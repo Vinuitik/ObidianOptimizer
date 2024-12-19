@@ -1,0 +1,112 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #1e1e1e; /* Dark background */
+  color: #d4d4d4; /* Light text color */
+}
+
+.container {
+  display: flex;
+  width: 100%;
+}
+
+.left-panel, .center-panel, .right-panel {
+  padding: 20px;
+  overflow-y: auto;
+  color: #d4d4d4;
+}
+
+.left-panel {
+  width: 20%;
+  background-color: #252526; /* Slightly lighter dark for the side panels */
+  border-right: 1px solid #333; /* Subtle border for separation */
+}
+
+.center-panel {
+  width: 60%;
+  background-color: #1e1e1e;
+  border-right: 1px solid #333;
+  padding: 20px;
+}
+
+.right-panel {
+  width: 20%;
+  background-color: #252526;
+}
+
+.markdown-view {
+  border: 1px solid #3c3c3c; /* Darker border */
+  padding: 15px;
+  background-color: #2d2d2d; /* Dark background for Markdown area */
+  min-height: 300px;
+  color: #d4d4d4;
+}
+
+h3 {
+  color: #c586c0; /* Accent color for headers */
+}
+
+/* Folder structure styles */
+ul {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  display: block;  /* Ensure items stack vertically */
+}
+
+li {
+  margin-bottom: 8px;
+}
+
+a {
+  color: #569cd6; /* Link color for better visibility */
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Container for the folder tree */
+#folder-structure {
+  max-width: 100%;
+  overflow-x: hidden; /* Hide overflowing content */
+  overflow-y: auto;   /* Enable vertical scrolling if necessary */
+  white-space: nowrap; /* Prevent wrapping */
+  margin-bottom: 20px;
+}
+
+/* Add horizontal scroll if the content exceeds the container width */
+#folder-structure ul {
+  white-space: nowrap; /* Prevent the tree from wrapping to a new line */
+  overflow-x: auto;  /* Enable horizontal scrolling */
+  padding: 0;
+}
+
+::-webkit-scrollbar {
+  width: 8px; /* Width of the scrollbar */
+  height: 8px; /* Height of the scrollbar for horizontal scroll */
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #4b4b4b; /* Darker thumb for better visibility */
+  border-radius: 10px; /* Rounded corners for the thumb */
+  border: 2px solid #2d2d2d; /* Slight border to match the background */
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #6a6a6a; /* Lighter thumb color on hover */
+}
+
+::-webkit-scrollbar-track {
+  background-color: #1e1e1e; /* Dark background for the scrollbar track */
+  border-radius: 10px; /* Rounded corners for the track */
+}
+
+::-webkit-scrollbar-corner {
+  background-color: #1e1e1e; /* Background for the corner (intersection of scrollbars) */
+}

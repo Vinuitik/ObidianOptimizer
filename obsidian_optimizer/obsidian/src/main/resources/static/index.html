@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Obsidian-Like Review App</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Include Markdown-it library -->
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it/dist/markdown-it.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <!-- LEFT: Folder Structure -->
+    <div class="left-panel">
+      <h3>Folder Structure</h3>
+      <div id="folder-structure">
+        <!-- Dynamically populated folder structure will go here -->
+      </div>
+    </div>
+
+    <!-- CENTER: Rendered Markdown Note -->
+    <div class="center-panel">
+      <h3>Note</h3>
+      <!-- Rendered markdown content -->
+      <div id="markdown-output" class="markdown-view"></div>
+    </div>
+
+    <!-- RIGHT: Notes to Review -->
+    <div class="right-panel">
+      <h3>Notes to Review</h3>
+      <ul id="notes-to-review">
+        <!-- Dynamically populated list of notes to review will go here -->
+      </ul>
+    </div>
+  </div>
+
+  <!-- Load the individual modules first -->
+  <script type="module" src="fetchUtils.js"></script>
+  <script type="module" src="nameMapSingleton.js"></script>
+  <script type="module" src="leafNodeSingleton.js"></script>
+  <script type="module" src="notesReview.js"></script>
+  <script type="module" src="folderStructure.js"></script>
+  <script type="module" src="renderMarkdown.js"></script>
+  <script type="module" src="app.js"></script>
+  
+</body>
+</html>
