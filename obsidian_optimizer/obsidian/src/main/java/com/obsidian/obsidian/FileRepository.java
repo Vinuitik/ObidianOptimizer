@@ -96,23 +96,23 @@ public class FileRepository {
                 reader.readLine();
                 line = reader.readLine();
                 if(line!=null&&isBeforeToday(line)){
-                reviewNames.add(file.toString());
+                    reviewNames.add(file.toString());
                 }
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
         try {
-                if (reader != null) {
-                    reader.close();  // Close the reader to release resources
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
+            if (reader != null) {
+                reader.close();  // Close the reader to release resources
             }
-            cacheReview = reviewNames;
-            cacheReviewUpToDate = true;
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        cacheReview = reviewNames;
+        cacheReviewUpToDate = true;
     
-            return cacheReview;
+        return cacheReview;
     }
     private boolean isBeforeToday(String line){
         boolean result = false;
