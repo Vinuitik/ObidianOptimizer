@@ -50,6 +50,10 @@ h3 {
   color: #c586c0; /* Accent color for headers */
 }
 
+.hover-effect:hover {
+  text-decoration: underline;
+}
+
 /* Folder structure styles */
 ul {
   list-style-type: none;
