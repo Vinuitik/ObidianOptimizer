@@ -8,7 +8,10 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Queue;
 import java.util.Stack;
 import org.springframework.stereotype.Component;
 
@@ -36,11 +39,11 @@ public class FileRepository {
         File root = new File(ROOT_FILE);
 
         // Use Stack to perform DFS
-        Stack<File> st = new Stack<>();
-        st.push(root);
+        Queue<File> st = new ArrayDeque<>();
+        st.add(root);
 
         while (!st.isEmpty()) {
-            File currentPath = st.pop();
+            File currentPath = st.poll();
 
             // If it's a file and ends with ".md", add to names
             if (currentPath.isFile() && currentPath.getName().endsWith(".md")) {
@@ -57,11 +60,11 @@ public class FileRepository {
                         if (file.isDirectory() && 
                             !file.getName().equals(".git") && 
                             !file.getName().equals("resources")) {
-                            st.push(file);
+                            st.add(file);
                         }
                         // We only push files for directories, .md files are handled already
                         else if (file.isFile()) {
-                            st.push(file);
+                            st.add(file);
                         }
                     }
                 }
@@ -69,6 +72,8 @@ public class FileRepository {
         }
         cache = names;
         cacheUpToDate = true;
+
+        Collections.sort(cache);
 
         return cache;
     }
@@ -144,5 +149,11 @@ public class FileRepository {
             System.out.println("Error reading the file: " + e.getMessage());
         }
         return content;
+    }
+
+    private String compress(String path, String prePath){
+        int m = prePath.length();
+
+        return path.substring(m+1);
     }
 }

@@ -6,12 +6,15 @@ const folderStructure = document.getElementById("folder-structure");
 // Global name map to store short-to-full path mapping
 const nameMap = new Map();
 
+const rootPath = "C:\\Users\\ACER\\Desktop\\NewLife";
+
 export function buildFolderTree(paths) {
   const root = {};
 
   // Build the folder tree structure from paths
   paths.forEach((path) => {
-    const parts = path.split('\\');
+    let compressedPath = path.substring(rootPath.length + 1); // Remove root part
+    const parts = compressedPath.split('\\');
     let current = root;
     parts.forEach((part) => {
       if (!current[part]) {
@@ -81,8 +84,8 @@ export function buildFolderTree(paths) {
         });
 
         // Apply similar styles as notes in the "Review Notes" section
-        folderName.style.color = "#007BFF";  // A blue color for consistency with clickable notes
-        folderName.style.textDecoration = "underline";  // Underline to indicate it's clickable
+        folderName.style.color = "#569cd6";  // A blue color for consistency with clickable notes
+        folderName.style.textDecoration = "none";  // Underline to indicate it's clickable
         li.appendChild(folderName);
       }
 
