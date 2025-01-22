@@ -1,4 +1,4 @@
-const md = window.markdownit();
+const md = window.markdownit({ html: true });
 const markdownOutput = document.getElementById("markdown-output");
 
 function processText(text) {
@@ -9,7 +9,7 @@ function processText(text) {
   text = text.replace(/!\[\[(.*?)\]\]/gs, (match, p1) => {
       imageLinks.push(p1);
       // Replace with <img> HTML tag
-      return `<img src="${p1}" alt="${p1}" class="embedded-image" />`;
+      return `<img src="images/${p1}" alt="${p1}" class="embedded-image" />`;
   });
 
   // Extract all content inside [[...]]

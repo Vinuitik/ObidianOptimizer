@@ -17,8 +17,7 @@ import java.nio.file.Paths;
 public class ImageRepository {
 
 
-    private final String imageDir = "/path/to/your/files/images"; // Update with your directory
-    private final String videoDir = "/path/to/your/files/videos";
+    private final String imageDir = "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images"; // Update with your directory
 
     @GetMapping("/images/{filename}")
     public ResponseEntity<Resource> getImage(@PathVariable String filename) {
