@@ -1,3 +1,7 @@
+import { switchNote } from "./notesReview";
+
+
+
 const md = window.markdownit({ html: true });
 const markdownOutput = document.getElementById("markdown-output");
 
@@ -17,7 +21,7 @@ function processText(text) {
   text = text.replace(/\[\[(.*?)\]\]/gs, (match, p1) => {
       links.push(p1);
       // Remove but keep the text clean
-      return '';
+      return `<a href="#" onclick = "switchNote" />${p1}</a>`; // implement onclick
   });
 
   return { imageLinks, links, remainingText: text };
