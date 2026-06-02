@@ -1,0 +1,113 @@
+:root {
+  --bg:      #0f0f0f;
+  --surface: #161616;
+  --border:  #2a2a2a;
+  --text:    #e8e8e8;
+  --muted:   #666666;
+  --accent:  #7c6af7;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+
+  --radius: 6px;
+  --transition: 150ms ease;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+code, pre, .mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Markdown content styles */
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+  color: var(--text);
+}
+.markdown-body h1 { font-size: 22px; }
+.markdown-body h2 { font-size: 18px; }
+.markdown-body h3 { font-size: 15px; }
+
+.markdown-body p { margin-bottom: var(--space-2); }
+
+.markdown-body a { color: var(--accent); text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+
+.markdown-body code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.markdown-body pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  overflow-x: auto;
+  margin-bottom: var(--space-2);
+}
+.markdown-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.markdown-body ul, .markdown-body ol {
+  padding-left: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: var(--space-3);
+  color: var(--muted);
+  margin-bottom: var(--space-2);
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: var(--space-4) 0;
+}
+
+.markdown-body img.embedded-image {
+  max-width: 100%;
+  border-radius: var(--radius);
+  display: block;
+  margin: var(--space-2) 0;
+}
