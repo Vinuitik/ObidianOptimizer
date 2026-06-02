@@ -11,26 +11,27 @@
 <body>
   <div class="container">
     <!-- LEFT: Folder Structure -->
-    <div class="left-panel">
-      <h3>Folder Structure</h3>
-      <div id="folder-structure">
-        <!-- Dynamically populated folder structure will go here -->
+    <div class="left-panel" id="left-panel">
+      <div class="panel-header">
+        <h3>Folder Structure</h3>
+        <button class="collapse-btn" onclick="togglePanel('left-panel')">◀</button>
       </div>
+      <div id="folder-structure"></div>
     </div>
 
     <!-- CENTER: Rendered Markdown Note -->
     <div class="center-panel">
       <h3>Note</h3>
-      <!-- Rendered markdown content -->
       <div id="markdown-output" class="markdown-view"></div>
     </div>
 
     <!-- RIGHT: Notes to Review -->
-    <div class="right-panel">
-      <h3>Notes to Review</h3>
-      <ul id="notes-to-review">
-        <!-- Dynamically populated list of notes to review will go here -->
-      </ul>
+    <div class="right-panel" id="right-panel">
+      <div class="panel-header">
+        <h3>Notes to Review</h3>
+        <button class="collapse-btn" onclick="togglePanel('right-panel')">▶</button>
+      </div>
+      <ul id="notes-to-review"></ul>
     </div>
   </div>
 

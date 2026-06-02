@@ -22,20 +22,65 @@ body {
 
 .left-panel {
   width: 20%;
-  background-color: #252526; /* Slightly lighter dark for the side panels */
-  border-right: 1px solid #333; /* Subtle border for separation */
+  min-width: 0;
+  background-color: #252526;
+  border-right: 1px solid #333;
+  transition: width 0.2s ease, padding 0.2s ease;
+  overflow: hidden;
+}
+
+.left-panel.collapsed {
+  width: 0;
+  padding: 0;
+  border: none;
 }
 
 .center-panel {
-  width: 60%;
+  flex: 1;
   background-color: #1e1e1e;
   border-right: 1px solid #333;
   padding: 20px;
+  min-width: 0;
 }
 
 .right-panel {
   width: 20%;
+  min-width: 0;
   background-color: #252526;
+  transition: width 0.2s ease, padding 0.2s ease;
+  overflow: hidden;
+}
+
+.right-panel.collapsed {
+  width: 0;
+  padding: 0;
+  border: none;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.panel-header h3 {
+  margin: 0;
+}
+
+.collapse-btn {
+  background: none;
+  border: 1px solid #555;
+  color: #d4d4d4;
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.collapse-btn:hover {
+  background-color: #3a3a3a;
 }
 
 .markdown-view {
