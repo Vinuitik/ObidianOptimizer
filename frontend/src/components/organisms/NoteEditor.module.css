@@ -1,0 +1,56 @@
+.editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: var(--space-4) var(--space-6);
+  gap: var(--space-3);
+  overflow: hidden;
+}
+
+.titleInput {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  padding: var(--space-1) 0;
+  width: 100%;
+  transition: border-color var(--transition);
+}
+
+.titleInput:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+.textarea {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  padding: var(--space-3);
+  resize: none;
+  transition: border-color var(--transition);
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.spacer {
+  flex: 1;
+}
