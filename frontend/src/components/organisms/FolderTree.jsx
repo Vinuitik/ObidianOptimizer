@@ -13,6 +13,7 @@ function sortEntries(entries) {
 function TreeNode({ name, node, depth }) {
   const [open, setOpen] = useState(false);
   const openNote = useStore(s => s.openNote);
+  const startNewNote = useStore(s => s.startNewNote);
 
   if (node.type === 'file') {
     return (
@@ -32,6 +33,7 @@ function TreeNode({ name, node, depth }) {
       isOpen={open}
       depth={depth}
       onClick={() => setOpen(o => !o)}
+      onAdd={() => startNewNote(node.fullPath)}
     >
       {open && sortEntries(Object.entries(node.children)).map(([childName, childNode]) => (
         <TreeNode key={childName} name={childName} node={childNode} depth={depth + 1} />
@@ -42,9 +44,16 @@ function TreeNode({ name, node, depth }) {
 
 export default function FolderTree() {
   const tree = useStore(s => s.tree);
+  const vaultRoot = useStore(s => s.vaultRoot);
+  const startNewNote = useStore(s => s.startNewNote);
 
   return (
     <div className={styles.tree}>
+      {vaultRoot && (
+        <button className={styles.newRootBtn} onClick={() => startNewNote(vaultRoot)}>
+          + New note
+        </button>
+      )}
       {sortEntries(Object.entries(tree.children)).map(([name, node]) => (
         <TreeNode key={name} name={name} node={node} depth={0} />
       ))}

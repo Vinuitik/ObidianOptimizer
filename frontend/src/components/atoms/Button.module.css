@@ -27,3 +27,14 @@
 .ghost:hover {
   border-color: var(--border);
 }
+
+.danger {
+  color: #e06c75;
+  border-color: rgba(224, 108, 117, 0.3);
+}
+
+.danger:hover {
+  background: rgba(224, 108, 117, 0.1);
+  border-color: rgba(224, 108, 117, 0.5);
+  color: #e06c75;
+}

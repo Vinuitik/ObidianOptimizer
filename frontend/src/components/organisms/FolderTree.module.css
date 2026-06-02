@@ -4,3 +4,24 @@
   overflow-x: hidden;
   flex: 1;
 }
+
+.newRootBtn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-1);
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-family: inherit;
+  transition: color var(--transition), background var(--transition);
+}
+
+.newRootBtn:hover {
+  color: var(--accent);
+  background: var(--bg);
+}
