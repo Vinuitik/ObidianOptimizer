@@ -1,0 +1,29 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  padding: var(--space-1) var(--space-2);
+  user-select: none;
+}
+
+.btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.ghost {
+  border-color: transparent;
+}
+
+.ghost:hover {
+  border-color: var(--border);
+}

@@ -1,0 +1,39 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px 0;
+}
+
+.label {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  transition: color var(--transition);
+  user-select: none;
+}
+
+.folder {
+  color: var(--text);
+}
+
+.folder:hover {
+  color: var(--accent);
+}
+
+.file {
+  color: var(--muted);
+}
+
+.file:hover {
+  color: var(--text);
+}
+
+.icon {
+  font-size: 10px;
+  color: var(--muted);
+  width: 12px;
+  flex-shrink: 0;
+}
