@@ -4,12 +4,6 @@ import { fetchNoteContent } from './fetchUtils.js';
 
 const notesToReview = document.getElementById("notes-to-review");
 
-export async function switchNote(event){
-    event.preventDefault();
-    const content = await fetchNoteContent(fullPath);
-    renderMarkdown(content);
-}
-
 export async function populateReviewNotes() {
   const fullPaths = await fetchReviewNotes();
   createShortenedNamesMapping(fullPaths);
@@ -22,7 +16,11 @@ export async function populateReviewNotes() {
     const link = document.createElement("a");
     link.href = "#";
     link.textContent = shortName;
-    link.onclick = switchNote;
+    link.onclick = async (event) => {
+      event.preventDefault();
+      const content = await fetchNoteContent(fullPath);
+      renderMarkdown(content);
+    };
     li.appendChild(link);
     notesToReview.appendChild(li);
   });
