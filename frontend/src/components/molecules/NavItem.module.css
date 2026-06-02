@@ -37,3 +37,26 @@
   width: 12px;
   flex-shrink: 0;
 }
+
+.addBtn {
+  margin-left: auto;
+  padding: 0 4px;
+  font-size: 14px;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition);
+  flex-shrink: 0;
+}
+
+.row:hover .addBtn {
+  opacity: 1;
+}
+
+.addBtn:hover {
+  color: var(--accent);
+}

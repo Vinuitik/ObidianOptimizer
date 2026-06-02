@@ -1,6 +1,6 @@
 import styles from './NavItem.module.css';
 
-export default function NavItem({ name, isFolder, isOpen, depth, onClick, children }) {
+export default function NavItem({ name, isFolder, isOpen, depth, onClick, onAdd, children }) {
   return (
     <div style={{ paddingLeft: depth * 16 }}>
       <div className={styles.row}>
@@ -13,6 +13,15 @@ export default function NavItem({ name, isFolder, isOpen, depth, onClick, childr
         >
           {name}
         </span>
+        {onAdd && (
+          <button
+            className={styles.addBtn}
+            onClick={e => { e.stopPropagation(); onAdd(); }}
+            title="New note in this folder"
+          >
+            +
+          </button>
+        )}
       </div>
       {children}
     </div>
