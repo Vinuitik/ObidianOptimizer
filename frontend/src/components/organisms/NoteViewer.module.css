@@ -1,0 +1,12 @@
+.viewer {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6);
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 14px;
+  margin-top: var(--space-6);
+  text-align: center;
+}

@@ -1,0 +1,6 @@
+.tree {
+  padding: var(--space-2) var(--space-2);
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+}
