@@ -1,7 +1,3 @@
-import { switchNote } from "./notesReview";
-
-
-
 const md = window.markdownit({ html: true });
 const markdownOutput = document.getElementById("markdown-output");
 
