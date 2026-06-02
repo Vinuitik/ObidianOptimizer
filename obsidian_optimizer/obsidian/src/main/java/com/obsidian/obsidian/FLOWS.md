@@ -1,58 +1,102 @@
 # Backend Flows
 
-Files: ObsidianApplication.java, MyController.java, FileRepository.java, ImageRepository.java, WebConfig.java, ServletInitializer.java
+Files: ObsidianApplication.java, MyController.java, FileRepository.java, ImageRepository.java, WebConfig.java, SecurityConfig.java, ServletInitializer.java
 
 ---
 
 ## Startup
 
-`ObsidianApplication.main()` → `SpringApplication.run()` → beans init: `FileRepository`, `ImageRepository`, `MyController`, `WebConfig` → Tomcat starts on port 8082  
+`ObsidianApplication.main()` → `SpringApplication.run()` → beans init: `FileRepository`, `ImageRepository`, `MyController`, `SecurityConfig` → Tomcat on port 8082  
 To change port: `application.properties → server.port`
+
+---
+
+## Auth (SecurityConfig.java)
+
+Spring Security session-based single-user auth.  
+Credentials in `application.properties`: `app.auth.username`, `app.auth.password` (raw — BCrypt applied at startup)
+
+`POST /login` (form-encoded: `username=&password=`) → Spring Security validates → sets session cookie → returns 200  
+`POST /logout` → invalidates session → returns 200  
+`GET /me` → 200 + username if authenticated, 401 if not
+
+Public GET endpoints: `/names`, `/review`, `/text`, `/images/**`  
+Protected (require session): all POST, PUT, PATCH, DELETE + `GET /me`
+
+To change credentials: `application.properties`  
+To add/remove protected endpoints: `SecurityConfig.filterChain()` `authorizeHttpRequests`
 
 ---
 
 ## GET /names — All Note Paths
 
-`MyController.getNames()` → `FileRepository.getNoteNames()` → check `cacheUpToDate` flag  
-- Cache hit: return `cache` (ArrayList<String>)  
-- Cache miss: BFS from `ROOT_PATH` (`C:\Users\ACER\Desktop\NewLife`), skip `.git` and `resources` dirs, collect all `.md` file absolute paths → sort → store in `cache`, set `cacheUpToDate=true` → return list  
-To change vault root: `FileRepository` line 21 (hardcoded, no env var)
+`MyController.getNames()` → `FileRepository.getNoteNames()` → check `cacheUpToDate`  
+- Cache hit: return `cache`  
+- Cache miss: BFS from `ROOT_FILE`, skip `.git`, `resources`, `_trash` → collect `.md` paths → sort → cache → return  
+To change vault root: `FileRepository.ROOT_FILE` (line 18)
 
 ---
 
 ## GET /review — Notes Due for Review
 
-`MyController.getReviewName()` → `FileRepository.getReviewNotes()` → check `cacheReviewUpToDate`  
-- Cache miss: calls `getNoteNames()` first → for each path open `BufferedReader`, read line 1 (skip), read line 2 → parse date after `"reviewed: "` prefix → compare to today (`LocalDate.now()`) → if date ≤ today, add path to `reviewNames` → set `cacheReviewUpToDate=true`  
-Format assumed on line 2: `reviewed: yyyy-MM-dd...`  
-To change review format: `FileRepository.getReviewNotes()`
+`MyController.getReviewNames()` → `FileRepository.getReviewNotes()` → check `cacheReviewUpToDate`  
+- Cache miss: calls `getNoteNames()` → for each path, read line 2, extract date after `"reviewed: "` → compare to today → add if ≤ today  
+Format expected on line 2: `reviewed: yyyy-MM-dd`  
+To change review format: `FileRepository.getReviewNotes()` + `isBeforeToday()`
 
 ---
 
 ## GET /text?noteName={path} — Note Content
 
-`MyController.getText(noteName)` → `FileRepository.getText(path)` → `Files.readString(Paths.get(path))` → returns raw markdown string as plain text response
+`MyController.getText(noteName)` → `FileRepository.getText(path)` → `Files.readString()` → returns raw markdown
 
 ---
 
 ## GET /images/{filename} — Image Serving
 
-`ImageRepository.getImage(filename)` → `serveFile(IMAGE_DIR, filename)` → validate file exists under `C:\Users\ACER\Desktop\NewLife\resources\images\` → detect MIME type from extension → return `ResponseEntity<Resource>` with Content-Type header  
-To change image dir: `ImageRepository` line 20 (hardcoded)
+`ImageRepository.getImage(filename)` → `serveFile(IMAGE_DIR, filename)` → validate exists → detect MIME → return `ResponseEntity<Resource>`  
+Image dir: `ImageRepository.imageDir` (hardcoded `C:\Users\ACER\Desktop\NewLife\resources\images`)
+
+---
+
+## POST /notes — Create Note
+
+`MyController.createNote(CreateNoteRequest{folder, name})`  
+→ `FileRepository.createNote(folderPath, name)` → validate folder exists → create `name.md` with frontmatter skeleton → `invalidateCache()` → return `{path: absolutePath}`  
+Initial frontmatter: `---\nreviewed: {today}\n---\n\n`
+
+---
+
+## PUT /notes — Update Note Content
+
+`MyController.updateNote(UpdateNoteRequest{path, content})`  
+→ `FileRepository.updateNote(path, content)` → validate file exists → `Files.writeString()` → `invalidateCache()`
+
+---
+
+## PATCH /notes/rename — Rename Note
+
+`MyController.renameNote(RenameNoteRequest{oldPath, newName})`  
+→ `FileRepository.renameNote(oldPath, newName)` → validate old exists, new doesn't → `File.renameTo()` → `invalidateCache()` → return `{path: newAbsolutePath}`
+
+**NOTE:** Does not update `[[link]]` references in other notes. This is a known limitation — see Residual below.
+
+---
+
+## DELETE /notes — Soft Delete
+
+`MyController.deleteNote(DeleteNoteRequest{path})`  
+→ `FileRepository.softDeleteNote(path)` → validate exists → ensure `ROOT_FILE/_trash/` exists → move file there (timestamp suffix if name conflict) → `invalidateCache()`  
+`_trash/` is skipped by `getNoteNames()` — files there are invisible to the app  
+Recovery: manual file move [NOT IMPLEMENTED in UI]
 
 ---
 
 ## Cache Invalidation
 
-`FileRepository.invalidateCache()` sets `cacheUpToDate=false` and `cacheReviewUpToDate=false`  
-No endpoint triggers this — invalidation is manual / restart-only [NOT IMPLEMENTED: no HTTP invalidation endpoint]
-
----
-
-## Static Frontend Serving
-
-`WebConfig.addResourceHandlers()` → maps `/static/**` → `classpath:/static/` with `no-store` cache  
-`index.html` served at root by Spring Boot default
+`FileRepository.invalidateCache()` sets `cacheUpToDate = false` AND `cacheReviewUpToDate = false`  
+Called automatically after every write (create, update, rename, delete)  
+No HTTP endpoint to trigger manually — restart or any write op clears both caches
 
 ---
 
@@ -60,10 +104,18 @@ No endpoint triggers this — invalidation is manual / restart-only [NOT IMPLEME
 
 | Thing to change | Where |
 |---|---|
-| Vault root path | `FileRepository` line 21 |
-| Image directory | `ImageRepository` line 20 |
-| Server port | `application.properties` → `server.port` |
-| Review date format | `FileRepository.getReviewNotes()` |
-| Cache strategy | `FileRepository` fields: `cache`, `cacheUpToDate`, `cacheReview`, `cacheReviewUpToDate` |
-| Static resource cache headers | `WebConfig.addResourceHandlers()` |
-| New REST endpoint | `MyController` + matching `FileRepository` method |
+| Vault root path | `FileRepository.ROOT_FILE` |
+| Image directory | `ImageRepository.imageDir` |
+| Server port | `application.properties → server.port` |
+| Auth credentials | `application.properties → app.auth.username / app.auth.password` |
+| Review date format | `FileRepository.isBeforeToday()` |
+| Directories skipped in BFS | `FileRepository.getNoteNames()` skip list |
+| Initial note frontmatter | `FileRepository.createNote()` |
+| Protected vs public endpoints | `SecurityConfig.filterChain()` |
+
+---
+
+## Residual (next session)
+
+- **Cross-file rename** — `FileRepository.updateLinksOnRename()` should read all .md files, replace `[[oldName]]` → `[[newName]]`, write back. Currently not implemented.
+- **HTTP cache invalidation endpoint** — optional `/admin/invalidate` for cache clearing without restart
