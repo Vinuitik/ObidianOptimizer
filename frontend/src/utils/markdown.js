@@ -1,11 +1,36 @@
 import MarkdownIt from 'markdown-it';
 
-const md = new MarkdownIt({ html: true });
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: true,
+});
+
+function stripFrontmatter(content) {
+  if (!content.trimStart().startsWith('---')) return content;
+  const after = content.trimStart().slice(3);
+  const end = after.indexOf('\n---');
+  if (end === -1) return content;
+  return after.slice(end + 4).trimStart();
+}
 
 export function renderMarkdown(content) {
-  let processed = content.replace(/!\[\[(.*?)\]\]/gs, (_, p1) =>
-    `<img src="/api/images/${p1}" alt="${p1}" class="embedded-image" />`
+  let processed = stripFrontmatter(content);
+
+  // ![[image.png]] → <img>
+  processed = processed.replace(/!\[\[(.*?)\]\]/gs, (_, p1) =>
+    `<img src="/api/images/${encodeURIComponent(p1)}" alt="${p1}" class="embedded-image" />`
   );
-  processed = processed.replace(/\[\[(.*?)\]\]/gs, (_, p1) => p1);
+
+  // [[link|alias]] or [[link]] → plain text (alias preferred)
+  processed = processed.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/gs, (_, target, alias) =>
+    alias ?? target
+  );
+
+  // #hashtag → styled span (skip #headings at line start)
+  processed = processed.replace(/(?<![#\w])#([a-zA-Z]\w*)/g, (_, tag) =>
+    `<span class="md-tag">#${tag}</span>`
+  );
+
   return md.render(processed);
 }
