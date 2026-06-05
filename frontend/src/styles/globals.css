@@ -120,6 +120,16 @@
   text-transform: uppercase;
 }
 
+.md-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
 .markdown-body img.embedded-image {
   max-width: 100%;
   border-radius: var(--radius-md);
