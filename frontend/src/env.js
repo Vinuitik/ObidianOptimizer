@@ -3,7 +3,7 @@ const ENV = {
 
   PORTS: {
     FRONTEND: 8083,
-    BACKEND: 8082,
+    BACKEND: 8084,
     DEV: 5173,
   },
 
