@@ -10,17 +10,13 @@ export default function ReviewList() {
   }
 
   return (
-    <div className={styles.list}>
+    <ul className={styles.list}>
       {reviewNotes.map(({ shortName, fullPath }) => (
-        <button
-          key={fullPath}
-          className={styles.item}
-          onClick={() => openNote(fullPath)}
-          title={shortName}
-        >
-          {shortName}
-        </button>
+        <li key={fullPath} className={styles.item} onClick={() => openNote(fullPath)}>
+          <span className={styles.dot} />
+          <span className={styles.label}>{shortName}</span>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
