@@ -138,10 +138,18 @@ User edits title and/or content → "Save"
 
 ## DELETE (soft)
 
-"Move to trash" button in `NoteEditor` → `window.confirm()` prompt  
-→ `deleteNote(path)` → `DELETE /api/notes` → backend moves file to `ROOT/_trash/`  
-→ `currentNotePath = null`, `centerMode = 'view'`, tree + review re-fetched  
-Recovery: manual file move from `_trash/` back to vault [NOT IMPLEMENTED in UI]
+Three entry points, all call `deleteNote(path)` → `DELETE /api/notes` → backend moves file to `ROOT/_trash/`
+
+| Where | How to reach |
+|---|---|
+| Left panel tree | Hover any file → 🗑 icon appears (hidden by default) → `window.confirm` → delete |
+| Center header | Open a note in view mode → 🗑 button next to "Edit" → `window.confirm` → delete |
+| Edit mode | "Edit" → "Move to trash" button at bottom of `NoteEditor` → `window.confirm` → delete |
+
+After delete: `currentNotePath = null`, `centerMode = 'view'`, tree + review re-fetched  
+Recovery: manual file move from `_trash/` back to vault [NOT IMPLEMENTED in UI]  
+To change trash icon style: `NavItem.module.css` `.deleteBtn`  
+To change center-header button style: `SplitLayout.jsx` danger `Button` next to Edit
 
 ---
 

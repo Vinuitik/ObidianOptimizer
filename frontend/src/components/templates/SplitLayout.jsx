@@ -63,6 +63,7 @@ export default function SplitLayout() {
   const currentNotePath = useStore(s => s.currentNotePath);
   const centerMode = useStore(s => s.centerMode);
   const startEdit = useStore(s => s.startEdit);
+  const deleteNote = useStore(s => s.deleteNote);
 
   const [leftWidth, onLeftHandleDown] = useResize(DEFAULT_WIDTH);
   const [rightWidth, onRightHandleDown] = useResize(DEFAULT_WIDTH);
@@ -111,6 +112,14 @@ export default function SplitLayout() {
             </span>
             {centerMode === 'view' && title && (
               <Button onClick={startEdit} variant="ghost">Edit</Button>
+            )}
+            {centerMode === 'view' && title && (
+              <Button
+                variant="danger"
+                onClick={() => {
+                  if (window.confirm(`Move "${title}" to trash?`)) deleteNote(currentNotePath);
+                }}
+              >🗑</Button>
             )}
           </div>
           <div className={styles.headerRight}>
