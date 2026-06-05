@@ -187,15 +187,17 @@ Write calls use `credentials: 'same-origin'` so session cookie is included autom
 ## Markdown Rendering (utils/markdown.js)
 
 `renderMarkdown(content)`:
-1. Replace `![[image.png]]` → `<img src="/api/images/image.png" class="embedded-image">`
-2. Replace `[[link text]]` → plain `link text`
-3. `markdown-it.render()` → HTML string
+1. `stripFrontmatter()` — strips `---` YAML block from top of file before rendering
+2. Replace `![[image.png]]` → `<img src="/api/images/image.png" class="embedded-image">`
+3. Replace `[[link|alias]]` or `[[link]]` → plain text (alias preferred)
+4. Replace `#hashtag` → `<span class="md-tag">#tag</span>` (indigo pill, skips `# Headings`)
+5. `markdown-it.render()` with `linkify: true`, `typographer: true`, tables enabled
 
-**RESIDUAL — known rendering issues:**
-- YAML frontmatter (`---` block) renders as plain text — needs stripping before render
-- Hashtags (e.g. `#tag`) not highlighted
-- Table rendering not confirmed working
+`.md-tag` styled in `styles/globals.css`
+
+**RESIDUAL:**
 - No Obsidian-style embedded note preview
+- Images served via `/api/images/` — path must match backend `FileRepository`
 
 ---
 
@@ -246,9 +248,24 @@ Ports (also in `env.js`):
 
 ---
 
+## Auth — protected reads
+
+All `/api/**` endpoints now require authentication (including `/names`, `/review`, `/text`).  
+Unauthenticated users see empty tree and empty review list.  
+After login, `fetchNoteNames()` + `fetchReviewNotes()` are called automatically to populate the UI.  
+To change which endpoints are public: `SecurityConfig.java` `authorizeHttpRequests`
+
+## Resizable Panels (SplitLayout.jsx)
+
+Left and right panels are draggable via a 4px `.resizeHandle` div between each panel and the center.  
+`useResize(initialWidth)` hook: tracks `mousedown` → global `mousemove/mouseup` → updates width state.  
+Width applied via inline `style={{ width, minWidth }}` on the panel div.  
+Collapsed state overrides via `!important` in CSS (`.collapsed` class).  
+Constants: `MIN_PANEL_WIDTH = 160`, `MAX_PANEL_WIDTH = 480`, `DEFAULT_WIDTH = 290`  
+To change default panel size: `SplitLayout.jsx` `DEFAULT_WIDTH`
+
 ## Residual (next session)
 
-- **Markdown rendering fixes** — strip frontmatter, hashtag colouring, confirm table rendering
 - **Cross-file rename** — update `[[oldName]]` → `[[newName]]` in all vault notes
 - **Trash UI** — list and restore notes from `_trash/`
 - **Review page** — build out `ReviewPage.jsx` (currently a stub)
