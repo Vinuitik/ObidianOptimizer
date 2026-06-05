@@ -89,14 +89,26 @@ const useStore = create((set, get) => ({
   // ── Data fetching ──────────────────────────────────────────────────────────
 
   fetchNoteNames: async () => {
-    const paths = await fetchNames();
-    const tree = buildTree(paths);
-    set({ tree, vaultRoot: tree.fullPath });
+    try {
+      const paths = await fetchNames();
+      const tree = buildTree(paths);
+      set({ tree, vaultRoot: tree.fullPath });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        set({ tree: { type: 'folder', children: {}, fullPath: '' }, vaultRoot: '' });
+      } else throw e;
+    }
   },
 
   fetchReviewNotes: async () => {
-    const paths = await fetchReview();
-    set({ reviewNotes: buildReviewList(paths) });
+    try {
+      const paths = await fetchReview();
+      set({ reviewNotes: buildReviewList(paths) });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        set({ reviewNotes: [] });
+      } else throw e;
+    }
   },
 
   openNote: async (fullPath) => {
@@ -116,7 +128,11 @@ const useStore = create((set, get) => ({
 
   login: async (username, password) => {
     const ok = await apiLogin(username, password);
-    if (ok) set({ isAuthenticated: true, showLogin: false });
+    if (ok) {
+      set({ isAuthenticated: true, showLogin: false });
+      await get().fetchNoteNames();
+      await get().fetchReviewNotes();
+    }
     return ok;
   },
 
