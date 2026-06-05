@@ -68,6 +68,7 @@ const useStore = create((set, get) => ({
   tree: { type: 'folder', children: {}, fullPath: '' },
   vaultRoot: '',
   reviewNotes: [],
+  noteIndex: new Map(), // basename (lowercase, no .md) → fullPath
 
   // Current note
   currentNoteHtml: '',
@@ -92,10 +93,13 @@ const useStore = create((set, get) => ({
     try {
       const paths = await fetchNames();
       const tree = buildTree(paths);
-      set({ tree, vaultRoot: tree.fullPath });
+      const noteIndex = new Map(
+        paths.map(p => [p.split(/[/\\]/).pop().replace(/\.md$/i, '').toLowerCase(), p])
+      );
+      set({ tree, vaultRoot: tree.fullPath, noteIndex });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        set({ tree: { type: 'folder', children: {}, fullPath: '' }, vaultRoot: '' });
+        set({ tree: { type: 'folder', children: {}, fullPath: '' }, vaultRoot: '', noteIndex: new Map() });
       } else throw e;
     }
   },

@@ -120,6 +120,19 @@
   text-transform: uppercase;
 }
 
+.wiki-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--color-accent-border);
+  cursor: pointer;
+  transition: color var(--ease-fast), border-color var(--ease-fast);
+}
+
+.wiki-link:hover {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
 .md-tag {
   display: inline-block;
   font-family: var(--font-mono);
