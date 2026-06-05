@@ -4,18 +4,38 @@ const md = new MarkdownIt({
   html: true,
   linkify: true,
   typographer: true,
+  breaks: true,
 });
 
-function stripFrontmatter(content) {
-  if (!content.trimStart().startsWith('---')) return content;
-  const after = content.trimStart().slice(3);
+function parseFrontmatter(content) {
+  const trimmed = content.trimStart();
+  if (!trimmed.startsWith('---')) return { table: '', body: content };
+  const after = trimmed.slice(3);
   const end = after.indexOf('\n---');
-  if (end === -1) return content;
-  return after.slice(end + 4).trimStart();
+  if (end === -1) return { table: '', body: content };
+
+  const yamlBlock = after.slice(0, end);
+  const body = after.slice(end + 4).trimStart();
+
+  const rows = yamlBlock
+    .split('\n')
+    .map(line => {
+      const colon = line.indexOf(':');
+      if (colon === -1) return '';
+      const key = line.slice(0, colon).trim();
+      const value = line.slice(colon + 1).trim();
+      return key ? `<tr><th scope="row">${key}</th><td>${value || '—'}</td></tr>` : '';
+    })
+    .filter(Boolean)
+    .join('');
+
+  if (!rows) return { table: '', body };
+  return { table: `<table><tbody>${rows}</tbody></table>\n`, body };
 }
 
 export function renderMarkdown(content) {
-  let processed = stripFrontmatter(content);
+  const { table, body } = parseFrontmatter(content);
+  let processed = body;
 
   // ![[image.png]] → <img>
   processed = processed.replace(/!\[\[(.*?)\]\]/gs, (_, p1) =>
@@ -33,5 +53,5 @@ export function renderMarkdown(content) {
     `<span class="md-tag">#${tag}</span>`
   );
 
-  return md.render(processed);
+  return table + md.render(processed);
 }
