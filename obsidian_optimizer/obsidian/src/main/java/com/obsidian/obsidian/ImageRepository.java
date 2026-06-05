@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.file.Path;
@@ -16,8 +17,8 @@ import java.nio.file.Paths;
 @RestController
 public class ImageRepository {
 
-
-    private final String imageDir = "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images"; // Update with your directory
+    @Value("${IMAGE_PATH:C:/Users/ACER/Desktop/NewLife/resources/images}")
+    private String imageDir;
 
     @GetMapping("/images/{filename}")
     public ResponseEntity<Resource> getImage(@PathVariable String filename) {

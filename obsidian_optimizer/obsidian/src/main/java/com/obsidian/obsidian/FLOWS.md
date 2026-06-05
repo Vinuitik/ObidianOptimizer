@@ -100,13 +100,29 @@ No HTTP endpoint to trigger manually — restart or any write op clears both cac
 
 ---
 
+## Infrastructure
+
+Both services run in Docker via `docker-compose.yml` at the repo root.  
+Start everything: `.\start.ps1` (or `docker compose up --build`)  
+Stop everything: `Ctrl+C` in the same terminal → both containers stop cleanly
+
+Config for friends: copy `.env.example` → `.env`, set `HOST_VAULT_PATH` to vault directory.  
+Vault is mounted read-write at `/vault` inside the backend container.
+
+### Technology Notes
+- **WAR + embedded Tomcat**: `java -jar app.war` works because Spring Boot rewrites the WAR to be self-executable even though `spring-boot-starter-tomcat` is `provided` scope.
+- **Volume mount on Windows (Docker Desktop)**: reads/writes work correctly; file watching (inotify/WatchService) does NOT propagate from host → container. This is why the backend uses a flag-based cache rather than a WatchService — WatchService would silently miss Obsidian edits when running in Docker.
+- **Docker network**: frontend and backend are on the default compose network; nginx proxies `/api/*` → `backend:8084` by service name. No `host.docker.internal` needed.
+
+---
+
 ## Change Index
 
 | Thing to change | Where |
 |---|---|
-| Vault root path | `FileRepository.ROOT_FILE` |
-| Image directory | `ImageRepository.imageDir` |
-| Server port | `application.properties → server.port` |
+| Vault root path | `.env` → `HOST_VAULT_PATH` (host) / `VAULT_PATH` env var (container) |
+| Image directory | `IMAGE_PATH` env var in `docker-compose.yml` (defaults to `VAULT_PATH/resources/images`) |
+| Server port | `application.properties → server.port` + `docker-compose.yml` port mapping |
 | Auth credentials | `application.properties → app.auth.username / app.auth.password` |
 | Review date format | `FileRepository.isBeforeToday()` |
 | Directories skipped in BFS | `FileRepository.getNoteNames()` skip list |
