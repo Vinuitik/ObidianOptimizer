@@ -1,10 +1,13 @@
 .row {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  padding: 3px var(--sp-2);
-  border-radius: var(--radius-sm);
-  transition: background var(--ease-fast);
+  gap: 8px;
+  padding: 10px 12px;
+  min-height: 44px;
+  border-radius: 8px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background 150ms ease;
 }
 
 .row:hover {
@@ -12,14 +15,14 @@
 }
 
 .label {
-  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: var(--text-sm);
-  transition: color var(--ease-fast);
+  font-size: 16px;
+  line-height: 1.4;
   user-select: none;
   flex: 1;
+  min-width: 0;
 }
 
 .folder {
@@ -40,25 +43,31 @@
 }
 
 .icon {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-muted);
-  width: 12px;
+  width: 14px;
   flex-shrink: 0;
+  line-height: 1;
 }
 
 .addBtn {
   margin-left: auto;
-  padding: 0 var(--sp-1);
-  font-size: 15px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
   line-height: 1;
   background: none;
   border: none;
   color: var(--color-muted);
   cursor: pointer;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   opacity: 0;
-  transition: opacity var(--ease-fast), color var(--ease-fast);
+  transition: opacity 150ms ease, color 150ms ease, background 150ms ease;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .row:hover .addBtn {
@@ -67,4 +76,5 @@
 
 .addBtn:hover {
   color: var(--color-accent);
+  background: var(--color-accent-dim);
 }
