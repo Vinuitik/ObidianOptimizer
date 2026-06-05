@@ -3,14 +3,11 @@ import styles from './NavItem.module.css';
 export default function NavItem({ name, isFolder, isOpen, depth, onClick, onAdd, onDelete, children }) {
   return (
     <div style={{ paddingLeft: depth * 16 }}>
-      <div className={styles.row}>
+      <div className={styles.row} onClick={onClick}>
         <span className={styles.icon}>
           {isFolder ? (isOpen ? '▾' : '▸') : ''}
         </span>
-        <span
-          className={`${styles.label} ${isFolder ? styles.folder : styles.file}`}
-          onClick={onClick}
-        >
+        <span className={`${styles.label} ${isFolder ? styles.folder : styles.file}`}>
           {name}
         </span>
         {onAdd && (
