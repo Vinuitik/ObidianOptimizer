@@ -19,26 +19,16 @@
   border-left: 1px solid var(--color-border);
 }
 
-.panelLeft {
-  width: 240px;
-  min-width: 240px;
-}
-
 .panelLeft.collapsed {
-  width: 0;
-  min-width: 0;
+  width: 0 !important;
+  min-width: 0 !important;
   opacity: 0;
   border-right: none;
 }
 
-.panelRight {
-  width: 240px;
-  min-width: 240px;
-}
-
 .panelRight.collapsed {
-  width: 0;
-  min-width: 0;
+  width: 0 !important;
+  min-width: 0 !important;
   opacity: 0;
   border-left: none;
 }
@@ -98,6 +88,21 @@
 .collapseRow {
   display: flex;
   gap: var(--sp-1);
+}
+
+.resizeHandle {
+  width: 4px;
+  flex-shrink: 0;
+  background: transparent;
+  cursor: col-resize;
+  transition: background var(--ease-fast);
+  position: relative;
+  z-index: 10;
+}
+
+.resizeHandle:hover,
+.resizeHandle:active {
+  background: var(--color-accent-border);
 }
 
 /* ── Responsive: collapse sidebars on mobile ──────────────────────────────── */
