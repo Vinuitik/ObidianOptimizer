@@ -187,11 +187,14 @@ Write calls use `credentials: 'same-origin'` so session cookie is included autom
 ## Markdown Rendering (utils/markdown.js)
 
 `renderMarkdown(content)`:
-1. `stripFrontmatter()` — strips `---` YAML block from top of file before rendering
+1. `parseFrontmatter()` — extracts `---` YAML block, renders it as an HTML `<table>` (key column = `<th scope="row">`, value column = `<td>`); prepended before note body
 2. `![[image.png]]` → `<img src="/api/images/image.png" class="embedded-image">`
 3. `[[link|alias]]` or `[[link]]` → `<a class="wiki-link" data-wiki-link="link" href="#">label</a>`
 4. `#hashtag` → `<span class="md-tag">#tag</span>` (indigo pill, skips `# Headings`)
-5. `markdown-it.render()` with `linkify: true`, `typographer: true`, tables enabled
+5. `markdown-it.render()` with `linkify: true`, `typographer: true`, `breaks: true`, tables enabled
+
+`breaks: true` — single newlines in the markdown body become `<br>` (Obsidian-style soft wrapping).  
+Frontmatter table uses `.markdown-body th/td` styles from `globals.css` — keys appear with card background + mono font.
 
 `.wiki-link` and `.md-tag` styled in `styles/globals.css`
 
