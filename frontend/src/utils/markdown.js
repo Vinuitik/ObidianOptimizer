@@ -22,10 +22,11 @@ export function renderMarkdown(content) {
     `<img src="/api/images/${encodeURIComponent(p1)}" alt="${p1}" class="embedded-image" />`
   );
 
-  // [[link|alias]] or [[link]] → plain text (alias preferred)
-  processed = processed.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/gs, (_, target, alias) =>
-    alias ?? target
-  );
+  // [[link|alias]] or [[link]] → clickable wiki-link anchor
+  processed = processed.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/gs, (_, target, alias) => {
+    const label = alias ?? target.split(/[/\\]/).pop();
+    return `<a class="wiki-link" data-wiki-link="${target.trim()}" href="#">${label}</a>`;
+  });
 
   // #hashtag → styled span (skip #headings at line start)
   processed = processed.replace(/(?<![#\w])#([a-zA-Z]\w*)/g, (_, tag) =>
