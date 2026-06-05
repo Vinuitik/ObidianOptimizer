@@ -1,5 +1,5 @@
 .tree {
-  padding: var(--space-2) var(--space-2);
+  padding: var(--sp-2);
   overflow-y: auto;
   overflow-x: hidden;
   flex: 1;
@@ -9,19 +9,20 @@
   display: block;
   width: 100%;
   text-align: left;
-  padding: var(--space-1) var(--space-2);
-  margin-bottom: var(--space-1);
-  font-size: 12px;
-  color: var(--muted);
+  padding: var(--sp-1) var(--sp-2);
+  margin-bottom: var(--sp-2);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--color-muted);
   background: none;
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-family: inherit;
-  transition: color var(--transition), background var(--transition);
+  letter-spacing: 0.03em;
+  transition: color var(--ease-fast), background var(--ease-fast);
 }
 
 .newRootBtn:hover {
-  color: var(--accent);
-  background: var(--bg);
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
 }
