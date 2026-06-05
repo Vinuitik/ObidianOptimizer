@@ -14,14 +14,19 @@ function TreeNode({ name, node, depth }) {
   const [open, setOpen] = useState(false);
   const openNote = useStore(s => s.openNote);
   const startNewNote = useStore(s => s.startNewNote);
+  const deleteNote = useStore(s => s.deleteNote);
 
   if (node.type === 'file') {
+    const displayName = name.replace(/\.md$/, '');
     return (
       <NavItem
-        name={name.replace(/\.md$/, '')}
+        name={displayName}
         isFolder={false}
         depth={depth}
         onClick={() => openNote(node.fullPath)}
+        onDelete={() => {
+          if (window.confirm(`Move "${displayName}" to trash?`)) deleteNote(node.fullPath);
+        }}
       />
     );
   }
