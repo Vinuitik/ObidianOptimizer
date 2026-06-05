@@ -188,16 +188,53 @@ Write calls use `credentials: 'same-origin'` so session cookie is included autom
 
 `renderMarkdown(content)`:
 1. `stripFrontmatter()` — strips `---` YAML block from top of file before rendering
-2. Replace `![[image.png]]` → `<img src="/api/images/image.png" class="embedded-image">`
-3. Replace `[[link|alias]]` or `[[link]]` → plain text (alias preferred)
-4. Replace `#hashtag` → `<span class="md-tag">#tag</span>` (indigo pill, skips `# Headings`)
+2. `![[image.png]]` → `<img src="/api/images/image.png" class="embedded-image">`
+3. `[[link|alias]]` or `[[link]]` → `<a class="wiki-link" data-wiki-link="link" href="#">label</a>`
+4. `#hashtag` → `<span class="md-tag">#tag</span>` (indigo pill, skips `# Headings`)
 5. `markdown-it.render()` with `linkify: true`, `typographer: true`, tables enabled
 
-`.md-tag` styled in `styles/globals.css`
+`.wiki-link` and `.md-tag` styled in `styles/globals.css`
 
 **RESIDUAL:**
 - No Obsidian-style embedded note preview
-- Images served via `/api/images/` — path must match backend `FileRepository`
+- Images served via `/api/images/` — path must match `ImageRepository.imageDir` hardcoded path
+
+---
+
+## Wiki-link Resolution (NoteViewer.jsx + useStore.js)
+
+`noteIndex` — `Map<string, string>` built in `fetchNoteNames()`:
+- Key: basename lowercased, no `.md` extension (e.g. `"agents 2025"`)
+- Value: full absolute path (e.g. `C:\...\Agents 2025.md`)
+
+Click on `.wiki-link` → `NoteViewer` intercepts via event delegation on the container div:
+1. `data-wiki-link` attribute holds the **original target string** from markdown (e.g. `"Books/LikeSwitcher"`)
+2. Lookup: try full target lowercased first → fall back to basename (handles both `[[Note]]` and `[[Folder/Note]]`)
+3. If resolved: `openNote(fullPath)` — loads the note
+4. If not found: silently does nothing (dead link, note doesn't exist in vault)
+
+---
+
+## Write Roundtrip — Obsidian Compatibility
+
+**Critical invariant:** the app edits raw markdown, never the rendered HTML.
+
+Flow:
+```
+Backend disk  →  GET /api/text  →  currentNoteRaw (raw .md string, unchanged)
+                                 ↓
+                           renderMarkdown()  →  currentNoteHtml (display only)
+                                 ↓
+                        NoteEditor textarea  ←  currentNoteRaw
+                                 ↓
+                     PUT /api/notes (currentNoteRaw back to disk, unchanged)
+```
+
+`[[links]]`, `![[images]]`, frontmatter, and all Obsidian syntax are **preserved verbatim** in `currentNoteRaw` and written back to disk exactly as Obsidian left them. The rendered HTML is display-only and never saved.
+
+`data-wiki-link` stores the full original link target (e.g. `"Books/LikeSwitcher"`) so if a future WYSIWYG editor ever needs to reconstruct `[[Books/LikeSwitcher]]` from the HTML, the information is there.
+
+To change the editor: `NoteEditor.jsx` — it reads `currentNoteRaw` and writes back plain text. Do NOT switch to saving `currentNoteHtml` — that would destroy Obsidian syntax.
 
 ---
 
