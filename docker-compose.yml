@@ -1,7 +1,17 @@
 services:
+  backend:
+    build: ./obsidian_optimizer/obsidian
+    ports:
+      - "8084:8084"
+    environment:
+      - VAULT_PATH=/vault
+      - IMAGE_PATH=/vault/resources/images
+    volumes:
+      - ${HOST_VAULT_PATH}:/vault
+
   frontend:
     build: ./frontend
     ports:
       - "8083:80"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend

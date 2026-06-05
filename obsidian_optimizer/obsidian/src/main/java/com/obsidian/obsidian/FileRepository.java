@@ -12,12 +12,14 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Queue;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 public class FileRepository {
 
-    private final String ROOT_FILE = "C:\\Users\\ACER\\Desktop\\NewLife";
+    @Value("${VAULT_PATH:C:/Users/ACER/Desktop/NewLife}")
+    private String ROOT_FILE;
 
     ArrayList<String> cache;
     boolean cacheUpToDate = false;

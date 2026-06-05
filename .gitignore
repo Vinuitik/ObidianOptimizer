@@ -1,5 +1,8 @@
 .claude/
 
+# Local config (vault path — never commit)
+.env
+
 # Node
 node_modules/
 frontend/node_modules/
