@@ -1,4 +1,6 @@
-const BASE = '/api';
+import ENV from '../env.js';
+
+const BASE = ENV.API_BASE;
 
 export class ApiError extends Error {
   constructor(status) {
