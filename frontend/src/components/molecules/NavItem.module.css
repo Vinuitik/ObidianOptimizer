@@ -1,8 +1,14 @@
 .row {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 2px 0;
+  gap: var(--sp-2);
+  padding: 3px var(--sp-2);
+  border-radius: var(--radius-sm);
+  transition: background var(--ease-fast);
+}
+
+.row:hover {
+  background: var(--color-card);
 }
 
 .label {
@@ -10,46 +16,48 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 13px;
-  transition: color var(--transition);
+  font-size: var(--text-sm);
+  transition: color var(--ease-fast);
   user-select: none;
+  flex: 1;
 }
 
 .folder {
-  color: var(--text);
+  color: var(--color-text);
+  font-weight: 500;
 }
 
 .folder:hover {
-  color: var(--accent);
+  color: var(--color-accent);
 }
 
 .file {
-  color: var(--muted);
+  color: var(--color-text-2);
 }
 
 .file:hover {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .icon {
   font-size: 10px;
-  color: var(--muted);
+  color: var(--color-muted);
   width: 12px;
   flex-shrink: 0;
 }
 
 .addBtn {
   margin-left: auto;
-  padding: 0 4px;
-  font-size: 14px;
+  padding: 0 var(--sp-1);
+  font-size: 15px;
   line-height: 1;
   background: none;
   border: none;
-  color: var(--muted);
+  color: var(--color-muted);
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   opacity: 0;
-  transition: opacity var(--transition), color var(--transition);
+  transition: opacity var(--ease-fast), color var(--ease-fast);
   flex-shrink: 0;
 }
 
@@ -58,5 +66,5 @@
 }
 
 .addBtn:hover {
-  color: var(--accent);
+  color: var(--color-accent);
 }

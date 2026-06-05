@@ -1,34 +1,57 @@
 .list {
-  padding: var(--space-2);
+  padding: var(--sp-2);
   overflow-y: auto;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .item {
   display: block;
   width: 100%;
-  padding: var(--space-1) var(--space-2);
-  font-size: 13px;
-  color: var(--muted);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--text-sm);
+  font-family: var(--font-body);
+  color: var(--color-text-2);
   cursor: pointer;
-  border-radius: var(--radius);
-  transition: background var(--transition), color var(--transition);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  transition: background var(--ease-fast), color var(--ease-fast), border-color var(--ease-fast);
   text-align: left;
-  border: none;
   background: none;
-  font-family: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  position: relative;
+}
+
+.item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 25%;
+  height: 50%;
+  width: 2px;
+  background: var(--color-accent);
+  border-radius: 1px;
+  opacity: 0;
+  transition: opacity var(--ease-fast);
 }
 
 .item:hover {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--color-card);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.item:hover::before {
+  opacity: 1;
 }
 
 .empty {
-  font-size: 13px;
-  color: var(--muted);
-  padding: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  padding: var(--sp-3);
+  font-style: italic;
 }

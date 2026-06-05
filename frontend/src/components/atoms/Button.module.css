@@ -2,39 +2,67 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius);
-  font-family: inherit;
-  font-size: 13px;
+  gap: var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition: background var(--transition), color var(--transition);
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   background: transparent;
-  color: var(--muted);
-  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-2);
+  padding: 6px var(--sp-3);
   user-select: none;
+  transition: background var(--ease-fast), color var(--ease-fast), border-color var(--ease-fast);
+  white-space: nowrap;
 }
 
 .btn:hover {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--color-card);
+  color: var(--color-text);
+  border-color: var(--color-border-hover);
 }
 
+.btn:active {
+  transform: scale(0.97);
+  transition: transform 100ms ease, background var(--ease-fast), color var(--ease-fast);
+}
+
+/* Primary — accent filled */
+.primary {
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+}
+
+.primary:hover {
+  background: rgba(108, 134, 245, 0.25);
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+/* Ghost — no border until hover */
 .ghost {
   border-color: transparent;
+  color: var(--color-muted);
 }
 
 .ghost:hover {
-  border-color: var(--border);
+  border-color: var(--color-border);
+  color: var(--color-text);
+  background: var(--color-card);
 }
 
+/* Danger */
 .danger {
-  color: #e06c75;
-  border-color: rgba(224, 108, 117, 0.3);
+  color: var(--color-danger);
+  border-color: rgba(224, 92, 92, 0.3);
+  background: transparent;
 }
 
 .danger:hover {
-  background: rgba(224, 108, 117, 0.1);
-  border-color: rgba(224, 108, 117, 0.5);
-  color: #e06c75;
+  background: rgba(224, 92, 92, 0.1);
+  border-color: rgba(224, 92, 92, 0.5);
+  color: var(--color-danger);
 }
