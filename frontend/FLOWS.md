@@ -1,6 +1,6 @@
 # Frontend Flows
 
-Files: main.jsx, App.jsx, App.module.css, pages/MainPage.jsx, pages/SettingsPage.jsx, pages/ReviewPage.jsx, store/useStore.js, api/notes.js, env.js, utils/markdown.js
+Files: main.jsx, App.jsx, App.module.css, pages/MainPage.jsx, pages/SettingsPage.jsx, pages/ReviewPage.jsx, store/useStore.js, api/notes.js, env.js, utils/markdown.js, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, molecules/SearchBar.jsx
 
 ---
 
@@ -28,11 +28,14 @@ To change transition timing: `pageVariants` in `App.jsx`
 
 ## Navigation Bar
 
-`NavBar.jsx` + `NavBar.module.css` — fixed top bar, 52px height  
+`NavBar.jsx` + `NavBar.module.css` — fixed top bar, 56px height  
+Brand: `ObsidianMark(22px glow=false)` + "Obsidian **Optimizer**" (Optimizer in `--color-accent`)  
+Right side: streak chip (flame icon + "12-day streak" — hardcoded) + 28px avatar tile ("V")  
 Uses `NavLink` from react-router-dom — `.linkActive` class applied automatically on active route  
 Auth state from Zustand: `isAuthenticated` → shows "Sign in" or "Sign out"  
 Sign in: calls `setShowLogin(true)` → `LoginModal` rendered in `MainPage`  
-Sign out: calls `store.logout()` → `POST /api/logout`
+Sign out: calls `store.logout()` → `POST /api/logout`  
+To wire streak dynamically: add `streakDays` to store, pass to NavBar
 
 ---
 
@@ -57,9 +60,25 @@ Tokens: `styles/tokens.css` — all CSS custom properties (colors, spacing, radi
 Reset: `styles/reset.css` — box-sizing, base font, scrollbar  
 Global: `styles/globals.css` — imports tokens + reset, stagger-in keyframe, markdown body styles  
 Fonts (Google Fonts in `index.html`): Space Grotesk (headings) / DM Sans (body) / DM Mono (code/labels)  
-Accent: indigo `#6c86f5` — `--color-accent` in tokens.css  
-To change accent: `tokens.css` → `--color-accent` + `--color-accent-dim` + `--color-accent-border`  
+Accent: amethyst `#7c5cff` — `--color-accent` in tokens.css  
+Accent soft: `--color-accent-soft: #a68dff` (lighter amethyst for text on dark bg)  
+Accent dim: `--color-accent-dim: rgba(124,92,255,0.14)` (tinted backgrounds)  
+Accent border: `--color-accent-border: rgba(124,92,255,0.34)` (bordered highlights)  
+Semantic additions: `--color-amber: #e0a458` (streak), `--color-success: #4cc38a`  
+Gap-fill radii: `--radius-xs: 8px`, `--radius-sm2: 9px`, `--radius-md2: 11px`, `--radius-lg2: 12px`  
+To change accent: `tokens.css` → `--color-accent` + `--color-accent-soft` + `--color-accent-dim` + `--color-accent-border`  
 To change any color/spacing/font: `tokens.css` only — never edit component CSS directly for tokens
+
+### New atoms (Redesign A)
+
+`atoms/Icon.jsx` — SVG glyph set via name prop (folder, file, chevron, search, plus, sparkle, clock, flame, dot, check, link, settings). `paths` lookup at module scope — no per-render alloc. Props: `name`, `size`, `color`, `strokeWidth`  
+`atoms/ObsidianMark.jsx` — pure-CSS faceted obsidian shard mark. Facet data at module scope. Props: `size` (default 120), `glow` (default true). Use `glow=false` in nav for no drop-shadow  
+`atoms/Chip.jsx` + `Chip.module.css` — inline action chip. Renders as `<span>` (static) or `<button>` (if `onClick` passed). Props: `children`, `onClick`, `className`  
+`atoms/Ring.jsx` — SVG progress ring. Props: `pct` (0-100), `size` (default 44), `strokeWidth` (default 4)
+
+### New molecules (Redesign A)
+
+`molecules/SearchBar.jsx` + `SearchBar.module.css` — controlled search input with search Icon, ⌘K / Ctrl+K focus shortcut (global keydown listener), clear button when query is non-empty. Props: `value`, `onChange`
 
 ### Technology Notes
 - **Framer Motion**: used for page-level route transitions (`AnimatePresence` in `App.jsx`) and can be extended for center panel mode switches. State is not persisted — animations are purely visual.
@@ -107,6 +126,17 @@ console.log('[READ out 200]', html.slice(0, 200))  // rendered HTML
 Open browser console and click any note to see both.
 
 ---
+
+## FolderTree search filter
+
+`FolderTree.jsx` — local `query` state, passed to all `TreeNode` instances  
+`SearchBar` rendered above new-note button; on change updates `query`  
+⌘K / Ctrl+K globally focuses the search input (listener in `SearchBar.jsx`)  
+`hasMatch(name, node, query)` — recursive: file = substring match on display name; folder = any descendant file matches  
+When query is active: folders without matching descendants hidden; folders with matches force-open; non-matching files hidden  
+"No results" empty state shown if all root entries filtered  
+`isActive` on file NavItem: `currentNotePath === node.fullPath` — drives accent-dim background + 3px left accent bar  
+To add AI-note sparkle badge: pass `isAI={true}` to NavItem — shows trailing sparkle icon
 
 ## CREATE
 
@@ -281,7 +311,13 @@ Ports (also in `env.js`):
 | Session config | `SecurityConfig.java` |
 | Vault root path | `FileRepository.java` `ROOT_FILE` |
 | Design tokens (colors, fonts, spacing) | `styles/tokens.css` |
-| Accent color | `styles/tokens.css` `--color-accent` + `--color-accent-dim` + `--color-accent-border` |
+| Accent color | `styles/tokens.css` `--color-accent` + `--color-accent-soft` + `--color-accent-dim` + `--color-accent-border` |
+| Logo mark (size/glow) | `atoms/ObsidianMark.jsx` |
+| Icon glyphs | `atoms/Icon.jsx` `paths` object |
+| Streak display | `NavBar.jsx` hardcoded "12-day streak" — wire to store when backend supports it |
+| Search filter logic | `FolderTree.jsx` `hasMatch()` |
+| Review card layout | `ReviewList.jsx` + `ReviewList.module.css` |
+| Due count in panel header | `SplitLayout.jsx` `dueSlot` — reads `reviewNotes.length` |
 | Google Fonts | `index.html` font link + `tokens.css` `--font-*` vars |
 | Page routes | `App.jsx` `<Routes>` + `NavBar.jsx` `NAV_ITEMS` |
 | Route transition speed | `App.jsx` `pageVariants` |
