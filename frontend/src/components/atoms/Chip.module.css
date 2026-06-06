@@ -1,0 +1,25 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-text-2);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  padding: 7px 12px;
+  white-space: nowrap;
+  cursor: default;
+  transition: border-color var(--ease-fast), background var(--ease-fast);
+}
+
+button.chip {
+  cursor: pointer;
+}
+
+button.chip:hover {
+  background: var(--color-surface);
+  border-color: var(--color-border-hover);
+}

@@ -1,26 +1,28 @@
 :root {
   /* ── Background stack ─────────────────────────────────────── */
-  --color-page:    #0d0f14;
-  --color-surface: #161920;
-  --color-card:    #1e2128;
+  --color-page:    #08070c;
+  --color-surface: #0e0d15;
+  --color-card:    #16141f;
 
   /* ── Text ────────────────────────────────────────────────── */
-  --color-text:    #e8eaf0;
-  --color-text-2:  #8b90a0;
-  --color-muted:   #555a6a;
+  --color-text:    #eceaf3;
+  --color-text-2:  #9a93ad;
+  --color-muted:   #5c5670;
 
-  /* ── Accent (indigo) ─────────────────────────────────────── */
-  --color-accent:        #6c86f5;
-  --color-accent-dim:    rgba(108, 134, 245, 0.15);
-  --color-accent-border: rgba(108, 134, 245, 0.35);
+  /* ── Accent (amethyst) ───────────────────────────────────── */
+  --color-accent:        #7c5cff;
+  --color-accent-soft:   #a68dff;
+  --color-accent-dim:    rgba(124, 92, 255, 0.14);
+  --color-accent-border: rgba(124, 92, 255, 0.34);
 
   /* ── Semantic ────────────────────────────────────────────── */
   --color-danger:  #e05c5c;
-  --color-success: #4caf85;
+  --color-success: #4cc38a;
+  --color-amber:   #e0a458;
 
   /* ── Borders ─────────────────────────────────────────────── */
-  --color-border:       rgba(255, 255, 255, 0.07);
-  --color-border-hover: rgba(255, 255, 255, 0.14);
+  --color-border:       rgba(255, 255, 255, 0.06);
+  --color-border-hover: rgba(255, 255, 255, 0.12);
 
   /* ── Typography ──────────────────────────────────────────── */
   --font-heading: 'Space Grotesk', sans-serif;
@@ -52,6 +54,10 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
+  --radius-xs: 8px;
+  --radius-sm2: 9px;
+  --radius-md2: 11px;
+  --radius-lg2: 12px;
 
   /* ── Transitions ─────────────────────────────────────────── */
   --ease-fast:   150ms ease;
