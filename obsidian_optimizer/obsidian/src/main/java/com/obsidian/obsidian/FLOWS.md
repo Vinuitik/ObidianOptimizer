@@ -63,14 +63,34 @@ Image dir: `ImageRepository.imageDir` (hardcoded `C:\Users\ACER\Desktop\NewLife\
 
 `MyController.createNote(CreateNoteRequest{folder, name})`  
 → `FileRepository.createNote(folderPath, name)` → validate folder exists → create `name.md` with frontmatter skeleton → `invalidateCache()` → return `{path: absolutePath}`  
-Initial frontmatter: `---\nreviewed: {today}\n---\n\n`
+Initial frontmatter: `---\nsr-due: {today+3d}\nsr-interval: 3\nsr-ease: 200\n---\n\n`  
+`sr-due` prefix is 8 chars — matches `isBeforeToday()` substring(8,18) extraction  
+To change defaults: `FileRepository.createNote()`
 
 ---
 
-## PUT /notes — Update Note Content
+## PUT /notes — Update Note Content (full replace, kept for fallback)
 
 `MyController.updateNote(UpdateNoteRequest{path, content})`  
 → `FileRepository.updateNote(path, content)` → validate file exists → `Files.writeString()` → `invalidateCache()`
+
+---
+
+## PATCH /notes/content — Diff-based Update
+
+`MyController.patchNote(PatchNoteRequest{path, hunks})`  
+→ `FileRepository.patchNote(path, hunks)`  
+1. Read file → detect line separator (`\r\n` or `\n`) from raw bytes  
+2. Normalize to LF → split into `List<String> lines` (with `-1` limit to keep trailing empty line)  
+3. Sort hunks descending by `startLine` (apply back-to-front so indices stay valid)  
+4. For each hunk: remove `deleteCount` lines at `startLine`, insert `insertLines` at `startLine`  
+5. `String.join(sep, lines)` → `Files.writeString()` → `invalidateCache()`
+
+Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String> insertLines)`  
+Security: PATCH is session-protected — same as PUT  
+Frontend diff: `utils/diff.js computeHunks(oldText, newText)` → LCS algorithm, CRLF-normalized  
+Zero hunks (no change) → frontend skips the PATCH call entirely  
+To change diff algorithm: `frontend/src/utils/diff.js lcsBacktrack()`
 
 ---
 
@@ -129,6 +149,8 @@ Vault is mounted read-write at `/vault` inside the backend container.
 | Review date format | `FileRepository.isBeforeToday()` |
 | Directories skipped in BFS | `FileRepository.getNoteNames()` skip list |
 | Initial note frontmatter | `FileRepository.createNote()` |
+| Diff algorithm | `frontend/src/utils/diff.js lcsBacktrack()` |
+| Patch hunk DTO | `FileRepository.PatchHunk` |
 | Protected vs public endpoints | `SecurityConfig.filterChain()` |
 
 ---

@@ -147,6 +147,41 @@ public class FileRepository {
         invalidateCache();
     }
 
+    public void patchNote(String path, List<PatchHunk> hunks) throws IOException {
+        if (hunks == null || hunks.isEmpty()) return;
+        File file = new File(path);
+        if (!file.exists()) throw new IOException("Note not found: " + path);
+
+        String original = Files.readString(Paths.get(path));
+        // Detect line separator from original file (preserve CRLF on Windows vaults)
+        String sep = original.contains("\r\n") ? "\r\n" : "\n";
+
+        // Normalize to LF for line-index operations
+        List<String> lines = new ArrayList<>(
+            Arrays.asList(original.replace("\r\n", "\n").split("\n", -1))
+        );
+
+        // Apply hunks back-to-front so earlier line numbers stay valid
+        List<PatchHunk> sorted = new ArrayList<>(hunks);
+        sorted.sort(Comparator.comparingInt(PatchHunk::startLine).reversed());
+
+        for (PatchHunk h : sorted) {
+            int start = h.startLine();
+            if (start < 0 || start > lines.size()) {
+                throw new IOException("Patch hunk out of range: startLine=" + start + " fileLines=" + lines.size());
+            }
+            for (int i = 0; i < h.deleteCount(); i++) {
+                if (start < lines.size()) lines.remove(start);
+            }
+            if (h.insertLines() != null) {
+                lines.addAll(start, h.insertLines());
+            }
+        }
+
+        Files.writeString(Paths.get(path), String.join(sep, lines));
+        invalidateCache();
+    }
+
     public String renameNote(String oldPath, String newName) throws IOException {
         File oldFile = new File(oldPath);
         if (!oldFile.exists()) throw new IOException("Note not found: " + oldPath);
@@ -225,6 +260,7 @@ public class FileRepository {
 
     public record ChildrenResult(String parentPath, List<String> folderPaths, List<String> filePaths) {}
     public record ReviewPage(List<String> notes, boolean hasMore) {}
+    public record PatchHunk(int startLine, int deleteCount, List<String> insertLines) {}
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 

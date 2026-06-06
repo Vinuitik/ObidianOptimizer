@@ -140,13 +140,15 @@ To add AI-note sparkle badge: pass `isAI={true}` to NavItem — shows trailing s
 
 ## CREATE
 
-`+` button on folder hover (NavItem) → `startNewNote(folderPath)` → `centerMode = 'new'`  
+`+` button on folder hover (NavItem) → `startNewNote(folderPath)` → `centerMode = 'new'`, `newNoteName = ''`  
 "New note" at top of FolderTree → `startNewNote(vaultRoot)` (creates at vault root)  
-`NewNoteForm` renders → user types name → Enter or "Create" button  
-→ `createNote(folder, name)` → `POST /api/notes` → `{ path: absolutePath }`  
-→ `fetchNoteNames()` rebuilds tree → `openNote(path)` → view mode
+Center header becomes an `<input>` (`.headerTitleInput` in `SplitLayout.module.css`) — user types name there  
+Enter in header input or "Create" button in `NewNoteForm` → `createNote(folder, newNoteName)`  
+→ `POST /api/notes` → `{ path: absolutePath }` → `openNote(path)` → view mode
 
-Backend: creates file at `folder/name.md` with minimal frontmatter (`reviewed: today`)  
+Name state: `newNoteName` in Zustand store, set via `setNewNoteName()`, reset on `startNewNote`/`cancelNewNote`  
+`NewNoteForm` is now just folder hint + Create/Cancel — no name input of its own  
+Backend: creates `folder/name.md` with frontmatter `sr-due: today+3d`, `sr-interval: 3`, `sr-ease: 200`  
 To change initial frontmatter: `FileRepository.createNote()`
 
 ---
@@ -158,9 +160,17 @@ To change initial frontmatter: `FileRepository.createNote()`
 User edits title and/or content → "Save"  
 `saveNote(title, content)` in store:
 1. If title changed → `PATCH /api/notes/rename` → get new path
-2. `PUT /api/notes` with (new path, content)
-3. Re-render note from new content, `centerMode = 'view'`
-4. `fetchNoteNames()` + `fetchReviewNotes()` to sync tree
+2. `computeHunks(currentNoteRaw, content)` [utils/diff.js] — LCS diff, CRLF-normalized
+3. If hunks non-empty → `PATCH /api/notes/content` with `{ path, hunks }`
+4. If hunks empty (no content change) → skip the network call
+5. Re-render note from new content, `centerMode = 'view'`
+
+Diff algorithm: `utils/diff.js lcsBacktrack()` — O(m×n) LCS backtrack → edit ops → compressed hunks  
+Hunk shape: `{ startLine: number, deleteCount: number, insertLines: string[] }`  
+CRLF handling: both sides normalized with `.replace(/\r\n/g, '\n')` before diff — browser edits are LF, server files may be CRLF  
+Backend applies hunks back-to-front, preserves original line separator, validated with bounds check  
+To change diff algorithm: `utils/diff.js lcsBacktrack()`  
+To revert to full-replace: call `apiUpdate(path, content)` instead of `apiPatch` in `useStore.js saveNote()`
 
 **RESIDUAL:** Cross-file `[[link]]` reference updating on rename [NOT IMPLEMENTED]
 
@@ -325,7 +335,9 @@ Ports (also in `env.js`):
 | Route transition speed | `App.jsx` `pageVariants` |
 | Center panel mode routing | `SplitLayout.jsx` |
 | Note editor UI | `NoteEditor.jsx` / `NoteEditor.module.css` |
-| New note form UI | `NewNoteForm.jsx` / `NewNoteForm.module.css` |
+| New note header input style | `SplitLayout.module.css` `.headerTitleInput` |
+| New note form (folder hint + buttons) | `NewNoteForm.jsx` / `NewNoteForm.module.css` |
+| Diff algorithm | `utils/diff.js lcsBacktrack()` |
 | Login modal UI | `LoginModal.jsx` / `LoginModal.module.css` |
 | Markdown rendering | `utils/markdown.js` |
 | Nginx proxy target | `frontend/nginx.conf` `proxy_pass` |

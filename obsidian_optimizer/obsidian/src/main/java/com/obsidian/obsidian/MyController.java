@@ -3,6 +3,7 @@ package com.obsidian.obsidian;
 import java.io.IOException;
 import java.security.Principal;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -81,6 +82,16 @@ public class MyController {
         }
     }
 
+    @PatchMapping("notes/content")
+    public ResponseEntity<?> patchNote(@RequestBody PatchNoteRequest req) {
+        try {
+            repository.patchNote(req.path(), req.hunks());
+            return ResponseEntity.ok().build();
+        } catch (IOException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     @PatchMapping("notes/rename")
     public ResponseEntity<?> renameNote(@RequestBody RenameNoteRequest req) {
         try {
@@ -105,6 +116,7 @@ public class MyController {
 
     record CreateNoteRequest(String folder, String name) {}
     record UpdateNoteRequest(String path, String content) {}
+    record PatchNoteRequest(String path, List<FileRepository.PatchHunk> hunks) {}
     record RenameNoteRequest(String oldPath, String newName) {}
     record DeleteNoteRequest(String path) {}
 }

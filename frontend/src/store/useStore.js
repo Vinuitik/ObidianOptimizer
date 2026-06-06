@@ -3,10 +3,11 @@ import {
   ApiError,
   fetchNames, fetchChildren, fetchReview, fetchNoteContent,
   checkAuth, login as apiLogin, logout as apiLogout,
-  createNote as apiCreate, updateNote as apiUpdate,
+  createNote as apiCreate, patchNote as apiPatch,
   renameNote as apiRename, deleteNote as apiDelete,
 } from '../api/notes';
 import { renderMarkdown } from '../utils/markdown';
+import { computeHunks } from '../utils/diff';
 
 // ── Review session (localStorage) ────────────────────────────────────────────
 
@@ -261,7 +262,7 @@ const useStore = create((set, get) => ({
   cancelEdit: () => set({ centerMode: 'view' }),
 
   saveNote: async (title, content) => {
-    const { currentNotePath } = get();
+    const { currentNotePath, currentNoteRaw } = get();
     try {
       const currentTitle = currentNotePath?.split(/[/\\]/).pop().replace(/\.md$/, '') ?? '';
       let savePath = currentNotePath;
@@ -271,7 +272,10 @@ const useStore = create((set, get) => ({
         savePath = newPath;
       }
 
-      await apiUpdate(savePath, content);
+      const hunks = computeHunks(currentNoteRaw, content);
+      if (hunks.length > 0) {
+        await apiPatch(savePath, hunks);
+      }
 
       const html = renderMarkdown(content);
       set({ currentNoteHtml: html, currentNoteRaw: content, currentNotePath: savePath, centerMode: 'view' });

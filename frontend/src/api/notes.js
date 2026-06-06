@@ -84,6 +84,14 @@ export async function updateNote(path, content) {
   });
 }
 
+export async function patchNote(path, hunks) {
+  await req(`${BASE}/notes/content`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, hunks }),
+  });
+}
+
 export async function renameNote(oldPath, newName) {
   const res = await req(`${BASE}/notes/rename`, {
     method: 'PATCH',
