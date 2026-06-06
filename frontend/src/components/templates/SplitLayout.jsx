@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import useStore from '../../store/useStore';
 import PanelHeader from '../molecules/PanelHeader';
 import FolderTree from '../organisms/FolderTree';
@@ -7,6 +7,8 @@ import NoteViewer from '../organisms/NoteViewer';
 import NewNoteForm from '../organisms/NewNoteForm';
 import NoteEditor from '../organisms/NoteEditor';
 import Button from '../atoms/Button';
+import Chip from '../atoms/Chip';
+import Icon from '../atoms/Icon';
 import styles from './SplitLayout.module.css';
 
 const MIN_PANEL_WIDTH = 160;
@@ -16,6 +18,12 @@ const DEFAULT_WIDTH = 290;
 function noteTitle(fullPath) {
   if (!fullPath) return null;
   return fullPath.split(/[/\\]/).pop().replace(/\.md$/, '');
+}
+
+function noteFolderHint(fullPath) {
+  if (!fullPath) return null;
+  const parts = fullPath.split(/[/\\]/);
+  return parts.length >= 2 ? parts[parts.length - 2] : null;
 }
 
 function useResize(initialWidth) {
@@ -64,11 +72,14 @@ export default function SplitLayout() {
   const centerMode = useStore(s => s.centerMode);
   const startEdit = useStore(s => s.startEdit);
   const deleteNote = useStore(s => s.deleteNote);
+  const reviewNotes = useStore(s => s.reviewNotes);
 
   const [leftWidth, onLeftHandleDown] = useResize(DEFAULT_WIDTH);
   const [rightWidth, onRightHandleDown] = useResize(DEFAULT_WIDTH);
 
   const title = noteTitle(currentNotePath);
+  const folderHint = noteFolderHint(currentNotePath);
+  const titleIsPlaceholder = centerMode === 'view' && !title;
 
   const centerTitle = {
     new: 'New Note',
@@ -76,7 +87,9 @@ export default function SplitLayout() {
     view: title ?? 'Select a note',
   }[centerMode];
 
-  const titleIsPlaceholder = centerMode === 'view' && !title;
+  const dueSlot = reviewNotes.length > 0
+    ? <span className={styles.dueCount}>{reviewNotes.length} due</span>
+    : null;
 
   return (
     <div className={styles.layout}>
@@ -104,25 +117,37 @@ export default function SplitLayout() {
             {leftCollapsed && (
               <Button onClick={toggleLeft} variant="ghost">▶ Files</Button>
             )}
-            <span className={titleIsPlaceholder
-              ? `${styles.centerTitle} ${styles.centerTitleEmpty}`
-              : styles.centerTitle}
-            >
-              {centerTitle}
-            </span>
-            {centerMode === 'view' && title && (
-              <Button onClick={startEdit} variant="ghost">Edit</Button>
-            )}
-            {centerMode === 'view' && title && (
-              <Button
-                variant="danger"
-                onClick={() => {
-                  if (window.confirm(`Move "${title}" to trash?`)) deleteNote(currentNotePath);
-                }}
-              >🗑</Button>
+            {centerMode === 'view' ? (
+              <div className={styles.titleBlock}>
+                <div className={titleIsPlaceholder ? styles.centerTitleEmpty : styles.centerTitle}>
+                  {centerTitle}
+                </div>
+                {folderHint && !titleIsPlaceholder && (
+                  <div className={styles.centerSubline}>{folderHint} /</div>
+                )}
+              </div>
+            ) : (
+              <span className={styles.centerTitle}>{centerTitle}</span>
             )}
           </div>
           <div className={styles.headerRight}>
+            {centerMode === 'view' && title && (
+              <>
+                <Chip>
+                  <Icon name="sparkle" size={14} color="var(--color-accent-soft)" />
+                  Optimize
+                </Chip>
+                <Chip onClick={startEdit}>Edit</Chip>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    if (window.confirm(`Move "${title}" to trash?`)) deleteNote(currentNotePath);
+                  }}
+                >
+                  🗑
+                </Button>
+              </>
+            )}
             {rightCollapsed && (
               <Button onClick={toggleRight} variant="ghost">Review ◀</Button>
             )}
@@ -147,7 +172,7 @@ export default function SplitLayout() {
         className={`${styles.panel} ${styles.panelRight} ${rightCollapsed ? styles.collapsed : ''}`}
         style={rightCollapsed ? undefined : { width: rightWidth, minWidth: rightWidth }}
       >
-        <PanelHeader title="Review" collapsed={rightCollapsed} onToggle={toggleRight} side="right" />
+        <PanelHeader title="Review" collapsed={rightCollapsed} onToggle={toggleRight} side="right" right={dueSlot} />
         <ReviewList />
       </div>
     </div>

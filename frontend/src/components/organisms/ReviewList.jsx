@@ -10,13 +10,20 @@ export default function ReviewList() {
   }
 
   return (
-    <ul className={styles.list}>
+    <div className={styles.list}>
+      <div className={styles.summaryCard}>
+        <div>
+          <div className={styles.summaryTitle}>Today's review</div>
+          <div className={styles.summaryCount}>{reviewNotes.length} notes due</div>
+        </div>
+      </div>
       {reviewNotes.map(({ shortName, fullPath }) => (
-        <li key={fullPath} className={styles.item} onClick={() => openNote(fullPath)}>
+        <div key={fullPath} className={styles.item} onClick={() => openNote(fullPath)}>
           <span className={styles.dot} />
           <span className={styles.label}>{shortName}</span>
-        </li>
+          <span className={styles.due}>Due now</span>
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }

@@ -45,10 +45,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--sp-4) var(--sp-5);
+  padding: 0 var(--sp-5);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  min-height: 56px;
+  min-height: 60px;
+  box-sizing: border-box;
   gap: var(--sp-4);
 }
 
@@ -83,6 +84,23 @@
   font-weight: 400;
   font-size: var(--text-base);
   letter-spacing: 0;
+}
+
+.titleBlock {
+  min-width: 0;
+}
+
+.centerSubline {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-muted);
+  margin-top: 2px;
+}
+
+.dueCount {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-accent-soft);
 }
 
 .collapseRow {
