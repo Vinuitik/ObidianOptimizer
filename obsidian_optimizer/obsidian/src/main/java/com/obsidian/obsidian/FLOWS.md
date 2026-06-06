@@ -98,6 +98,8 @@ Recovery: manual file move [NOT IMPLEMENTED in UI]
 Called automatically after every write (create, update, rename, delete)  
 No HTTP endpoint to trigger manually — restart or any write op clears both caches
 
+**CACHE CURRENTLY DISABLED** — `getNoteNames()` and `getReviewNotes()` ignore `cacheUpToDate` flags and always recompute. Re-enable by uncommenting the guard at the top of each method in `FileRepository.java` once the app is stable and the feedback loop is trusted.
+
 ---
 
 ## Infrastructure

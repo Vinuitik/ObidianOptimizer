@@ -15,31 +15,6 @@
   letter-spacing: 0.03em;
 }
 
-.titleInput {
-  width: 100%;
-  max-width: 540px;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid var(--color-border);
-  color: var(--color-text);
-  font-family: var(--font-heading);
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  letter-spacing: var(--tracking-tight);
-  padding: var(--sp-2) 0;
-  text-align: center;
-  transition: border-color var(--ease-fast);
-}
-
-.titleInput:focus {
-  outline: none;
-  border-bottom-color: var(--color-accent);
-}
-
-.titleInput::placeholder {
-  color: var(--color-muted);
-}
-
 .actions {
   display: flex;
   gap: var(--sp-2);

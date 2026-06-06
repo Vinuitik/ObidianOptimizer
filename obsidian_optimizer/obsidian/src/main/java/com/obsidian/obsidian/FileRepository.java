@@ -36,7 +36,8 @@ public class FileRepository {
     }
 
     public ArrayList<String> getNoteNames() {
-        if (cache != null && cacheUpToDate) return cache;
+        // CACHE DISABLED: re-enable once app is stable
+        // if (cache != null && cacheUpToDate) return cache;
 
         ArrayList<String> names = new ArrayList<>();
         File root = new File(ROOT_FILE);
@@ -75,8 +76,9 @@ public class FileRepository {
     }
 
     public ArrayList<String> getReviewNotes() {
-        if (cacheReview != null && cacheReviewUpToDate) return cacheReview;
-        if (cache == null || !cacheUpToDate) getNoteNames();
+        // CACHE DISABLED: re-enable once app is stable
+        // if (cacheReview != null && cacheReviewUpToDate) return cacheReview;
+        getNoteNames();
 
         ArrayList<String> reviewNames = new ArrayList<>();
         BufferedReader reader = null;
@@ -130,7 +132,8 @@ public class FileRepository {
             throw new IOException("Note already exists: " + filename);
         }
 
-        String initialContent = "---\nreviewed: " + LocalDate.now() + "\n---\n\n";
+        String srDue = LocalDate.now().plusDays(3).toString();
+        String initialContent = "---\nsr-due: " + srDue + "\nsr-interval: 3\nsr-ease: 200\n---\n\n";
         Files.writeString(noteFile.toPath(), initialContent);
 
         invalidateCache();

@@ -74,6 +74,11 @@ export default function SplitLayout() {
   const startEdit = useStore(s => s.startEdit);
   const deleteNote = useStore(s => s.deleteNote);
   const reviewNotes = useStore(s => s.reviewNotes);
+  const newNoteName = useStore(s => s.newNoteName);
+  const setNewNoteName = useStore(s => s.setNewNoteName);
+  const newNoteFolder = useStore(s => s.newNoteFolder);
+  const createNote = useStore(s => s.createNote);
+  const cancelNewNote = useStore(s => s.cancelNewNote);
 
   const [leftWidth, onLeftHandleDown] = useResize(DEFAULT_WIDTH);
   const [rightWidth, onRightHandleDown] = useResize(DEFAULT_WIDTH);
@@ -128,6 +133,18 @@ export default function SplitLayout() {
                   <div className={styles.centerSubline}>{folderHint} /</div>
                 )}
               </div>
+            ) : centerMode === 'new' ? (
+              <input
+                className={styles.headerTitleInput}
+                placeholder="Note name"
+                value={newNoteName}
+                onChange={e => setNewNoteName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && newNoteName.trim()) createNote(newNoteFolder, newNoteName.trim());
+                  if (e.key === 'Escape') cancelNewNote();
+                }}
+                autoFocus
+              />
             ) : (
               <span className={styles.centerTitle}>{centerTitle}</span>
             )}
