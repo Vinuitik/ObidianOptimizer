@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import NavItem from '../molecules/NavItem';
 import SearchBar from '../molecules/SearchBar';
 import Icon from '../atoms/Icon';
@@ -19,10 +19,12 @@ function hasMatch(name, node, query) {
 }
 
 function TreeNode({ name, node, depth, query, currentNotePath }) {
-  const [open, setOpen] = useState(false);
-  const openNote = useStore(s => s.openNote);
-  const startNewNote = useStore(s => s.startNewNote);
-  const deleteNote = useStore(s => s.deleteNote);
+  const [open, setOpen]       = useState(false);
+  const [loading, setLoading] = useState(false);
+  const openNote         = useStore(s => s.openNote);
+  const startNewNote     = useStore(s => s.startNewNote);
+  const deleteNote       = useStore(s => s.deleteNote);
+  const fetchChildrenOf  = useStore(s => s.fetchChildrenOf);
 
   if (node.type === 'file') {
     const displayName = name.replace(/\.md$/, '');
@@ -42,10 +44,28 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
     );
   }
 
+  // Folder: filter by query
   if (query && !hasMatch(name, node, query)) return null;
 
-  // Auto-expand folders that contain query matches
-  const isOpen = (!!query && hasMatch(name, node, query)) || open;
+  const isForceOpen = !!query && hasMatch(name, node, query);
+  const isOpen = isForceOpen || open;
+
+  // When a query forces this folder open, fetch its children if not yet loaded
+  useEffect(() => {
+    if (isForceOpen && !node.loaded && !loading) {
+      setLoading(true);
+      fetchChildrenOf(node.fullPath).finally(() => setLoading(false));
+    }
+  }, [isForceOpen]);
+
+  async function handleToggle() {
+    if (!open && !node.loaded && !loading) {
+      setLoading(true);
+      await fetchChildrenOf(node.fullPath);
+      setLoading(false);
+    }
+    setOpen(o => !o);
+  }
 
   return (
     <NavItem
@@ -53,10 +73,15 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
       isFolder
       isOpen={isOpen}
       depth={depth}
-      onClick={() => setOpen(o => !o)}
+      onClick={handleToggle}
       onAdd={() => startNewNote(node.fullPath)}
     >
-      {isOpen && sortEntries(Object.entries(node.children)).map(([childName, childNode]) => (
+      {isOpen && loading && (
+        <div className={styles.loadingRow} style={{ paddingLeft: (depth + 1) * 14 + 12 }}>
+          <span className={styles.loadingDot} />
+        </div>
+      )}
+      {isOpen && !loading && sortEntries(Object.entries(node.children)).map(([childName, childNode]) => (
         <TreeNode
           key={childName}
           name={childName}
@@ -72,13 +97,13 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
 
 export default function FolderTree() {
   const [query, setQuery] = useState('');
-  const tree = useStore(s => s.tree);
-  const vaultRoot = useStore(s => s.vaultRoot);
-  const currentNotePath = useStore(s => s.currentNotePath);
-  const startNewNote = useStore(s => s.startNewNote);
+  const tree             = useStore(s => s.tree);
+  const vaultRoot        = useStore(s => s.vaultRoot);
+  const currentNotePath  = useStore(s => s.currentNotePath);
+  const startNewNote     = useStore(s => s.startNewNote);
 
   const rootEntries = sortEntries(Object.entries(tree.children));
-  const hasResults = !query || rootEntries.some(([n, node]) => hasMatch(n, node, query));
+  const hasResults  = !query || rootEntries.some(([n, node]) => hasMatch(n, node, query));
 
   return (
     <div className={styles.tree}>

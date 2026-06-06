@@ -9,6 +9,7 @@ import NoteEditor from '../organisms/NoteEditor';
 import Button from '../atoms/Button';
 import Chip from '../atoms/Chip';
 import Icon from '../atoms/Icon';
+import ReviewRating from '../molecules/ReviewRating';
 import styles from './SplitLayout.module.css';
 
 const MIN_PANEL_WIDTH = 160;
@@ -80,6 +81,7 @@ export default function SplitLayout() {
   const title = noteTitle(currentNotePath);
   const folderHint = noteFolderHint(currentNotePath);
   const titleIsPlaceholder = centerMode === 'view' && !title;
+  const isInReview = reviewNotes.some(n => n.fullPath === currentNotePath);
 
   const centerTitle = {
     new: 'New Note',
@@ -133,6 +135,7 @@ export default function SplitLayout() {
           <div className={styles.headerRight}>
             {centerMode === 'view' && title && (
               <>
+                {isInReview && <ReviewRating fullPath={currentNotePath} />}
                 <Chip>
                   <Icon name="sparkle" size={14} color="var(--color-accent-soft)" />
                   Optimize

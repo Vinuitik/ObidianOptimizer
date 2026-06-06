@@ -23,8 +23,20 @@ export async function fetchNames() {
   return res.json();
 }
 
-export async function fetchReview() {
-  const res = await fetch(`${BASE}/review`);
+// Returns { parentPath, folderPaths, filePaths }.
+// folder=null fetches vault root.
+export async function fetchChildren(folder) {
+  const url = folder
+    ? `${BASE}/children?folder=${encodeURIComponent(folder)}`
+    : `${BASE}/children`;
+  const res = await fetch(url, { credentials: 'same-origin' });
+  if (!res.ok) throw new ApiError(res.status);
+  return res.json();
+}
+
+// Returns { notes: string[], hasMore: boolean }.
+export async function fetchReview(offset = 0, limit = 40) {
+  const res = await fetch(`${BASE}/review?offset=${offset}&limit=${limit}`, { credentials: 'same-origin' });
   if (!res.ok) throw new ApiError(res.status);
   return res.json();
 }
