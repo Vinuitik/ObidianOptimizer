@@ -1,15 +1,29 @@
+import Icon from '../atoms/Icon';
 import styles from './NavItem.module.css';
 
-export default function NavItem({ name, isFolder, isOpen, depth, onClick, onAdd, onDelete, children }) {
+export default function NavItem({ name, isFolder, isOpen, isActive, isAI, depth, onClick, onAdd, onDelete, children }) {
   return (
-    <div style={{ paddingLeft: depth * 16 }}>
-      <div className={styles.row} onClick={onClick}>
-        <span className={styles.icon}>
-          {isFolder ? (isOpen ? '▾' : '▸') : ''}
-        </span>
-        <span className={`${styles.label} ${isFolder ? styles.folder : styles.file}`}>
+    <div style={{ paddingLeft: depth * 14 }}>
+      <div className={`${styles.row} ${isActive ? styles.active : ''}`} onClick={onClick}>
+        {isActive && <span className={styles.accentBar} />}
+        {isFolder && (
+          <span className={`${styles.chevron} ${isOpen ? styles.chevronOpen : ''}`}>
+            <Icon name="chevron" size={13} strokeWidth={2} color="var(--color-muted)" />
+          </span>
+        )}
+        <Icon
+          name={isFolder ? 'folder' : 'file'}
+          size={15}
+          color={
+            isFolder
+              ? (isOpen ? 'var(--color-accent-soft)' : 'var(--color-text-2)')
+              : (isActive ? 'var(--color-accent-soft)' : 'var(--color-muted)')
+          }
+        />
+        <span className={`${styles.label} ${isFolder ? styles.folder : styles.file} ${isActive ? styles.fileActive : ''}`}>
           {name}
         </span>
+        {isAI && <Icon name="sparkle" size={13} color="var(--color-accent-soft)" />}
         {onAdd && (
           <button
             className={styles.addBtn}
