@@ -9,8 +9,9 @@ export class ApiError extends Error {
   }
 }
 
+// CACHE DISABLED: remove cache:'no-store' when re-enabling caching
 async function req(url, options = {}) {
-  const res = await fetch(url, { credentials: 'same-origin', ...options });
+  const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store', ...options });
   if (!res.ok) throw new ApiError(res.status);
   return res;
 }
@@ -18,7 +19,7 @@ async function req(url, options = {}) {
 // ── Read (public) ────────────────────────────────────────────────────────────
 
 export async function fetchNames() {
-  const res = await fetch(`${BASE}/names`);
+  const res = await fetch(`${BASE}/names`, { cache: 'no-store' });
   if (!res.ok) throw new ApiError(res.status);
   return res.json();
 }
@@ -29,20 +30,20 @@ export async function fetchChildren(folder) {
   const url = folder
     ? `${BASE}/children?folder=${encodeURIComponent(folder)}`
     : `${BASE}/children`;
-  const res = await fetch(url, { credentials: 'same-origin' });
+  const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
   if (!res.ok) throw new ApiError(res.status);
   return res.json();
 }
 
 // Returns { notes: string[], hasMore: boolean }.
 export async function fetchReview(offset = 0, limit = 40) {
-  const res = await fetch(`${BASE}/review?offset=${offset}&limit=${limit}`, { credentials: 'same-origin' });
+  const res = await fetch(`${BASE}/review?offset=${offset}&limit=${limit}`, { credentials: 'same-origin', cache: 'no-store' });
   if (!res.ok) throw new ApiError(res.status);
   return res.json();
 }
 
 export async function fetchNoteContent(fullPath) {
-  const res = await fetch(`${BASE}/text?noteName=${encodeURIComponent(fullPath)}`);
+  const res = await fetch(`${BASE}/text?noteName=${encodeURIComponent(fullPath)}`, { cache: 'no-store' });
   if (!res.ok) throw new ApiError(res.status);
   return res.text();
 }

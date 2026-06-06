@@ -107,6 +107,7 @@ const useStore = create((set, get) => ({
   // Center panel mode: 'view' | 'new' | 'edit'
   centerMode: 'view',
   newNoteFolder: null,
+  newNoteName: '',
 
   // Review
   reviewNotes: [],
@@ -235,9 +236,11 @@ const useStore = create((set, get) => ({
 
   // ── Create ────────────────────────────────────────────────────────────────
 
-  startNewNote: (folderPath) => set({ centerMode: 'new', newNoteFolder: folderPath }),
+  startNewNote: (folderPath) => set({ centerMode: 'new', newNoteFolder: folderPath, newNoteName: '' }),
 
-  cancelNewNote: () => set({ centerMode: 'view' }),
+  cancelNewNote: () => set({ centerMode: 'view', newNoteName: '' }),
+
+  setNewNoteName: (name) => set({ newNoteName: name }),
 
   createNote: async (folder, name) => {
     try {

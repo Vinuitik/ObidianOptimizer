@@ -294,6 +294,8 @@ To change the editor: `NoteEditor.jsx` — it reads `currentNoteRaw` and writes 
 `frontend/nginx.conf` — `/api/*` → `host.docker.internal:8082`, `/` → SPA  
 `start.ps1` — Java in new window + `docker compose up --build`
 
+**BROWSER CACHING DISABLED** — `nginx.conf` sends `Cache-Control: no-store, no-cache, must-revalidate` globally; all fetch calls in `api/notes.js` pass `cache: 'no-store'`. Re-enable by removing the `add_header` line in nginx and the `cache` option from fetch calls once the app is stable.
+
 Ports (also in `env.js`):
 - `http://localhost:8083` — React app via Nginx (Docker)
 - `http://localhost:8082` — Java backend

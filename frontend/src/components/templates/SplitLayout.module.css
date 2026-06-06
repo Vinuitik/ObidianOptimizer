@@ -90,6 +90,29 @@
   min-width: 0;
 }
 
+.headerTitleInput {
+  font-family: var(--font-heading);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--color-accent);
+  padding: var(--sp-1) 0;
+  min-width: 240px;
+  max-width: 480px;
+}
+
+.headerTitleInput:focus {
+  outline: none;
+}
+
+.headerTitleInput::placeholder {
+  color: var(--color-muted);
+  font-weight: 400;
+}
+
 .centerSubline {
   font-family: var(--font-mono);
   font-size: 12px;
