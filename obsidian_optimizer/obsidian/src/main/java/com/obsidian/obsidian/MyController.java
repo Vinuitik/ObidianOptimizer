@@ -9,12 +9,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.obsidian.obsidian.FileRepository.ChildrenResult;
+import com.obsidian.obsidian.FileRepository.ReviewPage;
+
 @RestController
 public class MyController {
 
     private final FileRepository repository;
 
-    @Autowired
     MyController(FileRepository repository) {
         this.repository = repository;
     }
@@ -26,9 +28,23 @@ public class MyController {
         return repository.getNoteNames();
     }
 
+    // Returns immediate children of a folder (lazy tree loading).
+    // No folder param = vault root.
+    @GetMapping("children")
+    public ChildrenResult getChildren(@RequestParam(required = false) String folder) {
+        String path = (folder == null || folder.isBlank())
+                ? repository.getRootPath()
+                : folder;
+        return repository.getDirectChildren(path);
+    }
+
+    // Returns paginated review-due notes.
+    // offset defaults to 0, limit defaults to 40.
     @GetMapping("review")
-    public ArrayList<String> getReviewNames() {
-        return repository.getReviewNotes();
+    public ReviewPage getReviewNames(
+            @RequestParam(defaultValue = "0")  int offset,
+            @RequestParam(defaultValue = "40") int limit) {
+        return repository.getReviewNotesPaged(offset, limit);
     }
 
     @GetMapping("text")

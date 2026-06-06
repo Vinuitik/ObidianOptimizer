@@ -10,7 +10,10 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Queue;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -177,6 +180,48 @@ public class FileRepository {
 
         invalidateCache();
     }
+
+    public String getRootPath() {
+        return new File(ROOT_FILE).getAbsolutePath();
+    }
+
+    // Returns immediate children (one level) of a folder — no recursion.
+    public ChildrenResult getDirectChildren(String folderPath) {
+        File dir = new File(folderPath);
+        List<String> folderPaths = new ArrayList<>();
+        List<String> filePaths   = new ArrayList<>();
+
+        File[] children = dir.listFiles();
+        if (children != null) {
+            for (File child : children) {
+                String n = child.getName();
+                if (child.isDirectory()) {
+                    if (!n.equals(".git") && !n.equals("resources") && !n.equals("_trash")) {
+                        folderPaths.add(child.getAbsolutePath());
+                    }
+                } else if (child.isFile() && n.endsWith(".md")) {
+                    filePaths.add(child.getAbsolutePath());
+                }
+            }
+        }
+
+        Collections.sort(folderPaths);
+        Collections.sort(filePaths);
+        return new ChildrenResult(dir.getAbsolutePath(), folderPaths, filePaths);
+    }
+
+    // Returns up to `limit` review-due notes starting at `offset`.
+    // Uses the review cache; warm on first call (O(n)), instant afterwards.
+    public ReviewPage getReviewNotesPaged(int offset, int limit) {
+        ArrayList<String> all = getReviewNotes();
+        int from    = Math.min(offset, all.size());
+        int to      = Math.min(from + limit, all.size());
+        boolean hasMore = to < all.size();
+        return new ReviewPage(new ArrayList<>(all.subList(from, to)), hasMore);
+    }
+
+    public record ChildrenResult(String parentPath, List<String> folderPaths, List<String> filePaths) {}
+    public record ReviewPage(List<String> notes, boolean hasMore) {}
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
