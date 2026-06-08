@@ -1,6 +1,6 @@
 # ML + MCP Layer — Architecture Plan
 
-Files: [NOT IMPLEMENTED] McpController.java, EmbeddingService.java, ImagePipelineService.java, NoteChunkRepository.java, CnnGatekeeperClient.java
+Files: [NOT IMPLEMENTED] McpController.java, EmbeddingService.java, ImagePipelineService.java, NoteChunkRepository.java, MarkdownPreprocessor.java
 
 ---
 
@@ -9,24 +9,92 @@ Files: [NOT IMPLEMENTED] McpController.java, EmbeddingService.java, ImagePipelin
 | Container | Image | Purpose |
 |---|---|---|
 | `postgres` | `pgvector/pgvector:pg16` | Vector + full-text search |
-| `ollama` | `ollama/ollama` | Hosts `nomic-embed-text` + `llava-phi3` |
-| CNN sidecar | TBD (Python/Flask or TorchServe) | Serves fine-tuned image classifier |
+| `ollama` | `ollama/ollama` | Hosts `nomic-embed-text` (embeddings only) |
+| host-wrapper | Python/Flask on host | VLM image processing via Anthropic API — see `host-wrapper/FLOWS.md` |
 
 ---
 
-## Embedding Flow (note indexing)
+## Full Embedding Pipeline
 
-`NoteWriteEvent` (create/update) → `EmbeddingService.indexNote(path)`  
-→ read markdown → split on `##` headers + paragraph breaks → `List<Chunk>`  
-→ for each `![[image.*]]` in chunk → `ImagePipelineService.toText(imagePath)` → replace tag with extracted text  
-→ for each chunk → `OllamaClient.embed(text)` → `float[768]`  
-→ upsert into `note_chunks(id, note_path, chunk_index, text, embedding, content_hash)`  
-→ if `content_hash` unchanged → skip (cache hit)
+Trigger: note created or updated → `EmbeddingService.indexNote(path)`
 
-Invalidation: mirrors `FileRepository.invalidateCache()` — any write triggers re-index of that note only  
-Bulk import: one-time `EmbeddingService.reindexAll()` — background thread, low priority  
-To change chunk size: `EmbeddingService.splitIntoChunks()`  
-To change embedding model: `application.properties → ollama.embed.model`
+### 1. Preprocessing — `MarkdownPreprocessor.process(rawMarkdown)`
+
+```
+raw markdown
+  → strip YAML frontmatter (lines between opening and closing ---)
+  → strip HTML comments (<!-- ... -->)
+  → strip obsidian metadata tags (lines starting with #tag at end of file)
+  → normalize headers: keep ## / ### text, strip # chars (used as chunk boundaries)
+  → normalize bold/italic: **text** → text, *text* → text, ==highlight== → text
+  → extract image refs: collect all ![[name.ext]] and ![alt](path) → replace with placeholder IMAGE[name.ext]
+  → extract tables: convert markdown table → "ColA: val, ColB: val" prose lines
+  → collapse 3+ blank lines → single blank line
+→ returns: PreprocessedNote { cleanText, List<imageRef> }
+```
+
+To change stripping rules: `MarkdownPreprocessor.process()`
+
+---
+
+### 2. Chunking — `EmbeddingService.splitIntoChunks(cleanText)`
+
+```
+cleanText
+  → split on ## and ### header lines → semantic sections
+  → for each section > 512 tokens:
+      → split further on double-newline (paragraph boundary)
+  → for each paragraph > 512 tokens:
+      → sliding window: 512-token chunks, 50-token overlap
+  → drop chunks < 50 tokens
+→ returns: List<String> chunks
+```
+
+Chunk size unit: approximate word count (1 token ≈ 0.75 words) — exact tokenization not needed  
+To change sizes: `EmbeddingService.CHUNK_MAX_TOKENS`, `EmbeddingService.CHUNK_OVERLAP_TOKENS`
+
+---
+
+### 3. Image Processing — `ImagePipelineService.toText(imageRef)` [ASYNC]
+
+```
+imageRef (e.g. "diagram.png")
+  → resolve to /vault/... absolute path
+  → check pending_image_jobs table — if already queued/done, skip
+  → insert into pending_image_jobs(note_path, image_path, status=PENDING)
+  → background thread drains queue:
+      → POST http://host.docker.internal:5001/process-image {image_path}
+      → if 200: extracted text → insert as extra chunk for note_path
+      → if wrapper unreachable: mark status=SKIPPED, continue (graceful degradation)
+      → update pending_image_jobs status
+```
+
+Image chunk is appended after text chunks for the same note  
+To change wrapper URL: `application.properties → wrapper.url`
+
+---
+
+### 4. Embedding — per chunk
+
+```
+chunk text
+  → hash(chunk text) → compare against note_chunks.content_hash
+  → if unchanged: skip (cache hit)
+  → POST http://ollama:11434/api/embeddings {model: nomic-embed-text, prompt: chunk}
+  → float[768] vector
+  → upsert note_chunks(note_path, chunk_index, text, embedding, content_hash, fts_vector)
+  → fts_vector = to_tsvector('english', chunk text)  ← postgres full-text index
+```
+
+Ollama model pull on first run: `ollama pull nomic-embed-text`  
+To change model: `application.properties → ollama.embed.model`
+
+---
+
+### 5. Stale Chunk Cleanup
+
+After re-indexing a note: delete `note_chunks WHERE note_path = ? AND chunk_index > newChunkCount`  
+Handles note shrinking (fewer chunks than before)
 
 ---
 
