@@ -15,6 +15,8 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Queue;
+
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -24,11 +26,22 @@ public class FileRepository {
     @Value("${VAULT_PATH:C:/Users/ACER/Desktop/NewLife}")
     private String ROOT_FILE;
 
+    private final NoteLinkRepository noteLinkRepo;
+
     ArrayList<String> cache;
     boolean cacheUpToDate = false;
 
     ArrayList<String> cacheReview;
     boolean cacheReviewUpToDate = false;
+
+    public FileRepository(NoteLinkRepository noteLinkRepo) {
+        this.noteLinkRepo = noteLinkRepo;
+    }
+
+    @PostConstruct
+    public void init() {
+        noteLinkRepo.backfillIfEmpty(getNoteNames());
+    }
 
     public void invalidateCache() {
         cacheUpToDate = false;
@@ -136,6 +149,8 @@ public class FileRepository {
         String initialContent = "---\nsr-due: " + srDue + "\nsr-interval: 3\nsr-ease: 200\n---\n\n";
         Files.writeString(noteFile.toPath(), initialContent);
 
+        noteLinkRepo.updateLinks(noteFile.getAbsolutePath(),
+            NoteLinkRepository.extractTargets(initialContent));
         invalidateCache();
         return noteFile.getAbsolutePath();
     }
@@ -144,6 +159,7 @@ public class FileRepository {
         File file = new File(path);
         if (!file.exists()) throw new IOException("Note not found: " + path);
         Files.writeString(Paths.get(path), content);
+        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
         invalidateCache();
     }
 
@@ -178,7 +194,9 @@ public class FileRepository {
             }
         }
 
-        Files.writeString(Paths.get(path), String.join(sep, lines));
+        String newContent = String.join(sep, lines);
+        Files.writeString(Paths.get(path), newContent);
+        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(newContent));
         invalidateCache();
     }
 
@@ -186,6 +204,7 @@ public class FileRepository {
         File oldFile = new File(oldPath);
         if (!oldFile.exists()) throw new IOException("Note not found: " + oldPath);
 
+        String oldName = oldFile.getName().replace(".md", "");
         String filename = newName.endsWith(".md") ? newName : newName + ".md";
         File newFile = new File(oldFile.getParent(), filename);
 
@@ -193,12 +212,36 @@ public class FileRepository {
             throw new IOException("A note named '" + newName + "' already exists in this folder");
         }
 
+        // Look up backlinks before the rename so DB is still consistent
+        List<String> sources = noteLinkRepo.findSourcesByTarget(oldName);
+
         if (!oldFile.renameTo(newFile)) {
             throw new IOException("Rename failed");
         }
 
+        String newPath = newFile.getAbsolutePath();
+
+        // Rewrite [[oldName]] → [[newName]] in every file that links to it
+        for (String sourcePath : sources) {
+            File sourceFile = new File(sourcePath);
+            if (!sourceFile.exists()) continue;
+            try {
+                String content = Files.readString(sourceFile.toPath());
+                String updated = NoteLinkRepository.rewriteLinks(content, oldName, newName);
+                if (!updated.equals(content)) {
+                    Files.writeString(sourceFile.toPath(), updated);
+                }
+            } catch (IOException e) {
+                System.err.println("Failed to rewrite links in " + sourcePath + ": " + e.getMessage());
+            }
+        }
+
+        // Keep adjacency table consistent
+        noteLinkRepo.renameTarget(oldName, newName);
+        noteLinkRepo.renameSource(oldPath, newPath);
+
         invalidateCache();
-        return newFile.getAbsolutePath();
+        return newPath;
     }
 
     public void softDeleteNote(String path) throws IOException {
@@ -216,6 +259,7 @@ public class FileRepository {
 
         if (!file.renameTo(dest)) throw new IOException("Failed to move note to trash");
 
+        noteLinkRepo.deleteSource(path);
         invalidateCache();
     }
 
