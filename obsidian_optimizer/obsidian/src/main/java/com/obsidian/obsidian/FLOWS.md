@@ -1,6 +1,6 @@
 # Backend Flows
 
-Files: ObsidianApplication.java, MyController.java, FileRepository.java, ImageRepository.java, WebConfig.java, SecurityConfig.java, ServletInitializer.java
+Files: ObsidianApplication.java, MyController.java, FileRepository.java, NoteLinkRepository.java, ImageRepository.java, WebConfig.java, SecurityConfig.java, ServletInitializer.java
 
 ---
 
@@ -97,17 +97,25 @@ To change diff algorithm: `frontend/src/utils/diff.js lcsBacktrack()`
 ## PATCH /notes/rename — Rename Note
 
 `MyController.renameNote(RenameNoteRequest{oldPath, newName})`  
-→ `FileRepository.renameNote(oldPath, newName)` → validate old exists, new doesn't → `File.renameTo()` → `invalidateCache()` → return `{path: newAbsolutePath}`
+→ `FileRepository.renameNote(oldPath, newName)`  
+1. Derive `oldName` (basename without `.md`)  
+2. Query `NoteLinkRepository.findSourcesByTarget(oldName)` → list of files that contain `[[oldName]]`  
+3. `File.renameTo()` → new path on disk  
+4. For each source file: read → `NoteLinkRepository.rewriteLinks(content, oldName, newName)` → write back (skips if content unchanged)  
+5. `NoteLinkRepository.renameTarget(oldName, newName)` — bulk-update `note_links` target column  
+6. `NoteLinkRepository.renameSource(oldPath, newPath)` — update the renamed note's own source entry  
+7. `invalidateCache()` → return `{path: newAbsolutePath}`
 
-**NOTE:** Does not update `[[link]]` references in other notes. This is a known limitation — see Residual below.
+Handles: `[[NoteA]]`, `[[NoteA|display]]`, `[[Folder/NoteA]]`, `[[Folder/NoteA|display]]`
 
 ---
 
 ## DELETE /notes — Soft Delete
 
 `MyController.deleteNote(DeleteNoteRequest{path})`  
-→ `FileRepository.softDeleteNote(path)` → validate exists → ensure `ROOT_FILE/_trash/` exists → move file there (timestamp suffix if name conflict) → `invalidateCache()`  
+→ `FileRepository.softDeleteNote(path)` → validate exists → ensure `ROOT_FILE/_trash/` exists → move file there (timestamp suffix if name conflict) → `NoteLinkRepository.deleteSource(path)` (removes outgoing links from adjacency table) → `invalidateCache()`  
 `_trash/` is skipped by `getNoteNames()` — files there are invisible to the app  
+Incoming links from other notes are left in `note_links` as dead entries — they become dead `[[links]]` in those files, consistent with Obsidian's own behaviour  
 Recovery: manual file move [NOT IMPLEMENTED in UI]
 
 ---
@@ -122,11 +130,30 @@ No HTTP endpoint to trigger manually — restart or any write op clears both cac
 
 ---
 
+## NoteLinkRepository — Wiki-link Adjacency Table
+
+`note_links(source_path TEXT, target_name TEXT, PRIMARY KEY(source_path, target_name))`  
+Index on `target_name` for O(k) rename lookups where k = number of backlinks.
+
+**Lifecycle:**
+- `@PostConstruct initSchema()` — `CREATE TABLE IF NOT EXISTS` + index on startup
+- `FileRepository.@PostConstruct init()` — calls `backfillIfEmpty(getNoteNames())`: reads all notes and seeds the table on first boot (skipped if table already has rows)
+- `updateLinks(path, targets)` — called after every write (create / update / patch)
+- `deleteSource(path)` — called on soft-delete
+
+**Extraction:** `extractTargets(markdown)` — regex `\[\[([^|\]]+)(?:\|[^\]]+)?\]\]`, strips path prefix, returns Set of basenames  
+**Rewrite:** `rewriteLinks(content, oldName, newName)` — regex replaces `[[oldName]]` / `[[.../oldName]]` / `[[oldName|text]]` in one pass
+
+To change link storage: `NoteLinkRepository.java`  
+To force re-index: truncate `note_links` table → restart app (backfill triggers)
+
+---
+
 ## Infrastructure
 
-Both services run in Docker via `docker-compose.yml` at the repo root.  
+Three services run in Docker via `docker-compose.yml` at the repo root.  
 Start everything: `.\start.ps1` (or `docker compose up --build`)  
-Stop everything: `Ctrl+C` in the same terminal → both containers stop cleanly
+Stop everything: `Ctrl+C` in the same terminal → all containers stop cleanly
 
 Config for friends: copy `.env.example` → `.env`, set `HOST_VAULT_PATH` to vault directory.  
 Vault is mounted read-write at `/vault` inside the backend container.
@@ -135,6 +162,8 @@ Vault is mounted read-write at `/vault` inside the backend container.
 - **WAR + embedded Tomcat**: `java -jar app.war` works because Spring Boot rewrites the WAR to be self-executable even though `spring-boot-starter-tomcat` is `provided` scope.
 - **Volume mount on Windows (Docker Desktop)**: reads/writes work correctly; file watching (inotify/WatchService) does NOT propagate from host → container. This is why the backend uses a flag-based cache rather than a WatchService — WatchService would silently miss Obsidian edits when running in Docker.
 - **Docker network**: frontend and backend are on the default compose network; nginx proxies `/api/*` → `backend:8084` by service name. No `host.docker.internal` needed.
+- **pgvector container**: `pgvector/pgvector:pg16` — backend waits on `service_healthy` (pg_isready). Postgres data persisted in named volume `postgres_data`. Local dev needs postgres on `localhost:5432` or run via `docker compose up`.
+- **note_links backfill**: runs once on first boot when the table is empty. To re-index from scratch: `TRUNCATE note_links;` in psql → restart backend.
 
 ---
 
@@ -152,10 +181,13 @@ Vault is mounted read-write at `/vault` inside the backend container.
 | Diff algorithm | `frontend/src/utils/diff.js lcsBacktrack()` |
 | Patch hunk DTO | `FileRepository.PatchHunk` |
 | Protected vs public endpoints | `SecurityConfig.filterChain()` |
+| Wiki-link regex (extract) | `NoteLinkRepository.WIKI_LINK` pattern |
+| Wiki-link regex (rewrite) | `NoteLinkRepository.rewriteLinks()` |
+| Postgres connection | `application.properties` (overridden by `SPRING_DATASOURCE_*` env vars) |
+| Postgres credentials | `docker-compose.yml` + `.env` `POSTGRES_PASSWORD` |
 
 ---
 
 ## Residual (next session)
 
-- **Cross-file rename** — `FileRepository.updateLinksOnRename()` should read all .md files, replace `[[oldName]]` → `[[newName]]`, write back. Currently not implemented.
 - **HTTP cache invalidation endpoint** — optional `/admin/invalidate` for cache clearing without restart

@@ -140,7 +140,7 @@ Backend applies hunks back-to-front, preserves original line separator
 To change diff algorithm: `utils/diff.js lcsBacktrack()`  
 To revert to full-replace: call `apiUpdate(path, content)` instead of `apiPatch` in `useStore.js saveNote()`
 
-**RESIDUAL:** Cross-file `[[link]]` reference updating on rename [NOT IMPLEMENTED]
+Cross-file `[[link]]` reference updating on rename is handled server-side via `NoteLinkRepository`.
 
 ---
 
@@ -274,7 +274,7 @@ Ports: `8083` → React (Nginx/Docker), `8082` → Java backend, `5173` → Dev 
 
 ## Residual (next session)
 
-- **Cross-file rename** — update `[[oldName]]` → `[[newName]]` in all vault notes
+- ~~Cross-file rename~~ — implemented server-side via `NoteLinkRepository`
 - **Trash UI** — list and restore notes from `_trash/`
 - **Review page** — build out `ReviewPage.jsx` (currently a stub)
 - **Settings page** — build out `SettingsPage.jsx` (currently a stub)
