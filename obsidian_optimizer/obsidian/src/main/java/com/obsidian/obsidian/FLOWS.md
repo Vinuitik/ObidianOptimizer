@@ -164,6 +164,9 @@ Vault is mounted read-write at `/vault` inside the backend container.
 - **Docker network**: frontend and backend are on the default compose network; nginx proxies `/api/*` → `backend:8084` by service name. No `host.docker.internal` needed.
 - **pgvector container**: `pgvector/pgvector:pg16` — backend waits on `service_healthy` (pg_isready). Postgres data persisted in named volume `postgres_data`. Local dev needs postgres on `localhost:5432` or run via `docker compose up`.
 - **note_links backfill**: runs once on first boot when the table is empty. To re-index from scratch: `TRUNCATE note_links;` in psql → restart backend.
+- **note_links partial invalidation**: `updateLinks(path, targets)` is per-note (DELETE WHERE source_path + INSERT) — only the written note's rows are replaced. Rename uses `renameTarget` / `renameSource` SQL UPDATEs — no full-table rebuild. Full rebuild only happens on first-boot backfill or manual TRUNCATE.
+- **note_links external-edit staleness**: edits made directly in Obsidian (outside the app) are NOT reflected in `note_links`. The table only updates when writes go through the app's API. Consequence: a backlink added externally will not be found by `findSourcesByTarget()` during rename. Workaround: TRUNCATE + restart to force a full re-index. WatchService cannot fix this — inotify does not propagate through Docker volume mounts on Windows.
+- **file-name cache (in-memory ArrayList)**: currently fully invalidated on every write. Partial invalidation (splice the one renamed path) is possible but not implemented — cache is disabled anyway. To re-enable cache: uncomment guards in `FileRepository.getNoteNames()` and `getReviewNotes()`. To make rename update cache without full rebuild: update `cache` ArrayList in-place inside `renameNote()`.
 
 ---
 
@@ -185,6 +188,10 @@ Vault is mounted read-write at `/vault` inside the backend container.
 | Wiki-link regex (rewrite) | `NoteLinkRepository.rewriteLinks()` |
 | Postgres connection | `application.properties` (overridden by `SPRING_DATASOURCE_*` env vars) |
 | Postgres credentials | `docker-compose.yml` + `.env` `POSTGRES_PASSWORD` |
+| Re-enable file-name cache | Uncomment guards in `FileRepository.getNoteNames()` + `getReviewNotes()` |
+| Make rename partially update file-name cache | Update `cache` ArrayList in-place in `FileRepository.renameNote()` (not yet done) |
+| Force note_links full re-index | `TRUNCATE note_links;` in psql → restart backend |
+| Partial note_links invalidation trigger | Implicit — every app-side write calls `updateLinks(path, targets)` automatically |
 
 ---
 
