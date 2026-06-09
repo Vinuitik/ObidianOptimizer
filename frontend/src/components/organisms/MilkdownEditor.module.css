@@ -188,6 +188,37 @@
 .milkdownWrapper :global(.pm-active-mark.pm-code)::before { content: attr(data-md-open); }
 .milkdownWrapper :global(.pm-active-mark.pm-code)::after  { content: attr(data-md-close); }
 
+/* ── GFM Tables ──────────────────────────────────────────────────────────────── */
+
+.milkdownWrapper :global(.ProseMirror table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--sp-4) 0;
+  font-size: var(--text-sm);
+}
+
+.milkdownWrapper :global(.ProseMirror th),
+.milkdownWrapper :global(.ProseMirror td) {
+  border: 1px solid var(--color-border-hover);
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+}
+
+.milkdownWrapper :global(.ProseMirror th) {
+  background: var(--color-card);
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.milkdownWrapper :global(.ProseMirror td) {
+  color: var(--color-text);
+}
+
+.milkdownWrapper :global(.ProseMirror tr:nth-child(even) td) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
 /* remarkLineBreak converts \n → span[data-type="hardbreak"]. Force a visual line break. */
 .milkdownWrapper :global(.ProseMirror span[data-type="hardbreak"]) {
   display: inline-block;
