@@ -51,12 +51,13 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
       })
       .use(gfm)
       .use(history)
-      .use(listener)
-      // .use(mathPlugin)         // DISABLED: diagnosing schema crash
-      .use(obsidianImagePlugin)   // must run before wikiLinkPlugin (images contain [[]])
-      .use(wikiLinkPlugin)
-      .use(hashtagPlugin)         // after wikiLink so [[#heading]] is already consumed
-      .use(livePreviewPlugin);
+      .use(listener);
+      // STAGE 0: all custom plugins disabled — diagnosing schema crash
+      // .use(mathPlugin)
+      // .use(obsidianImagePlugin)
+      // .use(wikiLinkPlugin)
+      // .use(hashtagPlugin)
+      // .use(livePreviewPlugin)
   });
 
   useEffect(() => {
