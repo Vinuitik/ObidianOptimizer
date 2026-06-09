@@ -15,6 +15,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Queue;
+import java.util.Set;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +23,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class FileRepository {
+
+    private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources");
 
     @Value("${VAULT_PATH:C:/Users/ACER/Desktop/NewLife}")
     private String ROOT_FILE;
@@ -71,7 +74,7 @@ public class FileRepository {
                     for (File file : files) {
                         if (file.isDirectory()) {
                             String n = file.getName();
-                            if (!n.equals(".git") && !n.equals("resources") && !n.equals("_trash")) {
+                            if (!EXCLUDED_DIRS.contains(n)) {
                                 queue.add(file);
                             }
                         } else if (file.isFile()) {
@@ -278,7 +281,7 @@ public class FileRepository {
             for (File child : children) {
                 String n = child.getName();
                 if (child.isDirectory()) {
-                    if (!n.equals(".git") && !n.equals("resources") && !n.equals("_trash")) {
+                    if (!EXCLUDED_DIRS.contains(n)) {
                         folderPaths.add(child.getAbsolutePath());
                     }
                 } else if (child.isFile() && n.endsWith(".md")) {
