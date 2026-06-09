@@ -1,6 +1,6 @@
 # Frontend Design Reference
 
-Files: styles/tokens.css, styles/reset.css, styles/globals.css, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, molecules/SearchBar.jsx, store/useStore.js, utils/markdown.js
+Files: styles/tokens.css, styles/reset.css, styles/globals.css, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Button.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, store/useStore.js, utils/frontmatter.js, utils/markdownCleanup.js
 
 ---
 
@@ -29,6 +29,10 @@ To change any color/spacing/font: `tokens.css` only — never edit component CSS
 
 `--radius-xs: 8px` / `--radius-sm2: 9px` / `--radius-md2: 11px` / `--radius-lg2: 12px`
 
+### Spacing
+
+`--sp-1: 4px` through `--sp-10: 96px` (4 → 8 → 12 → 16 → 24 → 32 → 48 → 64 → 80 → 96)
+
 ---
 
 ## Atoms
@@ -45,42 +49,77 @@ To change any color/spacing/font: `tokens.css` only — never edit component CSS
 
 `molecules/SearchBar.jsx` — controlled search input with search Icon, ⌘K / Ctrl+K focus shortcut (global keydown listener), clear button when query non-empty. Props: `value`, `onChange`
 
+`molecules/TabBar.jsx` — browser-style tab strip. Each tab shows note title, dirty indicator (•), and close button. Reads `tabs`, `activeTabIndex` from store. Calls `switchTab(i)` / `closeTab(i)`.
+
 ---
 
 ## State Shape (Zustand — useStore.js)
 
 | Field | Purpose |
 |---|---|
-| `tree` | nested `{type, children, fullPath}` — vault file tree |
+| `tree` | nested `{type, children, fullPath, loaded}` — vault file tree (lazily populated) |
 | `vaultRoot` | absolute path to vault root |
-| `reviewNotes` | `[{shortName, fullPath}]` |
-| `currentNoteHtml` | rendered HTML of open note (display only) |
-| `currentNoteRaw` | raw markdown of open note (source of truth) |
+| `noteIndex` | `Map<string, string>` — basename lowercased → full path (for wiki-link resolution) |
+| `currentNoteRaw` | raw markdown of open note as loaded from disk (source of truth for diffing) |
 | `currentNotePath` | absolute path of open note |
+| `pendingRaw` | working copy of raw markdown — updated on every Milkdown keystroke |
+| `pendingFrontmatter` | frontmatter string extracted from `currentNoteRaw` (read-only; not passed to Milkdown) |
+| `pendingTitle` | note filename without `.md` — editable in header when `isMutable` |
+| `isMutable` | `true` when editor is in edit mode — controls Milkdown `editable` prop |
+| `editorResetKey` | integer, incremented by `cancelEdit()` — forces Milkdown remount without disk fetch |
+| `tabs` | `[{path, pendingTitle, isMutable, hunks}]` — open tab list; `hunks` stores diff from `currentNoteRaw` → `pendingRaw` for inactive tabs |
+| `activeTabIndex` | index into `tabs[]`, `-1` when no note open |
+| `reviewNotes` | `[{shortName, fullPath}]` — current review queue page |
+| `reviewOffset` | pagination offset for review queue |
+| `reviewHasMore` | whether more review notes exist past current page |
 | `isAuthenticated` | `true` after successful login |
 | `showLogin` | controls LoginModal visibility |
-| `centerMode` | `'view' \| 'new' \| 'edit'` |
+| `centerMode` | `'view' \| 'new'` — `'new'` shows NewNoteForm; edit mode is `isMutable` not a centerMode |
 | `newNoteFolder` | folder path for new note creation |
+| `newNoteName` | controlled input value for new note name |
 | `leftCollapsed`, `rightCollapsed` | panel collapse state |
 
 State is in-memory only — lost on page refresh. `checkAuth()` re-runs on every load via `MainPage` useEffect.
 
 ---
 
-## Markdown Rendering (utils/markdown.js)
+## Markdown Rendering
 
-`renderMarkdown(content)` pipeline:
-1. `parseFrontmatter()` — extracts `---` YAML block → renders as HTML `<table>` (key = `<th scope="row">`, value = `<td>`); prepended before body
-2. `![[image.png]]` → `<img src="/api/images/image.png" class="embedded-image">`
-3. `[[link|alias]]` or `[[link]]` → `<a class="wiki-link" data-wiki-link="link" href="#">label</a>`
-4. `#hashtag` → `<span class="md-tag">#tag</span>` (indigo pill; skips `# Headings`)
-5. `markdown-it.render()` with `linkify: true`, `typographer: true`, `breaks: true`, tables enabled
+The app uses **Milkdown** (ProseMirror-based WYSIWYG) with `@milkdown/preset-gfm` (a superset of commonmark — includes tables, task lists, strikethrough). `utils/markdown.js` is a legacy file and is no longer used in the main editor flow.
 
-`breaks: true` — single newlines become `<br>` (Obsidian-style soft wrapping).  
-`.wiki-link` and `.md-tag` styled in `styles/globals.css`.  
+### Milkdown rendering pipeline
+
+Milkdown receives the note body (frontmatter stripped). Obsidian-specific and extended syntax is handled by custom plugins:
+
+| Syntax | Plugin | Output |
+|---|---|---|
+| `![[image.png]]` | `obsidianImagePlugin` | `<img class="embedded-image" src="/api/images/image.png">` |
+| `[[link]]` / `[[link\|alias]]` | `wikiLinkPlugin` | `<span class="wiki-link" data-wiki-link="link">` |
+| `#tag` | `hashtagPlugin` | `<span class="md-tag">#tag</span>` |
+| `$...$` | `mathPlugin` | KaTeX inline render (`<span class="math-inline">`) |
+| `$$...$$` | `mathPlugin` | KaTeX block render (`<div class="math-block">`) |
+| `\[...\]` | `mathPlugin` | KaTeX block render, serializes back as `\[` |
+| GFM tables | `gfm` preset | `<table>` with styled `<th>`/`<td>` |
+| Standard markdown | `gfm` preset | standard ProseMirror nodes |
+
+Frontmatter is extracted via `splitFrontmatter()` and rendered as a read-only `<table>` by `FrontmatterTable` above the editor surface.  
 Images served via `/api/images/` — path must match `ImageRepository.imageDir`.
 
-**Residual:** No Obsidian-style embedded note preview (`![[Note]]` transclusion).
+`.wiki-link`, `.md-tag`, `.math-inline`, `.math-block` styled in `MilkdownEditor.module.css` (scoped to `.ProseMirror`).
+
+### Live preview
+
+`livePreviewPlugin` (`utils/livePreviewPlugin.js`) shows raw syntax markers when the cursor is inside a formatted mark:
+
+| Mark | Shown when cursor inside |
+|---|---|
+| `em` (`*`) | `*text*` |
+| `strong` (`**`) | `**text**` |
+| `code` (`` ` ``) | `` `code` `` |
+
+Syntax characters are CSS `::before`/`::after` pseudo-elements on the inline decoration span — no DOM nodes inserted into the editable flow, so space and other input works normally at mark boundaries.  
+To change syntax chars: `utils/livePreviewPlugin.js` `MARK_SYNTAX`.  
+To change visual style: `.pm-active-mark::before/::after` in `MilkdownEditor.module.css`.
 
 ---
 
@@ -97,9 +136,11 @@ Images served via `/api/images/` — path must match `ImageRepository.imageDir`.
 ## Technology Notes
 
 - **Framer Motion**: page-level route transitions (`AnimatePresence` in `App.jsx`). Purely visual — no state tied to animation.
-- **Zustand**: in-memory only. No persistence — state lost on page refresh.
+- **Zustand**: in-memory only. No persistence — state lost on page refresh. `editorResetKey` is also in-memory (resets to 0 on reload).
 - **Google Fonts**: CDN link in `index.html`. Requires internet at load time; falls back to system sans-serif offline. To bundle: add to `public/fonts/` and use `@font-face` in `tokens.css`.
 - **CSS Modules**: class names scoped by Vite. Never use global class names inside `.module.css` files.
+- **KaTeX**: bundled client-side via `katex` npm package. Math is rendered synchronously in `toDOM`. KaTeX CSS loaded in `main.jsx`. Math nodes are `contenteditable="false"` atoms — no inline editing. To change math rendering: `utils/mathPlugin.js`.
+- **@milkdown/preset-gfm**: replaces `@milkdown/preset-commonmark` — it is a strict superset. Adds tables, task lists, strikethrough. All custom plugins are compatible since they hook into the same base node types.
 
 ---
 
@@ -111,9 +152,16 @@ Images served via `/api/images/` — path must match `ImageRepository.imageDir`.
 | Accent color | `styles/tokens.css` — all four `--color-accent*` vars |
 | Logo mark size/glow | `atoms/ObsidianMark.jsx` |
 | Icon glyphs | `atoms/Icon.jsx` `paths` object |
-| Markdown rendering pipeline | `utils/markdown.js` |
-| Frontmatter table style | `styles/globals.css` `.markdown-body th/td` |
-| Wiki-link / hashtag style | `styles/globals.css` `.wiki-link`, `.md-tag` |
+| Markdown rendering pipeline | `utils/wikiLinkPlugin.js`, `utils/obsidianImagePlugin.js`, `utils/markdownCleanup.js` |
+| Math rendering | `utils/mathPlugin.js` |
+| Math block/inline styles | `organisms/MilkdownEditor.module.css` `.math-block` / `.math-inline` |
+| Frontmatter split/join | `utils/frontmatter.js` |
+| Frontmatter table style | `molecules/FrontmatterTable.module.css` |
+| Wiki-link / image style | `organisms/MilkdownEditor.module.css` (scoped to `.ProseMirror`) |
+| Milkdown height chain / editor CSS | `organisms/MilkdownEditor.module.css` |
+| Live preview syntax chars | `utils/livePreviewPlugin.js` `MARK_SYNTAX` |
+| Live preview CSS style | `organisms/MilkdownEditor.module.css` `.pm-active-mark::before/::after` |
 | Google Fonts | `index.html` font link + `tokens.css` `--font-*` vars |
 | Zustand store shape | `store/useStore.js` |
 | Atom props/behavior | individual file in `atoms/` |
+| Tab bar UI | `molecules/TabBar.jsx` + `TabBar.module.css` |
