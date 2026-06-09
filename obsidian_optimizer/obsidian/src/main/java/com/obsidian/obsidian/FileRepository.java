@@ -149,7 +149,7 @@ public class FileRepository {
         }
 
         String srDue = LocalDate.now().plusDays(3).toString();
-        String initialContent = "---\nsr-due: " + srDue + "\nsr-interval: 3\nsr-ease: 200\n---\n\n";
+        String initialContent = "---\nsr-due: " + srDue + "\nsr-interval: 3\nsr-ease: 200\n---\n\n#review\n";
         Files.writeString(noteFile.toPath(), initialContent);
 
         noteLinkRepo.updateLinks(noteFile.getAbsolutePath(),
