@@ -188,6 +188,31 @@
 .milkdownWrapper :global(.pm-active-mark.pm-code)::before { content: attr(data-md-open); }
 .milkdownWrapper :global(.pm-active-mark.pm-code)::after  { content: attr(data-md-close); }
 
+/* ── Math (KaTeX) ────────────────────────────────────────────────────────────── */
+
+.milkdownWrapper :global(.math-block) {
+  display: block;
+  text-align: center;
+  margin: var(--sp-4) 0;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  cursor: default;
+}
+
+.milkdownWrapper :global(.math-inline) {
+  display: inline;
+  cursor: default;
+}
+
+/* KaTeX overrides for dark theme */
+.milkdownWrapper :global(.katex) {
+  color: var(--color-text);
+  font-size: 1.05em;
+}
+
 /* ── GFM Tables ──────────────────────────────────────────────────────────────── */
 
 .milkdownWrapper :global(.ProseMirror table) {
