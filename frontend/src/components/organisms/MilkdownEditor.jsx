@@ -22,14 +22,22 @@ import styles from './MilkdownEditor.module.css';
 function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
   const [loading, getInstance] = useInstance();
   const skipFirst = useRef(true);
+  const renderCount = useRef(0);
+  renderCount.current += 1;
 
-  console.debug('[MilkdownEditor] mounting — body length:', body.length,
-    '| first 80 chars:', JSON.stringify(body.slice(0, 80)));
+  console.debug(`[MilkdownEditor] render #${renderCount.current} — body length: ${body.length} | first 80: ${JSON.stringify(body.slice(0, 80))}`);
+
+  useEffect(() => {
+    console.debug(`[MilkdownEditor] MOUNTED (render #${renderCount.current}) — body length: ${body.length}`);
+    return () => console.debug('[MilkdownEditor] UNMOUNTED');
+  }, []);
 
   useEditor((root) => {
-    console.debug('[MilkdownEditor] useEditor building editor');
+    console.debug('[MilkdownEditor] useEditor factory called — body length:', body.length,
+      '| first 80:', JSON.stringify(body.slice(0, 80)));
     return Editor.make()
       .config((ctx) => {
+        console.debug('[MilkdownEditor] config callback — setting defaultValueCtx, body length:', body.length);
         ctx.set(rootCtx, root);
         ctx.set(defaultValueCtx, body);
         ctx.update(editorViewOptionsCtx, prev => ({
@@ -53,11 +61,17 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
 
   useEffect(() => {
     if (loading) {
-      console.debug('[MilkdownEditor] editor still loading…');
+      console.debug('[MilkdownEditor] loading=true (editor not ready yet)');
       return;
     }
-    console.debug('[MilkdownEditor] editor ready, isMutable=', isMutable);
-    getInstance()?.action((ctx) => {
+    const instance = getInstance();
+    const docContent = instance?.action(ctx => {
+      try { return ctx.get(editorViewCtx)?.state.doc.textContent.slice(0, 120); }
+      catch { return '<error reading doc>'; }
+    });
+    console.debug('[MilkdownEditor] editor READY — isMutable:', isMutable,
+      '| doc.textContent (first 120):', JSON.stringify(docContent));
+    instance?.action((ctx) => {
       ctx.get(editorViewCtx)?.setProps({ editable: () => isMutable });
     });
   }, [isMutable, loading]);
