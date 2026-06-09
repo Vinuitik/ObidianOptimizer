@@ -9,6 +9,7 @@ import useStore from '../../store/useStore';
 import { splitFrontmatter } from '../../utils/frontmatter';
 import { wikiLinkPlugin } from '../../utils/wikiLinkPlugin';
 import { obsidianImagePlugin } from '../../utils/obsidianImagePlugin';
+import { hashtagPlugin } from '../../utils/hashtagPlugin';
 import { cleanMilkdownOutput } from '../../utils/markdownCleanup';
 import FrontmatterTable from '../molecules/FrontmatterTable';
 import styles from './MilkdownEditor.module.css';
@@ -34,6 +35,7 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
       .use(listener)
       .use(obsidianImagePlugin)   // must run before wikiLinkPlugin (images contain [[]])
       .use(wikiLinkPlugin)
+      .use(hashtagPlugin)         // after wikiLink so [[#heading]] is already consumed
   );
 
   // Toggle editable on the live ProseMirror view when isMutable changes

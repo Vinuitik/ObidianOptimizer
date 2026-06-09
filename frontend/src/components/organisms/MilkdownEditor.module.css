@@ -120,6 +120,15 @@
   color: var(--color-muted);
 }
 
+.milkdownWrapper :global(.ProseMirror .md-tag) {
+  color: var(--color-accent-soft);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--color-accent-dim);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
+}
+
 .milkdownWrapper :global(.ProseMirror a),
 .milkdownWrapper :global(.ProseMirror .wiki-link) {
   color: var(--color-accent);
