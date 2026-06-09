@@ -12,6 +12,7 @@ import { obsidianImagePlugin } from '../../utils/obsidianImagePlugin';
 import { hashtagPlugin } from '../../utils/hashtagPlugin';
 import { livePreviewPlugin } from '../../utils/livePreviewPlugin';
 import { cleanMilkdownOutput } from '../../utils/markdownCleanup';
+import { mathPlugin } from '../../utils/mathPlugin';
 import FrontmatterTable from '../molecules/FrontmatterTable';
 import styles from './MilkdownEditor.module.css';
 
@@ -41,6 +42,7 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
       .use(gfm)
       .use(history)
       .use(listener)
+      .use(mathPlugin)            // before wikiLinkPlugin so \[...\] isn't mistaken for [[
       .use(obsidianImagePlugin)   // must run before wikiLinkPlugin (images contain [[]])
       .use(wikiLinkPlugin)
       .use(hashtagPlugin)         // after wikiLink so [[#heading]] is already consumed
