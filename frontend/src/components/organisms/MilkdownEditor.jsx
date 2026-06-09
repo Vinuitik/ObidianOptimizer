@@ -65,6 +65,7 @@ export default function MilkdownEditor() {
   const pendingFrontmatter = useStore(s => s.pendingFrontmatter);
   const pendingRaw         = useStore(s => s.pendingRaw);
   const isMutable          = useStore(s => s.isMutable);
+  const editorResetKey     = useStore(s => s.editorResetKey);
   const updatePending      = useStore(s => s.updatePending);
   const noteIndex          = useStore(s => s.noteIndex);
   const openTab            = useStore(s => s.openTab);
@@ -98,7 +99,7 @@ export default function MilkdownEditor() {
       <div className={styles.milkdownWrapper}>
         <MilkdownProvider>
           <MilkdownEditorInner
-            key={currentNotePath}
+            key={`${currentNotePath}-${editorResetKey}`}
             body={body}
             isMutable={isMutable}
             onBodyChange={updatePending}
