@@ -4,4 +4,9 @@ if (-not (Test-Path $envFile)) {
     exit 1
 }
 
-docker compose -f "$PSScriptRoot\docker-compose.yml" up --build
+try {
+    docker compose -f "$PSScriptRoot\docker-compose.yml" up --build
+} finally {
+    Write-Host "Shutting down containers..."
+    docker compose -f "$PSScriptRoot\docker-compose.yml" down
+}
