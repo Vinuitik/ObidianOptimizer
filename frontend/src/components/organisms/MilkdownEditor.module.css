@@ -152,6 +152,34 @@
   margin: var(--sp-5) 0;
 }
 
+/* ── Live preview: source syntax shown when cursor is inside a mark ─────────── */
+
+/* Injected syntax character widget (the *, **, ` delimiters) */
+.milkdownWrapper :global(.pm-src-char) {
+  color: var(--color-muted);
+  font-style: normal;
+  font-weight: normal;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  opacity: 0.7;
+  user-select: none;
+}
+
+/* Un-apply mark styling so the raw text + syntax chars look like source */
+.milkdownWrapper :global(.pm-active-mark.pm-em) {
+  font-style: normal;
+}
+
+.milkdownWrapper :global(.pm-active-mark.pm-strong) {
+  font-weight: normal;
+}
+
+.milkdownWrapper :global(.pm-active-mark.pm-code) {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+
 /* remarkLineBreak converts \n → span[data-type="hardbreak"]. Force a visual line break. */
 .milkdownWrapper :global(.ProseMirror span[data-type="hardbreak"]) {
   display: inline-block;
