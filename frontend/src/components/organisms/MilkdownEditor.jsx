@@ -107,9 +107,8 @@ export default function MilkdownEditor() {
       <FrontmatterTable frontmatter={pendingFrontmatter} />
       <div className={styles.milkdownWrapper}>
         <EditorErrorBoundary>
-          <MilkdownProvider>
+          <MilkdownProvider key={`${currentNotePath}-${editorResetKey}`}>
             <MilkdownEditorInner
-              key={`${currentNotePath}-${editorResetKey}`}
               body={body}
               isMutable={isMutable}
               onBodyChange={updatePending}
