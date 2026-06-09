@@ -9,6 +9,7 @@ import useStore from '../../store/useStore';
 import { splitFrontmatter } from '../../utils/frontmatter';
 import { wikiLinkPlugin } from '../../utils/wikiLinkPlugin';
 import { obsidianImagePlugin } from '../../utils/obsidianImagePlugin';
+import { cleanMilkdownOutput } from '../../utils/markdownCleanup';
 import FrontmatterTable from '../molecules/FrontmatterTable';
 import styles from './MilkdownEditor.module.css';
 
@@ -26,7 +27,7 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
           ...prev,
           editable: () => isMutable,
         }));
-        ctx.get(listenerCtx).markdownUpdated((_, md) => onBodyChange(md));
+        ctx.get(listenerCtx).markdownUpdated((_, md) => onBodyChange(cleanMilkdownOutput(md)));
       })
       .use(commonmark)
       .use(history)

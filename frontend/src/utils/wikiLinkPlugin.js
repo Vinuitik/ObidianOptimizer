@@ -89,7 +89,9 @@ export const wikiLinkNode$ = $node('wiki_link', () => ({
     runner: (state, node) => {
       const { target, display } = node.attrs;
       const raw = display ? `[[${target}|${display}]]` : `[[${target}]]`;
-      state.addNode('text', undefined, raw);
+      // Use 'html' node type so mdast-util-to-markdown emits verbatim without escaping '['.
+      // On re-parse, remark-parse sees [[...]] as plain text → wikiLinkRemarkPlugin handles it.
+      state.addNode('html', undefined, raw);
     },
   },
 }));
