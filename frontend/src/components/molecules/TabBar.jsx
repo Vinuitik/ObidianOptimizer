@@ -27,8 +27,10 @@ export default function TabBar() {
             <span
               className={styles.close}
               role="button"
+              tabIndex={0}
               aria-label="Close tab"
               onClick={e => { e.stopPropagation(); closeTab(i); }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); closeTab(i); } }}
             >
               ×
             </span>

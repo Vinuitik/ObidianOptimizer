@@ -138,17 +138,28 @@
 }
 
 .resizeHandle {
-  width: 4px;
+  width: 10px;
   flex-shrink: 0;
   background: transparent;
   cursor: col-resize;
-  transition: background var(--ease-fast);
   position: relative;
   z-index: 10;
 }
 
-.resizeHandle:hover,
-.resizeHandle:active {
+/* Visual stripe is 4px, centered inside the 10px hit target */
+.resizeHandle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 4px;
+  background: transparent;
+  transition: background var(--ease-fast);
+}
+
+.resizeHandle:hover::after,
+.resizeHandle:active::after {
   background: var(--color-accent-border);
 }
 
