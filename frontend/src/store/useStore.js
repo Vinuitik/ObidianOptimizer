@@ -6,8 +6,8 @@ import {
   createNote as apiCreate, patchNote as apiPatch,
   renameNote as apiRename, deleteNote as apiDelete,
 } from '../api/notes';
-import { renderMarkdown } from '../utils/markdown';
 import { computeHunks } from '../utils/diff';
+import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
 
 // ── Review session (localStorage) ────────────────────────────────────────────
 
@@ -19,7 +19,6 @@ function getReviewSession() {
     const stored = JSON.parse(localStorage.getItem(REVIEW_KEY) || 'null');
     if (stored?.date === today) return { offset: stored.offset ?? 0 };
   } catch {}
-  // New day or corrupt data — reset
   localStorage.setItem(REVIEW_KEY, JSON.stringify({ date: today, offset: 0 }));
   return { offset: 0 };
 }
@@ -36,7 +35,6 @@ function getParentPath(fullPath) {
   return fullPath.split(/[/\\]/).slice(0, -1).join(sep);
 }
 
-// Deep-merge: replace children of the node at folderPath, mark it loaded.
 function mergeChildren(tree, folderPath, newChildren) {
   if (tree.fullPath === folderPath) {
     return { ...tree, children: newChildren, loaded: true };
@@ -50,7 +48,6 @@ function mergeChildren(tree, folderPath, newChildren) {
   return { ...tree, children: updated };
 }
 
-// Build a children map from the /children API response.
 function childrenFromResponse({ folderPaths, filePaths }) {
   const children = {};
   for (const fp of folderPaths) {
@@ -64,7 +61,6 @@ function childrenFromResponse({ folderPaths, filePaths }) {
   return children;
 }
 
-// noteIndex entries from a list of file full-paths.
 function indexEntries(filePaths) {
   return filePaths.map(fp => [
     fp.split(/[/\\]/).pop().replace(/\.md$/i, '').toLowerCase(),
@@ -88,6 +84,10 @@ function buildReviewList(paths) {
   return Array.from(map.entries()).map(([shortName, fullPath]) => ({ shortName, fullPath }));
 }
 
+function noteBasename(fullPath) {
+  return fullPath?.split(/[/\\]/).pop().replace(/\.md$/, '') ?? '';
+}
+
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 const useStore = create((set, get) => ({
@@ -96,16 +96,24 @@ const useStore = create((set, get) => ({
   vaultRoot: '',
   noteIndex: new Map(),
 
-  // Current note
-  currentNoteHtml: '',
+  // Current note — source of truth (what's on disk)
   currentNoteRaw: '',
   currentNotePath: null,
+
+  // Pending (working copy while editing)
+  pendingRaw: '',
+  pendingFrontmatter: '',
+  pendingTitle: '',
+
+  // Whether the editor is in editable mode
+  isMutable: false,
 
   // Auth
   isAuthenticated: false,
   showLogin: false,
 
-  // Center panel mode: 'view' | 'new' | 'edit'
+  // Center panel mode: 'view' | 'new'
+  // 'edit' is now conveyed by isMutable; centerMode only distinguishes new-note form
   centerMode: 'view',
   newNoteFolder: null,
   newNoteName: '',
@@ -150,7 +158,7 @@ const useStore = create((set, get) => ({
     }
   },
 
-  // ── Full noteIndex rebuild (background, for wiki-link resolution) ─────────
+  // ── Full noteIndex rebuild ────────────────────────────────────────────────
 
   fetchNoteNames: async () => {
     try {
@@ -166,14 +174,12 @@ const useStore = create((set, get) => ({
     }
   },
 
-  // ── Review: init with localStorage offset (call on app load) ─────────────
+  // ── Review ────────────────────────────────────────────────────────────────
 
   initReviewSession: async () => {
     const { offset } = getReviewSession();
     await get().fetchReviewNotes(offset);
   },
-
-  // ── Review: fetch a page ──────────────────────────────────────────────────
 
   fetchReviewNotes: async (offset = 0) => {
     try {
@@ -187,14 +193,10 @@ const useStore = create((set, get) => ({
     }
   },
 
-  // ── Review: load next page (only when current batch is empty) ────────────
-
   loadMoreReview: async () => {
     const { reviewOffset } = get();
     await get().fetchReviewNotes(reviewOffset + 40);
   },
-
-  // ── Review: dismiss a note after rating ──────────────────────────────────
 
   dismissFromReview: (fullPath) => {
     set(s => ({ reviewNotes: s.reviewNotes.filter(n => n.fullPath !== fullPath) }));
@@ -204,10 +206,67 @@ const useStore = create((set, get) => ({
 
   openNote: async (fullPath) => {
     const raw = await fetchNoteContent(fullPath);
-    console.log('[READ in  200]', raw.slice(0, 200));
-    const html = renderMarkdown(raw);
-    console.log('[READ out 200]', html.slice(0, 200));
-    set({ currentNoteHtml: html, currentNoteRaw: raw, currentNotePath: fullPath, centerMode: 'view' });
+    const { frontmatter, body } = splitFrontmatter(raw);
+    set({
+      currentNoteRaw: raw,
+      currentNotePath: fullPath,
+      pendingRaw: raw,
+      pendingFrontmatter: frontmatter,
+      pendingTitle: noteBasename(fullPath),
+      isMutable: false,
+      centerMode: 'view',
+    });
+    // Suppress unused body — it's stored in pendingRaw; Milkdown reads it via splitFrontmatter
+    void body;
+  },
+
+  // ── WYSIWYG: live update from Milkdown onChange ───────────────────────────
+
+  // Called by Milkdown's markdownUpdated listener with the serialized body (no frontmatter).
+  updatePending: (body) => {
+    const { pendingFrontmatter } = get();
+    set({ pendingRaw: joinFrontmatter(pendingFrontmatter, body) });
+  },
+
+  setPendingTitle: (title) => set({ pendingTitle: title }),
+
+  // ── WYSIWYG: enter/exit edit mode ────────────────────────────────────────
+
+  toggleMutable: () => set(s => ({ isMutable: !s.isMutable })),
+
+  // ── WYSIWYG: sync pendingRaw → disk ──────────────────────────────────────
+
+  syncNote: async () => {
+    const { currentNotePath, currentNoteRaw, pendingRaw, pendingTitle } = get();
+    if (!currentNotePath) return;
+    try {
+      const currentTitle = noteBasename(currentNotePath);
+      let savePath = currentNotePath;
+
+      if (pendingTitle !== currentTitle) {
+        const { path: newPath } = await apiRename(currentNotePath, pendingTitle);
+        savePath = newPath;
+      }
+
+      const hunks = computeHunks(currentNoteRaw, pendingRaw);
+      if (hunks.length > 0) {
+        await apiPatch(savePath, hunks);
+      }
+
+      set({
+        currentNoteRaw: pendingRaw,
+        currentNotePath: savePath,
+        pendingTitle: noteBasename(savePath),
+        isMutable: false,
+      });
+
+      await get().fetchChildrenOf(getParentPath(savePath));
+      get().fetchNoteNames();
+      get().fetchReviewNotes(get().reviewOffset);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
+      else throw e;
+    }
   },
 
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -255,47 +314,21 @@ const useStore = create((set, get) => ({
     }
   },
 
-  // ── Edit ──────────────────────────────────────────────────────────────────
-
-  startEdit: () => set({ centerMode: 'edit' }),
-
-  cancelEdit: () => set({ centerMode: 'view' }),
-
-  saveNote: async (title, content) => {
-    const { currentNotePath, currentNoteRaw } = get();
-    try {
-      const currentTitle = currentNotePath?.split(/[/\\]/).pop().replace(/\.md$/, '') ?? '';
-      let savePath = currentNotePath;
-
-      if (title !== currentTitle) {
-        const { path: newPath } = await apiRename(currentNotePath, title);
-        savePath = newPath;
-      }
-
-      const hunks = computeHunks(currentNoteRaw, content);
-      if (hunks.length > 0) {
-        await apiPatch(savePath, hunks);
-      }
-
-      const html = renderMarkdown(content);
-      set({ currentNoteHtml: html, currentNoteRaw: content, currentNotePath: savePath, centerMode: 'view' });
-
-      await get().fetchChildrenOf(getParentPath(savePath));
-      get().fetchNoteNames();
-      get().fetchReviewNotes(get().reviewOffset);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
-      else throw e;
-    }
-  },
-
   // ── Delete ────────────────────────────────────────────────────────────────
 
   deleteNote: async (path) => {
     try {
       await apiDelete(path);
       const parentFolder = getParentPath(path);
-      set({ currentNoteHtml: '', currentNoteRaw: '', currentNotePath: null, centerMode: 'view' });
+      set({
+        currentNoteRaw: '',
+        currentNotePath: null,
+        pendingRaw: '',
+        pendingFrontmatter: '',
+        pendingTitle: '',
+        isMutable: false,
+        centerMode: 'view',
+      });
       await get().fetchChildrenOf(parentFolder);
       get().fetchNoteNames();
       get().fetchReviewNotes(get().reviewOffset);
