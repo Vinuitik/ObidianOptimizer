@@ -154,18 +154,7 @@
 
 /* ── Live preview: source syntax shown when cursor is inside a mark ─────────── */
 
-/* Injected syntax character widget (the *, **, ` delimiters) */
-.milkdownWrapper :global(.pm-src-char) {
-  color: var(--color-muted);
-  font-style: normal;
-  font-weight: normal;
-  font-family: var(--font-mono);
-  font-size: 0.85em;
-  opacity: 0.7;
-  user-select: none;
-}
-
-/* Un-apply mark styling so the raw text + syntax chars look like source */
+/* Un-apply mark styling so the raw text looks like source while editing */
 .milkdownWrapper :global(.pm-active-mark.pm-em) {
   font-style: normal;
 }
@@ -179,6 +168,25 @@
   padding: 0;
   border-radius: 0;
 }
+
+/* Syntax delimiters rendered via CSS — no DOM nodes inserted so space input works */
+.milkdownWrapper :global(.pm-active-mark)::before,
+.milkdownWrapper :global(.pm-active-mark)::after {
+  color: var(--color-muted);
+  font-style: normal;
+  font-weight: normal;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  opacity: 0.7;
+  user-select: none;
+}
+
+.milkdownWrapper :global(.pm-active-mark.pm-em)::before  { content: attr(data-md-open); }
+.milkdownWrapper :global(.pm-active-mark.pm-em)::after   { content: attr(data-md-close); }
+.milkdownWrapper :global(.pm-active-mark.pm-strong)::before { content: attr(data-md-open); }
+.milkdownWrapper :global(.pm-active-mark.pm-strong)::after  { content: attr(data-md-close); }
+.milkdownWrapper :global(.pm-active-mark.pm-code)::before { content: attr(data-md-open); }
+.milkdownWrapper :global(.pm-active-mark.pm-code)::after  { content: attr(data-md-close); }
 
 /* remarkLineBreak converts \n → span[data-type="hardbreak"]. Force a visual line break. */
 .milkdownWrapper :global(.ProseMirror span[data-type="hardbreak"]) {
