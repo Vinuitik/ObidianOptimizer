@@ -31,8 +31,8 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
       .use(commonmark)
       .use(history)
       .use(listener)
+      .use(obsidianImagePlugin)   // must run before wikiLinkPlugin (images contain [[]])
       .use(wikiLinkPlugin)
-      .use(obsidianImagePlugin)
   );
 
   // Toggle editable on the live ProseMirror view when isMutable changes
