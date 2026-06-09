@@ -79,7 +79,8 @@ export const obsidianImageNode$ = $node('obsidian_image', () => ({
   toMarkdown: {
     match: node => node.type.name === 'obsidian_image',
     runner: (state, node) => {
-      state.addNode('text', undefined, `![[${node.attrs.filename}]]`);
+      // Use 'html' node type to emit verbatim; mdast-util-to-markdown would otherwise escape '['.
+      state.addNode('html', undefined, `![[${node.attrs.filename}]]`);
     },
   },
 }));
