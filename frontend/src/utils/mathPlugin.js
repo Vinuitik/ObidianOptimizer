@@ -107,8 +107,8 @@ export const mathInlineNode$ = $node('mathInline', () => ({
   },
   parseMarkdown: {
     match: node => node.type === 'mathInline',
-    runner: (state, node) => {
-      state.addNode(state.type('mathInline'), { value: node.value });
+    runner: (state, node, type) => {
+      state.addNode(type, { value: node.value });
     },
   },
   toMarkdown: {
@@ -157,8 +157,8 @@ export const mathBlockNode$ = $node('mathBlock', () => ({
   },
   parseMarkdown: {
     match: node => node.type === 'mathBlock',
-    runner: (state, node) => {
-      state.addNode(state.type('mathBlock'), {
+    runner: (state, node, type) => {
+      state.addNode(type, {
         value:  node.value,
         syntax: node.syntax ?? '$$',
       });
