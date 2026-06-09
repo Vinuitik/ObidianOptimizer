@@ -11,46 +11,47 @@ import { visit } from 'unist-util-visit';
 
 function remarkMath() {
   return (tree) => {
-    // Walk all 'text' nodes inside paragraphs and headings
-    visit(tree, 'text', (node, index, parent) => {
-      if (!parent || index == null) return;
+    try {
+      // Walk all 'text' nodes to extract inline $...$ math
+      visit(tree, 'text', (node, index, parent) => {
+        if (!parent || index == null) return;
 
-      const segments = splitMathText(node.value);
-      if (segments.length === 1 && segments[0].type === 'text') return;
+        const segments = splitMathText(node.value);
+        if (segments.length === 1 && segments[0].type === 'text') return;
 
-      const newNodes = segments.map(seg => {
-        if (seg.type === 'text')        return { type: 'text', value: seg.value };
-        if (seg.type === 'mathInline')  return { type: 'mathInline', value: seg.value };
-        if (seg.type === 'mathBlock')   return { type: 'mathBlock',  value: seg.value, syntax: seg.syntax };
-        return { type: 'text', value: seg.value };
+        const newNodes = segments.map(seg => {
+          if (seg.type === 'text')        return { type: 'text', value: seg.value };
+          if (seg.type === 'mathInline')  return { type: 'mathInline', value: seg.value };
+          if (seg.type === 'mathBlock')   return { type: 'mathBlock',  value: seg.value, syntax: seg.syntax };
+          return { type: 'text', value: seg.value };
+        });
+
+        parent.children.splice(index, 1, ...newNodes);
+        return index + newNodes.length;
       });
 
-      parent.children.splice(index, 1, ...newNodes);
-      return index + newNodes.length;
-    });
+      // Walk 'paragraph' nodes to find standalone $$...$$ and \[...\] blocks
+      visit(tree, 'paragraph', (node, index, parent) => {
+        if (!parent || index == null) return;
+        if (node.children.length !== 1 || node.children[0].type !== 'text') return;
 
-    // Walk 'paragraph' nodes to find standalone $$...$$ and \[...\] blocks
-    // (when they occupy an entire paragraph on their own)
-    visit(tree, 'paragraph', (node, index, parent) => {
-      if (!parent || index == null) return;
-      if (node.children.length !== 1 || node.children[0].type !== 'text') return;
+        const raw = node.children[0].value.trim();
 
-      const raw = node.children[0].value.trim();
+        if (raw.startsWith('$$') && raw.endsWith('$$') && raw.length > 4) {
+          const content = raw.slice(2, -2).trim();
+          parent.children[index] = { type: 'mathBlock', value: content, syntax: '$$' };
+          return;
+        }
 
-      // $$...$$  block
-      if (raw.startsWith('$$') && raw.endsWith('$$') && raw.length > 4) {
-        const content = raw.slice(2, -2).trim();
-        parent.children[index] = { type: 'mathBlock', value: content, syntax: '$$' };
-        return;
-      }
-
-      // \[...\]  block
-      if (raw.startsWith('\\[') && raw.endsWith('\\]')) {
-        const content = raw.slice(2, -2).trim();
-        parent.children[index] = { type: 'mathBlock', value: content, syntax: '\\[' };
-        return;
-      }
-    });
+        if (raw.startsWith('\\[') && raw.endsWith('\\]')) {
+          const content = raw.slice(2, -2).trim();
+          parent.children[index] = { type: 'mathBlock', value: content, syntax: '\\[' };
+          return;
+        }
+      });
+    } catch (err) {
+      console.error('[mathPlugin] remark transform error — tree left unmodified:', err);
+    }
   };
 }
 

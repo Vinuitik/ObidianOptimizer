@@ -1,0 +1,32 @@
+.errorBox {
+  padding: var(--sp-5);
+  margin: var(--sp-4);
+  background: rgba(224, 92, 92, 0.08);
+  border: 1px solid rgba(224, 92, 92, 0.3);
+  border-radius: var(--radius-md);
+  overflow: auto;
+}
+
+.errorTitle {
+  font-family: var(--font-heading);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-danger);
+  margin-bottom: var(--sp-3);
+}
+
+.errorMsg {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+  white-space: pre-wrap;
+  margin-bottom: var(--sp-2);
+}
+
+.errorStack {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-2);
+  white-space: pre-wrap;
+  opacity: 0.7;
+}
