@@ -67,7 +67,7 @@ export default function MilkdownEditor() {
   const isMutable          = useStore(s => s.isMutable);
   const updatePending      = useStore(s => s.updatePending);
   const noteIndex          = useStore(s => s.noteIndex);
-  const openNote           = useStore(s => s.openNote);
+  const openTab            = useStore(s => s.openTab);
 
   const handleClick = useCallback((e) => {
     // Only navigate wiki links when NOT in edit mode (editing needs click for cursor)
@@ -78,8 +78,8 @@ export default function MilkdownEditor() {
     const target = anchor.getAttribute('data-wiki-link');
     const basename = target.split(/[/\\]/).pop().toLowerCase();
     const fullPath = noteIndex.get(target.toLowerCase()) ?? noteIndex.get(basename);
-    if (fullPath) openNote(fullPath);
-  }, [isMutable, noteIndex, openNote]);
+    if (fullPath) openTab(fullPath);
+  }, [isMutable, noteIndex, openTab]);
 
   if (!currentNotePath) {
     return (
