@@ -14,19 +14,21 @@ import { livePreviewPlugin } from '../../utils/livePreviewPlugin';
 import { cleanMilkdownOutput } from '../../utils/markdownCleanup';
 import { mathPlugin } from '../../utils/mathPlugin';
 import FrontmatterTable from '../molecules/FrontmatterTable';
+import EditorErrorBoundary from './EditorErrorBoundary';
 import styles from './MilkdownEditor.module.css';
 
 // ── Inner editor: mounts once per note (key forces remount on note change) ───
 
 function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
   const [loading, getInstance] = useInstance();
-  // Skip the first markdownUpdated fire — Milkdown serialises the initial body
-  // on mount, which can differ from the raw file content (trailing newline, blank
-  // lines around html nodes, etc.) and would cause spurious hunks on sync.
   const skipFirst = useRef(true);
 
-  useEditor((root) =>
-    Editor.make()
+  console.debug('[MilkdownEditor] mounting — body length:', body.length,
+    '| first 80 chars:', JSON.stringify(body.slice(0, 80)));
+
+  useEditor((root) => {
+    console.debug('[MilkdownEditor] useEditor building editor');
+    return Editor.make()
       .config((ctx) => {
         ctx.set(rootCtx, root);
         ctx.set(defaultValueCtx, body);
@@ -46,12 +48,15 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
       .use(obsidianImagePlugin)   // must run before wikiLinkPlugin (images contain [[]])
       .use(wikiLinkPlugin)
       .use(hashtagPlugin)         // after wikiLink so [[#heading]] is already consumed
-      .use(livePreviewPlugin)
-  );
+      .use(livePreviewPlugin);
+  });
 
-  // Toggle editable on the live ProseMirror view when isMutable changes
   useEffect(() => {
-    if (loading) return;
+    if (loading) {
+      console.debug('[MilkdownEditor] editor still loading…');
+      return;
+    }
+    console.debug('[MilkdownEditor] editor ready, isMutable=', isMutable);
     getInstance()?.action((ctx) => {
       ctx.get(editorViewCtx)?.setProps({ editable: () => isMutable });
     });
@@ -73,7 +78,6 @@ export default function MilkdownEditor() {
   const openTab            = useStore(s => s.openTab);
 
   const handleClick = useCallback((e) => {
-    // Only navigate wiki links when NOT in edit mode (editing needs click for cursor)
     if (isMutable) return;
     const anchor = e.target.closest('[data-wiki-link]');
     if (!anchor) return;
@@ -95,18 +99,23 @@ export default function MilkdownEditor() {
 
   const { body } = splitFrontmatter(pendingRaw);
 
+  console.debug('[MilkdownEditor] rendering note:', currentNotePath,
+    '| pendingRaw length:', pendingRaw.length, '| body length:', body.length);
+
   return (
     <div className={styles.wrapper} onClick={handleClick}>
       <FrontmatterTable frontmatter={pendingFrontmatter} />
       <div className={styles.milkdownWrapper}>
-        <MilkdownProvider>
-          <MilkdownEditorInner
-            key={`${currentNotePath}-${editorResetKey}`}
-            body={body}
-            isMutable={isMutable}
-            onBodyChange={updatePending}
-          />
-        </MilkdownProvider>
+        <EditorErrorBoundary>
+          <MilkdownProvider>
+            <MilkdownEditorInner
+              key={`${currentNotePath}-${editorResetKey}`}
+              body={body}
+              isMutable={isMutable}
+              onBodyChange={updatePending}
+            />
+          </MilkdownProvider>
+        </EditorErrorBoundary>
       </div>
     </div>
   );

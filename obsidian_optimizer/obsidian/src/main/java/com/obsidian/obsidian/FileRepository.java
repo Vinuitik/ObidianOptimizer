@@ -18,11 +18,15 @@ import java.util.Queue;
 import java.util.Set;
 
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
 public class FileRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(FileRepository.class);
 
     private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources");
 
@@ -126,9 +130,11 @@ public class FileRepository {
 
     public String getText(String path) {
         try {
-            return Files.readString(Paths.get(path));
+            String content = Files.readString(Paths.get(path));
+            log.debug("[getText] read {} bytes from {}", content.length(), path);
+            return content;
         } catch (IOException e) {
-            System.out.println("Error reading file: " + e.getMessage());
+            log.error("[getText] failed to read path={}: {}", path, e.getMessage());
             return "";
         }
     }
@@ -167,6 +173,7 @@ public class FileRepository {
     }
 
     public void patchNote(String path, List<PatchHunk> hunks) throws IOException {
+        log.info("[patchNote] applying {} hunks to {}", hunks == null ? 0 : hunks.size(), path);
         if (hunks == null || hunks.isEmpty()) return;
         File file = new File(path);
         if (!file.exists()) throw new IOException("Note not found: " + path);
