@@ -108,6 +108,9 @@ const useStore = create((set, get) => ({
   // Whether the editor is in editable mode
   isMutable: false,
 
+  // Incremented on cancel to force Milkdown remount with clean content
+  editorResetKey: 0,
+
   // Auth
   isAuthenticated: false,
   showLogin: false,
@@ -238,6 +241,24 @@ const useStore = create((set, get) => ({
   // ── WYSIWYG: enter/exit edit mode ────────────────────────────────────────
 
   toggleMutable: () => set(s => ({ isMutable: !s.isMutable })),
+
+  // Cancel edit — discard all pending changes and force Milkdown remount
+  cancelEdit: () => {
+    const { currentNoteRaw, currentNotePath, tabs, activeTabIndex } = get();
+    const updates = {
+      pendingRaw: currentNoteRaw,
+      pendingTitle: noteBasename(currentNotePath),
+      isMutable: false,
+      editorResetKey: get().editorResetKey + 1,
+    };
+    // Clear hunks on the active tab so dirty indicator resets
+    if (activeTabIndex >= 0 && tabs[activeTabIndex]) {
+      const updated = [...tabs];
+      updated[activeTabIndex] = { ...updated[activeTabIndex], isMutable: false, hunks: [] };
+      updates.tabs = updated;
+    }
+    set(updates);
+  },
 
   // ── WYSIWYG: sync pendingRaw → disk ──────────────────────────────────────
 

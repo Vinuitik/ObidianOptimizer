@@ -73,6 +73,7 @@ export default function SplitLayout() {
   const centerMode     = useStore(s => s.centerMode);
   const isMutable      = useStore(s => s.isMutable);
   const toggleMutable  = useStore(s => s.toggleMutable);
+  const cancelEdit     = useStore(s => s.cancelEdit);
   const syncNote       = useStore(s => s.syncNote);
   const deleteNote     = useStore(s => s.deleteNote);
   const reviewNotes    = useStore(s => s.reviewNotes);
@@ -177,7 +178,7 @@ export default function SplitLayout() {
                 {isMutable ? (
                   <>
                     <Button onClick={syncNote}>Save</Button>
-                    <Button variant="ghost" onClick={toggleMutable}>Cancel</Button>
+                    <Button variant="ghost" onClick={cancelEdit}>Cancel</Button>
                   </>
                 ) : (
                   <>
