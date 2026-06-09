@@ -52,7 +52,7 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
       .use(gfm)
       .use(history)
       .use(listener)
-      .use(mathPlugin)            // before wikiLinkPlugin so \[...\] isn't mistaken for [[
+      // .use(mathPlugin)         // DISABLED: diagnosing schema crash
       .use(obsidianImagePlugin)   // must run before wikiLinkPlugin (images contain [[]])
       .use(wikiLinkPlugin)
       .use(hashtagPlugin)         // after wikiLink so [[#heading]] is already consumed

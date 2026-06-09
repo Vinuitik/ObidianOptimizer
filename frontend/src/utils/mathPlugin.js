@@ -178,4 +178,4 @@ export const mathBlockNode$ = $node('mathBlock', () => ({
 
 // ── Assembled plugin ──────────────────────────────────────────────────────────
 
-export const mathPlugin = [mathRemark$, mathInlineNode$, mathBlockNode$];
+export const mathPlugin = [...mathRemark$, mathInlineNode$, mathBlockNode$];
