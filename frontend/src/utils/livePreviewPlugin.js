@@ -2,7 +2,11 @@ import { $prose } from '@milkdown/utils';
 import { Plugin, PluginKey } from '@milkdown/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 
-// ── Syntax characters to show when cursor is inside a mark ───────────────────
+// ── Syntax characters shown when cursor is inside a mark ─────────────────────
+// Values stored as data attributes; CSS ::before / ::after renders them.
+// Using inline decorations with nodeName:'span' avoids inserting non-editable
+// DOM widget nodes, which caused browsers to swallow spaces typed near the
+// mark boundary.
 
 const MARK_SYNTAX = {
   em:     { open: '*',  close: '*'  },
@@ -11,7 +15,6 @@ const MARK_SYNTAX = {
 };
 
 // ── Find the continuous extent of markType around cursorPos in the doc ────────
-// Iterates the parent paragraph's children — O(children count), not O(doc size).
 
 function markExtent(doc, cursorPos, markType) {
   const $pos = doc.resolve(cursorPos);
@@ -29,8 +32,7 @@ function markExtent(doc, cursorPos, markType) {
       if (!current) current = { from: nodeFrom, to: nodeTo };
       else current.to = nodeTo;
     } else if (current) {
-      // gap — stop extending; check if cursor was already inside
-      if (cursorPos <= current.to) return; // will be picked up below
+      if (cursorPos <= current.to) return;
       current = null;
     }
   });
@@ -39,17 +41,6 @@ function markExtent(doc, cursorPos, markType) {
     return current;
   }
   return null;
-}
-
-// ── Widget factory: a small <span> with the syntax character ─────────────────
-
-function syntaxWidget(text) {
-  return () => {
-    const span = document.createElement('span');
-    span.className = 'pm-src-char';
-    span.textContent = text;
-    return span;
-  };
 }
 
 // ── Build the full decoration set for the current state ──────────────────────
@@ -68,10 +59,16 @@ function buildDecorations(state) {
     const extent = markExtent(doc, from, markType);
     if (!extent) continue;
 
+    // A single inline decoration wrapping the mark extent in a <span>.
+    // CSS ::before / ::after on the span display the syntax characters.
+    // No non-editable DOM nodes are inserted, so cursor and space input work normally.
     decorations.push(
-      Decoration.widget(extent.from, syntaxWidget(syntax.open),  { side: -1, key: `${markName}-open`  }),
-      Decoration.widget(extent.to,   syntaxWidget(syntax.close), { side:  1, key: `${markName}-close` }),
-      Decoration.inline(extent.from, extent.to, { class: `pm-active-mark pm-${markName}` }),
+      Decoration.inline(extent.from, extent.to, {
+        nodeName: 'span',
+        class: `pm-active-mark pm-${markName}`,
+        'data-md-open':  syntax.open,
+        'data-md-close': syntax.close,
+      }),
     );
   }
 
@@ -90,7 +87,6 @@ export const livePreviewPlugin = $prose(() =>
         return buildDecorations(state);
       },
       apply(tr, old, _, newState) {
-        // Only rebuild when selection or document changes
         if (!tr.selectionSet && !tr.docChanged) return old;
         return buildDecorations(newState);
       },
