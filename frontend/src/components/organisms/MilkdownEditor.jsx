@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
 import { commonmark } from '@milkdown/preset-commonmark';
 import { history } from '@milkdown/plugin-history';
@@ -18,6 +18,10 @@ import styles from './MilkdownEditor.module.css';
 
 function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
   const [loading, getInstance] = useInstance();
+  // Skip the first markdownUpdated fire — Milkdown serialises the initial body
+  // on mount, which can differ from the raw file content (trailing newline, blank
+  // lines around html nodes, etc.) and would cause spurious hunks on sync.
+  const skipFirst = useRef(true);
 
   useEditor((root) =>
     Editor.make()
@@ -28,7 +32,10 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
           ...prev,
           editable: () => isMutable,
         }));
-        ctx.get(listenerCtx).markdownUpdated((_, md) => onBodyChange(cleanMilkdownOutput(md)));
+        ctx.get(listenerCtx).markdownUpdated((_, md) => {
+          if (skipFirst.current) { skipFirst.current = false; return; }
+          onBodyChange(cleanMilkdownOutput(md));
+        });
       })
       .use(commonmark)
       .use(history)
