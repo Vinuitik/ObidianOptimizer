@@ -121,10 +121,15 @@ export default function SplitLayout() {
       {/* Center */}
       <div className={styles.center}>
         <div className={styles.centerHeader}>
-          <div className={styles.headerLeft}>
+          {/* Left edge — collapse button only */}
+          <div className={styles.headerEdge}>
             {leftCollapsed && (
               <Button onClick={toggleLeft} variant="ghost">▶ Files</Button>
             )}
+          </div>
+
+          {/* Center — title, always visually centered */}
+          <div className={styles.headerCenter}>
             {centerMode === 'new' ? (
               <input
                 className={styles.headerTitleInput}
@@ -138,7 +143,6 @@ export default function SplitLayout() {
                 autoFocus
               />
             ) : isMutable ? (
-              // Editable title input when in edit mode
               <input
                 className={styles.headerTitleInput}
                 value={pendingTitle}
@@ -156,7 +160,9 @@ export default function SplitLayout() {
               </div>
             )}
           </div>
-          <div className={styles.headerRight}>
+
+          {/* Right edge — action buttons */}
+          <div className={`${styles.headerEdge} ${styles.headerEdgeRight}`}>
             {centerMode !== 'new' && title && (
               <>
                 {!isMutable && isInReview && <ReviewRating fullPath={currentNotePath} />}
