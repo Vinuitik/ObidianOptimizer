@@ -7,7 +7,8 @@ function wikiLinkRemarkPlugin() {
   return (tree) => {
     visit(tree, 'text', (node, index, parent) => {
       if (!parent || index == null) return;
-      const WIKI = /\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g;
+      // (?<!!) ensures we don't match ![[...]] (Obsidian image embeds)
+      const WIKI = /(?<!!)\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g;
       const parts = [];
       let last = 0;
       let match;
@@ -97,7 +98,7 @@ export const wikiLinkNode$ = $node('wiki_link', () => ({
 
 export const wikiLinkInputRule$ = $inputRule(ctx =>
   new InputRule(
-    /\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]$/,
+    /(?<!!)\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]$/,
     (state, match, start, end) => {
       const type = wikiLinkNode$.type(ctx);
       return state.tr.replaceWith(start, end, type.create({
