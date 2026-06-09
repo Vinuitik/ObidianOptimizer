@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
+import { commonmark } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { history } from '@milkdown/plugin-history';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
@@ -49,15 +50,15 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
           onBodyChange(cleanMilkdownOutput(md));
         });
       })
+      .use(commonmark)
       .use(gfm)
       .use(history)
-      .use(listener);
-      // STAGE 0: all custom plugins disabled — diagnosing schema crash
-      // .use(mathPlugin)
-      // .use(obsidianImagePlugin)
-      // .use(wikiLinkPlugin)
-      // .use(hashtagPlugin)
-      // .use(livePreviewPlugin)
+      .use(listener)
+      .use(mathPlugin)
+      .use(obsidianImagePlugin)
+      .use(wikiLinkPlugin)
+      .use(hashtagPlugin)
+      .use(livePreviewPlugin);
   });
 
   useEffect(() => {
