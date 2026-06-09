@@ -6,7 +6,7 @@ import {
   createNote as apiCreate, patchNote as apiPatch,
   renameNote as apiRename, deleteNote as apiDelete,
 } from '../api/notes';
-import { computeHunks } from '../utils/diff';
+import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
 
 // ── Review session (localStorage) ────────────────────────────────────────────
@@ -126,6 +126,11 @@ const useStore = create((set, get) => ({
   // Panel collapse
   leftCollapsed: false,
   rightCollapsed: false,
+
+  // Tabs — each entry: { path, pendingTitle, isMutable, hunks }
+  // hunks stores the diff from currentNoteRaw → pendingRaw for inactive tabs.
+  tabs: [],
+  activeTabIndex: -1,
 
   // ── Tree: initial root load ───────────────────────────────────────────────
 
@@ -260,6 +265,14 @@ const useStore = create((set, get) => ({
         isMutable: false,
       });
 
+      // Update the active tab entry to reflect the new path and clear hunks
+      const { tabs, activeTabIndex } = get();
+      if (activeTabIndex >= 0 && tabs[activeTabIndex]) {
+        const updated = [...tabs];
+        updated[activeTabIndex] = { ...updated[activeTabIndex], path: savePath, pendingTitle: noteBasename(savePath), isMutable: false, hunks: [] };
+        set({ tabs: updated });
+      }
+
       await get().fetchChildrenOf(getParentPath(savePath));
       get().fetchNoteNames();
       get().fetchReviewNotes(get().reviewOffset);
@@ -307,7 +320,7 @@ const useStore = create((set, get) => ({
       const { path } = await apiCreate(folder, name);
       await get().fetchChildrenOf(folder);
       get().fetchNoteNames();
-      await get().openNote(path);
+      await get().openTab(path);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
       else throw e;
@@ -320,21 +333,132 @@ const useStore = create((set, get) => ({
     try {
       await apiDelete(path);
       const parentFolder = getParentPath(path);
-      set({
-        currentNoteRaw: '',
-        currentNotePath: null,
-        pendingRaw: '',
-        pendingFrontmatter: '',
-        pendingTitle: '',
-        isMutable: false,
-        centerMode: 'view',
-      });
+
+      // Remove the deleted note's tab; if it was active, clear the editor
+      const { tabs, activeTabIndex } = get();
+      const deletedIndex = tabs.findIndex(t => t.path === path);
+      const newTabs = tabs.filter(t => t.path !== path);
+      const wasActive = deletedIndex === activeTabIndex;
+
+      if (wasActive) {
+        set({
+          tabs: newTabs,
+          activeTabIndex: -1,
+          currentNoteRaw: '',
+          currentNotePath: null,
+          pendingRaw: '',
+          pendingFrontmatter: '',
+          pendingTitle: '',
+          isMutable: false,
+          centerMode: 'view',
+        });
+        // If other tabs remain, activate the nearest one
+        if (newTabs.length > 0) {
+          const nextIndex = Math.min(deletedIndex, newTabs.length - 1);
+          set({ tabs: newTabs, activeTabIndex: nextIndex });
+          await get().switchTab(nextIndex);
+        }
+      } else {
+        const newActiveIndex = deletedIndex < activeTabIndex ? activeTabIndex - 1 : activeTabIndex;
+        set({ tabs: newTabs, activeTabIndex: newActiveIndex });
+      }
+
       await get().fetchChildrenOf(parentFolder);
       get().fetchNoteNames();
       get().fetchReviewNotes(get().reviewOffset);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
       else throw e;
+    }
+  },
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+
+  // Snapshot current tab's unsaved state into the tabs array.
+  _snapshotTab: () => {
+    const { tabs, activeTabIndex, currentNoteRaw, pendingRaw, pendingTitle, isMutable } = get();
+    if (activeTabIndex < 0 || !tabs[activeTabIndex]) return;
+    const hunks = computeHunks(currentNoteRaw, pendingRaw);
+    const updated = [...tabs];
+    updated[activeTabIndex] = { ...updated[activeTabIndex], pendingTitle, isMutable, hunks };
+    set({ tabs: updated });
+  },
+
+  // Open a note in a tab. If already open, switch to it. Otherwise add new tab.
+  openTab: async (fullPath) => {
+    const { tabs, activeTabIndex } = get();
+    const existingIndex = tabs.findIndex(t => t.path === fullPath);
+
+    if (existingIndex !== -1) {
+      if (existingIndex !== activeTabIndex) await get().switchTab(existingIndex);
+      return;
+    }
+
+    get()._snapshotTab();
+    await get().openNote(fullPath);
+
+    const newTab = { path: fullPath, pendingTitle: noteBasename(fullPath), isMutable: false, hunks: [] };
+    const newTabs = [...get().tabs, newTab];
+    set({ tabs: newTabs, activeTabIndex: newTabs.length - 1 });
+  },
+
+  // Switch to tab at index, restoring its pending state.
+  switchTab: async (index) => {
+    const { tabs, activeTabIndex } = get();
+    if (index === activeTabIndex) return;
+
+    get()._snapshotTab();
+
+    const tab = tabs[index];
+    if (!tab) return;
+
+    const raw = await fetchNoteContent(tab.path);
+    const { frontmatter } = splitFrontmatter(raw);
+
+    let restoredPending = raw;
+    if (tab.hunks.length > 0) {
+      try { restoredPending = applyHunks(raw, tab.hunks); }
+      catch { /* hunks stale — fall back to disk version */ }
+    }
+
+    set({
+      currentNoteRaw: raw,
+      currentNotePath: tab.path,
+      pendingRaw: restoredPending,
+      pendingFrontmatter: frontmatter,
+      pendingTitle: tab.pendingTitle,
+      isMutable: tab.isMutable,
+      centerMode: 'view',
+      activeTabIndex: index,
+    });
+  },
+
+  // Close tab at index. If it was active, switch to nearest remaining tab.
+  closeTab: async (index) => {
+    const { tabs, activeTabIndex } = get();
+    const isActive = index === activeTabIndex;
+    const newTabs = tabs.filter((_, i) => i !== index);
+
+    if (newTabs.length === 0) {
+      set({
+        tabs: [], activeTabIndex: -1,
+        currentNoteRaw: '', currentNotePath: null,
+        pendingRaw: '', pendingFrontmatter: '', pendingTitle: '',
+        isMutable: false, centerMode: 'view',
+      });
+      return;
+    }
+
+    const newActiveIndex = isActive
+      ? Math.min(index, newTabs.length - 1)
+      : index < activeTabIndex ? activeTabIndex - 1 : activeTabIndex;
+
+    if (isActive) {
+      // Load the new active tab (don't snapshot — we're discarding the closing tab)
+      set({ tabs: newTabs });
+      await get().switchTab(newActiveIndex);
+    } else {
+      set({ tabs: newTabs, activeTabIndex: newActiveIndex });
     }
   },
 

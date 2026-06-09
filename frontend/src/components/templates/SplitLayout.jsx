@@ -9,6 +9,7 @@ import Button from '../atoms/Button';
 import Chip from '../atoms/Chip';
 import Icon from '../atoms/Icon';
 import ReviewRating from '../molecules/ReviewRating';
+import TabBar from '../molecules/TabBar';
 import styles from './SplitLayout.module.css';
 
 const MIN_PANEL_WIDTH = 160;
@@ -120,6 +121,7 @@ export default function SplitLayout() {
 
       {/* Center */}
       <div className={styles.center}>
+        <TabBar />
         <div className={styles.centerHeader}>
           {/* Left edge — collapse button only */}
           <div className={styles.headerEdge}>

@@ -21,7 +21,7 @@ function hasMatch(name, node, query) {
 function TreeNode({ name, node, depth, query, currentNotePath }) {
   const [open, setOpen]       = useState(false);
   const [loading, setLoading] = useState(false);
-  const openNote         = useStore(s => s.openNote);
+  const openTab          = useStore(s => s.openTab);
   const startNewNote     = useStore(s => s.startNewNote);
   const deleteNote       = useStore(s => s.deleteNote);
   const fetchChildrenOf  = useStore(s => s.fetchChildrenOf);
@@ -36,7 +36,7 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
         isFolder={false}
         isActive={isActive}
         depth={depth}
-        onClick={() => openNote(node.fullPath)}
+        onClick={() => openTab(node.fullPath)}
         onDelete={() => {
           if (window.confirm(`Move "${displayName}" to trash?`)) deleteNote(node.fullPath);
         }}

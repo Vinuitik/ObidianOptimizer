@@ -6,7 +6,7 @@ export default function ReviewList() {
   const reviewNotes    = useStore(s => s.reviewNotes);
   const reviewHasMore  = useStore(s => s.reviewHasMore);
   const loadMoreReview = useStore(s => s.loadMoreReview);
-  const openNote       = useStore(s => s.openNote);
+  const openTab        = useStore(s => s.openTab);
 
   const allDone = reviewNotes.length === 0;
 
@@ -26,7 +26,7 @@ export default function ReviewList() {
       )}
 
       {reviewNotes.map(({ shortName, fullPath }) => (
-        <div key={fullPath} className={styles.item} onClick={() => openNote(fullPath)}>
+        <div key={fullPath} className={styles.item} onClick={() => openTab(fullPath)}>
           <span className={styles.dot} />
           <span className={styles.label}>{shortName}</span>
           <ReviewRating fullPath={fullPath} />

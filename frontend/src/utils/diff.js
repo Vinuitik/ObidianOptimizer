@@ -71,3 +71,14 @@ export function computeHunks(oldText, newText) {
 
   return hunks;
 }
+
+// Apply a set of hunks (produced by computeHunks) to reconstruct the modified text.
+// Hunks are sorted back-to-front so splicing doesn't shift subsequent indices.
+export function applyHunks(text, hunks) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const sorted = [...hunks].sort((a, b) => b.startLine - a.startLine);
+  for (const { startLine, deleteCount, insertLines } of sorted) {
+    lines.splice(startLine, deleteCount, ...insertLines);
+  }
+  return lines.join('\n');
+}
