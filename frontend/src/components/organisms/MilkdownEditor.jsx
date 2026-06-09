@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
-import { commonmark } from '@milkdown/preset-commonmark';
+import { gfm } from '@milkdown/preset-gfm';
 import { history } from '@milkdown/plugin-history';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { defaultValueCtx, Editor, rootCtx, editorViewOptionsCtx, editorViewCtx } from '@milkdown/core';
@@ -38,7 +38,7 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
           onBodyChange(cleanMilkdownOutput(md));
         });
       })
-      .use(commonmark)
+      .use(gfm)
       .use(history)
       .use(listener)
       .use(obsidianImagePlugin)   // must run before wikiLinkPlugin (images contain [[]])
