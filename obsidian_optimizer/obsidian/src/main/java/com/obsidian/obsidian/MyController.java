@@ -119,6 +119,18 @@ public class MyController {
         }
     }
 
+    @PatchMapping("notes/move")
+    public ResponseEntity<?> moveNote(@RequestBody MoveNoteRequest req) {
+        log.info("[moveNote] source={} target={}", req.sourcePath(), req.targetFolder());
+        try {
+            String newPath = repository.moveNote(req.sourcePath(), req.targetFolder());
+            return ResponseEntity.ok(Map.of("path", newPath));
+        } catch (IOException e) {
+            log.error("[moveNote] failed: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     @DeleteMapping("notes")
     public ResponseEntity<?> deleteNote(@RequestBody DeleteNoteRequest req) {
         log.info("[deleteNote] path={}", req.path());
@@ -178,6 +190,7 @@ public class MyController {
     record PatchNoteRequest(String path, List<FileRepository.PatchHunk> hunks) {}
     record RenameNoteRequest(String oldPath, String newName) {}
     record DeleteNoteRequest(String path) {}
+    record MoveNoteRequest(String sourcePath, String targetFolder) {}
     record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize, String startupSyncMode) {}
     record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize, String startupSyncMode) {}
 }
