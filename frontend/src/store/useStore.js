@@ -5,6 +5,7 @@ import {
   checkAuth, login as apiLogin, logout as apiLogout,
   createNote as apiCreate, patchNote as apiPatch,
   renameNote as apiRename, deleteNote as apiDelete,
+  createFolder as apiCreateFolder,
   moveNote as apiMoveNote,
   fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings,
 } from '../api/notes';
@@ -393,6 +394,18 @@ const useStore = create((set, get) => ({
       await get().fetchChildrenOf(parentFolder);
       get().fetchNoteNames();
       get().fetchReviewNotes(get().reviewOffset);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
+      else throw e;
+    }
+  },
+
+  // ── Create folder ────────────────────────────────────────────────────────
+
+  createFolder: async (parentPath, name) => {
+    try {
+      await apiCreateFolder(parentPath, name);
+      await get().fetchChildrenOf(parentPath);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
       else throw e;

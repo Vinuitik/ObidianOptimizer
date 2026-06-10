@@ -109,6 +109,15 @@ export async function deleteNote(path) {
   });
 }
 
+export async function createFolder(parentPath, name) {
+  const res = await req(`${BASE}/folders`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parentPath, name }),
+  });
+  return res.json();
+}
+
 export async function moveNote(sourcePath, targetFolder) {
   const res = await req(`${BASE}/notes/move`, {
     method: 'PATCH',

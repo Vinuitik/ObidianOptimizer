@@ -126,6 +126,24 @@ public class FileRepository {
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
 
+    public String createFolder(String parentPath, String name) throws IOException {
+        File parent = new File(parentPath);
+        if (!parent.exists() || !parent.isDirectory()) {
+            throw new IOException("Parent folder not found: " + parentPath);
+        }
+        if (name == null || name.isBlank() || name.contains("/") || name.contains("\\")) {
+            throw new IOException("Invalid folder name: " + name);
+        }
+        File newDir = new File(parent, name);
+        if (newDir.exists()) {
+            throw new IOException("Folder already exists: " + name);
+        }
+        if (!newDir.mkdir()) {
+            throw new IOException("Failed to create folder: " + name);
+        }
+        return newDir.getAbsolutePath();
+    }
+
     public String createNote(String folderPath, String name) throws IOException {
         File folder = new File(folderPath);
         if (!folder.exists() || !folder.isDirectory()) {

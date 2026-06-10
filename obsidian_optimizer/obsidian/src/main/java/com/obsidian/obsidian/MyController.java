@@ -71,6 +71,18 @@ public class MyController {
 
     // ── Write endpoints (require session auth) ───────────────────────────────
 
+    @PostMapping("folders")
+    public ResponseEntity<?> createFolder(@RequestBody CreateFolderRequest req) {
+        log.info("[createFolder] parent={} name={}", req.parentPath(), req.name());
+        try {
+            String path = repository.createFolder(req.parentPath(), req.name());
+            return ResponseEntity.ok(Map.of("path", path));
+        } catch (IOException e) {
+            log.error("[createFolder] failed: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     @PostMapping("notes")
     public ResponseEntity<?> createNote(@RequestBody CreateNoteRequest req) {
         log.info("[createNote] folder={} name={}", req.folder(), req.name());
@@ -185,6 +197,7 @@ public class MyController {
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
+    record CreateFolderRequest(String parentPath, String name) {}
     record CreateNoteRequest(String folder, String name) {}
     record UpdateNoteRequest(String path, String content) {}
     record PatchNoteRequest(String path, List<FileRepository.PatchHunk> hunks) {}
