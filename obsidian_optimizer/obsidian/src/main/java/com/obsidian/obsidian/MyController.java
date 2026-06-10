@@ -22,8 +22,11 @@ public class MyController {
 
     private final FileRepository repository;
 
-    MyController(FileRepository repository) {
+    private final SettingsRepository settingsRepo;
+
+    MyController(FileRepository repository, SettingsRepository settingsRepo) {
         this.repository = repository;
+        this.settingsRepo = settingsRepo;
     }
 
     // ── Read endpoints (public) ──────────────────────────────────────────────
@@ -128,6 +131,39 @@ public class MyController {
         }
     }
 
+    // ── Settings ─────────────────────────────────────────────────────────────
+
+    @GetMapping("settings")
+    public SettingsResponse getSettings() {
+        return new SettingsResponse(
+            settingsRepo.getVaultPath(),
+            settingsRepo.getResourcePath(),
+            settingsRepo.getReviewPageSize()
+        );
+    }
+
+    @PutMapping("settings")
+    public ResponseEntity<?> updateSettings(@RequestBody UpdateSettingsRequest req) {
+        try {
+            if (req.vaultPath() != null) {
+                repository.updateVaultPath(req.vaultPath());
+            }
+            if (req.resourcePath() != null) {
+                settingsRepo.set("resourcePath", req.resourcePath());
+            }
+            if (req.reviewPageSize() != null) {
+                if (req.reviewPageSize() < 1 || req.reviewPageSize() > 500) {
+                    return ResponseEntity.badRequest().body("reviewPageSize must be between 1 and 500");
+                }
+                settingsRepo.set("reviewPageSize", String.valueOf(req.reviewPageSize()));
+            }
+            return ResponseEntity.ok(getSettings());
+        } catch (Exception e) {
+            log.error("[updateSettings] failed: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
     record CreateNoteRequest(String folder, String name) {}
@@ -135,4 +171,6 @@ public class MyController {
     record PatchNoteRequest(String path, List<FileRepository.PatchHunk> hunks) {}
     record RenameNoteRequest(String oldPath, String newName) {}
     record DeleteNoteRequest(String path) {}
+    record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize) {}
+    record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize) {}
 }

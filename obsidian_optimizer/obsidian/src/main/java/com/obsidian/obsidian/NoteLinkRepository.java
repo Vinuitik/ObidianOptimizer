@@ -75,7 +75,16 @@ public class NoteLinkRepository {
     public void backfillIfEmpty(List<String> notePaths) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM note_links", Integer.class);
         if (count != null && count > 0) return;
+        backfill(notePaths);
+    }
 
+    // Truncate and fully rebuild the link index (used when vault path changes).
+    public void forceRebuildLinks(List<String> notePaths) {
+        jdbc.execute("TRUNCATE note_links");
+        backfill(notePaths);
+    }
+
+    private void backfill(List<String> notePaths) {
         for (String path : notePaths) {
             try {
                 String content = java.nio.file.Files.readString(java.nio.file.Paths.get(path));

@@ -8,16 +8,15 @@ export default function MainPage() {
   const fetchNoteNames     = useStore(s => s.fetchNoteNames);
   const initReviewSession  = useStore(s => s.initReviewSession);
   const checkAuth          = useStore(s => s.checkAuth);
+  const loadSettings       = useStore(s => s.loadSettings);
   const showLogin          = useStore(s => s.showLogin);
 
   useEffect(() => {
+    // Load settings first so reviewPageSize is correct before initReviewSession
+    loadSettings().then(() => initReviewSession());
     checkAuth();
-    // Fast: only root-level folder contents — UI shows immediately
     fetchRootChildren();
-    // Background: full noteIndex for wiki-link resolution
     fetchNoteNames();
-    // Review: respects localStorage offset + new-day reset
-    initReviewSession();
   }, []);
 
   return (

@@ -5,6 +5,7 @@ import {
   checkAuth, login as apiLogin, logout as apiLogout,
   createNote as apiCreate, patchNote as apiPatch,
   renameNote as apiRename, deleteNote as apiDelete,
+  fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings,
 } from '../api/notes';
 import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
@@ -130,6 +131,9 @@ const useStore = create((set, get) => ({
   leftCollapsed: false,
   rightCollapsed: false,
 
+  // Settings (loaded from backend on startup)
+  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20 },
+
   // Tabs — each entry: { path, pendingTitle, isMutable, hunks }
   // hunks stores the diff from currentNoteRaw → pendingRaw for inactive tabs.
   tabs: [],
@@ -190,8 +194,9 @@ const useStore = create((set, get) => ({
   },
 
   fetchReviewNotes: async (offset = 0) => {
+    const pageSize = get().settings.reviewPageSize;
     try {
-      const { notes, hasMore } = await fetchReview(offset, 40);
+      const { notes, hasMore } = await fetchReview(offset, pageSize);
       set({ reviewNotes: buildReviewList(notes), reviewOffset: offset, reviewHasMore: hasMore });
       saveReviewOffset(offset);
     } catch (e) {
@@ -202,8 +207,8 @@ const useStore = create((set, get) => ({
   },
 
   loadMoreReview: async () => {
-    const { reviewOffset } = get();
-    await get().fetchReviewNotes(reviewOffset + 40);
+    const { reviewOffset, settings } = get();
+    await get().fetchReviewNotes(reviewOffset + settings.reviewPageSize);
   },
 
   dismissFromReview: (fullPath) => {
@@ -487,6 +492,27 @@ const useStore = create((set, get) => ({
 
   toggleLeft:  () => set(s => ({ leftCollapsed:  !s.leftCollapsed })),
   toggleRight: () => set(s => ({ rightCollapsed: !s.rightCollapsed })),
+
+  // ── Settings ──────────────────────────────────────────────────────────────
+
+  loadSettings: async () => {
+    try {
+      const settings = await apiFetchSettings();
+      set({ settings });
+    } catch {
+      // Non-fatal — defaults remain
+    }
+  },
+
+  applySettings: async (patch) => {
+    const updated = await apiSaveSettings(patch);
+    set({ settings: updated });
+    // If page size changed, re-fetch the review queue from the top
+    if (patch.reviewPageSize != null) {
+      await get().fetchReviewNotes(0);
+    }
+    return updated;
+  },
 }));
 
 export default useStore;

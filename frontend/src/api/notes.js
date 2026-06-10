@@ -108,3 +108,22 @@ export async function deleteNote(path) {
     body: JSON.stringify({ path }),
   });
 }
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+
+// Returns { vaultPath, resourcePath, reviewPageSize }.
+export async function fetchSettings() {
+  const res = await fetch(`${BASE}/settings`, { cache: 'no-store' });
+  if (!res.ok) throw new ApiError(res.status);
+  return res.json();
+}
+
+// Partial update — only include the keys you want to change.
+export async function saveSettings(patch) {
+  const res = await req(`${BASE}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  return res.json();
+}

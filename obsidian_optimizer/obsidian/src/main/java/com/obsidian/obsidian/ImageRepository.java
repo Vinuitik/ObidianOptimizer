@@ -7,8 +7,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.file.Path;
@@ -17,14 +15,16 @@ import java.nio.file.Paths;
 @RestController
 public class ImageRepository {
 
-    @Value("${IMAGE_PATH:C:/Users/ACER/Desktop/NewLife/resources/images}")
-    private String imageDir;
+    private final SettingsRepository settingsRepo;
+
+    public ImageRepository(SettingsRepository settingsRepo) {
+        this.settingsRepo = settingsRepo;
+    }
 
     @GetMapping("/images/{filename}")
     public ResponseEntity<Resource> getImage(@PathVariable String filename) {
-        return serveFile(imageDir, filename);
+        return serveFile(settingsRepo.getResourcePath(), filename);
     }
-
 
     private ResponseEntity<Resource> serveFile(String directory, String filename) {
         try {
@@ -34,9 +34,7 @@ public class ImageRepository {
                 return ResponseEntity.notFound().build();
             }
 
-
-            String contentType = "image/" + filename.substring(filename.lastIndexOf('.')+1);
-
+            String contentType = "image/" + filename.substring(filename.lastIndexOf('.') + 1);
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(contentType))
                     .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
@@ -46,4 +44,3 @@ public class ImageRepository {
         }
     }
 }
-

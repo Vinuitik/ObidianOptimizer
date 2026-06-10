@@ -1,0 +1,185 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-7) var(--sp-8);
+}
+
+.header {
+  margin-bottom: var(--sp-6);
+}
+
+.title {
+  font-family: var(--font-heading);
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text);
+}
+
+.subtitle {
+  margin-top: var(--sp-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-2);
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  max-width: 640px;
+}
+
+.section {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.sectionHeader {
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sectionTitle {
+  font-family: var(--font-heading);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.sectionDesc {
+  margin-top: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--color-text-2);
+  line-height: var(--leading-normal);
+}
+
+/* ── Fields ──────────────────────────────────────────────────────────────── */
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.field:last-child {
+  border-bottom: none;
+}
+
+.fieldMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 140px;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  cursor: default;
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  line-height: var(--leading-normal);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm2);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  padding: 7px var(--sp-3);
+  transition: border-color var(--ease-fast);
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--color-accent-border);
+}
+
+.input:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.inputPath {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* number input — remove spinners */
+.input[type='number']::-webkit-inner-spin-button,
+.input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+.input[type='number'] {
+  -moz-appearance: textfield;
+  max-width: 100px;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+
+.sectionFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--color-surface);
+}
+
+.saveBtn {
+  padding: 7px var(--sp-4);
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm2);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--ease-fast);
+}
+
+.saveBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.saveBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.savedMsg {
+  font-size: var(--text-xs);
+  color: var(--color-success);
+}
+
+.errorMsg {
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+  flex: 1;
+  text-align: left;
+}
