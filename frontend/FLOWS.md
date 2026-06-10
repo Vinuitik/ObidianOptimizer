@@ -555,6 +555,20 @@ Ports: `8083` → React (Nginx/Docker), `8082` → Java backend, `5173` → Dev 
 
 ---
 
+## Chrono Status Panel (SettingsPage.jsx)
+
+Rendered below the data-driven `SECTIONS` loop — not part of the `SECTIONS` array because it's a status + action panel, not a form field.
+
+State: `chronoStatus` (fetched from `GET /api/chrono/status` on mount), `chronoRunning`, `chronoResult`, `chronoError`.  
+"Run now" button → `runChronoNow()` → `POST /api/chrono/run` → updates `chronoResult` + `chronoStatus`.  
+Button disabled when `!isAuthenticated` or `chronoRunning`.  
+Result display: inline summary line (filesMoved, filesFixed, overdueCount, bankruptcy declared flag, moved notes count).
+
+To change what the panel shows: `SettingsPage.jsx` chrono status section (below `SECTIONS.map`).  
+To add more chrono result fields: expand `ChronoService.ChronoResult` record + update this display.
+
+---
+
 ## Settings Page (SettingsPage.jsx)
 
 `SECTIONS` config array in `SettingsPage.jsx` drives all setting rows — add new settings by adding entries there.  
@@ -563,8 +577,10 @@ Each section has a "Save" button — only active when values differ from `store.
 Save → `applySettings(patch)` → `PUT /api/settings` → updates `store.settings` + re-fetches review queue if `reviewPageSize` changed.  
 `vaultPath` change: backend re-indexes `note_links` (TRUNCATE + backfill) — may take a moment on large vaults.
 
+Number field validation: if `field.max` is set, validates `[min, max]`; if absent (e.g. `maxDailyReviews`, `bankruptcyLimit`), only checks `>= min` — no upper bound.
+
 To add a new setting:
-1. Add an entry to the relevant `SECTIONS[].fields` array in `SettingsPage.jsx` (`key`, `label`, `type`, optional `hint`)
+1. Add an entry to the relevant `SECTIONS[].fields` array in `SettingsPage.jsx` (`key`, `label`, `type`, optional `hint`, optional `max`)
 2. Add the key to `SettingsRepository.java` (default + typed getter)
 3. Add the key to `MyController.SettingsResponse` + `UpdateSettingsRequest` records
 4. Handle the key in `MyController.updateSettings()`
