@@ -1,10 +1,10 @@
 import Icon from '../atoms/Icon';
 import styles from './NavItem.module.css';
 
-export default function NavItem({ name, isFolder, isOpen, isActive, isAI, depth, onClick, onAdd, onDelete, children }) {
+export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDragOver, depth, onClick, onAdd, onDelete, children }) {
   return (
     <div style={{ paddingLeft: depth * 14 }}>
-      <div className={`${styles.row} ${isActive ? styles.active : ''}`} onClick={onClick}>
+      <div className={`${styles.row} ${isActive ? styles.active : ''} ${isDragOver ? styles.dragOver : ''}`} onClick={onClick}>
         {isActive && <span className={styles.accentBar} />}
         {isFolder && (
           <span className={`${styles.chevron} ${isOpen ? styles.chevronOpen : ''}`}>

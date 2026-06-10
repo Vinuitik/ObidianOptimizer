@@ -18,39 +18,52 @@ function hasMatch(name, node, query) {
   return Object.entries(node.children).some(([n, c]) => hasMatch(n, c, query));
 }
 
-function TreeNode({ name, node, depth, query, currentNotePath }) {
-  const [open, setOpen]       = useState(false);
-  const [loading, setLoading] = useState(false);
-  const openTab          = useStore(s => s.openTab);
-  const startNewNote     = useStore(s => s.startNewNote);
-  const deleteNote       = useStore(s => s.deleteNote);
-  const fetchChildrenOf  = useStore(s => s.fetchChildrenOf);
+const DRAG_TYPE = 'application/obsidian-note';
 
+function TreeNode({ name, node, depth, query, currentNotePath }) {
+  const [open, setOpen]         = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  const openTab         = useStore(s => s.openTab);
+  const startNewNote    = useStore(s => s.startNewNote);
+  const deleteNote      = useStore(s => s.deleteNote);
+  const moveNote        = useStore(s => s.moveNote);
+  const fetchChildrenOf = useStore(s => s.fetchChildrenOf);
+
+  // ── File node ──────────────────────────────────────────────────────────────
   if (node.type === 'file') {
     const displayName = name.replace(/\.md$/, '');
     if (query && !displayName.toLowerCase().includes(query.toLowerCase())) return null;
     const isActive = currentNotePath === node.fullPath;
     return (
-      <NavItem
-        name={displayName}
-        isFolder={false}
-        isActive={isActive}
-        depth={depth}
-        onClick={() => openTab(node.fullPath)}
-        onDelete={() => {
-          if (window.confirm(`Move "${displayName}" to trash?`)) deleteNote(node.fullPath);
+      <div
+        draggable
+        onDragStart={e => {
+          e.dataTransfer.setData(DRAG_TYPE, node.fullPath);
+          e.dataTransfer.effectAllowed = 'move';
         }}
-      />
+      >
+        <NavItem
+          name={displayName}
+          isFolder={false}
+          isActive={isActive}
+          depth={depth}
+          onClick={() => openTab(node.fullPath)}
+          onDelete={() => {
+            if (window.confirm(`Move "${displayName}" to trash?`)) deleteNote(node.fullPath);
+          }}
+        />
+      </div>
     );
   }
 
-  // Folder: filter by query
+  // ── Folder node ────────────────────────────────────────────────────────────
   if (query && !hasMatch(name, node, query)) return null;
 
   const isForceOpen = !!query && hasMatch(name, node, query);
   const isOpen = isForceOpen || open;
 
-  // When a query forces this folder open, fetch its children if not yet loaded
   useEffect(() => {
     if (isForceOpen && !node.loaded && !loading) {
       setLoading(true);
@@ -67,31 +80,68 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
     setOpen(o => !o);
   }
 
+  function handleDragOver(e) {
+    // Only accept our own drag type
+    if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOver(true);
+  }
+
+  function handleDragLeave(e) {
+    // Only clear when leaving the folder row itself, not a child element
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setDragOver(false);
+    }
+  }
+
+  async function handleDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    const sourcePath = e.dataTransfer.getData(DRAG_TYPE);
+    if (!sourcePath || sourcePath === node.fullPath) return;
+    // Ensure the folder is expanded after the move so the user can see the note
+    if (!node.loaded) {
+      setLoading(true);
+      await fetchChildrenOf(node.fullPath);
+      setLoading(false);
+    }
+    setOpen(true);
+    await moveNote(sourcePath, node.fullPath);
+  }
+
   return (
-    <NavItem
-      name={name}
-      isFolder
-      isOpen={isOpen}
-      depth={depth}
-      onClick={handleToggle}
-      onAdd={() => startNewNote(node.fullPath)}
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
-      {isOpen && loading && (
-        <div className={styles.loadingRow} style={{ paddingLeft: (depth + 1) * 14 + 12 }}>
-          <span className={styles.loadingDot} />
-        </div>
-      )}
-      {isOpen && !loading && sortEntries(Object.entries(node.children)).map(([childName, childNode]) => (
-        <TreeNode
-          key={childName}
-          name={childName}
-          node={childNode}
-          depth={depth + 1}
-          query={query}
-          currentNotePath={currentNotePath}
-        />
-      ))}
-    </NavItem>
+      <NavItem
+        name={name}
+        isFolder
+        isOpen={isOpen}
+        isDragOver={dragOver}
+        depth={depth}
+        onClick={handleToggle}
+        onAdd={() => startNewNote(node.fullPath)}
+      >
+        {isOpen && loading && (
+          <div className={styles.loadingRow} style={{ paddingLeft: (depth + 1) * 14 + 12 }}>
+            <span className={styles.loadingDot} />
+          </div>
+        )}
+        {isOpen && !loading && sortEntries(Object.entries(node.children)).map(([childName, childNode]) => (
+          <TreeNode
+            key={childName}
+            name={childName}
+            node={childNode}
+            depth={depth + 1}
+            query={query}
+            currentNotePath={currentNotePath}
+          />
+        ))}
+      </NavItem>
+    </div>
   );
 }
 
