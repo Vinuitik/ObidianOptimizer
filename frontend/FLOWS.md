@@ -166,6 +166,36 @@ To change dirty indicator style: `molecules/TabBar.module.css` `.dirty`
 Folder expand → `fetchChildrenOf(folderPath)` → `GET /api/children?folder=...` → merges into `tree`  
 `noteIndex` — `Map<string, string>` (basename lowercased → full absolute path), rebuilt on each load and after create/rename
 
+### Drag-and-Drop Move
+
+`DRAG_TYPE = 'application/obsidian-note'` — namespaced MIME type prevents accepting unrelated browser drags.
+
+**File nodes** — wrapped in a `draggable` div:
+```
+onDragStart → dataTransfer.setData(DRAG_TYPE, node.fullPath) + effectAllowed='move'
+```
+
+**Folder nodes** — wrapper div handles drop events:
+```
+onDragOver  → e.preventDefault() + dropEffect='move' + setDragOver(true)
+              (only if DRAG_TYPE present in dataTransfer.types)
+onDragLeave → setDragOver(false) only when leaving the folder subtree
+              (guards: e.currentTarget.contains(e.relatedTarget))
+onDrop      → getData(DRAG_TYPE) → guard sourcePath !== folderPath
+              → fetchChildrenOf (if not loaded) → setOpen(true)
+              → moveNote(sourcePath, node.fullPath)
+```
+
+`isDragOver` boolean passed to `NavItem` → `.dragOver` CSS class (accent-dim background + accent-border outline).
+
+`moveNote(sourcePath, targetFolder)` in store:  
+`PATCH /api/notes/move` → `{ path: newAbsPath }` → updates open tab path if source matches → `fetchChildrenOf` both source parent and target folder → `fetchNoteNames()`
+
+Backend: validates source exists + target folder exists + no filename collision → `Files.move(ATOMIC_MOVE)` → `noteIndex.rename()` + `noteLinkRepo.renameSource()`
+
+To change drop highlight style: `NavItem.module.css` `.dragOver`  
+To change what gets accepted: `FolderTree.jsx` `DRAG_TYPE` constant
+
 ### FolderTree Search Filter
 
 Local `query` state, passed to all `TreeNode` instances  
@@ -420,6 +450,7 @@ Write calls use `credentials: 'same-origin'` — session cookie included automat
 | `patchNote(path, hunks)` | `PATCH /api/notes/content` | Yes |
 | `renameNote(oldPath, name)` | `PATCH /api/notes/rename` | Yes |
 | `deleteNote(path)` | `DELETE /api/notes` | Yes |
+| `moveNote(srcPath, folder)` | `PATCH /api/notes/move` | Yes |
 | `fetchSettings()` | `GET /api/settings` | No |
 | `saveSettings(patch)` | `PUT /api/settings` | Yes |
 
@@ -491,6 +522,10 @@ Ports: `8083` → React (Nginx/Docker), `8082` → Java backend, `5173` → Dev 
 | Vault root path | `FileRepository.java` `ROOT_FILE` |
 | Streak display | `NavBar.jsx` hardcoded "12-day streak" — wire to `streakDays` in store when backend supports it |
 | Search filter logic | `FolderTree.jsx` `hasMatch()` |
+| Drag-and-drop MIME type | `FolderTree.jsx` `DRAG_TYPE` constant |
+| Drop highlight style | `molecules/NavItem.module.css` `.dragOver` |
+| Move note (frontend) | `useStore.js moveNote()` |
+| Move note (backend) | `FileRepository.moveNote()` + `MyController PATCH /notes/move` |
 | Review card layout | `ReviewList.jsx` + `ReviewList.module.css` |
 | Add a new setting | `pages/SettingsPage.jsx` `SECTIONS` array + backend `SettingsRepository` + `MyController` records |
 | Settings page styles | `pages/SettingsPage.module.css` |
