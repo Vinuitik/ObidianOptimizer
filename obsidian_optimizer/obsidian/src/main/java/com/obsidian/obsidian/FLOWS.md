@@ -1,12 +1,19 @@
 # Backend Flows
 
-Files: ObsidianApplication.java, MyController.java, FileRepository.java, NoteLinkRepository.java, ImageRepository.java, SettingsRepository.java, WebConfig.java, SecurityConfig.java, ServletInitializer.java
+Files: ObsidianApplication.java, MyController.java, FileRepository.java, NoteLinkRepository.java, NoteIndexRepository.java, FrontmatterParser.java, ImageRepository.java, SettingsRepository.java, WebConfig.java, SecurityConfig.java, ServletInitializer.java
 
 ---
 
 ## Startup
 
-`ObsidianApplication.main()` → `SpringApplication.run()` → beans init: `SettingsRepository` (seeds `app_settings` table) → `FileRepository` (reads vault path from `SettingsRepository`, backfills `note_links`) → `ImageRepository`, `MyController`, `SecurityConfig` → Tomcat on port 8082  
+Bean init order (Spring respects dependency graph):
+1. `SettingsRepository` — creates `app_settings`, seeds defaults from env vars
+2. `NoteLinkRepository` — creates `note_links` + index
+3. `NoteIndexRepository` — creates `notes` + index
+4. `FileRepository.@PostConstruct init()` — reads vault path from `SettingsRepository` → `bfsDiskFiles()` → `NoteIndexRepository.syncWithDisk()`
+   - `startupSyncMode = "blocking"` (default): sync runs before app accepts requests
+   - `startupSyncMode = "async"`: sync runs in `CompletableFuture.runAsync()`, app starts immediately
+
 To change port: `application.properties → server.port`
 
 ---
@@ -20,29 +27,93 @@ Credentials in `application.properties`: `app.auth.username`, `app.auth.password
 `POST /logout` → invalidates session → returns 200  
 `GET /me` → 200 + username if authenticated, 401 if not
 
-Public GET endpoints: `/names`, `/review`, `/text`, `/images/**`  
-Protected (require session): all POST, PUT, PATCH, DELETE + `GET /me`
-
-To change credentials: `application.properties`  
+`GET /settings` public. All other endpoints require session auth.  
 To add/remove protected endpoints: `SecurityConfig.filterChain()` `authorizeHttpRequests`
+
+---
+
+## Startup Sync — Delta Algorithm
+
+`NoteIndexRepository.syncWithDisk(diskFiles)`:
+
+```
+diskMap = { path → File }           from bfsDiskFiles()
+dbMap   = { path → modified_at }    from SELECT path, modified_at FROM notes
+
+for each diskFile:
+  if path not in dbMap:             → INSERT (new note)
+    read content → FrontmatterParser.parse() → upsert() + updateLinks()
+  elif file.lastModified() > dbMap[path]:  → UPDATE (changed externally)
+    read content → FrontmatterParser.parse() → upsert() + updateLinks()
+  else:                             → skip (unchanged, no I/O)
+
+for each dbPath not in diskMap:     → DELETE (removed externally)
+  delete() + deleteSource()
+```
+
+Only reads file content for new or modified notes — unchanged notes cost zero disk I/O.
+
+---
+
+## FrontmatterParser
+
+`FrontmatterParser.parse(rawContent)` → `NoteMetadata(srDue, srInterval, srEase)`  
+Normalises `\r\n` → `\n`, finds `---` … `---` block, splits lines on `:`.  
+Returns `null` fields for any key not present or unparseable.  
+Keys: `sr-due` (DATE), `sr-interval` (INT), `sr-ease` (INT).
+
+Canonical frontmatter format (written by `createNote`):
+```
+---
+sr-due: yyyy-MM-dd
+sr-interval: 3
+sr-ease: 200
+---
+```
+To add a new frontmatter field to the index: `FrontmatterParser.parse()` + `NoteIndexRepository` schema + `upsert()`.
+
+---
+
+## NoteIndexRepository — notes table
+
+Schema:
+```sql
+notes(
+  path        TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  sr_due      DATE,           -- NULL = no review date
+  sr_interval INT,
+  sr_ease     INT,
+  modified_at BIGINT NOT NULL -- file.lastModified() epoch ms
+)
+INDEX idx_notes_sr_due ON notes(sr_due)
+```
+
+Key methods:
+- `syncWithDisk(diskFiles)` — delta sync (see above)
+- `forceResync(diskFiles)` — TRUNCATE notes + TRUNCATE note_links → full syncWithDisk
+- `getAllPaths()` — `SELECT path FROM notes ORDER BY path`
+- `getReviewNotesPaged(offset, limit)` — `WHERE sr_due <= CURRENT_DATE ORDER BY sr_due, path LIMIT limit+1 OFFSET offset` (limit+1 trick avoids COUNT query)
+- `upsert(path, title, meta, modifiedAt)` — INSERT … ON CONFLICT DO UPDATE
+- `rename(oldPath, newPath, newTitle)` — UPDATE path + title
+- `delete(path)` — DELETE
 
 ---
 
 ## GET /names — All Note Paths
 
-`MyController.getNames()` → `FileRepository.getNoteNames()` → check `cacheUpToDate`  
-- Cache hit: return `cache`  
-- Cache miss: BFS from `ROOT_FILE`, skip `.git`, `resources`, `_trash` → collect `.md` paths → sort → cache → return  
-To change vault root: `FileRepository.ROOT_FILE` (line 18)
+`MyController.getNames()` → `FileRepository.getNoteNames()` → `NoteIndexRepository.getAllPaths()`  
+→ `SELECT path FROM notes ORDER BY path`  
+No disk I/O. O(N) result scan.
 
 ---
 
 ## GET /review — Notes Due for Review
 
-`MyController.getReviewNames()` → `FileRepository.getReviewNotes()` → check `cacheReviewUpToDate`  
-- Cache miss: calls `getNoteNames()` → for each path, read line 2, extract date after `"reviewed: "` → compare to today → add if ≤ today  
-Format expected on line 2: `reviewed: yyyy-MM-dd`  
-To change review format: `FileRepository.getReviewNotes()` + `isBeforeToday()`
+`MyController.getReviewNames()` → `FileRepository.getReviewNotesPaged(offset, limit)` → `NoteIndexRepository.getReviewNotesPaged()`  
+→ `SELECT path FROM notes WHERE sr_due <= CURRENT_DATE ORDER BY sr_due ASC, path ASC LIMIT ? OFFSET ?`  
+`hasMore` detected via limit+1 trick — no separate COUNT query.  
+To change review sort: `NoteIndexRepository.getReviewNotesPaged()` ORDER BY clause.
 
 ---
 
@@ -54,119 +125,113 @@ To change review format: `FileRepository.getReviewNotes()` + `isBeforeToday()`
 
 ## GET /images/{filename} — Image Serving
 
-`ImageRepository.getImage(filename)` → `serveFile(IMAGE_DIR, filename)` → validate exists → detect MIME → return `ResponseEntity<Resource>`  
-Image dir: `ImageRepository.imageDir` (hardcoded `C:\Users\ACER\Desktop\NewLife\resources\images`)
+`ImageRepository.getImage(filename)` → `serveFile(settingsRepo.getResourcePath(), filename)` → validate exists → detect MIME → return `ResponseEntity<Resource>`  
+Image dir: read from `SettingsRepository` → `app_settings.resourcePath` (default: `VAULT_PATH/resources/images`)
 
 ---
 
 ## POST /notes — Create Note
 
 `MyController.createNote(CreateNoteRequest{folder, name})`  
-→ `FileRepository.createNote(folderPath, name)` → validate folder exists → create `name.md` with frontmatter skeleton → `invalidateCache()` → return `{path: absolutePath}`  
-Initial frontmatter: `---\nsr-due: {today+3d}\nsr-interval: 3\nsr-ease: 200\n---\n\n`  
-`sr-due` prefix is 8 chars — matches `isBeforeToday()` substring(8,18) extraction  
+→ `FileRepository.createNote(folderPath, name)` → validate folder → create `name.md` with frontmatter skeleton  
+→ `FrontmatterParser.parse(initialContent)` → `NoteIndexRepository.upsert()`  
+→ `NoteLinkRepository.updateLinks()` → return `{path: absolutePath}`
+
+Initial frontmatter: `---\nsr-due: {today+3d}\nsr-interval: 3\nsr-ease: 200\n---\n\n#review\n`  
 To change defaults: `FileRepository.createNote()`
 
 ---
 
-## PUT /notes — Update Note Content (full replace, kept for fallback)
+## PUT /notes — Update Note Content (full replace, fallback)
 
 `MyController.updateNote(UpdateNoteRequest{path, content})`  
-→ `FileRepository.updateNote(path, content)` → validate file exists → `Files.writeString()` → `invalidateCache()`
+→ `FileRepository.updateNote(path, content)` → `Files.writeString()` → `FrontmatterParser.parse()` → `NoteIndexRepository.upsert()` → `NoteLinkRepository.updateLinks()`
 
 ---
 
 ## PATCH /notes/content — Diff-based Update
 
 `MyController.patchNote(PatchNoteRequest{path, hunks})`  
-→ `FileRepository.patchNote(path, hunks)`  
-1. Read file → detect line separator (`\r\n` or `\n`) from raw bytes  
-2. Normalize to LF → split into `List<String> lines` (with `-1` limit to keep trailing empty line)  
-3. Sort hunks descending by `startLine` (apply back-to-front so indices stay valid)  
-4. For each hunk: remove `deleteCount` lines at `startLine`, insert `insertLines` at `startLine`  
-5. `String.join(sep, lines)` → `Files.writeString()` → `invalidateCache()`
+→ `FileRepository.patchNote(path, hunks)` → apply hunks back-to-front → `Files.writeString()`  
+→ `FrontmatterParser.parse(newContent)` → `NoteIndexRepository.upsert()` → `NoteLinkRepository.updateLinks()`
 
-Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String> insertLines)`  
-Security: PATCH is session-protected — same as PUT  
-Frontend diff: `utils/diff.js computeHunks(oldText, newText)` → LCS algorithm, CRLF-normalized  
-Zero hunks (no change) → frontend skips the PATCH call entirely  
-To change diff algorithm: `frontend/src/utils/diff.js lcsBacktrack()`
+Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String> insertLines)`
 
 ---
 
 ## PATCH /notes/rename — Rename Note
 
 `MyController.renameNote(RenameNoteRequest{oldPath, newName})`  
-→ `FileRepository.renameNote(oldPath, newName)`  
-1. Derive `oldName` (basename without `.md`)  
-2. Query `NoteLinkRepository.findSourcesByTarget(oldName)` → list of files that contain `[[oldName]]`  
-3. `File.renameTo()` → new path on disk  
-4. For each source file: read → `NoteLinkRepository.rewriteLinks(content, oldName, newName)` → write back (skips if content unchanged)  
-5. `NoteLinkRepository.renameTarget(oldName, newName)` — bulk-update `note_links` target column  
-6. `NoteLinkRepository.renameSource(oldPath, newPath)` — update the renamed note's own source entry  
-7. `invalidateCache()` → return `{path: newAbsolutePath}`
+→ `FileRepository.renameNote(oldPath, newName)`
+1. `NoteLinkRepository.findSourcesByTarget(oldName)` → backlink list
+2. `File.renameTo()` on disk
+3. Rewrite `[[oldName]]` → `[[newName]]` in each source file
+4. `NoteIndexRepository.rename(oldPath, newPath, newTitle)` — UPDATE path + title
+5. `NoteLinkRepository.renameTarget(oldName, newName)` + `renameSource(oldPath, newPath)`
 
-Handles: `[[NoteA]]`, `[[NoteA|display]]`, `[[Folder/NoteA]]`, `[[Folder/NoteA|display]]`
+Cross-file rename works for notes written through the app. External edits are caught at next startup sync (delta detects `lastModified` change → `updateLinks` refreshes the row).
 
 ---
 
 ## DELETE /notes — Soft Delete
 
 `MyController.deleteNote(DeleteNoteRequest{path})`  
-→ `FileRepository.softDeleteNote(path)` → validate exists → ensure `ROOT_FILE/_trash/` exists → move file there (timestamp suffix if name conflict) → `NoteLinkRepository.deleteSource(path)` (removes outgoing links from adjacency table) → `invalidateCache()`  
-`_trash/` is skipped by `getNoteNames()` — files there are invisible to the app  
-Incoming links from other notes are left in `note_links` as dead entries — they become dead `[[links]]` in those files, consistent with Obsidian's own behaviour  
-Recovery: manual file move [NOT IMPLEMENTED in UI]
+→ `FileRepository.softDeleteNote(path)` → move to `ROOT_FILE/_trash/` → `NoteIndexRepository.delete(path)` → `NoteLinkRepository.deleteSource(path)`
 
 ---
 
-## Cache Invalidation
+## GET /settings + PUT /settings
 
-`FileRepository.invalidateCache()` sets `cacheUpToDate = false` AND `cacheReviewUpToDate = false`  
-Called automatically after every write (create, update, rename, delete)  
-No HTTP endpoint to trigger manually — restart or any write op clears both caches
+`GET /settings` — public, returns `{vaultPath, resourcePath, reviewPageSize, startupSyncMode}`  
+`PUT /settings` — auth required, partial update (all fields optional)
 
-**CACHE CURRENTLY DISABLED** — `getNoteNames()` and `getReviewNotes()` ignore `cacheUpToDate` flags and always recompute. Re-enable by uncommenting the guard at the top of each method in `FileRepository.java` once the app is stable and the feedback loop is trusted.
+`vaultPath` change → `FileRepository.updateVaultPath()` → validates dir → saves to DB → sets `ROOT_FILE` → `NoteIndexRepository.forceResync()` (TRUNCATE notes + note_links → full delta sync)  
+`startupSyncMode` — `"blocking"` or `"async"`, validated in controller  
+`reviewPageSize` — 1–500, validated in controller
 
 ---
 
-## NoteLinkRepository — Wiki-link Adjacency Table
+## SettingsRepository — app_settings table
+
+`app_settings(key TEXT PRIMARY KEY, value TEXT)`  
+Seeded on first boot from env vars with `ON CONFLICT DO NOTHING`.
+
+| Key | Default | Source |
+|---|---|---|
+| `vaultPath` | `$VAULT_PATH` | env var |
+| `resourcePath` | `$IMAGE_PATH` or `$VAULT_PATH/resources/images` | env var |
+| `reviewPageSize` | `20` | hardcoded |
+| `startupSyncMode` | `"blocking"` | hardcoded |
+
+To force re-seed: `DELETE FROM app_settings;` → restart.
+
+---
+
+## NoteLinkRepository — note_links adjacency table
 
 `note_links(source_path TEXT, target_name TEXT, PRIMARY KEY(source_path, target_name))`  
-Index on `target_name` for O(k) rename lookups where k = number of backlinks.
+Index on `target_name` for O(k) rename lookups.
 
 **Lifecycle:**
-- `@PostConstruct initSchema()` — `CREATE TABLE IF NOT EXISTS` + index on startup
-- `FileRepository.@PostConstruct init()` — calls `backfillIfEmpty(getNoteNames())`: reads all notes and seeds the table on first boot (skipped if table already has rows)
-- `updateLinks(path, targets)` — called after every write (create / update / patch)
-- `deleteSource(path)` — called on soft-delete
+- `initSchema()` — `CREATE TABLE IF NOT EXISTS` + index
+- `syncWithDisk()` (via `NoteIndexRepository`) — calls `updateLinks()` for every new/changed note
+- `truncateLinks()` — truncate only (used before `forceResync`)
+- `forceRebuildLinks(paths)` — truncate + full backfill from a path list
 
-**Extraction:** `extractTargets(markdown)` — regex `\[\[([^|\]]+)(?:\|[^\]]+)?\]\]`, strips path prefix, returns Set of basenames  
-**Rewrite:** `rewriteLinks(content, oldName, newName)` — regex replaces `[[oldName]]` / `[[.../oldName]]` / `[[oldName|text]]` in one pass
-
-To change link storage: `NoteLinkRepository.java`  
-To force re-index: truncate `note_links` table → restart app (backfill triggers)
+**Staleness note:** external Obsidian edits are caught at next startup sync. No mid-session inotify — Docker volume mounts on Windows don't propagate inotify events.
 
 ---
 
 ## Infrastructure
 
-Three services run in Docker via `docker-compose.yml` at the repo root.  
-Start everything: `.\start.ps1` (or `docker compose up --build`)  
-Stop everything: `Ctrl+C` in the same terminal → all containers stop cleanly
-
-Config for friends: copy `.env.example` → `.env`, set `HOST_VAULT_PATH` to vault directory.  
-Vault is mounted read-write at `/vault` inside the backend container.
+Three services via `docker-compose.yml`. Start: `.\start.ps1`. Stop: `Ctrl+C`.
 
 ### Technology Notes
-- **WAR + embedded Tomcat**: `java -jar app.war` works because Spring Boot rewrites the WAR to be self-executable even though `spring-boot-starter-tomcat` is `provided` scope.
-- **Volume mount on Windows (Docker Desktop)**: reads/writes work correctly; file watching (inotify/WatchService) does NOT propagate from host → container. This is why the backend uses a flag-based cache rather than a WatchService — WatchService would silently miss Obsidian edits when running in Docker.
-- **Docker network**: frontend and backend are on the default compose network; nginx proxies `/api/*` → `backend:8084` by service name. No `host.docker.internal` needed.
-- **pgvector container**: `pgvector/pgvector:pg16` — backend waits on `service_healthy` (pg_isready). Postgres data persisted in named volume `postgres_data`. Local dev needs postgres on `localhost:5432` or run via `docker compose up`.
-- **note_links backfill**: runs once on first boot when the table is empty. To re-index from scratch: `TRUNCATE note_links;` in psql → restart backend.
-- **note_links partial invalidation**: `updateLinks(path, targets)` is per-note (DELETE WHERE source_path + INSERT) — only the written note's rows are replaced. Rename uses `renameTarget` / `renameSource` SQL UPDATEs — no full-table rebuild. Full rebuild only happens on first-boot backfill or manual TRUNCATE.
-- **note_links external-edit staleness**: edits made directly in Obsidian (outside the app) are NOT reflected in `note_links`. The table only updates when writes go through the app's API. Consequence: a backlink added externally will not be found by `findSourcesByTarget()` during rename. Workaround: TRUNCATE + restart to force a full re-index. WatchService cannot fix this — inotify does not propagate through Docker volume mounts on Windows.
-- **file-name cache (in-memory ArrayList)**: currently fully invalidated on every write. Partial invalidation (splice the one renamed path) is possible but not implemented — cache is disabled anyway. To re-enable cache: uncomment guards in `FileRepository.getNoteNames()` and `getReviewNotes()`. To make rename update cache without full rebuild: update `cache` ArrayList in-place inside `renameNote()`.
+- **WAR + embedded Tomcat**: `java -jar app.war` is self-executable despite `provided` scope.
+- **Volume mount on Windows**: file watching (inotify/WatchService) does NOT propagate from host → container. Startup delta sync handles external edits instead.
+- **pgvector container**: `pgvector/pgvector:pg16` — backend waits on `service_healthy`. Data persisted in `postgres_data` volume.
+- **Startup sync blocking mode**: app does not accept requests until `NoteIndexRepository.syncWithDisk()` completes. On large vaults with no changes, this is fast (only a DB query + Set comparison). On first boot or after many external edits, it reads changed files from disk.
+- **Startup sync async mode**: app starts immediately. `getNoteNames()` and `getReviewNotesPaged()` return partial results during sync. Choose this for faster boot at the cost of a brief stale window.
 
 ---
 
@@ -174,13 +239,15 @@ Vault is mounted read-write at `/vault` inside the backend container.
 
 | Thing to change | Where |
 |---|---|
-| Vault root path | Settings page → `PUT /api/settings` → `SettingsRepository` + `FileRepository.updateVaultPath()`; initial default from `VAULT_PATH` env var |
-| Image directory | Settings page → `PUT /api/settings` → `SettingsRepository`; initial default from `IMAGE_PATH` env var |
-| Review page size | Settings page → `PUT /api/settings` → `SettingsRepository`; default 20 |
-| Server port | `application.properties → server.port` + `docker-compose.yml` port mapping |
+| Vault root path | Settings page → `PUT /api/settings` → `FileRepository.updateVaultPath()` |
+| Image directory | Settings page → `PUT /api/settings` → `SettingsRepository` |
+| Review page size | Settings page → `PUT /api/settings` → `SettingsRepository` |
+| Startup sync mode | Settings page → `PUT /api/settings` → `SettingsRepository` |
+| Server port | `application.properties → server.port` |
 | Auth credentials | `application.properties → app.auth.username / app.auth.password` |
-| Review date format | `FileRepository.isBeforeToday()` |
-| Directories skipped in BFS | `FileRepository.getNoteNames()` skip list |
+| Frontmatter keys indexed | `FrontmatterParser.parse()` + `NoteIndexRepository` schema + `upsert()` |
+| Review sort order | `NoteIndexRepository.getReviewNotesPaged()` ORDER BY |
+| Directories skipped in BFS | `FileRepository.EXCLUDED_DIRS` |
 | Initial note frontmatter | `FileRepository.createNote()` |
 | Diff algorithm | `frontend/src/utils/diff.js lcsBacktrack()` |
 | Patch hunk DTO | `FileRepository.PatchHunk` |
@@ -188,42 +255,11 @@ Vault is mounted read-write at `/vault` inside the backend container.
 | Wiki-link regex (extract) | `NoteLinkRepository.WIKI_LINK` pattern |
 | Wiki-link regex (rewrite) | `NoteLinkRepository.rewriteLinks()` |
 | Postgres connection | `application.properties` (overridden by `SPRING_DATASOURCE_*` env vars) |
-| Postgres credentials | `docker-compose.yml` + `.env` `POSTGRES_PASSWORD` |
-| Re-enable file-name cache | Uncomment guards in `FileRepository.getNoteNames()` + `getReviewNotes()` |
-| Make rename partially update file-name cache | Update `cache` ArrayList in-place in `FileRepository.renameNote()` (not yet done) |
-| Force note_links full re-index | `TRUNCATE note_links;` in psql → restart backend |
-| Partial note_links invalidation trigger | Implicit — every app-side write calls `updateLinks(path, targets)` automatically |
-
----
-
-## GET /settings — Current Settings
-
-`MyController.getSettings()` → reads `SettingsRepository` → `{vaultPath, resourcePath, reviewPageSize}`  
-Public endpoint — no session required.
-
----
-
-## PUT /settings — Update Settings
-
-`MyController.updateSettings(UpdateSettingsRequest{vaultPath?, resourcePath?, reviewPageSize?})` — partial update, all fields optional  
-- `vaultPath`: calls `FileRepository.updateVaultPath()` → validates dir exists → saves to DB → sets `ROOT_FILE` → `invalidateCache()` → `NoteLinkRepository.forceRebuildLinks()` (TRUNCATE + re-backfill)  
-- `resourcePath`: `SettingsRepository.set("resourcePath", ...)` — takes effect on next image request  
-- `reviewPageSize`: `SettingsRepository.set("reviewPageSize", ...)` — validated 1–500  
-Returns updated settings object.  
-Requires session auth.
-
----
-
-## SettingsRepository — app_settings table
-
-`app_settings(key TEXT PRIMARY KEY, value TEXT)` — key-value store for runtime-editable config.  
-Seeded on first boot from env vars (`VAULT_PATH`, `IMAGE_PATH`) with `ON CONFLICT DO NOTHING`.  
-Defaults: `reviewPageSize=20`, `vaultPath=${VAULT_PATH}`, `resourcePath=${IMAGE_PATH}` (or `${VAULT_PATH}/resources/images`).  
-`getVaultPath()` / `getResourcePath()` / `getReviewPageSize()` — typed accessors used by other beans.  
-To force re-seed: `DELETE FROM app_settings;` → restart.
+| Force notes full re-index | `TRUNCATE notes; TRUNCATE note_links;` in psql → restart backend |
 
 ---
 
 ## Residual (next session)
 
-- **HTTP cache invalidation endpoint** — optional `/admin/invalidate` for cache clearing without restart
+- **HTTP resync endpoint** — optional `POST /admin/resync` to trigger delta sync without restart
+- **Trash UI** — list and restore notes from `_trash/`
