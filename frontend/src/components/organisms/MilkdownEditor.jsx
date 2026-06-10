@@ -4,6 +4,8 @@ import { commonmark } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { history } from '@milkdown/plugin-history';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
+import { prism } from '@milkdown/plugin-prism';
+import 'prismjs/themes/prism-tomorrow.css';
 import { defaultValueCtx, Editor, rootCtx, editorViewOptionsCtx, editorViewCtx } from '@milkdown/core';
 
 import useStore from '../../store/useStore';
@@ -49,6 +51,7 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUns
       .use(gfm)
       .use(history)
       .use(listener)
+      .use(prism)
       .use(mathPlugin)
       .use(obsidianImagePlugin)   // before wikiLinkPlugin: ![[]] must be consumed first
       .use(wikiLinkPlugin)
