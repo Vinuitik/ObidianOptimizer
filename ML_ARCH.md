@@ -98,6 +98,37 @@ Handles note shrinking (fewer chunks than before)
 
 ---
 
+## Detailed Implementation Plan
+
+### 1. Database & Hybrid Search Infrastructure
+*   **Custom Docker Image**: A custom `Dockerfile` for the database will be created based on PostgreSQL. It will include `pgvector` alongside a dedicated search extension (like ParadeDB / `pg_search` or a Tantivy-based extension) to provide robust, exact BM25 scoring functionality.
+*   **Schema (`note_chunks`)**:
+    *   `id` (UUID) - Primary Key
+    *   `note_path` (String) - Logical foreign key to the original markdown file
+    *   `chunk_index` (Integer) - Order of chunk within the note
+    *   `text` (Text) - Chunk contents or transcribed image context
+    *   `embedding` (vector 768) - For Ollama's `nomic-embed-text`
+*   **Hybrid Search Math (RRF)**:
+    *   **Formula**: `(1 / (60 + rank_bm25)) + (1 / (60 + rank_vector))`
+    *   `rank_vector`: Fetched via nearest-neighbor vector sorting.
+    *   `rank_bm25`: Fetched via the custom BM25 database extension.
+
+### 2. Image Pipeline Integration
+*   Image references (`![img]`) inside chunks trigger async HTTP POSTs to the Host Wrapper (`host.docker.internal:5001`).
+*   The wrapper invokes Claude Vision APIs to transcribe image contents/diagrams.
+*   The returned transcription is stored as an independent chunk for that `note_path` and embedded via Ollama into the standard text vector space.
+
+### 3. Application MCP Server Layer
+Spring Boot will act as an internal Model Context Protocol (MCP) server, exposing tools for LLM agents or internal UI elements:
+*   **Retrieval Tools**:
+    *   `mcp_search_notes(query, limit)`: Runs the RRF Hybrid Search and returns top chunks alongside parent references.
+    *   `mcp_get_note_content(note_path)`: Retrieves the fully compiled raw markdown for context context framing.
+*   **Mutation Tools**:
+    *   `mcp_create_note(title, content)`: Creates a new note file. Triggers local `EmbeddingService` to chunk, embed, and transcribe images.
+    *   `mcp_update_note(note_path, edited_content)`: Edits an existing note, triggering stale chunk cleanup and fresh indexing.
+
+---
+
 ## Image Pipeline (CNN gatekeeper + VLM distillation)
 
 `ImagePipelineService.toText(imagePath)`:
