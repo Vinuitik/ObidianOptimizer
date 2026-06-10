@@ -350,9 +350,9 @@ KaTeX CSS loaded globally in `main.jsx`.
 
 Post-processes Milkdown's serialized output before storing:
 1. Strips lines that are only `<br />` (Milkdown's empty-paragraph markers — Obsidian doesn't need them)
-2. Un-escapes `\#tag` at line start when not followed by space (`#hashtag` is valid Obsidian syntax, not a heading)
 
-Math blocks and wiki-links are emitted as raw HTML by their `toMarkdown` handlers — `cleanMilkdownOutput` does not touch them.
+`\#` unescaping was removed — `hashtagPlugin` emits `#tag` verbatim via the `html` node type, so `mdast-util-to-markdown` never sees or escapes them.  
+Math blocks and wiki-links are also emitted as raw HTML — `cleanMilkdownOutput` does not touch them.
 
 ---
 
@@ -552,6 +552,12 @@ Ports: `8083` → React (Nginx/Docker), `8082` → Java backend, `5173` → Dev 
 | Nginx proxy target | `frontend/nginx.conf` `proxy_pass` |
 | Dev proxy target | `vite.config.js` `server.proxy` |
 | Docker exposed port | `docker-compose.yml` `ports: 8083:80` |
+| Run frontend tests | `cd frontend && npm test` |
+| Add a component test | Create `ComponentName.test.jsx` next to the component |
+| Add a util test | Create `util.test.js` next to the util file |
+| Mock API in tests | `vi.mock('../api/notes', ...)` at module level before `import useStore` |
+| Reset store between tests | `useStore.setState(INITIAL)` — no replace flag, keeps actions |
+| Side-effect mock defaults | `beforeEach`: `api.fetchReview.mockResolvedValue(...)` etc. |
 
 ---
 
@@ -584,6 +590,69 @@ To add a new setting:
 2. Add the key to `SettingsRepository.java` (default + typed getter)
 3. Add the key to `MyController.SettingsResponse` + `UpdateSettingsRequest` records
 4. Handle the key in `MyController.updateSettings()`
+
+---
+
+## Testing
+
+Files: diff.test.js, markdownCleanup.test.js, useStore.test.js, TabBar.test.jsx, FrontmatterTable.test.jsx, FolderTree.filter.test.jsx, NewNoteForm.test.jsx, LoginModal.test.jsx
+
+### Run commands
+
+```powershell
+# From frontend/
+npm test           # vitest run (single pass, exits)
+npm run test:watch # vitest watch (re-runs on file change)
+```
+
+### Test files and coverage
+
+| File | What it covers |
+|---|---|
+| `utils/diff.test.js` | `computeHunks` + `applyHunks` — insert/delete/replace, multi-hunk, round-trip, CRLF, out-of-range |
+| `utils/markdownCleanup.test.js` | `cleanMilkdownOutput` — strips `<br />`, leaves `\#` untouched, preserves other markdown |
+| `store/useStore.test.js` | `openTab`, `_snapshotTab`, `switchTab`, `closeTab`, `cancelEdit`, `syncNote` |
+| `molecules/TabBar.test.jsx` | Empty/populated render, dirty indicator, switchTab/closeTab calls, active class |
+| `molecules/FrontmatterTable.test.jsx` | Empty/no-kv/populated render, em-dash for empty value, ignores non-kv lines |
+| `organisms/FolderTree.filter.test.jsx` | Search filter: match/no-match, folder shown when descendant matches, "No results" empty state, case-insensitive |
+| `organisms/NewNoteForm.test.jsx` | Folder hint, vault root hint, `createNote` called / not called on blank, `cancelNewNote` |
+| `organisms/LoginModal.test.jsx` | Inputs present (via `htmlFor`/`id`), sign in / cancel, credential submit, error message, overlay click |
+
+### Key patterns
+
+**API mocking** — module-level `vi.mock('../api/notes', ...)` with all exports listed explicitly. `@DynamicImport` order matters: mock must be declared before `import useStore`.
+
+**Store reset between tests:**
+```js
+const INITIAL = { tabs: [], activeTabIndex: -1, ... };
+function resetStore() {
+  useStore.setState(INITIAL); // merge (no replace flag) — keeps action functions intact
+}
+// Do NOT pass true as second arg: useStore.setState(INITIAL, true) wipes actions
+```
+
+**Side-effect defaults** — add in `beforeEach` after `vi.clearAllMocks()` to prevent unhandled rejections from background calls:
+```js
+api.fetchReview.mockResolvedValue({ notes: [], hasMore: false });
+api.fetchNames.mockResolvedValue([]);
+api.fetchChildren.mockResolvedValue({ parentPath: '', filePaths: [], folderPaths: [] });
+```
+
+**Store mock for component tests:**
+```js
+vi.mock('../../store/useStore', () => ({
+  default: vi.fn((selector) => selector({ ...allActionsAndState })),
+}));
+```
+Mutable state (e.g. `mockTabs`) declared as `let` outside the mock factory, mutated in `beforeEach` — the `vi.fn` selector closure re-evaluates each render.
+
+### Technology Notes — Testing
+
+- **CSS modules in jsdom**: class names resolve to `undefined` — tests can still verify `className` differs between active/inactive buttons using `container.querySelectorAll` and `!==` comparisons. Do not assert on exact class name strings.
+- **Hooks violation bug fixed in FolderTree.jsx**: `useEffect` was declared after a conditional early return for filtered-out folder nodes. React would see a different hook count between renders when a folder toggled from shown → hidden. Fixed by hoisting `isForceOpen` + `useEffect` above all early returns.
+- **LoginModal label association**: `<label>` elements must have `htmlFor` matching an input's `id` for `getByLabelText` to work. The component was fixed to add `htmlFor="login-username"` / `htmlFor="login-password"`.
+- **`getByText` vs `getByRole`**: when an element's text appears in multiple places (e.g. "Sign in" as both a `<span>` title and a `<Button>`), use `getByRole('button', { name: 'Sign in' })` to target the interactive element specifically.
+- **`role="button"` on spans**: `TabBar` uses `<span role="button">` for the close button inside each tab `<button>`. `getAllByRole('button')` returns both — filter with `.getAttribute('aria-label') !== 'Close tab'` to get only tab-level buttons.
 
 ---
 

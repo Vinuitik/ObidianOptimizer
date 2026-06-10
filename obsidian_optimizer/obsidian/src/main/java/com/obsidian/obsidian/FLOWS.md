@@ -256,6 +256,13 @@ Three services via `docker-compose.yml`. Start: `.\start.ps1`. Stop: `Ctrl+C`.
 | Wiki-link regex (rewrite) | `NoteLinkRepository.rewriteLinks()` |
 | Postgres connection | `application.properties` (overridden by `SPRING_DATASOURCE_*` env vars) |
 | Force notes full re-index | `TRUNCATE notes; TRUNCATE note_links;` in psql → restart backend |
+| Run unit tests | `mvn test -Dtest="!*IT"` |
+| Run integration tests | `mvn test -Dtest="*IT"` (Docker required) |
+| Add a new unit test | `src/test/java/.../` — extend relevant `*Test.java` |
+| Add a new IT test | `NoteLifecycleIT.java` (DB/file lifecycle) or `ChronoServiceIT.java` (jobs) |
+| Change IT Postgres image | `NoteLifecycleIT.java` + `ChronoServiceIT.java` `PostgreSQLContainer<>(...)` |
+| Change IT vault path | Static initializer block in each IT class |
+| Mockito strict mode | `@MockitoSettings(strictness = ...)` on the test class |
 
 ---
 
@@ -327,6 +334,98 @@ Works on both future and overdue notes (negative deltas cascade forward through 
 | `maxDailyReviews` | `30` | Yes |
 | `bankruptcyLimit` | `200` | Yes |
 | `chronoLastRunDate` | `""` | No (internal) |
+
+---
+
+## Testing
+
+Files: FrontmatterRewriterTest.java, FileMoverServiceTest.java, FileCheckerServiceTest.java, BankruptcyServiceTest.java, SpreadServiceTest.java, FileRepositoryPatchTest.java, NoteLinkRepositoryTest.java, MyControllerTest.java, NoteLifecycleIT.java, ChronoServiceIT.java, ObsidianApplicationTests.java
+
+### Run commands
+
+```powershell
+# Unit tests only (fast, no Docker)
+mvn test -Dtest="!*IT" --no-transfer-progress
+
+# Integration tests only (pulls postgres:16 via Testcontainers — Docker must be running)
+mvn test -Dtest="*IT" --no-transfer-progress
+
+# All tests
+mvn test --no-transfer-progress
+```
+
+### Layer 1 — Unit tests (no Spring, no DB)
+
+All use `@ExtendWith(MockitoExtension.class)` + `@TempDir` for real temp files.  
+`@MockitoSettings(strictness = Strictness.LENIENT)` on `FileRepositoryPatchTest` — shared `@BeforeEach` stubs are unused by early-exit tests (null/empty hunks, missing file).  
+`@PostConstruct` is NOT invoked in plain Mockito tests — no Spring context.
+
+| Test class | What it covers |
+|---|---|
+| `FrontmatterRewriterTest` | `read()`, `write()`, `hasInvalidDate()` — CRLF preservation, null sr-due, round-trip |
+| `FileMoverServiceTest` | All 9 media extensions → correct subdirs; non-recursive; unknown ext stays |
+| `FileCheckerServiceTest` | Fix triggered on invalid date; reset to `{today+3, 3, 200}`; valid dates untouched |
+| `BankruptcyServiceTest` | Threshold (count ≥ limit), 4 tier intervals, ease floor (215), future notes excluded |
+| `SpreadServiceTest` | Within-cap no-op, overflow cascade, lowest-ease stays, overdue cascade, empty list |
+| `FileRepositoryPatchTest` | Single insert/delete/replace, multi-hunk back-to-front, CRLF, out-of-range throws |
+| `NoteLinkRepositoryTest` | `extractTargets()` (dedupe, path prefix, display text), `rewriteLinks()` (all forms) |
+
+### Layer 2 — Controller tests (MockMvc + Mockito)
+
+`MyControllerTest` — `@WebMvcTest(MyController.class)` + `@MockBean` for `FileRepository`, `SettingsRepository`, `ChronoService`.
+
+Endpoints covered: `GET /names`, `GET /review`, `GET /text`, `POST /notes`, `PATCH /notes/content`, `PATCH /notes/rename`, `DELETE /notes`, `GET /chrono/status`, `POST /chrono/run`.
+
+Settings validation: `maxDailyReviews`, `bankruptcyLimit`, `reviewPageSize`, `startupSyncMode`.
+
+### Layer 4 — Integration tests (Testcontainers + real Postgres)
+
+Both IT classes share the same pattern:
+
+```
+@Testcontainers
+@SpringBootTest(webEnvironment = NONE)
+class *IT {
+  @Container static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16");
+  static final Path VAULT;  // static initializer — runs before Spring reads @DynamicPropertySource
+  static { VAULT = Files.createTempDirectory(...); }
+
+  @DynamicPropertySource
+  static void configure(DynamicPropertyRegistry r) {
+    r.add("VAULT_PATH", VAULT::toString);
+    r.add("spring.datasource.url", postgres::getJdbcUrl);
+    ...
+  }
+  @AfterEach void cleanAll() { ... noteIndex.forceResync(List.<File>of()); }
+}
+```
+
+**Why static initializer instead of `@BeforeAll`:** `@DynamicPropertySource` suppliers are evaluated during Spring context creation, which may run before `@BeforeAll`. The static field initializer is guaranteed to run when the class loads — before any JUnit or Spring machinery.
+
+**Why `postgres:16` not `pgvector/pgvector:pg16`:** pgvector features are not yet used in production code (planned for ML layer). Standard `postgres:16` starts faster on CI.
+
+#### NoteLifecycleIT
+
+`@MockBean ChronoService` — prevents `onStartup()` from running jobs against the test vault.
+
+Covers: `createNote()` upserts to DB, delta sync (insert/skip unchanged/delete removed), `patchNote()`, `renameNote()` + backlink rewrite, `softDeleteNote()` → `_trash/`, review queue due-filter + `hasMore` flag, `NoteLinkRepository` index update + rename.
+
+#### ChronoServiceIT
+
+Real `ChronoService` bean. `@BeforeEach` resets `chronoLastRunDate = ""` so `onStartup()` ran once during context creation (empty vault); each test pre-populates vault then calls `runAllJobs()` directly.
+
+Covers: `FileMoverService` moves `.png` to `resources/images/`, `FileCheckerService` fixes "Invalid date" frontmatter, `SpreadService` shifts over-cap notes, `BankruptcyService` below-threshold no-op, `getLastRunDate()` = today, `onStartup()` same-day idempotency.
+
+#### ObsidianApplicationTests
+
+`@Disabled` — context load is verified by the IT classes which run against a real DB. Kept in source to document the intent; re-enable by removing `@Disabled` and running with a live Postgres.
+
+### Technology Notes — Testing
+
+- **Testcontainers on CI**: GitHub-hosted ubuntu runners have Docker. `TESTCONTAINERS_RYUK_DISABLED=true` in CI workflow avoids permission issues with the Ryuk reaper container.
+- **Spring context caching**: Spring Boot Test caches the application context per unique configuration. `NoteLifecycleIT` (has `@MockBean ChronoService`) and `ChronoServiceIT` (no mock) have different configurations → two separate containers start. Each test class gets its own Postgres container.
+- **`@MockitoSettings(LENIENT)` scope**: applies only to the annotated class, not globally. The default `STRICT_STUBS` is preserved everywhere else.
+- **`@TempDir` lifecycle**: `static @TempDir` lasts for the entire test class; instance `@TempDir` is recreated per test method. Integration tests use a static initializer instead (see above).
 
 ---
 
