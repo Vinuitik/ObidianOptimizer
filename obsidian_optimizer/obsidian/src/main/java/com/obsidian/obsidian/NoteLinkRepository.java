@@ -78,6 +78,11 @@ public class NoteLinkRepository {
         backfill(notePaths);
     }
 
+    // Truncate only — used when a full resync will repopulate via updateLinks calls.
+    public void truncateLinks() {
+        jdbc.execute("TRUNCATE note_links");
+    }
+
     // Truncate and fully rebuild the link index (used when vault path changes).
     public void forceRebuildLinks(List<String> notePaths) {
         jdbc.execute("TRUNCATE note_links");
