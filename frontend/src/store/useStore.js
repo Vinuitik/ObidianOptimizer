@@ -5,6 +5,7 @@ import {
   checkAuth, login as apiLogin, logout as apiLogout,
   createNote as apiCreate, patchNote as apiPatch,
   renameNote as apiRename, deleteNote as apiDelete,
+  moveNote as apiMoveNote,
   fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings,
 } from '../api/notes';
 import { computeHunks, applyHunks } from '../utils/diff';
@@ -392,6 +393,36 @@ const useStore = create((set, get) => ({
       await get().fetchChildrenOf(parentFolder);
       get().fetchNoteNames();
       get().fetchReviewNotes(get().reviewOffset);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
+      else throw e;
+    }
+  },
+
+  // ── Move ─────────────────────────────────────────────────────────────────
+
+  moveNote: async (sourcePath, targetFolder) => {
+    try {
+      const { path: newPath } = await apiMoveNote(sourcePath, targetFolder);
+
+      // Update any open tab that was displaying the moved note
+      const { tabs, activeTabIndex } = get();
+      const tabIdx = tabs.findIndex(t => t.path === sourcePath);
+      if (tabIdx >= 0) {
+        const updated = [...tabs];
+        updated[tabIdx] = { ...updated[tabIdx], path: newPath };
+        const patch = { tabs: updated };
+        if (tabIdx === activeTabIndex) patch.currentNotePath = newPath;
+        set(patch);
+      }
+
+      // Refresh both the source and target folders in the tree
+      const sourceParent = getParentPath(sourcePath);
+      await Promise.all([
+        get().fetchChildrenOf(sourceParent),
+        get().fetchChildrenOf(targetFolder),
+      ]);
+      get().fetchNoteNames();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
       else throw e;

@@ -109,6 +109,15 @@ export async function deleteNote(path) {
   });
 }
 
+export async function moveNote(sourcePath, targetFolder) {
+  const res = await req(`${BASE}/notes/move`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourcePath, targetFolder }),
+  });
+  return res.json();
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 // Returns { vaultPath, resourcePath, reviewPageSize }.
