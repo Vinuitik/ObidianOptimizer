@@ -20,7 +20,6 @@ import java.util.Set;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -30,10 +29,10 @@ public class FileRepository {
 
     private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources");
 
-    @Value("${VAULT_PATH:C:/Users/ACER/Desktop/NewLife}")
     private String ROOT_FILE;
 
     private final NoteLinkRepository noteLinkRepo;
+    private final SettingsRepository settingsRepo;
 
     ArrayList<String> cache;
     boolean cacheUpToDate = false;
@@ -41,13 +40,26 @@ public class FileRepository {
     ArrayList<String> cacheReview;
     boolean cacheReviewUpToDate = false;
 
-    public FileRepository(NoteLinkRepository noteLinkRepo) {
+    public FileRepository(NoteLinkRepository noteLinkRepo, SettingsRepository settingsRepo) {
         this.noteLinkRepo = noteLinkRepo;
+        this.settingsRepo = settingsRepo;
     }
 
     @PostConstruct
     public void init() {
+        ROOT_FILE = settingsRepo.getVaultPath();
         noteLinkRepo.backfillIfEmpty(getNoteNames());
+    }
+
+    public void updateVaultPath(String newPath) throws IOException {
+        File dir = new File(newPath);
+        if (!dir.exists() || !dir.isDirectory()) {
+            throw new IOException("Directory not found: " + newPath);
+        }
+        settingsRepo.set("vaultPath", newPath);
+        ROOT_FILE = newPath;
+        invalidateCache();
+        noteLinkRepo.forceRebuildLinks(getNoteNames());
     }
 
     public void invalidateCache() {

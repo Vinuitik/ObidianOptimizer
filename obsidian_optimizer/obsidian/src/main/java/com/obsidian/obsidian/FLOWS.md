@@ -1,12 +1,12 @@
 # Backend Flows
 
-Files: ObsidianApplication.java, MyController.java, FileRepository.java, NoteLinkRepository.java, ImageRepository.java, WebConfig.java, SecurityConfig.java, ServletInitializer.java
+Files: ObsidianApplication.java, MyController.java, FileRepository.java, NoteLinkRepository.java, ImageRepository.java, SettingsRepository.java, WebConfig.java, SecurityConfig.java, ServletInitializer.java
 
 ---
 
 ## Startup
 
-`ObsidianApplication.main()` → `SpringApplication.run()` → beans init: `FileRepository`, `ImageRepository`, `MyController`, `SecurityConfig` → Tomcat on port 8082  
+`ObsidianApplication.main()` → `SpringApplication.run()` → beans init: `SettingsRepository` (seeds `app_settings` table) → `FileRepository` (reads vault path from `SettingsRepository`, backfills `note_links`) → `ImageRepository`, `MyController`, `SecurityConfig` → Tomcat on port 8082  
 To change port: `application.properties → server.port`
 
 ---
@@ -174,8 +174,9 @@ Vault is mounted read-write at `/vault` inside the backend container.
 
 | Thing to change | Where |
 |---|---|
-| Vault root path | `.env` → `HOST_VAULT_PATH` (host) / `VAULT_PATH` env var (container) |
-| Image directory | `IMAGE_PATH` env var in `docker-compose.yml` (defaults to `VAULT_PATH/resources/images`) |
+| Vault root path | Settings page → `PUT /api/settings` → `SettingsRepository` + `FileRepository.updateVaultPath()`; initial default from `VAULT_PATH` env var |
+| Image directory | Settings page → `PUT /api/settings` → `SettingsRepository`; initial default from `IMAGE_PATH` env var |
+| Review page size | Settings page → `PUT /api/settings` → `SettingsRepository`; default 20 |
 | Server port | `application.properties → server.port` + `docker-compose.yml` port mapping |
 | Auth credentials | `application.properties → app.auth.username / app.auth.password` |
 | Review date format | `FileRepository.isBeforeToday()` |
@@ -192,6 +193,34 @@ Vault is mounted read-write at `/vault` inside the backend container.
 | Make rename partially update file-name cache | Update `cache` ArrayList in-place in `FileRepository.renameNote()` (not yet done) |
 | Force note_links full re-index | `TRUNCATE note_links;` in psql → restart backend |
 | Partial note_links invalidation trigger | Implicit — every app-side write calls `updateLinks(path, targets)` automatically |
+
+---
+
+## GET /settings — Current Settings
+
+`MyController.getSettings()` → reads `SettingsRepository` → `{vaultPath, resourcePath, reviewPageSize}`  
+Public endpoint — no session required.
+
+---
+
+## PUT /settings — Update Settings
+
+`MyController.updateSettings(UpdateSettingsRequest{vaultPath?, resourcePath?, reviewPageSize?})` — partial update, all fields optional  
+- `vaultPath`: calls `FileRepository.updateVaultPath()` → validates dir exists → saves to DB → sets `ROOT_FILE` → `invalidateCache()` → `NoteLinkRepository.forceRebuildLinks()` (TRUNCATE + re-backfill)  
+- `resourcePath`: `SettingsRepository.set("resourcePath", ...)` — takes effect on next image request  
+- `reviewPageSize`: `SettingsRepository.set("reviewPageSize", ...)` — validated 1–500  
+Returns updated settings object.  
+Requires session auth.
+
+---
+
+## SettingsRepository — app_settings table
+
+`app_settings(key TEXT PRIMARY KEY, value TEXT)` — key-value store for runtime-editable config.  
+Seeded on first boot from env vars (`VAULT_PATH`, `IMAGE_PATH`) with `ON CONFLICT DO NOTHING`.  
+Defaults: `reviewPageSize=20`, `vaultPath=${VAULT_PATH}`, `resourcePath=${IMAGE_PATH}` (or `${VAULT_PATH}/resources/images`).  
+`getVaultPath()` / `getResourcePath()` / `getReviewPageSize()` — typed accessors used by other beans.  
+To force re-seed: `DELETE FROM app_settings;` → restart.
 
 ---
 

@@ -1,6 +1,6 @@
 # Frontend Flows
 
-Files: main.jsx, App.jsx, App.module.css, pages/MainPage.jsx, pages/SettingsPage.jsx, pages/ReviewPage.jsx, store/useStore.js, api/notes.js, env.js, utils/diff.js, utils/frontmatter.js, utils/wikiLinkPlugin.js, utils/obsidianImagePlugin.js, utils/hashtagPlugin.js, utils/livePreviewPlugin.js, utils/mathPlugin.js, utils/markdownCleanup.js, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Button.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, templates/SplitLayout.jsx
+Files: main.jsx, App.jsx, App.module.css, pages/MainPage.jsx, pages/SettingsPage.jsx, pages/SettingsPage.module.css, pages/ReviewPage.jsx, store/useStore.js, api/notes.js, env.js, utils/diff.js, utils/frontmatter.js, utils/wikiLinkPlugin.js, utils/obsidianImagePlugin.js, utils/hashtagPlugin.js, utils/livePreviewPlugin.js, utils/mathPlugin.js, utils/markdownCleanup.js, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Button.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, templates/SplitLayout.jsx
 
 Design system, state shape, and markdown rendering → [DESIGN.md](DESIGN.md)
 
@@ -10,7 +10,7 @@ Design system, state shape, and markdown rendering → [DESIGN.md](DESIGN.md)
 
 `main.jsx` → `createRoot` → `<App>` → `<BrowserRouter>` → `<NavBar>` + `<AnimatedRoutes>`  
 `AnimatedRoutes` wraps all `<Routes>` in Framer Motion `AnimatePresence` — 180ms opacity fade on route change  
-`MainPage` `useEffect` → parallel: `checkAuth()` + `fetchRootChildren()` + `fetchNoteNames()` + `initReviewSession()` → store updated → render
+`MainPage` `useEffect` → `loadSettings()` (GET /api/settings → populates `store.settings`) → `.then(initReviewSession)` (uses `reviewPageSize` from settings); parallel: `checkAuth()`, `fetchRootChildren()`, `fetchNoteNames()`
 
 ---
 
@@ -20,7 +20,7 @@ Design system, state shape, and markdown rendering → [DESIGN.md](DESIGN.md)
 |---|---|---|
 | `/` | `MainPage` | 3-panel WYSIWYG note editor |
 | `/review` | `ReviewPage` | Dedicated review queue [stub] |
-| `/settings` | `SettingsPage` | Vault settings [stub] |
+| `/settings` | `SettingsPage` | Vault path, resource path, review page size |
 
 Route transitions: `AnimatePresence mode="wait"` + Framer Motion `motion.div` `opacity 0→1 / 1→0` at 180ms  
 To add a route: add to `NAV_ITEMS` in `NavBar.jsx` + add `<Route>` in `App.jsx` + create page component  
@@ -420,6 +420,8 @@ Write calls use `credentials: 'same-origin'` — session cookie included automat
 | `patchNote(path, hunks)` | `PATCH /api/notes/content` | Yes |
 | `renameNote(oldPath, name)` | `PATCH /api/notes/rename` | Yes |
 | `deleteNote(path)` | `DELETE /api/notes` | Yes |
+| `fetchSettings()` | `GET /api/settings` | No |
+| `saveSettings(patch)` | `PUT /api/settings` | Yes |
 
 ---
 
@@ -490,6 +492,8 @@ Ports: `8083` → React (Nginx/Docker), `8082` → Java backend, `5173` → Dev 
 | Streak display | `NavBar.jsx` hardcoded "12-day streak" — wire to `streakDays` in store when backend supports it |
 | Search filter logic | `FolderTree.jsx` `hasMatch()` |
 | Review card layout | `ReviewList.jsx` + `ReviewList.module.css` |
+| Add a new setting | `pages/SettingsPage.jsx` `SECTIONS` array + backend `SettingsRepository` + `MyController` records |
+| Settings page styles | `pages/SettingsPage.module.css` |
 | Due count in panel header | `SplitLayout.jsx` `dueSlot` — reads `reviewNotes.length` |
 | Page routes | `App.jsx` `<Routes>` + `NavBar.jsx` `NAV_ITEMS` |
 | Route transition speed | `App.jsx` `pageVariants` |
@@ -516,11 +520,26 @@ Ports: `8083` → React (Nginx/Docker), `8082` → Java backend, `5173` → Dev 
 
 ---
 
+## Settings Page (SettingsPage.jsx)
+
+`SECTIONS` config array in `SettingsPage.jsx` drives all setting rows — add new settings by adding entries there.  
+On mount: initialises local draft state from `store.settings` (set by `loadSettings()` at startup).  
+Each section has a "Save" button — only active when values differ from `store.settings` (dirty check).  
+Save → `applySettings(patch)` → `PUT /api/settings` → updates `store.settings` + re-fetches review queue if `reviewPageSize` changed.  
+`vaultPath` change: backend re-indexes `note_links` (TRUNCATE + backfill) — may take a moment on large vaults.
+
+To add a new setting:
+1. Add an entry to the relevant `SECTIONS[].fields` array in `SettingsPage.jsx` (`key`, `label`, `type`, optional `hint`)
+2. Add the key to `SettingsRepository.java` (default + typed getter)
+3. Add the key to `MyController.SettingsResponse` + `UpdateSettingsRequest` records
+4. Handle the key in `MyController.updateSettings()`
+
+---
+
 ## Residual (next session)
 
 - **Frontmatter editing** — inline editing of frontmatter fields in the UI [NOT IMPLEMENTED]
 - **Trash UI** — list and restore notes from `_trash/`
 - **Review page** — build out `ReviewPage.jsx` (currently a stub)
-- **Settings page** — build out `SettingsPage.jsx` (currently a stub)
 - **Math editing** — math nodes are currently read-only atoms; clicking to edit inline is not implemented
 - **Tab persistence** — tab state is lost on page refresh (Zustand in-memory only)
