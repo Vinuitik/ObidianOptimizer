@@ -138,7 +138,8 @@ public class MyController {
         return new SettingsResponse(
             settingsRepo.getVaultPath(),
             settingsRepo.getResourcePath(),
-            settingsRepo.getReviewPageSize()
+            settingsRepo.getReviewPageSize(),
+            settingsRepo.getStartupSyncMode()
         );
     }
 
@@ -157,6 +158,12 @@ public class MyController {
                 }
                 settingsRepo.set("reviewPageSize", String.valueOf(req.reviewPageSize()));
             }
+            if (req.startupSyncMode() != null) {
+                if (!req.startupSyncMode().equals("blocking") && !req.startupSyncMode().equals("async")) {
+                    return ResponseEntity.badRequest().body("startupSyncMode must be 'blocking' or 'async'");
+                }
+                settingsRepo.set("startupSyncMode", req.startupSyncMode());
+            }
             return ResponseEntity.ok(getSettings());
         } catch (Exception e) {
             log.error("[updateSettings] failed: {}", e.getMessage());
@@ -171,6 +178,6 @@ public class MyController {
     record PatchNoteRequest(String path, List<FileRepository.PatchHunk> hunks) {}
     record RenameNoteRequest(String oldPath, String newName) {}
     record DeleteNoteRequest(String path) {}
-    record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize) {}
-    record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize) {}
+    record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize, String startupSyncMode) {}
+    record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize, String startupSyncMode) {}
 }

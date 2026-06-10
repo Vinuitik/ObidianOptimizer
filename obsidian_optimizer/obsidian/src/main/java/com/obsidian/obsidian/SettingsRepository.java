@@ -37,6 +37,7 @@ public class SettingsRepository {
         insertDefault("vaultPath", defaultVaultPath);
         insertDefault("resourcePath", imagePath);
         insertDefault("reviewPageSize", "20");
+        insertDefault("startupSyncMode", "blocking");
     }
 
     private void insertDefault(String key, String value) {
@@ -66,5 +67,10 @@ public class SettingsRepository {
 
     public int getReviewPageSize() {
         return Integer.parseInt(get("reviewPageSize"));
+    }
+
+    // "blocking" | "async"
+    public String getStartupSyncMode() {
+        return get("startupSyncMode");
     }
 }
