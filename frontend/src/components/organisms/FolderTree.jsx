@@ -34,6 +34,18 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
   const createFolder    = useStore(s => s.createFolder);
   const fetchChildrenOf = useStore(s => s.fetchChildrenOf);
 
+  // Compute unconditionally — useEffect must be called before any early return
+  const isForceOpen = node.type === 'folder' && !!query && hasMatch(name, node, query);
+  const isOpen = isForceOpen || open;
+
+  // Must be before ALL conditional returns (rules of hooks)
+  useEffect(() => {
+    if (isForceOpen && !node.loaded && !loading) {
+      setLoading(true);
+      fetchChildrenOf(node.fullPath).finally(() => setLoading(false));
+    }
+  }, [isForceOpen]);
+
   // ── File node ──────────────────────────────────────────────────────────────
   if (node.type === 'file') {
     const displayName = name.replace(/\.md$/, '');
@@ -63,16 +75,6 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
 
   // ── Folder node ────────────────────────────────────────────────────────────
   if (query && !hasMatch(name, node, query)) return null;
-
-  const isForceOpen = !!query && hasMatch(name, node, query);
-  const isOpen = isForceOpen || open;
-
-  useEffect(() => {
-    if (isForceOpen && !node.loaded && !loading) {
-      setLoading(true);
-      fetchChildrenOf(node.fullPath).finally(() => setLoading(false));
-    }
-  }, [isForceOpen]);
 
   async function handleToggle() {
     if (!open && !node.loaded && !loading) {
