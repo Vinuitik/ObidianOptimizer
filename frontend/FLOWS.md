@@ -187,7 +187,7 @@ To add AI-note sparkle badge: pass `isAI={true}` to `NavItem` — shows trailing
 1. `GET /api/text?noteName=<fullPath>` → raw markdown string
 2. `splitFrontmatter(raw)` → `{ frontmatter, body }`
 3. Store sets: `currentNoteRaw = raw`, `pendingRaw = raw`, `pendingFrontmatter = frontmatter`, `pendingTitle = basename`, `isMutable = false`, `centerMode = 'view'`
-4. `MilkdownEditor` re-renders — `key={currentNotePath}-${editorResetKey}` forces a clean Milkdown remount
+4. `MilkdownEditor` re-renders — `MilkdownProvider key={currentNotePath}-${editorResetKey}` tears down the full schema context and remounts clean
 
 `splitFrontmatter` is in `utils/frontmatter.js` — strips the `---` block so body passed to Milkdown is clean markdown.
 
@@ -202,10 +202,12 @@ To add AI-note sparkle badge: pass `isAI={true}` to `NavItem` — shows trailing
 ```
 MilkdownEditor (outer)
   └─ FrontmatterTable           — read-only display of frontmatter fields
-  └─ MilkdownProvider           — context provider
-       └─ MilkdownEditorInner   — key={currentNotePath}-{editorResetKey} → remounts on note change OR cancel
+  └─ MilkdownProvider           — key={currentNotePath}-{editorResetKey} → full context teardown on note change OR cancel
+       └─ MilkdownEditorInner   — stateless inner; remounts with the provider
             └─ Milkdown         — renders [data-milkdown-root] → .milkdown → .ProseMirror
 ```
+
+The `key` must be on `MilkdownProvider` (not the inner component) — keying only the inner component lets the provider's schema context persist, causing `doc` node collision on the second init.
 
 ### Milkdown configuration
 
@@ -217,7 +219,8 @@ Editor.make()
     ctx.update(editorViewOptionsCtx, prev => ({ ...prev, editable: () => isMutable }));
     ctx.get(listenerCtx).markdownUpdated((_, md) => onBodyChange(cleanMilkdownOutput(md)));
   })
-  .use(gfm)
+  .use(commonmark)            // REQUIRED: provides doc + all base ProseMirror nodes (125 plugins)
+  .use(gfm)                   // REQUIRED alongside commonmark: adds tables/strikethrough/tasks (48 plugins)
   .use(history)
   .use(listener)
   .use(mathPlugin)            // before wikiLinkPlugin: \[...\] must be consumed first
@@ -226,6 +229,8 @@ Editor.make()
   .use(hashtagPlugin)         // after wikiLink so [[#heading]] is already consumed
   .use(livePreviewPlugin)
 ```
+
+**Critical:** `gfm` alone causes `Schema is missing its top node type ('doc')` at startup. Both presets are required.
 
 `markdownUpdated` fires on every keystroke → `cleanMilkdownOutput(md)` → `updatePending(body)` → `joinFrontmatter(pendingFrontmatter, body)` → stored as `pendingRaw`
 

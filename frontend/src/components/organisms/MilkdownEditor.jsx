@@ -23,22 +23,10 @@ import styles from './MilkdownEditor.module.css';
 function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
   const [loading, getInstance] = useInstance();
   const skipFirst = useRef(true);
-  const renderCount = useRef(0);
-  renderCount.current += 1;
-
-  console.debug(`[MilkdownEditor] render #${renderCount.current} — body length: ${body.length} | first 80: ${JSON.stringify(body.slice(0, 80))}`);
-
-  useEffect(() => {
-    console.debug(`[MilkdownEditor] MOUNTED (render #${renderCount.current}) — body length: ${body.length}`);
-    return () => console.debug('[MilkdownEditor] UNMOUNTED');
-  }, []);
 
   useEditor((root) => {
-    console.debug('[MilkdownEditor] useEditor factory called — body length:', body.length,
-      '| first 80:', JSON.stringify(body.slice(0, 80)));
     return Editor.make()
       .config((ctx) => {
-        console.debug('[MilkdownEditor] config callback — setting defaultValueCtx, body length:', body.length);
         ctx.set(rootCtx, root);
         ctx.set(defaultValueCtx, body);
         ctx.update(editorViewOptionsCtx, prev => ({
@@ -55,25 +43,15 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange }) {
       .use(history)
       .use(listener)
       .use(mathPlugin)
-      .use(obsidianImagePlugin)
+      .use(obsidianImagePlugin)   // before wikiLinkPlugin: ![[]] must be consumed first
       .use(wikiLinkPlugin)
-      .use(hashtagPlugin)
+      .use(hashtagPlugin)         // after wikiLink: [[#heading]] already consumed
       .use(livePreviewPlugin);
   });
 
   useEffect(() => {
-    if (loading) {
-      console.debug('[MilkdownEditor] loading=true (editor not ready yet)');
-      return;
-    }
-    const instance = getInstance();
-    const docContent = instance?.action(ctx => {
-      try { return ctx.get(editorViewCtx)?.state.doc.textContent.slice(0, 120); }
-      catch { return '<error reading doc>'; }
-    });
-    console.debug('[MilkdownEditor] editor READY — isMutable:', isMutable,
-      '| doc.textContent (first 120):', JSON.stringify(docContent));
-    instance?.action((ctx) => {
+    if (loading) return;
+    getInstance()?.action((ctx) => {
       ctx.get(editorViewCtx)?.setProps({ editable: () => isMutable });
     });
   }, [isMutable, loading]);
@@ -114,9 +92,6 @@ export default function MilkdownEditor() {
   }
 
   const { body } = splitFrontmatter(pendingRaw);
-
-  console.debug('[MilkdownEditor] rendering note:', currentNotePath,
-    '| pendingRaw length:', pendingRaw.length, '| body length:', body.length);
 
   return (
     <div className={styles.wrapper} onClick={handleClick}>

@@ -85,7 +85,7 @@ State is in-memory only — lost on page refresh. `checkAuth()` re-runs on every
 
 ## Markdown Rendering
 
-The app uses **Milkdown** (ProseMirror-based WYSIWYG) with `@milkdown/preset-gfm` (a superset of commonmark — includes tables, task lists, strikethrough). `utils/markdown.js` is a legacy file and is no longer used in the main editor flow.
+The app uses **Milkdown** (ProseMirror-based WYSIWYG) with **both** `@milkdown/preset-commonmark` (125 plugins — provides all base nodes including the required `doc` root) and `@milkdown/preset-gfm` (48 plugins — adds tables, task lists, strikethrough on top). Both must be loaded; `gfm` alone omits `doc` and causes a ProseMirror schema crash. `utils/markdown.js` is a legacy file and is no longer used in the main editor flow.
 
 ### Milkdown rendering pipeline
 
@@ -140,7 +140,9 @@ To change visual style: `.pm-active-mark::before/::after` in `MilkdownEditor.mod
 - **Google Fonts**: CDN link in `index.html`. Requires internet at load time; falls back to system sans-serif offline. To bundle: add to `public/fonts/` and use `@font-face` in `tokens.css`.
 - **CSS Modules**: class names scoped by Vite. Never use global class names inside `.module.css` files.
 - **KaTeX**: bundled client-side via `katex` npm package. Math is rendered synchronously in `toDOM`. KaTeX CSS loaded in `main.jsx`. Math nodes are `contenteditable="false"` atoms — no inline editing. To change math rendering: `utils/mathPlugin.js`.
-- **@milkdown/preset-gfm**: replaces `@milkdown/preset-commonmark` — it is a strict superset. Adds tables, task lists, strikethrough. All custom plugins are compatible since they hook into the same base node types.
+- **@milkdown/preset-commonmark + @milkdown/preset-gfm**: must be used together. `gfm` is NOT a self-contained superset — it only ships 48 GFM-specific plugins (tables, strikethrough, task lists) and depends on `commonmark`'s 125 base plugins for the ProseMirror schema root (`doc`) and all standard nodes. Using `.use(gfm)` alone throws `Schema is missing its top node type ('doc')` at schema compile time.
+- **Custom `$node` plugins** (`mathPlugin`, `wikiLinkPlugin`, etc.): `$remark()` returns `MilkdownPlugin[]` and must be spread into the plugin array (`[...hashtagRemark$, hashtagNode$]`). `$node()` returns a single plugin — no spreading. `parseMarkdown.runner` receives `(state, node, type)` — use `type` directly, not `state.type(name)`.
+- **MilkdownProvider key**: the `key` prop must be on `MilkdownProvider` (not on the inner component). Keying the inner component only lets the provider's schema context persist across remounts, which causes schema corruption on the second editor init.
 
 ---
 
