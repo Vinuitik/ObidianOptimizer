@@ -1,7 +1,7 @@
 import Icon from '../atoms/Icon';
 import styles from './NavItem.module.css';
 
-export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDragOver, depth, onClick, onAdd, onDelete, children }) {
+export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDragOver, depth, onClick, onAdd, onAddFolder, onDelete, children }) {
   return (
     <div style={{ paddingLeft: depth * 14 }}>
       <div className={`${styles.row} ${isActive ? styles.active : ''} ${isDragOver ? styles.dragOver : ''}`} onClick={onClick}>
@@ -24,6 +24,15 @@ export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDrag
           {name}
         </span>
         {isAI && <Icon name="sparkle" size={13} color="var(--color-accent-soft)" />}
+        {onAddFolder && (
+          <button
+            className={styles.addBtn}
+            onClick={e => { e.stopPropagation(); onAddFolder(); }}
+            title="New subfolder"
+          >
+            <Icon name="folder" size={12} color="currentColor" />
+          </button>
+        )}
         {onAdd && (
           <button
             className={styles.addBtn}

@@ -21,14 +21,17 @@ function hasMatch(name, node, query) {
 const DRAG_TYPE = 'application/obsidian-note';
 
 function TreeNode({ name, node, depth, query, currentNotePath }) {
-  const [open, setOpen]         = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const [dragOver, setDragOver] = useState(false);
+  const [open, setOpen]               = useState(false);
+  const [loading, setLoading]         = useState(false);
+  const [dragOver, setDragOver]       = useState(false);
+  const [creatingFolder, setCreating] = useState(false);
+  const [folderName, setFolderName]   = useState('');
 
   const openTab         = useStore(s => s.openTab);
   const startNewNote    = useStore(s => s.startNewNote);
   const deleteNote      = useStore(s => s.deleteNote);
   const moveNote        = useStore(s => s.moveNote);
+  const createFolder    = useStore(s => s.createFolder);
   const fetchChildrenOf = useStore(s => s.fetchChildrenOf);
 
   // ── File node ──────────────────────────────────────────────────────────────
@@ -80,6 +83,25 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
     setOpen(o => !o);
   }
 
+  async function handleAddFolder() {
+    if (!node.loaded) {
+      setLoading(true);
+      await fetchChildrenOf(node.fullPath);
+      setLoading(false);
+    }
+    setOpen(true);
+    setFolderName('');
+    setCreating(true);
+  }
+
+  async function submitFolder(e) {
+    e.preventDefault();
+    const name = folderName.trim();
+    setCreating(false);
+    if (!name) return;
+    await createFolder(node.fullPath, name);
+  }
+
   function handleDragOver(e) {
     // Only accept our own drag type
     if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
@@ -123,8 +145,26 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
         isDragOver={dragOver}
         depth={depth}
         onClick={handleToggle}
+        onAddFolder={handleAddFolder}
         onAdd={() => startNewNote(node.fullPath)}
       >
+        {creatingFolder && (
+          <form
+            className={styles.folderInput}
+            style={{ paddingLeft: (depth + 1) * 14 + 12 }}
+            onSubmit={submitFolder}
+          >
+            <input
+              autoFocus
+              className={styles.folderInputField}
+              value={folderName}
+              onChange={e => setFolderName(e.target.value)}
+              onBlur={() => setCreating(false)}
+              onKeyDown={e => e.key === 'Escape' && setCreating(false)}
+              placeholder="folder name"
+            />
+          </form>
+        )}
         {isOpen && loading && (
           <div className={styles.loadingRow} style={{ paddingLeft: (depth + 1) * 14 + 12 }}>
             <span className={styles.loadingDot} />
@@ -146,11 +186,23 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
 }
 
 export default function FolderTree() {
-  const [query, setQuery] = useState('');
-  const tree             = useStore(s => s.tree);
-  const vaultRoot        = useStore(s => s.vaultRoot);
-  const currentNotePath  = useStore(s => s.currentNotePath);
-  const startNewNote     = useStore(s => s.startNewNote);
+  const [query, setQuery]               = useState('');
+  const [rootCreating, setRootCreating] = useState(false);
+  const [rootFolderName, setRootName]   = useState('');
+
+  const tree            = useStore(s => s.tree);
+  const vaultRoot       = useStore(s => s.vaultRoot);
+  const currentNotePath = useStore(s => s.currentNotePath);
+  const startNewNote    = useStore(s => s.startNewNote);
+  const createFolder    = useStore(s => s.createFolder);
+
+  async function submitRootFolder(e) {
+    e.preventDefault();
+    const name = rootFolderName.trim();
+    setRootCreating(false);
+    if (!name || !vaultRoot) return;
+    await createFolder(vaultRoot, name);
+  }
 
   const rootEntries = sortEntries(Object.entries(tree.children));
   const hasResults  = !query || rootEntries.some(([n, node]) => hasMatch(n, node, query));
@@ -164,6 +216,25 @@ export default function FolderTree() {
             <Icon name="plus" size={15} color="var(--color-accent-soft)" />
             New note
           </button>
+        )}
+        {vaultRoot && (
+          <button className={styles.newRootBtn} onClick={() => { setRootName(''); setRootCreating(true); }}>
+            <Icon name="folder" size={15} color="var(--color-accent-soft)" />
+            New folder
+          </button>
+        )}
+        {rootCreating && (
+          <form className={styles.folderInput} onSubmit={submitRootFolder}>
+            <input
+              autoFocus
+              className={styles.folderInputField}
+              value={rootFolderName}
+              onChange={e => setRootName(e.target.value)}
+              onBlur={() => setRootCreating(false)}
+              onKeyDown={e => e.key === 'Escape' && setRootCreating(false)}
+              placeholder="folder name"
+            />
+          </form>
         )}
       </div>
       {rootEntries.map(([name, node]) => (
