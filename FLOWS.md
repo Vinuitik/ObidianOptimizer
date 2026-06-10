@@ -23,3 +23,6 @@ Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notl
 | [ML Architecture](ML_ARCH.md) | Architecture | MCP server, pgvector search, CNN/VLM image pipeline [NOT IMPLEMENTED] |
 | [Backend FLOWS — Chrono](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#chrono-service) | Flows | Daily jobs: FileMover, FileChecker, BankruptcyCheck, SpreadCheck |
 | [Mobile Architecture](MOBILE_ARCH.md) | Architecture | Offline-first mobile app, sync engine [NOT IMPLEMENTED] |
+| [Backend Testing](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#testing) | Testing | Unit tests (7 service layers), MockMvc controller tests, Testcontainers IT |
+| [Frontend Testing](frontend/FLOWS.md#testing) | Testing | Vitest: useStore, TabBar, FolderTree filter, diff, LoginModal, NewNoteForm |
+| [CI Pipeline](.github/workflows/ci.yml) | CI/CD | GitHub Actions: backend-unit, backend-integration, frontend, docker-build |
