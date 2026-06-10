@@ -23,8 +23,9 @@ export default function LoginModal() {
         <span className={styles.title}>Sign in</span>
         <form onSubmit={handleSubmit}>
           <div className={styles.field}>
-            <label className={styles.label}>Username</label>
+            <label className={styles.label} htmlFor="login-username">Username</label>
             <input
+              id="login-username"
               className={styles.input}
               value={username}
               onChange={e => setUsername(e.target.value)}
@@ -33,8 +34,9 @@ export default function LoginModal() {
             />
           </div>
           <div className={styles.field} style={{ marginTop: 12 }}>
-            <label className={styles.label}>Password</label>
+            <label className={styles.label} htmlFor="login-password">Password</label>
             <input
+              id="login-password"
               className={styles.input}
               type="password"
               value={password}

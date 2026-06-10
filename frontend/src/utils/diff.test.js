@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeHunks } from './diff.js';
+import { computeHunks, applyHunks } from './diff.js';
 
 describe('computeHunks', () => {
   it('returns empty array for identical text', () => {
@@ -63,5 +63,54 @@ describe('computeHunks', () => {
     // string we fed it, computeHunks must return [].
     const body = '# My Note\n\nSome paragraph.\n\n- item one\n- item two\n';
     expect(computeHunks(body, body)).toEqual([]);
+  });
+});
+
+describe('applyHunks', () => {
+  it('returns original text when hunks is empty', () => {
+    expect(applyHunks('a\nb\nc', [])).toBe('a\nb\nc');
+  });
+
+  it('applies a single insertion hunk', () => {
+    const result = applyHunks('line0\nline2', [{ startLine: 1, deleteCount: 0, insertLines: ['line1'] }]);
+    expect(result).toBe('line0\nline1\nline2');
+  });
+
+  it('applies a single deletion hunk', () => {
+    const result = applyHunks('line0\nBAD\nline2', [{ startLine: 1, deleteCount: 1, insertLines: [] }]);
+    expect(result).toBe('line0\nline2');
+  });
+
+  it('applies a single replacement hunk', () => {
+    const result = applyHunks('a\nb\nc', [{ startLine: 1, deleteCount: 1, insertLines: ['B'] }]);
+    expect(result).toBe('a\nB\nc');
+  });
+
+  it('applies multiple hunks (given in any order — sorts back-to-front internally)', () => {
+    // Two replacements: line 0 and line 2
+    const result = applyHunks('alpha\nbeta\ngamma\ndelta', [
+      { startLine: 0, deleteCount: 1, insertLines: ['ALPHA'] },
+      { startLine: 2, deleteCount: 1, insertLines: ['GAMMA'] },
+    ]);
+    expect(result).toBe('ALPHA\nbeta\nGAMMA\ndelta');
+  });
+
+  it('round-trips: applyHunks(old, computeHunks(old, new)) === new', () => {
+    const old = 'alpha\nbeta\ngamma';
+    const next = 'alpha\nBETA\ngamma\ndelta';
+    expect(applyHunks(old, computeHunks(old, next))).toBe(next);
+  });
+
+  it('normalizes CRLF in input before applying', () => {
+    // CRLF input should be treated same as LF
+    const result = applyHunks('a\r\nb\r\nc', [{ startLine: 1, deleteCount: 1, insertLines: ['B'] }]);
+    expect(result).toBe('a\nB\nc');
+  });
+
+  it('stale hunks that are out of range do not throw — splice handles gracefully', () => {
+    // startLine beyond end: splice at out-of-range index appends to end
+    expect(() =>
+      applyHunks('one line', [{ startLine: 99, deleteCount: 0, insertLines: ['extra'] }])
+    ).not.toThrow();
   });
 });

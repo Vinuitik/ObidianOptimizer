@@ -18,17 +18,10 @@ describe('cleanMilkdownOutput', () => {
     expect(cleanMilkdownOutput(input)).toBe('text <br /> more text');
   });
 
-  it('un-escapes \\#hashtag at line start', () => {
-    expect(cleanMilkdownOutput('\\#mytag')).toBe('#mytag');
-  });
-
-  it('does NOT un-escape \\# followed by space (escaped heading)', () => {
+  it('leaves \\#tag untouched (hashtagPlugin serializes verbatim, no unescape needed)', () => {
+    // hashtagPlugin uses html node type — mdast-util-to-markdown never escapes these
+    expect(cleanMilkdownOutput('\\#mytag')).toBe('\\#mytag');
     expect(cleanMilkdownOutput('\\# Heading')).toBe('\\# Heading');
-  });
-
-  it('un-escapes \\#tag in the middle of a document', () => {
-    const input = 'Some text\n\n\\#topic\n\nMore';
-    expect(cleanMilkdownOutput(input)).toBe('Some text\n\n#topic\n\nMore');
   });
 
   it('leaves clean markdown unchanged', () => {
