@@ -1,0 +1,233 @@
+#
+# There is insufficient memory for the Java Runtime Environment to continue.
+# Native memory allocation (mmap) failed to map 132120576 bytes for G1 virtual space
+# Possible reasons:
+#   The system is out of physical RAM or swap space
+#   The process is running with CompressedOops enabled, and the Java Heap may be blocking the growth of the native heap
+# Possible solutions:
+#   Reduce memory load on the system
+#   Increase physical memory or swap space
+#   Check if swap backing store is full
+#   Decrease Java heap size (-Xmx/-Xms)
+#   Decrease number of Java threads
+#   Decrease Java thread stack sizes (-Xss)
+#   Set larger code cache with -XX:ReservedCodeCacheSize=
+#   JVM is running with Unscaled Compressed Oops mode in which the Java heap is
+#     placed in the first 4GB address space. The Java Heap base address is the
+#     maximum limit for the native heap growth. Please use -XX:HeapBaseMinAddress
+#     to set the Java Heap base and to place the Java Heap above 4GB virtual address.
+# This output file may be truncated or incomplete.
+#
+#  Out of Memory Error (os_windows.cpp:3600), pid=18440, tid=13080
+#
+# JRE version:  (21.0.4+8) (build )
+# Java VM: Java HotSpot(TM) 64-Bit Server VM (21.0.4+8-LTS-274, mixed mode, sharing, tiered, compressed oops, compressed class ptrs, g1 gc, windows-amd64)
+# No core dump will be written. Minidumps are not enabled by default on client versions of Windows
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -Dclassworlds.conf=C:\Users\ACER\.m2\wrapper\dists\apache-maven-3.9.9\977a63e90f436cd6ade95b4c0e10c20c\bin\m2.conf -Dmaven.home=C:\Users\ACER\.m2\wrapper\dists\apache-maven-3.9.9\977a63e90f436cd6ade95b4c0e10c20c -Dlibrary.jansi.path=C:\Users\ACER\.m2\wrapper\dists\apache-maven-3.9.9\977a63e90f436cd6ade95b4c0e10c20c\lib\jansi-native -Dmaven.multiModuleProjectDirectory=c:\Users\ACER\Desktop\Java\ObsidianOptimizer\obsidian_optimizer\obsidian org.codehaus.plexus.classworlds.launcher.Launcher --version
+
+Host: Intel(R) Core(TM) i5-10300H CPU @ 2.50GHz, 8 cores, 7G,  Windows 11 , 64 bit Build 26100 (10.0.26100.8328)
+Time: Wed Jun 10 17:35:50 2026 GMT Daylight Time elapsed time: 0.023855 seconds (0d 0h 0m 0s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x00000188a550f200):  JavaThread "Unknown thread" [_thread_in_vm, id=13080, stack(0x000000498b500000,0x000000498b600000) (1024K)]
+
+Stack: [0x000000498b500000,0x000000498b600000]
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+V  [jvm.dll+0x6c8e59]
+V  [jvm.dll+0x853181]
+V  [jvm.dll+0x8556ae]
+V  [jvm.dll+0x855d83]
+V  [jvm.dll+0x27d526]
+V  [jvm.dll+0x6c55f5]
+V  [jvm.dll+0x6ba17a]
+V  [jvm.dll+0x352a8a]
+V  [jvm.dll+0x35a6e6]
+V  [jvm.dll+0x3acdae]
+V  [jvm.dll+0x3ad058]
+V  [jvm.dll+0x326dec]
+V  [jvm.dll+0x32794b]
+V  [jvm.dll+0x81c569]
+V  [jvm.dll+0x3b9a11]
+V  [jvm.dll+0x805948]
+V  [jvm.dll+0x44ec5e]
+V  [jvm.dll+0x450851]
+C  [jli.dll+0x52a3]
+C  [ucrtbase.dll+0x37b0]
+C  [KERNEL32.DLL+0x2e957]
+C  [ntdll.dll+0x427c]
+
+
+---------------  P R O C E S S  ---------------
+
+Threads class SMR info:
+_java_thread_list=0x00007ff9aa086c08, length=0, elements={
+}
+
+Java Threads: ( => current thread )
+Total: 0
+
+Other Threads:
+  0x00000188a5565f90 WorkerThread "GC Thread#0"                     [id=22748, stack(0x000000498b600000,0x000000498b700000) (1024K)]
+  0x00000188a55778b0 ConcurrentGCThread "G1 Main Marker"            [id=31696, stack(0x000000498b700000,0x000000498b800000) (1024K)]
+  0x00000188a5578b50 WorkerThread "G1 Conc#0"                       [id=28804, stack(0x000000498b800000,0x000000498b900000) (1024K)]
+
+[error occurred during error reporting (printing all threads), id 0xc0000005, EXCEPTION_ACCESS_VIOLATION (0xc0000005) at pc=0x00007ff9a97f9577]
+VM state: not at safepoint (not fully initialized)
+
+VM Mutex/Monitor currently owned by a thread:  ([mutex/lock_event])
+[0x00007ff9aa0f7f98] Heap_lock - owner thread: 0x00000188a550f200
+
+Heap address: 0x0000000082a00000, size: 2006 MB, Compressed Oops mode: 32-bit
+
+CDS archive(s) mapped at: [0x0000000000000000-0x0000000000000000-0x0000000000000000), size 0, SharedBaseAddress: 0x0000000800000000, ArchiveRelocationMode: 1.
+Narrow klass base: 0x0000000000000000, Narrow klass shift: 0, Narrow klass range: 0x0
+
+GC Precious Log:
+ CardTable entry size: 512
+ Card Set container configuration: InlinePtr #cards 5 size 8 Array Of Cards #cards 12 size 40 Howl #buckets 4 coarsen threshold 1843 Howl Bitmap #cards 512 size 80 coarsen threshold 460 Card regions per heap region 1 cards per card region 2048
+
+Heap:
+ garbage-first heap   total 0K, used 0K [0x0000000082a00000, 0x0000000100000000)
+  region size 1024K, 0 young (0K), 0 survivors (0K)
+
+[error occurred during error reporting (printing heap information), id 0xc0000005, EXCEPTION_ACCESS_VIOLATION (0xc0000005) at pc=0x00007ff9a9be1df9]
+GC Heap History (0 events):
+No events
+
+Dll operation events (1 events):
+Event: 0.014 Loaded shared library C:\Program Files\Java\jdk-21\bin\java.dll
+
+Deoptimization events (0 events):
+No events
+
+Classes loaded (0 events):
+No events
+
+Classes unloaded (0 events):
+No events
+
+Classes redefined (0 events):
+No events
+
+Internal exceptions (0 events):
+No events
+
+ZGC Phase Switch (0 events):
+No events
+
+VM Operations (0 events):
+No events
+
+Events (0 events):
+No events
+
+
+Dynamic libraries:
+0x00007ff6e8450000 - 0x00007ff6e8460000 	C:\Program Files\Java\jdk-21\bin\java.exe
+0x00007ffa7aae0000 - 0x00007ffa7ad47000 	C:\WINDOWS\SYSTEM32\ntdll.dll
+0x00007ffa79280000 - 0x00007ffa79349000 	C:\WINDOWS\System32\KERNEL32.DLL
+0x00007ffa77510000 - 0x00007ffa77907000 	C:\WINDOWS\System32\KERNELBASE.dll
+0x00007ffa77a80000 - 0x00007ffa77bcb000 	C:\WINDOWS\System32\ucrtbase.dll
+0x00007ffa2d6f0000 - 0x00007ffa2d709000 	C:\Program Files\Java\jdk-21\bin\jli.dll
+0x00007ffa2d6d0000 - 0x00007ffa2d6eb000 	C:\Program Files\Java\jdk-21\bin\VCRUNTIME140.dll
+0x00007ffa791b0000 - 0x00007ffa79266000 	C:\WINDOWS\System32\ADVAPI32.dll
+0x00007ffa7a9c0000 - 0x00007ffa7aa69000 	C:\WINDOWS\System32\msvcrt.dll
+0x00007ffa78c20000 - 0x00007ffa78cc7000 	C:\WINDOWS\System32\sechost.dll
+0x00007ffa7a8a0000 - 0x00007ffa7a9b8000 	C:\WINDOWS\System32\RPCRT4.dll
+0x00007ffa79350000 - 0x00007ffa79516000 	C:\WINDOWS\System32\USER32.dll
+0x00007ffa78830000 - 0x00007ffa78857000 	C:\WINDOWS\System32\win32u.dll
+0x00007ffa76710000 - 0x00007ffa769a2000 	C:\WINDOWS\WinSxS\amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.26100.8457_none_3e0b2faee331e92d\COMCTL32.dll
+0x00007ffa78860000 - 0x00007ffa7888b000 	C:\WINDOWS\System32\GDI32.dll
+0x00007ffa77bd0000 - 0x00007ffa77cfc000 	C:\WINDOWS\System32\gdi32full.dll
+0x00007ffa78570000 - 0x00007ffa78613000 	C:\WINDOWS\System32\msvcp_win.dll
+0x00007ffa6d650000 - 0x00007ffa6d65b000 	C:\WINDOWS\SYSTEM32\VERSION.dll
+0x00007ffa78d60000 - 0x00007ffa78d92000 	C:\WINDOWS\System32\IMM32.DLL
+0x00007ffa719d0000 - 0x00007ffa719dc000 	C:\Program Files\Java\jdk-21\bin\vcruntime140_1.dll
+0x00007ffa21e00000 - 0x00007ffa21e8e000 	C:\Program Files\Java\jdk-21\bin\msvcp140.dll
+0x00007ff9a94c0000 - 0x00007ff9aa1d3000 	C:\Program Files\Java\jdk-21\bin\server\jvm.dll
+0x00007ffa7a550000 - 0x00007ffa7a5d0000 	C:\WINDOWS\System32\WS2_32.dll
+0x00007ffa77370000 - 0x00007ffa773ce000 	C:\WINDOWS\SYSTEM32\POWRPROF.dll
+0x00007ffa6d660000 - 0x00007ffa6d696000 	C:\WINDOWS\SYSTEM32\WINMM.dll
+0x00007ffa77350000 - 0x00007ffa77364000 	C:\WINDOWS\SYSTEM32\UMPDC.dll
+0x00007ffa75940000 - 0x00007ffa7595b000 	C:\WINDOWS\SYSTEM32\kernel.appcore.dll
+0x00007ffa5ac50000 - 0x00007ffa5ac5a000 	C:\Program Files\Java\jdk-21\bin\jimage.dll
+0x00007ffa76cc0000 - 0x00007ffa76f02000 	C:\WINDOWS\SYSTEM32\DBGHELP.DLL
+0x00007ffa78890000 - 0x00007ffa78c13000 	C:\WINDOWS\System32\combase.dll
+0x00007ffa79520000 - 0x00007ffa795f9000 	C:\WINDOWS\System32\OLEAUT32.dll
+0x00007ffa76bb0000 - 0x00007ffa76beb000 	C:\WINDOWS\SYSTEM32\dbgcore.DLL
+0x00007ffa779d0000 - 0x00007ffa77a78000 	C:\WINDOWS\System32\bcryptPrimitives.dll
+0x00007ffa2d640000 - 0x00007ffa2d65f000 	C:\Program Files\Java\jdk-21\bin\java.dll
+
+dbghelp: loaded successfully - version: 4.0.5 - missing functions: none
+symbol engine: initialized successfully - sym options: 0x614 - pdb path: .;C:\Program Files\Java\jdk-21\bin;C:\WINDOWS\SYSTEM32;C:\WINDOWS\WinSxS\amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.26100.8457_none_3e0b2faee331e92d;C:\Program Files\Java\jdk-21\bin\server
+
+VM Arguments:
+jvm_args: -Dclassworlds.conf=C:\Users\ACER\.m2\wrapper\dists\apache-maven-3.9.9\977a63e90f436cd6ade95b4c0e10c20c\bin\m2.conf -Dmaven.home=C:\Users\ACER\.m2\wrapper\dists\apache-maven-3.9.9\977a63e90f436cd6ade95b4c0e10c20c -Dlibrary.jansi.path=C:\Users\ACER\.m2\wrapper\dists\apache-maven-3.9.9\977a63e90f436cd6ade95b4c0e10c20c\lib\jansi-native -Dmaven.multiModuleProjectDirectory=c:\Users\ACER\Desktop\Java\ObsidianOptimizer\obsidian_optimizer\obsidian 
+java_command: org.codehaus.plexus.classworlds.launcher.Launcher --version
+java_class_path (initial): C:\Users\ACER\.m2\wrapper\dists\apache-maven-3.9.9\977a63e90f436cd6ade95b4c0e10c20c\boot\plexus-classworlds-2.8.0.jar
+Launcher Type: SUN_STANDARD
+
+[Global flags]
+     intx CICompilerCount                          = 4                                         {product} {ergonomic}
+     uint ConcGCThreads                            = 2                                         {product} {ergonomic}
+     uint G1ConcRefinementThreads                  = 8                                         {product} {ergonomic}
+   size_t G1HeapRegionSize                         = 1048576                                   {product} {ergonomic}
+    uintx GCDrainStackTargetSize                   = 64                                        {product} {ergonomic}
+   size_t InitialHeapSize                          = 132120576                                 {product} {ergonomic}
+   size_t MarkStackSize                            = 4194304                                   {product} {ergonomic}
+   size_t MaxHeapSize                              = 2103443456                                {product} {ergonomic}
+   size_t MinHeapDeltaBytes                        = 1048576                                   {product} {ergonomic}
+   size_t MinHeapSize                              = 8388608                                   {product} {ergonomic}
+    uintx NonNMethodCodeHeapSize                   = 5839372                                {pd product} {ergonomic}
+    uintx NonProfiledCodeHeapSize                  = 122909434                              {pd product} {ergonomic}
+    uintx ProfiledCodeHeapSize                     = 122909434                              {pd product} {ergonomic}
+    uintx ReservedCodeCacheSize                    = 251658240                              {pd product} {ergonomic}
+     bool SegmentedCodeCache                       = true                                      {product} {ergonomic}
+   size_t SoftMaxHeapSize                          = 2103443456                             {manageable} {ergonomic}
+     bool UseCompressedOops                        = true                           {product lp64_product} {ergonomic}
+     bool UseG1GC                                  = true                                      {product} {ergonomic}
+     bool UseLargePagesIndividualAllocation        = false                                  {pd product} {ergonomic}
+
+Logging:
+Log output configuration:
+ #0: stdout all=warning uptime,level,tags foldmultilines=false
+ #1: stderr all=off uptime,level,tags foldmultilines=false
+
+Environment Variables:
+JAVA_HOME=C:\Program Files\Java\jdk-21
+PATH=C:\Python313\Scripts\;C:\Python313\;C:\Program Files\Common Files\Oracle\Java\javapath;C:\Program Files (x86)\Common Files\Oracle\Java\java8path;C:\Program Files (x86)\Common Files\Oracle\Java\javapath;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Users\ACER\Desktop\MinGW\bin;C:\Users\ACER\Desktop\Min_GW\bin;C:\Users\ACER\Desktop\Java\jdk-20\bin;C:\Users\ACER\Desktop\Java\apache-maven-3.9.5-bin\apache-maven-3.9.5\bin;C:\Program Files\MySQL\MySQL Server 8.0\bin;C:\Program Files\PostgreSQL\16\bin;C:\Program Files\dotnet\;C:\Program Files\PowerShell\7\pwsh.exe;C:\Program Files\Amazon\AWSCLIV2\;C:\Program Files\Docker\Docker\resources\bin;C:\Program Files\Git\cmd;C:\Users\ACER\miniconda3;C:\Users\ACER\miniconda3\Library\bin;C:\Users\ACER\miniconda3\Scripts;C:\Program Files\PowerShell\7-preview\preview;C:\Program Files\nodejs\;C:\ProgramData\chocolatey\bin;C:\Program Files\GitHub CLI\;C:\Program Files (x86)\cloudflared\;C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\PowerShell\7\;C:\Users\ACER\.local\bin;C:\Program Files\MySQL\MySQL Shell 8.0\bin\;C:\Users\ACER\AppData\Local\Programs\Python\Python310\Scripts\;C:\Users\ACER\AppData\Local\Programs\Python\Python310\;C:\Users\ACER\AppData\Local\Microsoft\WindowsApps;C:\Users\ACER\Desktop\Microsoft VS Code\bin;C:\Users\ACER\Desktop\Java\jdk-20\bin;C:\Users\ACER\Desktop\Java\apache-maven-3.9.5-bin\apache-maven-3.9.5\bin;C:\Program Files\PostgreSQL\16\bin;C:\Users\ACER\.dotnet\tools;C:\Program Files\PowerShell\7;C:\Users\ACER\AppData\Local\Programs\Ollama;C:\Users\ACER\AppData\Local\JetBrains\IntelliJ IDEA Community Edition 2024.2.0.2\bin;;C:\Users\ACER\miniconda3;C:\Users\ACER\miniconda3\Scripts;C:\Users\ACER\miniconda3\Library\bin;C:\Users\ACER\AppData\Roaming\npm;C:\Users\ACER\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0-full_build\bin;C:\Users\ACER\AppData\Local\GitHubDesktop\bin;C:\Users\ACER\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin;C:\Users\ACER\AppData\Local\Microsoft\WinGet\Packages\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe;;C:\Users\ACER\AppData\Roaming\Python\Python313\Scripts
+USERNAME=ACER
+OS=Windows_NT
+PROCESSOR_IDENTIFIER=Intel64 Family 6 Model 165 Stepping 2, GenuineIntel
+TMP=C:\Users\ACER\AppData\Local\Temp
+TEMP=C:\Users\ACER\AppData\Local\Temp
+
+
+
+
+Periodic native trim disabled
+
+---------------  S Y S T E M  ---------------
+
+OS:
+ Windows 11 , 64 bit Build 26100 (10.0.26100.8328)
+OS uptime: 0 days 0:35 hours
+Hyper-V role detected
+
+CPU: total 8 (initial active 8) (4 cores per cpu, 2 threads per core) family 6 model 165 stepping 2 microcode 0xea, cx8, cmov, fxsr, ht, mmx, 3dnowpref, sse, sse2, sse3, ssse3, sse4.1, sse4.2, popcnt, lzcnt, tsc, tscinvbit, avx, avx2, aes, erms, clmul, bmi1, bmi2, adx, fma, vzeroupper, clflush, clflushopt, hv, rdtscp, f16c
+Processor Information for all 8 processors :
+  Max Mhz: 2496, Current Mhz: 2496, Mhz Limit: 2496
+
+Memory: 4k page, system-wide physical 8023M (688M free)
+TotalPageFile size 25332M (AvailPageFile size 111M)
+current process WorkingSet (physical memory assigned to process): 13M, peak: 13M
+current process commit charge ("private bytes"): 60M, peak: 186M
+
+vm_info: Java HotSpot(TM) 64-Bit Server VM (21.0.4+8-LTS-274) for windows-amd64 JRE (21.0.4+8-LTS-274), built on 2024-06-05T05:23:33Z by "mach5one" with MS VC++ 17.6 (VS2022)
+
+END.

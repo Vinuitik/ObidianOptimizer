@@ -132,7 +132,7 @@ const useStore = create((set, get) => ({
   rightCollapsed: false,
 
   // Settings (loaded from backend on startup)
-  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20 },
+  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking' },
 
   // Tabs — each entry: { path, pendingTitle, isMutable, hunks }
   // hunks stores the diff from currentNoteRaw → pendingRaw for inactive tabs.

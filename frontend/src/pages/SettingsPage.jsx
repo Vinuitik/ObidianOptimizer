@@ -43,6 +43,23 @@ const SECTIONS = [
       },
     ],
   },
+  {
+    id: 'advanced',
+    title: 'Advanced',
+    description: 'Performance and startup behaviour.',
+    fields: [
+      {
+        key: 'startupSyncMode',
+        label: 'Startup sync',
+        type: 'select',
+        options: [
+          { value: 'blocking', label: 'Blocking (default) — app waits for index sync before accepting requests' },
+          { value: 'async',    label: 'Async — app starts immediately, sync runs in background' },
+        ],
+        hint: 'How the note index is synchronised with disk on startup.',
+      },
+    ],
+  },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -190,6 +207,22 @@ export default function SettingsPage() {
 function FieldInput({ id, field, value, disabled, onChange, onEnter }) {
   function handleKey(e) {
     if (e.key === 'Enter') onEnter();
+  }
+
+  if (field.type === 'select') {
+    return (
+      <select
+        id={id}
+        className={styles.input}
+        value={value}
+        disabled={disabled}
+        onChange={e => onChange(e.target.value)}
+      >
+        {field.options.map(opt => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+    );
   }
 
   if (field.type === 'number') {

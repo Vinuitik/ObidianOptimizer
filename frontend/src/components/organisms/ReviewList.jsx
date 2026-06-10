@@ -7,6 +7,7 @@ export default function ReviewList() {
   const reviewHasMore  = useStore(s => s.reviewHasMore);
   const loadMoreReview = useStore(s => s.loadMoreReview);
   const openTab        = useStore(s => s.openTab);
+  const pageSize       = useStore(s => s.settings.reviewPageSize);
 
   const allDone = reviewNotes.length === 0;
 
@@ -37,7 +38,7 @@ export default function ReviewList() {
         <div className={styles.allDone}>
           <p className={styles.allDoneText}>Batch complete!</p>
           <button className={styles.loadMore} onClick={loadMoreReview}>
-            Load next 40 →
+            Load next {pageSize} →
           </button>
         </div>
       )}
