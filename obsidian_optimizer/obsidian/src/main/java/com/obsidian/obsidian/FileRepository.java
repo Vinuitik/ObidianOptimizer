@@ -3,7 +3,9 @@ package com.obsidian.obsidian;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -234,6 +236,32 @@ public class FileRepository {
         noteLinkRepo.renameTarget(oldName, newName);
         noteLinkRepo.renameSource(oldPath, newPath);
         return newPath;
+    }
+
+    public String moveNote(String sourcePath, String targetFolder) throws IOException {
+        File sourceFile = new File(sourcePath);
+        if (!sourceFile.exists()) throw new IOException("Note not found: " + sourcePath);
+
+        File targetDir = new File(targetFolder);
+        if (!targetDir.exists() || !targetDir.isDirectory()) {
+            throw new IOException("Target folder not found: " + targetFolder);
+        }
+
+        File destFile = new File(targetDir, sourceFile.getName());
+        if (destFile.getAbsolutePath().equals(sourceFile.getAbsolutePath())) {
+            return sourcePath; // already in target folder — no-op
+        }
+        if (destFile.exists()) {
+            throw new IOException("A note named '" + sourceFile.getName() + "' already exists in the target folder");
+        }
+
+        Path newPath = Files.move(sourceFile.toPath(), destFile.toPath(), StandardCopyOption.ATOMIC_MOVE);
+        String newAbsPath = newPath.toFile().getAbsolutePath();
+        String title = sourceFile.getName().replace(".md", "");
+
+        noteIndex.rename(sourcePath, newAbsPath, title);
+        noteLinkRepo.renameSource(sourcePath, newAbsPath);
+        return newAbsPath;
     }
 
     public void softDeleteNote(String path) throws IOException {
