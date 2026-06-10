@@ -18,11 +18,23 @@ vi.mock('../api/notes', () => ({
   moveNote:         vi.fn(),
   fetchSettings:    vi.fn(),
   saveSettings:     vi.fn(),
+  uploadFile:       vi.fn(),
   ApiError:         class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } },
+}));
+
+// ── obsidianImagePlugin mock ──────────────────────────────────────────────────
+
+vi.mock('../utils/obsidianImagePlugin', () => ({
+  setPendingBlobs: vi.fn(),
 }));
 
 import useStore from './useStore';
 import * as api from '../api/notes';
+import * as imagePlugin from '../utils/obsidianImagePlugin';
+
+// Global browser API stubs
+global.URL.revokeObjectURL = vi.fn();
+global.URL.createObjectURL = vi.fn(() => 'blob:mock');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,6 +50,8 @@ const INITIAL = {
   editorResetKey: 0,
   centerMode: 'view',
   noteIndex: new Map(),
+  pendingFiles: {},
+  toast: null,
 };
 
 function resetStore() {
@@ -289,5 +303,167 @@ describe('syncNote', () => {
     useStore.setState({ isMutable: true, settings: { reviewPageSize: 20 } });
     await getState().syncNote();
     expect(getState().isMutable).toBe(false);
+  });
+});
+
+// ── addPendingFile ────────────────────────────────────────────────────────────
+
+describe('addPendingFile', () => {
+  it('adds entry to pendingFiles', () => {
+    const file = { name: 'photo.png' };
+    getState().addPendingFile('photo-abc.png', file, 'blob:url-1');
+    expect(getState().pendingFiles['photo-abc.png']).toEqual({ file, blobURL: 'blob:url-1' });
+  });
+
+  it('accumulates multiple files', () => {
+    getState().addPendingFile('a.png', {}, 'blob:a');
+    getState().addPendingFile('b.mp4', {}, 'blob:b');
+    expect(Object.keys(getState().pendingFiles)).toHaveLength(2);
+  });
+});
+
+// ── _snapshotTab saves pendingFiles ───────────────────────────────────────────
+
+describe('_snapshotTab saves pendingFiles', () => {
+  it('snapshots current pendingFiles into the active tab', async () => {
+    api.fetchNoteContent.mockResolvedValue('line1');
+    await getState().openTab('/vault/A.md');
+    useStore.setState({ pendingFiles: { 'img-abc.png': { file: {}, blobURL: 'blob:x' } } });
+    getState()._snapshotTab();
+    expect(getState().tabs[0].pendingFiles).toEqual({ 'img-abc.png': { file: {}, blobURL: 'blob:x' } });
+  });
+});
+
+// ── switchTab restores pendingFiles ───────────────────────────────────────────
+
+describe('switchTab restores pendingFiles', () => {
+  it('restores pendingFiles from tab snapshot and calls setPendingBlobs', async () => {
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().openTab('/vault/A.md');
+    const files = { 'img-abc.png': { file: {}, blobURL: 'blob:x' } };
+    useStore.setState({ pendingFiles: files });
+
+    api.fetchNoteContent.mockResolvedValue('# B');
+    await getState().openTab('/vault/B.md'); // snapshots A's pendingFiles into tab 0
+
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().switchTab(0); // should restore A's pendingFiles
+
+    expect(getState().pendingFiles).toEqual(files);
+    expect(imagePlugin.setPendingBlobs).toHaveBeenCalledWith(files);
+  });
+
+  it('restores empty pendingFiles for a tab with no pasted files', async () => {
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().openTab('/vault/A.md');
+    api.fetchNoteContent.mockResolvedValue('# B');
+    await getState().openTab('/vault/B.md');
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().switchTab(0);
+    expect(getState().pendingFiles).toEqual({});
+  });
+});
+
+// ── closeTab revokes blob URLs ────────────────────────────────────────────────
+
+describe('closeTab revokes blob URLs', () => {
+  it('calls revokeObjectURL for each pending file when closing a tab', async () => {
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().openTab('/vault/A.md');
+    // Manually inject pendingFiles into the tab entry
+    const updated = [...getState().tabs];
+    updated[0] = { ...updated[0], pendingFiles: { 'img.png': { file: {}, blobURL: 'blob:revoke-me' } } };
+    useStore.setState({ tabs: updated });
+
+    await getState().closeTab(0);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:revoke-me');
+  });
+
+  it('clears pendingFiles from store when last tab is closed', async () => {
+    api.fetchNoteContent.mockResolvedValue('# Only');
+    await getState().openTab('/vault/Only.md');
+    useStore.setState({ pendingFiles: { 'x.png': { file: {}, blobURL: 'blob:x' } } });
+    await getState().closeTab(0);
+    expect(getState().pendingFiles).toEqual({});
+  });
+});
+
+// ── cancelEdit revokes blob URLs ──────────────────────────────────────────────
+
+describe('cancelEdit revokes blob URLs', () => {
+  it('calls revokeObjectURL for each pending file', async () => {
+    api.fetchNoteContent.mockResolvedValue('# Note');
+    await getState().openTab('/vault/Note.md');
+    useStore.setState({
+      pendingFiles: {
+        'a.png': { file: {}, blobURL: 'blob:a' },
+        'b.mp4': { file: {}, blobURL: 'blob:b' },
+      },
+    });
+    getState().cancelEdit();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:a');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:b');
+  });
+
+  it('clears pendingFiles after cancel', async () => {
+    api.fetchNoteContent.mockResolvedValue('# Note');
+    await getState().openTab('/vault/Note.md');
+    useStore.setState({ pendingFiles: { 'x.png': { file: {}, blobURL: 'blob:x' } } });
+    getState().cancelEdit();
+    expect(getState().pendingFiles).toEqual({});
+  });
+});
+
+// ── syncNote uploads pending files ────────────────────────────────────────────
+
+describe('syncNote with pendingFiles', () => {
+  beforeEach(() => {
+    api.fetchChildren.mockResolvedValue({ parentPath: '/vault', folderPaths: [], filePaths: [] });
+    api.fetchNames.mockResolvedValue([]);
+    api.fetchReview.mockResolvedValue({ notes: [], hasMore: false });
+    api.patchNote.mockResolvedValue();
+    api.uploadFile.mockResolvedValue({ filename: 'img-abc.png', url: '/api/images/img-abc.png' });
+  });
+
+  it('calls uploadFile for each pending file before patching', async () => {
+    api.fetchNoteContent.mockResolvedValue('# Note');
+    await getState().openTab('/vault/Note.md');
+    const file = { name: 'img.png' };
+    useStore.setState({
+      pendingFiles: { 'img-abc.png': { file, blobURL: 'blob:img' } },
+      settings: { reviewPageSize: 20 },
+    });
+    await getState().syncNote();
+    expect(api.uploadFile).toHaveBeenCalledWith(file, 'img-abc.png');
+  });
+
+  it('clears pendingFiles after successful upload', async () => {
+    api.fetchNoteContent.mockResolvedValue('# Note');
+    await getState().openTab('/vault/Note.md');
+    useStore.setState({
+      pendingFiles: { 'img-abc.png': { file: {}, blobURL: 'blob:img' } },
+      settings: { reviewPageSize: 20 },
+    });
+    await getState().syncNote();
+    expect(getState().pendingFiles).toEqual({});
+  });
+
+  it('calls revokeObjectURL after upload', async () => {
+    api.fetchNoteContent.mockResolvedValue('# Note');
+    await getState().openTab('/vault/Note.md');
+    useStore.setState({
+      pendingFiles: { 'img-abc.png': { file: {}, blobURL: 'blob:img-upload' } },
+      settings: { reviewPageSize: 20 },
+    });
+    await getState().syncNote();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:img-upload');
+  });
+
+  it('does not call uploadFile when there are no pending files', async () => {
+    api.fetchNoteContent.mockResolvedValue('# Note');
+    await getState().openTab('/vault/Note.md');
+    useStore.setState({ settings: { reviewPageSize: 20 } });
+    await getState().syncNote();
+    expect(api.uploadFile).not.toHaveBeenCalled();
   });
 });
