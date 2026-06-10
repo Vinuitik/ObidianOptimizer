@@ -1,0 +1,139 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render } from '@testing-library/react';
+import React from 'react';
+
+// ── Mock heavy Milkdown dependencies ─────────────────────────────────────────
+
+let capturedUsePlugins = [];
+
+vi.mock('@milkdown/react', () => ({
+  Milkdown: () => <div data-testid="milkdown" />,
+  MilkdownProvider: ({ children }) => <>{children}</>,
+  useEditor: vi.fn(factory => factory(document.createElement('div'))),
+  useInstance: vi.fn(() => [false, vi.fn()]),
+}));
+vi.mock('@milkdown/preset-commonmark', () => ({ commonmark: { _id: 'commonmark' } }));
+vi.mock('@milkdown/preset-gfm',        () => ({ gfm: { _id: 'gfm' } }));
+vi.mock('@milkdown/plugin-history',    () => ({ history: { _id: 'history' } }));
+vi.mock('@milkdown/plugin-listener',   () => ({ listener: { _id: 'listener' }, listenerCtx: {} }));
+vi.mock('@milkdown/plugin-prism',      () => ({ prism: { _id: 'prism' } }));
+vi.mock('prismjs/themes/prism-tomorrow.css', () => ({}));
+vi.mock('@milkdown/core', () => {
+  const useMock = vi.fn().mockImplementation(function (plugin) {
+    capturedUsePlugins.push(plugin);
+    return this;
+  });
+  const editorInstance = {
+    config: vi.fn().mockReturnThis(),
+    use: useMock,
+  };
+  return {
+    defaultValueCtx: {},
+    Editor: { make: vi.fn(() => editorInstance) },
+    rootCtx: {},
+    editorViewOptionsCtx: {},
+    editorViewCtx: {},
+  };
+});
+vi.mock('../../utils/wikiLinkPlugin',    () => ({ wikiLinkPlugin: {} }));
+vi.mock('../../utils/hashtagPlugin',     () => ({ hashtagPlugin: {} }));
+vi.mock('../../utils/livePreviewPlugin', () => ({ livePreviewPlugin: {} }));
+vi.mock('../../utils/mathPlugin',        () => ({ mathPlugin: {} }));
+vi.mock('../../utils/frontmatter',       () => ({ splitFrontmatter: () => ({ frontmatter: {}, body: '' }) }));
+vi.mock('../../utils/markdownCleanup',   () => ({ cleanMilkdownOutput: s => s }));
+vi.mock('../../utils/obsidianImagePlugin', () => ({
+  obsidianImagePlugin: {},
+  obsidianImageNode$: { type: vi.fn() },
+  setPendingBlobs: vi.fn(),
+  addPendingBlob: vi.fn(),
+  isWhitelisted: vi.fn(() => false),
+  generateFilename: vi.fn(() => 'test.png'),
+}));
+vi.mock('../molecules/FrontmatterTable', () => ({ default: () => null }));
+vi.mock('./EditorErrorBoundary', () => ({ default: ({ children }) => <>{children}</> }));
+vi.mock('../organisms/MilkdownEditor.module.css', () => ({ default: {} }));
+
+vi.mock('../../store/useStore', () => ({
+  default: vi.fn((selector) => selector({
+    currentNotePath: '/vault/Test.md',
+    pendingFrontmatter: {},
+    pendingRaw: '```python\nprint("Hello")\n```\n',
+    isMutable: false,
+    editorResetKey: 0,
+    updatePending: vi.fn(),
+    noteIndex: new Map(),
+    openTab: vi.fn(),
+    pendingFiles: {},
+    addPendingFile: vi.fn(),
+    showToast: vi.fn(),
+  })),
+}));
+
+describe('MilkdownEditor code block', () => {
+  beforeEach(() => {
+    capturedUsePlugins = [];
+  });
+
+  it('registers the prism plugin in the editor chain', async () => {
+    const { default: MilkdownEditor } = await import('./MilkdownEditor');
+    render(<MilkdownEditor />);
+    const pluginIds = capturedUsePlugins.map(p => p?._id).filter(Boolean);
+    expect(pluginIds).toContain('prism');
+  });
+
+  it('registers prism after commonmark', async () => {
+    const { default: MilkdownEditor } = await import('./MilkdownEditor');
+    render(<MilkdownEditor />);
+    const ids = capturedUsePlugins.map(p => p?._id).filter(Boolean);
+    const cmIdx = ids.indexOf('commonmark');
+    const prismIdx = ids.indexOf('prism');
+    expect(cmIdx).toBeGreaterThanOrEqual(0);
+    expect(prismIdx).toBeGreaterThan(cmIdx);
+  });
+});
+
+// ── cleanMilkdownOutput: code block round-trip ────────────────────────────────
+
+import { cleanMilkdownOutput } from '../../utils/markdownCleanup';
+
+describe('cleanMilkdownOutput — code block preservation', () => {
+  it('preserves fenced code block with language specifier', () => {
+    const md = '```python\nprint("Hello World!")\n```';
+    expect(cleanMilkdownOutput(md)).toBe(md);
+  });
+
+  it('preserves fenced code block without language specifier', () => {
+    const md = '```\nsome code\n```';
+    expect(cleanMilkdownOutput(md)).toBe(md);
+  });
+
+  it('preserves multiline code block', () => {
+    const md = '```js\nconst x = 1;\nconst y = 2;\nreturn x + y;\n```';
+    expect(cleanMilkdownOutput(md)).toBe(md);
+  });
+
+  it('preserves inline code unchanged', () => {
+    const md = 'Call `print()` to output text.';
+    expect(cleanMilkdownOutput(md)).toBe(md);
+  });
+
+  it('strips <br /> lines but leaves code blocks untouched', () => {
+    const md = 'paragraph\n<br />\n```python\npass\n```';
+    expect(cleanMilkdownOutput(md)).toBe('paragraph\n\n```python\npass\n```');
+  });
+
+  it('preserves code block containing <br /> literally (inside fence)', () => {
+    const md = '```html\n<br />\n```';
+    expect(cleanMilkdownOutput(md)).toBe('```html\n\n```');
+  });
+
+  it('handles empty code block', () => {
+    const md = '```python\n```';
+    expect(cleanMilkdownOutput(md)).toBe(md);
+  });
+
+  it('handles code block with trailing blank line before fence', () => {
+    const md = '```js\ncode\n\n```';
+    expect(cleanMilkdownOutput(md)).toBe(md);
+  });
+});
