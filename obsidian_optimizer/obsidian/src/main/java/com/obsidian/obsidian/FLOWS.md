@@ -259,6 +259,77 @@ Three services via `docker-compose.yml`. Start: `.\start.ps1`. Stop: `Ctrl+C`.
 
 ---
 
+---
+
+## Chrono Service
+
+Files: ChronoService.java, FileMoverService.java, FileCheckerService.java, BankruptcyService.java, SpreadService.java, FrontmatterRewriter.java, FrontmatterChecker.java
+
+Daily maintenance jobs run in sequence once per day. Last run date persisted in `app_settings.chronoLastRunDate`.
+
+### Trigger points
+
+- `@PostConstruct` on `ChronoService` — if `chronoLastRunDate` is blank or before today, runs immediately after startup sync
+- `@Scheduled(cron = "0 0 2 * * *")` — runs at 2am daily
+- `POST /api/chrono/run` — manual trigger (auth required)
+- `GET /api/chrono/status` — returns `{ lastRunDate }` (public)
+
+`@EnableScheduling` is required — enabled on `ObsidianApplication`.
+
+### Execution order
+
+```
+ChronoService.runAllJobs()
+  1. FileMoverService.run(vaultRoot)        — non-recursive scan of vault root
+  2. FileCheckerService.run(mdFiles, checker) — default checker: FrontmatterRewriter::hasInvalidDate
+  3. BankruptcyService.run(mdFiles, limit)  — reads bankruptcyLimit from settings
+  4. SpreadService.run(mdFiles, max)        — reads maxDailyReviews from settings
+  5. FileRepository.triggerDeltaSync()      — delta resync so DB reflects modified files
+  6. settingsRepo.set("chronoLastRunDate")  — mark today done
+```
+
+`FileRepository.listMdPaths()` — called once in `runAllJobs()`, result passed to all services. Reuses `bfsDiskFiles()` + `EXCLUDED_DIRS` so `_trash/` and `resources/` are skipped.
+
+### FileMoverService
+
+Scans vault root (non-recursive). Moves: `.png/.jpg/.jpeg/.gif/.webp` → `resources/images`, `.pdf` → `resources/pdf`, `.mp4/.mov/.mkv` → `resources/videos`. Creates subdirs if missing.  
+To add an extension: `FileMoverService.IMAGE_EXTS / PDF_EXTS / VIDEO_EXTS` sets.
+
+### FileCheckerService
+
+Walks `mdFiles`, calls `FrontmatterChecker.needsFix(path)`. If true: resets to `{today+3, interval=3, ease=200}` via `FrontmatterRewriter.write()`.  
+Current checker: `FrontmatterRewriter::hasInvalidDate` — detects Obsidian SR `"Invalid date"` on line 2.  
+To change the check: pass a different `FrontmatterChecker` lambda to `FileCheckerService.run()`.
+
+### BankruptcyService
+
+Collects all notes where `sr-due < today`. If count ≥ `bankruptcyLimit` → bankruptcy declared.  
+Tiered interval reduction: `≤7d → 2`, `≤30d → interval/2`, `≤90d → 21`, `>90d → 45`.  
+Ease: `max(215, ease/2)`.  
+Load-balanced scheduling: heap for long/very-long tiers, `pickDate` for short/medium.  
+Constants: `MIN_INTERVAL=2`, `MIN_EASE=215`, tier boundaries and capped intervals are hardcoded — not in settings.
+
+### SpreadService
+
+Groups all notes by day-delta from today. Cascades overflow forward day-by-day until no day exceeds `maxDailyReviews`. Within each overloaded day, lowest-ease notes stay (hardest first), overflow goes to day+1.  
+Works on both future and overdue notes (negative deltas cascade forward through today and beyond).
+
+### FrontmatterRewriter (shared utility)
+
+`read(Path)` → `SrFields(due, interval, ease)` or null if no valid sr-due.  
+`write(Path, SrFields)` → rewrites `sr-due/sr-interval/sr-ease` in place, preserves line endings.  
+`hasInvalidDate(Path)` → true if line 2 ends with `"Invalid date"`.
+
+### Settings keys
+
+| Key | Default | Tunable in UI |
+|---|---|---|
+| `maxDailyReviews` | `30` | Yes |
+| `bankruptcyLimit` | `200` | Yes |
+| `chronoLastRunDate` | `""` | No (internal) |
+
+---
+
 ## Residual (next session)
 
 - **HTTP resync endpoint** — optional `POST /admin/resync` to trigger delta sync without restart

@@ -38,6 +38,9 @@ public class SettingsRepository {
         insertDefault("resourcePath", imagePath);
         insertDefault("reviewPageSize", "20");
         insertDefault("startupSyncMode", "blocking");
+        insertDefault("maxDailyReviews", "30");
+        insertDefault("bankruptcyLimit", "200");
+        insertDefault("chronoLastRunDate", "");
     }
 
     private void insertDefault(String key, String value) {
@@ -72,5 +75,18 @@ public class SettingsRepository {
     // "blocking" | "async"
     public String getStartupSyncMode() {
         return get("startupSyncMode");
+    }
+
+    public int getMaxDailyReviews() {
+        return Integer.parseInt(get("maxDailyReviews"));
+    }
+
+    public int getBankruptcyLimit() {
+        return Integer.parseInt(get("bankruptcyLimit"));
+    }
+
+    // Empty string = never run.
+    public String getChronoLastRunDate() {
+        return get("chronoLastRunDate");
     }
 }

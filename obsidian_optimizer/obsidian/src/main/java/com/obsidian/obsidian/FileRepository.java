@@ -94,6 +94,20 @@ public class FileRepository {
         return new File(ROOT_FILE).getAbsolutePath();
     }
 
+    // Returns all vault .md paths as Path objects. Used by ChronoService to build the
+    // file list once and pass it to each job, avoiding repeated BFS walks.
+    public List<Path> listMdPaths() {
+        return bfsDiskFiles().stream()
+                .map(File::toPath)
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    // Re-runs delta sync after ChronoService has modified files on disk.
+    public void triggerDeltaSync() {
+        log.info("[FileRepository] Post-chrono delta sync.");
+        noteIndex.syncWithDisk(bfsDiskFiles());
+    }
+
     // Returns immediate children (one level) of a folder — no recursion.
     public ChildrenResult getDirectChildren(String folderPath) {
         File dir = new File(folderPath);

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import useStore from '../store/useStore';
+import { fetchChronoStatus, runChronoNow } from '../api/notes';
 import styles from './SettingsPage.module.css';
 
 // ── Section config ────────────────────────────────────────────────────────────
@@ -60,18 +61,46 @@ const SECTIONS = [
       },
     ],
   },
+  {
+    id: 'chrono',
+    title: 'Daily Jobs',
+    description: 'Hyperparameters for the automatic daily maintenance jobs (FileMover, FileChecker, BankruptcyCheck, SpreadCheck).',
+    fields: [
+      {
+        key: 'maxDailyReviews',
+        label: 'Max reviews per day',
+        type: 'number',
+        min: 1,
+        hint: 'SpreadCheck redistributes notes so no single day exceeds this count.',
+      },
+      {
+        key: 'bankruptcyLimit',
+        label: 'Bankruptcy limit',
+        type: 'number',
+        min: 1,
+        hint: 'If overdue notes reach this count, BankruptcyCheck halves intervals and redistributes them.',
+      },
+    ],
+  },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const settings     = useStore(s => s.settings);
+  const settings      = useStore(s => s.settings);
   const applySettings = useStore(s => s.applySettings);
+  const isAuthenticated = useStore(s => s.isAuthenticated);
 
   // Local draft state: one object per section id
   const [drafts, setDrafts]     = useState({});
   const [status, setStatus]     = useState({}); // { [sectionId]: 'idle' | 'saving' | 'saved' | 'error' }
   const [errors, setErrors]     = useState({}); // { [sectionId]: string }
+
+  // Chrono status
+  const [chronoStatus,  setChronoStatus]  = useState(null);
+  const [chronoRunning, setChronoRunning] = useState(false);
+  const [chronoResult,  setChronoResult]  = useState(null);
+  const [chronoError,   setChronoError]   = useState(null);
 
   // Initialise drafts from store once settings load
   useEffect(() => {
@@ -86,6 +115,13 @@ export default function SettingsPage() {
     }
     setDrafts(initial);
   }, [settings.vaultPath]);
+
+  // Fetch chrono status on mount
+  useEffect(() => {
+    fetchChronoStatus()
+      .then(setChronoStatus)
+      .catch(() => {});
+  }, []);
 
   function setField(sectionId, key, value) {
     setDrafts(prev => ({
@@ -105,8 +141,13 @@ export default function SettingsPage() {
       const raw = draft[field.key];
       if (field.type === 'number') {
         const n = parseInt(raw, 10);
-        if (isNaN(n) || n < (field.min ?? 1) || n > (field.max ?? 9999)) {
-          setErrors(prev => ({ ...prev, [section.id]: `${field.label} must be between ${field.min} and ${field.max}.` }));
+        const belowMin = isNaN(n) || n < (field.min ?? 1);
+        const aboveMax = field.max != null && n > field.max;
+        if (belowMin || aboveMax) {
+          const msg = field.max != null
+            ? `${field.label} must be between ${field.min ?? 1} and ${field.max}.`
+            : `${field.label} must be a positive integer.`;
+          setErrors(prev => ({ ...prev, [section.id]: msg }));
           return;
         }
         patch[field.key] = n;
@@ -138,6 +179,21 @@ export default function SettingsPage() {
     return section.fields.some(f => String(settings[f.key] ?? '') !== draft[f.key]);
   }
 
+  async function handleChronoRun() {
+    setChronoRunning(true);
+    setChronoResult(null);
+    setChronoError(null);
+    try {
+      const result = await runChronoNow();
+      setChronoResult(result);
+      setChronoStatus({ lastRunDate: result.date });
+    } catch (e) {
+      setChronoError('Run failed — check server logs.');
+    } finally {
+      setChronoRunning(false);
+    }
+  }
+
   const loaded = Boolean(settings.vaultPath);
 
   return (
@@ -149,6 +205,7 @@ export default function SettingsPage() {
 
       <div className={styles.sections}>
         {SECTIONS.map(section => {
+
           const st   = status[section.id] ?? 'idle';
           const err  = errors[section.id];
           const dirty = isDirty(section);
@@ -197,6 +254,48 @@ export default function SettingsPage() {
             </div>
           );
         })}
+
+        {/* Chrono status — read-only panel with manual trigger */}
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>Chrono Status</h2>
+            <p className={styles.sectionDesc}>
+              Daily jobs run automatically at 2am and on startup. FileMover → FileChecker → BankruptcyCheck → SpreadCheck.
+            </p>
+          </div>
+
+          <div className={styles.fields}>
+            <div className={styles.field}>
+              <div className={styles.fieldMeta}>
+                <label className={styles.label}>Last run</label>
+              </div>
+              <span className={styles.hint}>
+                {chronoStatus?.lastRunDate || 'Never'}
+              </span>
+            </div>
+          </div>
+
+          {chronoResult && (
+            <p className={styles.hint} style={{ marginTop: '8px' }}>
+              Moved {chronoResult.filesMoved} file(s) · Fixed {chronoResult.filesFixed} note(s) ·
+              Overdue {chronoResult.bankruptcy.overdueCount}
+              {chronoResult.bankruptcy.declared ? ' (bankruptcy declared)' : ''} ·
+              Shifted {chronoResult.spread.moved} note(s)
+            </p>
+          )}
+          {chronoError && <span className={styles.errorMsg}>{chronoError}</span>}
+
+          <div className={styles.sectionFooter}>
+            <button
+              className={styles.saveBtn}
+              disabled={chronoRunning || !isAuthenticated}
+              onClick={handleChronoRun}
+            >
+              {chronoRunning ? 'Running…' : 'Run now'}
+            </button>
+          </div>
+        </div>
+
       </div>
     </div>
   );

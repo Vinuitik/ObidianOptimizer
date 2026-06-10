@@ -129,7 +129,7 @@ export async function moveNote(sourcePath, targetFolder) {
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
-// Returns { vaultPath, resourcePath, reviewPageSize }.
+// Returns { vaultPath, resourcePath, reviewPageSize, startupSyncMode, maxDailyReviews, bankruptcyLimit }.
 export async function fetchSettings() {
   const res = await fetch(`${BASE}/settings`, { cache: 'no-store' });
   if (!res.ok) throw new ApiError(res.status);
@@ -143,5 +143,20 @@ export async function saveSettings(patch) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   });
+  return res.json();
+}
+
+// ── Chrono ────────────────────────────────────────────────────────────────────
+
+// Returns { lastRunDate: string }.
+export async function fetchChronoStatus() {
+  const res = await fetch(`${BASE}/chrono/status`, { cache: 'no-store' });
+  if (!res.ok) throw new ApiError(res.status);
+  return res.json();
+}
+
+// Triggers all daily jobs immediately. Returns ChronoResult.
+export async function runChronoNow() {
+  const res = await req(`${BASE}/chrono/run`, { method: 'POST' });
   return res.json();
 }

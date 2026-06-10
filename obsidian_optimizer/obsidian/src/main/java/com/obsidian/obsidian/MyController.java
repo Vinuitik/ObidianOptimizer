@@ -8,7 +8,6 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,12 +20,13 @@ public class MyController {
     private static final Logger log = LoggerFactory.getLogger(MyController.class);
 
     private final FileRepository repository;
-
     private final SettingsRepository settingsRepo;
+    private final ChronoService chronoService;
 
-    MyController(FileRepository repository, SettingsRepository settingsRepo) {
-        this.repository = repository;
-        this.settingsRepo = settingsRepo;
+    MyController(FileRepository repository, SettingsRepository settingsRepo, ChronoService chronoService) {
+        this.repository    = repository;
+        this.settingsRepo  = settingsRepo;
+        this.chronoService = chronoService;
     }
 
     // ── Read endpoints (public) ──────────────────────────────────────────────
@@ -163,7 +163,9 @@ public class MyController {
             settingsRepo.getVaultPath(),
             settingsRepo.getResourcePath(),
             settingsRepo.getReviewPageSize(),
-            settingsRepo.getStartupSyncMode()
+            settingsRepo.getStartupSyncMode(),
+            settingsRepo.getMaxDailyReviews(),
+            settingsRepo.getBankruptcyLimit()
         );
     }
 
@@ -188,10 +190,40 @@ public class MyController {
                 }
                 settingsRepo.set("startupSyncMode", req.startupSyncMode());
             }
+            if (req.maxDailyReviews() != null) {
+                if (req.maxDailyReviews() < 1) {
+                    return ResponseEntity.badRequest().body("maxDailyReviews must be a positive integer");
+                }
+                settingsRepo.set("maxDailyReviews", String.valueOf(req.maxDailyReviews()));
+            }
+            if (req.bankruptcyLimit() != null) {
+                if (req.bankruptcyLimit() < 1) {
+                    return ResponseEntity.badRequest().body("bankruptcyLimit must be a positive integer");
+                }
+                settingsRepo.set("bankruptcyLimit", String.valueOf(req.bankruptcyLimit()));
+            }
             return ResponseEntity.ok(getSettings());
         } catch (Exception e) {
             log.error("[updateSettings] failed: {}", e.getMessage());
             return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // ── Chrono ────────────────────────────────────────────────────────────────
+
+    @GetMapping("chrono/status")
+    public ChronoStatusResponse getChronoStatus() {
+        return new ChronoStatusResponse(chronoService.getLastRunDate());
+    }
+
+    @PostMapping("chrono/run")
+    public ResponseEntity<?> runChrono() {
+        try {
+            ChronoService.ChronoResult result = chronoService.runAllJobs();
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("[runChrono] failed: {}", e.getMessage());
+            return ResponseEntity.internalServerError().body(e.getMessage());
         }
     }
 
@@ -204,6 +236,7 @@ public class MyController {
     record RenameNoteRequest(String oldPath, String newName) {}
     record DeleteNoteRequest(String path) {}
     record MoveNoteRequest(String sourcePath, String targetFolder) {}
-    record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize, String startupSyncMode) {}
-    record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize, String startupSyncMode) {}
+    record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize, String startupSyncMode, int maxDailyReviews, int bankruptcyLimit) {}
+    record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize, String startupSyncMode, Integer maxDailyReviews, Integer bankruptcyLimit) {}
+    record ChronoStatusResponse(String lastRunDate) {}
 }
