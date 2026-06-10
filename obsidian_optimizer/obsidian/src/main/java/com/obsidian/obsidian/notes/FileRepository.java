@@ -1,4 +1,6 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.notes;
+
+import com.obsidian.obsidian.settings.SettingsRepository;
 
 import java.io.File;
 import java.io.IOException;
@@ -68,13 +70,11 @@ public class FileRepository {
         }
         settingsRepo.set("vaultPath", newPath);
         ROOT_FILE = newPath;
-        // Force a full resync: wipes both notes + note_links, then repopulates
         noteIndex.forceResync(bfsDiskFiles());
     }
 
     // ── Read ─────────────────────────────────────────────────────────────────
 
-    // Returns all note paths from the DB index (O(1) query, no disk walk).
     public ArrayList<String> getNoteNames() {
         return noteIndex.getAllPaths();
     }
@@ -94,21 +94,17 @@ public class FileRepository {
         return new File(ROOT_FILE).getAbsolutePath();
     }
 
-    // Returns all vault .md paths as Path objects. Used by ChronoService to build the
-    // file list once and pass it to each job, avoiding repeated BFS walks.
     public List<Path> listMdPaths() {
         return bfsDiskFiles().stream()
                 .map(File::toPath)
                 .collect(java.util.stream.Collectors.toList());
     }
 
-    // Re-runs delta sync after ChronoService has modified files on disk.
     public void triggerDeltaSync() {
         log.info("[FileRepository] Post-chrono delta sync.");
         noteIndex.syncWithDisk(bfsDiskFiles());
     }
 
-    // Returns immediate children (one level) of a folder — no recursion.
     public ChildrenResult getDirectChildren(String folderPath) {
         File dir = new File(folderPath);
         List<String> folderPaths = new ArrayList<>();
@@ -133,7 +129,6 @@ public class FileRepository {
         return new ChildrenResult(dir.getAbsolutePath(), folderPaths, filePaths);
     }
 
-    // Returns paginated review-due notes from the DB index.
     public ReviewPage getReviewNotesPaged(int offset, int limit) {
         return noteIndex.getReviewNotesPaged(offset, limit);
     }
@@ -281,7 +276,7 @@ public class FileRepository {
 
         File destFile = new File(targetDir, sourceFile.getName());
         if (destFile.getAbsolutePath().equals(sourceFile.getAbsolutePath())) {
-            return sourcePath; // already in target folder — no-op
+            return sourcePath;
         }
         if (destFile.exists()) {
             throw new IOException("A note named '" + sourceFile.getName() + "' already exists in the target folder");
@@ -323,7 +318,6 @@ public class FileRepository {
 
     // ── Private ───────────────────────────────────────────────────────────────
 
-    // Raw BFS disk walk — used only by init() and updateVaultPath() to feed syncWithDisk.
     private List<File> bfsDiskFiles() {
         List<File> files = new ArrayList<>();
         File root = new File(ROOT_FILE);

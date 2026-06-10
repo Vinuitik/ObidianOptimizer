@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.notes;
 
 import org.junit.jupiter.api.Test;
 
@@ -87,10 +87,9 @@ class FrontmatterParserTest {
 
     @Test
     void valueWithColonInItParsesFirstColonOnly() {
-        // e.g. "sr-due: 2024:01:01" — weird but should not crash
         String raw = "---\nsr-due: 2024:01:01\nsr-ease: 180\n---\n";
         var m = FrontmatterParser.parse(raw);
-        assertThat(m.srDue()).isNull();        // not a valid ISO date
-        assertThat(m.srEase()).isEqualTo(180); // other field still parsed
+        assertThat(m.srDue()).isNull();
+        assertThat(m.srEase()).isEqualTo(180);
     }
 }

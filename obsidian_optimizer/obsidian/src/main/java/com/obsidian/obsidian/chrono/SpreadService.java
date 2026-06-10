@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,9 +17,6 @@ public class SpreadService {
 
     public record SpreadResult(int total, int moved) {}
 
-    // Groups all notes by day-offset from today, then cascades overflow forward
-    // day-by-day until no day exceeds maxDailyReviews. Within each overloaded day,
-    // lowest-ease notes stay (hardest kept first) and overflow shifts to day+1.
     public SpreadResult run(List<Path> mdFiles, int maxDailyReviews) {
         LocalDate today = LocalDate.now();
         TreeMap<Integer, List<NoteInfo>> byDay = new TreeMap<>();
@@ -45,7 +42,7 @@ public class SpreadService {
             List<NoteInfo> notes = byDay.get(delta);
             if (notes == null || notes.size() <= maxDailyReviews) continue;
 
-            notes.sort(Comparator.comparingInt(n -> n.ease)); // lowest ease = hardest = keep first
+            notes.sort(Comparator.comparingInt(n -> n.ease));
             List<NoteInfo> overflow = new ArrayList<>(notes.subList(maxDailyReviews, notes.size()));
             notes.subList(maxDailyReviews, notes.size()).clear();
             byDay.computeIfAbsent(delta + 1, k -> new ArrayList<>()).addAll(overflow);

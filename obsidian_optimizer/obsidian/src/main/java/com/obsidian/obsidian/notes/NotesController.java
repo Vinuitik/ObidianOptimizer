@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.notes;
 
 import java.io.IOException;
 import java.security.Principal;
@@ -11,45 +11,34 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import com.obsidian.obsidian.FileRepository.ChildrenResult;
-import com.obsidian.obsidian.FileRepository.ReviewPage;
-
 @RestController
-public class MyController {
+public class NotesController {
 
-    private static final Logger log = LoggerFactory.getLogger(MyController.class);
+    private static final Logger log = LoggerFactory.getLogger(NotesController.class);
 
     private final FileRepository repository;
-    private final SettingsRepository settingsRepo;
-    private final ChronoService chronoService;
 
-    MyController(FileRepository repository, SettingsRepository settingsRepo, ChronoService chronoService) {
-        this.repository    = repository;
-        this.settingsRepo  = settingsRepo;
-        this.chronoService = chronoService;
+    NotesController(FileRepository repository) {
+        this.repository = repository;
     }
 
-    // ── Read endpoints (public) ──────────────────────────────────────────────
+    // ── Read ─────────────────────────────────────────────────────────────────
 
     @GetMapping("names")
     public ArrayList<String> getNames() {
         return repository.getNoteNames();
     }
 
-    // Returns immediate children of a folder (lazy tree loading).
-    // No folder param = vault root.
     @GetMapping("children")
-    public ChildrenResult getChildren(@RequestParam(required = false) String folder) {
+    public FileRepository.ChildrenResult getChildren(@RequestParam(required = false) String folder) {
         String path = (folder == null || folder.isBlank())
                 ? repository.getRootPath()
                 : folder;
         return repository.getDirectChildren(path);
     }
 
-    // Returns paginated review-due notes.
-    // offset defaults to 0, limit defaults to 40.
     @GetMapping("review")
-    public ReviewPage getReviewNames(
+    public FileRepository.ReviewPage getReviewNames(
             @RequestParam(defaultValue = "0")  int offset,
             @RequestParam(defaultValue = "40") int limit) {
         return repository.getReviewNotesPaged(offset, limit);
@@ -69,7 +58,7 @@ public class MyController {
         return principal.getName();
     }
 
-    // ── Write endpoints (require session auth) ───────────────────────────────
+    // ── Write ─────────────────────────────────────────────────────────────────
 
     @PostMapping("folders")
     public ResponseEntity<?> createFolder(@RequestBody CreateFolderRequest req) {
@@ -155,78 +144,6 @@ public class MyController {
         }
     }
 
-    // ── Settings ─────────────────────────────────────────────────────────────
-
-    @GetMapping("settings")
-    public SettingsResponse getSettings() {
-        return new SettingsResponse(
-            settingsRepo.getVaultPath(),
-            settingsRepo.getResourcePath(),
-            settingsRepo.getReviewPageSize(),
-            settingsRepo.getStartupSyncMode(),
-            settingsRepo.getMaxDailyReviews(),
-            settingsRepo.getBankruptcyLimit()
-        );
-    }
-
-    @PutMapping("settings")
-    public ResponseEntity<?> updateSettings(@RequestBody UpdateSettingsRequest req) {
-        try {
-            if (req.vaultPath() != null) {
-                repository.updateVaultPath(req.vaultPath());
-            }
-            if (req.resourcePath() != null) {
-                settingsRepo.set("resourcePath", req.resourcePath());
-            }
-            if (req.reviewPageSize() != null) {
-                if (req.reviewPageSize() < 1 || req.reviewPageSize() > 500) {
-                    return ResponseEntity.badRequest().body("reviewPageSize must be between 1 and 500");
-                }
-                settingsRepo.set("reviewPageSize", String.valueOf(req.reviewPageSize()));
-            }
-            if (req.startupSyncMode() != null) {
-                if (!req.startupSyncMode().equals("blocking") && !req.startupSyncMode().equals("async")) {
-                    return ResponseEntity.badRequest().body("startupSyncMode must be 'blocking' or 'async'");
-                }
-                settingsRepo.set("startupSyncMode", req.startupSyncMode());
-            }
-            if (req.maxDailyReviews() != null) {
-                if (req.maxDailyReviews() < 1) {
-                    return ResponseEntity.badRequest().body("maxDailyReviews must be a positive integer");
-                }
-                settingsRepo.set("maxDailyReviews", String.valueOf(req.maxDailyReviews()));
-            }
-            if (req.bankruptcyLimit() != null) {
-                if (req.bankruptcyLimit() < 1) {
-                    return ResponseEntity.badRequest().body("bankruptcyLimit must be a positive integer");
-                }
-                settingsRepo.set("bankruptcyLimit", String.valueOf(req.bankruptcyLimit()));
-            }
-            return ResponseEntity.ok(getSettings());
-        } catch (Exception e) {
-            log.error("[updateSettings] failed: {}", e.getMessage());
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
-    }
-
-    // ── Chrono ────────────────────────────────────────────────────────────────
-
-    @GetMapping("chrono/status")
-    public ChronoStatusResponse getChronoStatus() {
-        return new ChronoStatusResponse(chronoService.getLastRunDate());
-    }
-
-    @PostMapping("chrono/run")
-    public ResponseEntity<?> runChrono() {
-        try {
-            ChronoService.ChronoResult result = chronoService.runAllJobs();
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            log.error("[runChrono] failed: {}", e.getMessage());
-            return ResponseEntity.internalServerError().body(e.getMessage());
-        }
-    }
-
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
     record CreateFolderRequest(String parentPath, String name) {}
@@ -236,7 +153,4 @@ public class MyController {
     record RenameNoteRequest(String oldPath, String newName) {}
     record DeleteNoteRequest(String path) {}
     record MoveNoteRequest(String sourcePath, String targetFolder) {}
-    record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize, String startupSyncMode, int maxDailyReviews, int bankruptcyLimit) {}
-    record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize, String startupSyncMode, Integer maxDailyReviews, Integer bankruptcyLimit) {}
-    record ChronoStatusResponse(String lastRunDate) {}
 }

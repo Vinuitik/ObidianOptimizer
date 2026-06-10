@@ -1,4 +1,8 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
+
+import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.notes.NoteIndexRepository;
+import com.obsidian.obsidian.settings.SettingsRepository;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,17 +25,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Integration tests for ChronoService: all five jobs run end-to-end with real
- * file I/O and a real Postgres container. ChronoService is NOT mocked here —
- * we want the real bean. The @PostConstruct onStartup() will fire with an empty
- * vault; each test then pre-populates files and calls runAllJobs() directly.
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
 class ChronoServiceIT {
 
-    @SuppressWarnings("resource") // lifecycle managed by @Testcontainers extension
+    @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>("postgres:16");
@@ -52,8 +50,6 @@ class ChronoServiceIT {
         r.add("spring.datasource.username",         postgres::getUsername);
         r.add("spring.datasource.password",         postgres::getPassword);
         r.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
-        // Ensure onStartup() from @PostConstruct always triggers during context init
-        // (lastRunDate is blank in a fresh DB), but that's fine — vault is empty then.
     }
 
     @Autowired ChronoService      chronoService;
@@ -63,7 +59,6 @@ class ChronoServiceIT {
 
     @BeforeEach
     void resetLastRunDate() {
-        // Let each test drive runAllJobs() directly without the date guard.
         settingsRepo.set("chronoLastRunDate", "");
     }
 
@@ -77,11 +72,8 @@ class ChronoServiceIT {
         noteIndex.forceResync(List.<File>of());
     }
 
-    // ── FileMoverService ──────────────────────────────────────────────────────
-
     @Test
     void runAllJobs_mediaFileInVaultRoot_movedToResourcesSubdir() throws IOException {
-        // A .png sitting at vault root should be moved to resources/images/
         Path img = VAULT.resolve("diagram.png");
         Files.writeString(img, "fake-png-bytes");
 
@@ -94,7 +86,6 @@ class ChronoServiceIT {
 
     @Test
     void runAllJobs_noMediaFiles_zeroMoved() throws IOException {
-        // Only markdown in vault root — nothing to move
         Files.writeString(VAULT.resolve("Note.md"),
             "---\nsr-due: " + LocalDate.now().plusDays(5) + "\nsr-interval: 3\nsr-ease: 200\n---\n");
 
@@ -103,11 +94,8 @@ class ChronoServiceIT {
         assertThat(result.filesMoved()).isEqualTo(0);
     }
 
-    // ── FileCheckerService ────────────────────────────────────────────────────
-
     @Test
     void runAllJobs_noteWithInvalidDate_frontmatterFixed() throws IOException {
-        // sr-due = "Invalid date" triggers FileCheckerService
         String badContent = "---\nsr-due: Invalid date\nsr-interval: 3\nsr-ease: 200\n---\n\n# Note\n";
         Path note = VAULT.resolve("Broken.md");
         Files.writeString(note, badContent);
@@ -117,7 +105,6 @@ class ChronoServiceIT {
         assertThat(result.filesFixed()).isEqualTo(1);
         String fixed = Files.readString(note);
         assertThat(fixed).doesNotContain("Invalid date");
-        // sr-due should now be today+3
         assertThat(fixed).contains("sr-due: " + LocalDate.now().plusDays(3));
     }
 
@@ -133,11 +120,8 @@ class ChronoServiceIT {
         assertThat(Files.readString(note)).contains("sr-due: " + future);
     }
 
-    // ── SpreadService ─────────────────────────────────────────────────────────
-
     @Test
     void runAllJobs_overCapNotes_spreadToFutureDays() throws IOException {
-        // max 1 review/day: 3 overdue notes → 2 must be rescheduled to distinct future days
         settingsRepo.set("maxDailyReviews", "1");
         LocalDate yesterday = LocalDate.now().minusDays(1);
         for (int i = 0; i < 3; i++) {
@@ -150,12 +134,9 @@ class ChronoServiceIT {
         assertThat(result.spread().moved()).isGreaterThan(0);
     }
 
-    // ── BankruptcyService ─────────────────────────────────────────────────────
-
     @Test
     void runAllJobs_underBankruptcyThreshold_noBankruptcy() throws IOException {
         settingsRepo.set("bankruptcyLimit", "200");
-        // Only 1 overdue note — nowhere near 200
         Files.writeString(VAULT.resolve("One.md"),
             "---\nsr-due: " + LocalDate.now().minusDays(1) + "\nsr-interval: 3\nsr-ease: 200\n---\n");
 
@@ -163,8 +144,6 @@ class ChronoServiceIT {
 
         assertThat(result.bankruptcy().declared()).isFalse();
     }
-
-    // ── Date guard (idempotency) ──────────────────────────────────────────────
 
     @Test
     void runAllJobs_setsLastRunDateToToday() {
@@ -174,18 +153,14 @@ class ChronoServiceIT {
 
     @Test
     void onStartup_alreadyRanToday_skipsJobs() throws IOException {
-        // Pre-set today's date so onStartup() thinks it already ran
         settingsRepo.set("chronoLastRunDate", LocalDate.now().toString());
-        // Put a media file in vault root — it should NOT be moved if jobs are skipped
         Path img = VAULT.resolve("skip.png");
         Files.writeString(img, "fake");
 
-        chronoService.onStartup(); // should be a no-op
+        chronoService.onStartup();
 
-        assertThat(img).exists(); // file still there → no job ran
+        assertThat(img).exists();
     }
-
-    // ── Combined result structure ─────────────────────────────────────────────
 
     @Test
     void runAllJobs_returnsResultWithTodaysDate() {

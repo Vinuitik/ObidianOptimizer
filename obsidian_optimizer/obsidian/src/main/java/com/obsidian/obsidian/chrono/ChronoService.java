@@ -1,4 +1,7 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
+
+import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.settings.SettingsRepository;
 
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -41,8 +44,6 @@ public class ChronoService {
         SpreadService.SpreadResult spread
     ) {}
 
-    // Runs after FileRepository has completed its own @PostConstruct startup sync
-    // (guaranteed because FileRepository is a dependency of this bean).
     @PostConstruct
     public void onStartup() {
         String lastRun = settingsRepo.getChronoLastRunDate();

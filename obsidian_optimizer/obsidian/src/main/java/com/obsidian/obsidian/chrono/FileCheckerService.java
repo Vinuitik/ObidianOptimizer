@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,9 +14,6 @@ public class FileCheckerService {
 
     private static final Logger log = LoggerFactory.getLogger(FileCheckerService.class);
 
-    // Walks the pre-collected md file list, runs the checker on each, and resets
-    // frontmatter to {today+3, interval=3, ease=200} for any file that needs fixing.
-    // Returns count of files fixed.
     public int run(List<Path> mdFiles, FrontmatterChecker checker) {
         LocalDate resetDue = LocalDate.now().plusDays(3);
         FrontmatterRewriter.SrFields resetFields = new FrontmatterRewriter.SrFields(resetDue, 3, 200);

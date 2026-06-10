@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,8 +17,6 @@ class FileMoverServiceTest {
     private void createFile(String name) throws IOException {
         Files.writeString(vault.resolve(name), "data");
     }
-
-    // ── Image extensions ─────────────────────────────────────────────────────
 
     @Test
     void movesPngToImagesDir() throws IOException {
@@ -56,8 +54,6 @@ class FileMoverServiceTest {
         assertThat(vault.resolve("resources/images/banner.webp")).exists();
     }
 
-    // ── PDF ──────────────────────────────────────────────────────────────────
-
     @Test
     void movesPdfToPdfDir() throws IOException {
         createFile("doc.pdf");
@@ -65,8 +61,6 @@ class FileMoverServiceTest {
         assertThat(vault.resolve("resources/pdf/doc.pdf")).exists();
         assertThat(vault.resolve("doc.pdf")).doesNotExist();
     }
-
-    // ── Video extensions ─────────────────────────────────────────────────────
 
     @Test
     void movesMp4ToVideosDir() throws IOException {
@@ -89,8 +83,6 @@ class FileMoverServiceTest {
         assertThat(vault.resolve("resources/videos/movie.mkv")).exists();
     }
 
-    // ── Non-media files stay ──────────────────────────────────────────────────
-
     @Test
     void markdownFileNotMoved() throws IOException {
         createFile("note.md");
@@ -112,20 +104,15 @@ class FileMoverServiceTest {
         assertThat(vault.resolve("README")).exists();
     }
 
-    // ── Non-recursive ─────────────────────────────────────────────────────────
-
     @Test
     void filesInSubdirNotMoved() throws IOException {
         Path sub = vault.resolve("subfolder");
         Files.createDirectories(sub);
         Files.writeString(sub.resolve("nested.png"), "data");
         service.run(vault.toString());
-        // non-recursive scan — files inside subfolders must not be moved
         assertThat(sub.resolve("nested.png")).exists();
         assertThat(vault.resolve("resources/images/nested.png")).doesNotExist();
     }
-
-    // ── Directory creation ────────────────────────────────────────────────────
 
     @Test
     void createsDirsIfMissing() throws IOException {
@@ -135,8 +122,6 @@ class FileMoverServiceTest {
         assertThat(vault.resolve("resources/pdf")).isDirectory();
         assertThat(vault.resolve("resources/videos")).isDirectory();
     }
-
-    // ── Return count ──────────────────────────────────────────────────────────
 
     @Test
     void returnsCountOfMovedFiles() throws IOException {

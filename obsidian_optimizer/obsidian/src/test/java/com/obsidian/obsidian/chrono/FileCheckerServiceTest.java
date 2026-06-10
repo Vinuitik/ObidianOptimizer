@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

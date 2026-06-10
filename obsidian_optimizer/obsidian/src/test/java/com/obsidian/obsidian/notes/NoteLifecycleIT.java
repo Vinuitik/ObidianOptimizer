@@ -1,4 +1,6 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.notes;
+
+import com.obsidian.obsidian.chrono.ChronoService;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -23,10 +25,6 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * Integration tests: note CRUD, delta sync, backlinks — against a real Postgres container.
- * ChronoService mocked to keep vault state deterministic across @PostConstruct.
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
 class NoteLifecycleIT {
@@ -35,7 +33,6 @@ class NoteLifecycleIT {
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>("postgres:16");
 
-    // Static initializer runs before Spring reads @DynamicPropertySource suppliers.
     static final Path VAULT;
     static {
         try {
@@ -62,13 +59,11 @@ class NoteLifecycleIT {
 
     @AfterEach
     void cleanAll() throws IOException {
-        // Remove vault contents (leaves VAULT dir itself)
         try (var stream = Files.walk(VAULT)) {
             stream.sorted(Comparator.reverseOrder())
                   .filter(p -> !p.equals(VAULT))
                   .forEach(p -> p.toFile().delete());
         }
-        // Truncate both tables
         noteIndex.forceResync(List.<File>of());
     }
 
@@ -82,8 +77,6 @@ class NoteLifecycleIT {
         return fileRepo.listMdPaths().stream()
             .map(Path::toFile).collect(Collectors.toList());
     }
-
-    // ── CREATE ────────────────────────────────────────────────────────────────
 
     @Test
     void createNote_createsFileAndUpsertsToDB() throws IOException {
@@ -106,8 +99,6 @@ class NoteLifecycleIT {
         assertThatThrownBy(() -> fileRepo.createNote(VAULT.toString(), "Dup"))
             .isInstanceOf(IOException.class);
     }
-
-    // ── DELTA SYNC ────────────────────────────────────────────────────────────
 
     @Test
     void syncWithDisk_insertsExternallyCreatedFile() throws IOException {
@@ -134,8 +125,6 @@ class NoteLifecycleIT {
         assertThat(noteIndex.getAllPaths()).contains(path);
     }
 
-    // ── PATCH ─────────────────────────────────────────────────────────────────
-
     @Test
     void patchNote_appendsLineAndUpdatesDB() throws IOException {
         String path = fileRepo.createNote(VAULT.toString(), "PatchMe");
@@ -149,8 +138,6 @@ class NoteLifecycleIT {
         assertThat(Files.readString(Path.of(path))).contains("# Appended");
         assertThat(noteIndex.getAllPaths()).contains(path);
     }
-
-    // ── RENAME ────────────────────────────────────────────────────────────────
 
     @Test
     void renameNote_movesFileAndUpdatesDB() throws IOException {
@@ -177,8 +164,6 @@ class NoteLifecycleIT {
         assertThat(updated).doesNotContain("[[TargetNote]]");
     }
 
-    // ── SOFT DELETE ───────────────────────────────────────────────────────────
-
     @Test
     void softDelete_movesToTrashAndRemovesFromDB() throws IOException {
         String path = fileRepo.createNote(VAULT.toString(), "ToTrash");
@@ -191,8 +176,6 @@ class NoteLifecycleIT {
         assertThat(Files.list(trash).anyMatch(p -> p.getFileName().toString().startsWith("ToTrash")))
             .isTrue();
     }
-
-    // ── REVIEW QUEUE ─────────────────────────────────────────────────────────
 
     @Test
     void reviewQueue_returnsDueNotesAndExcludesFuture() throws IOException {
@@ -220,8 +203,6 @@ class NoteLifecycleIT {
         assertThat(page.notes()).hasSize(2);
         assertThat(page.hasMore()).isTrue();
     }
-
-    // ── NOTE LINK INDEX ───────────────────────────────────────────────────────
 
     @Test
     void noteLinkIndex_storesLinksOnWrite() throws IOException {

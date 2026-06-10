@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -26,8 +26,6 @@ class BankruptcyServiceTest {
     private LocalDate pastDate(int daysAgo) {
         return LocalDate.now().minusDays(daysAgo);
     }
-
-    // ── Threshold logic ──────────────────────────────────────────────────────
 
     @Test
     void notDeclaredWhenOverdueCountBelowLimit() throws IOException {
@@ -62,9 +60,6 @@ class BankruptcyServiceTest {
         assertThat(result.declared()).isFalse();
         assertThat(result.overdueCount()).isEqualTo(0);
     }
-
-    // ── Tier interval logic ──────────────────────────────────────────────────
-    // Triggers bankruptcy (limit = 1) for each tier to verify the new interval.
 
     @Test
     void tierShort_intervalAtOrBelow7_becomesMinInterval2() throws IOException {
@@ -108,11 +103,8 @@ class BankruptcyServiceTest {
         assertThat(FrontmatterRewriter.read(f).interval()).isEqualTo(45);
     }
 
-    // ── Ease floor logic ─────────────────────────────────────────────────────
-
     @Test
     void easeHighEnough_isHalvedNormally() throws IOException {
-        // 500/2 = 250 > 215 floor → result is 250
         Path f = writeNote("hi.md", pastDate(1), 5, 500);
         service.run(List.of(f), 1);
         assertThat(FrontmatterRewriter.read(f).ease()).isEqualTo(250);
@@ -120,7 +112,6 @@ class BankruptcyServiceTest {
 
     @Test
     void easeHalfBelowMinEase_isClamped() throws IOException {
-        // 300/2 = 150 < 215 → clamped to 215
         Path f = writeNote("lo.md", pastDate(1), 5, 300);
         service.run(List.of(f), 1);
         assertThat(FrontmatterRewriter.read(f).ease()).isEqualTo(215);
@@ -128,13 +119,10 @@ class BankruptcyServiceTest {
 
     @Test
     void easeExactlyMinEase_staysAtMinEase() throws IOException {
-        // 215/2 = 107 < 215 → clamped to 215
         Path f = writeNote("exact.md", pastDate(1), 5, 215);
         service.run(List.of(f), 1);
         assertThat(FrontmatterRewriter.read(f).ease()).isEqualTo(215);
     }
-
-    // ── New due date is in the future ────────────────────────────────────────
 
     @Test
     void rescheduledNoteHasFutureDueDate() throws IOException {

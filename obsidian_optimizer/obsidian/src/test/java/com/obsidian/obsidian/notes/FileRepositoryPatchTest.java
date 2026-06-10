@@ -1,4 +1,6 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.notes;
+
+import com.obsidian.obsidian.settings.SettingsRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,9 +23,6 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 
-// LENIENT: setUp stubs (upsert/updateLinks) are not reached by early-exit tests
-// (null/empty hunks, non-existent file, out-of-range hunk) — they're still needed
-// by the main patch tests, so moving them to @BeforeEach is the right place.
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class FileRepositoryPatchTest {
@@ -38,8 +37,6 @@ class FileRepositoryPatchTest {
 
     @BeforeEach
     void setUp() {
-        // @PostConstruct init() is NOT called in plain Mockito — no Spring context.
-        // We stub only what patchNote() calls after writing.
         doNothing().when(noteIndex).upsert(anyString(), anyString(), any(), anyLong());
         doNothing().when(noteLinkRepo).updateLinks(anyString(), any());
         repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex);
@@ -50,8 +47,6 @@ class FileRepositoryPatchTest {
         Files.writeString(f, content);
         return f;
     }
-
-    // ── Single-hunk cases ────────────────────────────────────────────────────
 
     @Test
     void singleLineInsertion() throws IOException {
@@ -98,13 +93,9 @@ class FileRepositoryPatchTest {
         assertThat(Files.readString(f)).isEqualTo("first\nsecond\nthird");
     }
 
-    // ── Multiple hunks applied back-to-front ─────────────────────────────────
-
     @Test
     void multipleHunksAppliedBackToFront() throws IOException {
         Path f = writeNote("multi.md", "alpha\nbeta\ngamma\ndelta");
-        // Replace line 0 (alpha→ALPHA) and line 2 (gamma→GAMMA).
-        // Hunks given in forward order — back-to-front sort must handle this.
         repo.patchNote(f.toString(), List.of(
             new FileRepository.PatchHunk(0, 1, List.of("ALPHA")),
             new FileRepository.PatchHunk(2, 1, List.of("GAMMA"))
@@ -121,8 +112,6 @@ class FileRepositoryPatchTest {
         assertThat(Files.readString(f)).isEqualTo("first\nsecond\nthird\nlast");
     }
 
-    // ── Line ending preservation ──────────────────────────────────────────────
-
     @Test
     void preservesCrlfSeparator() throws IOException {
         Path f = writeNote("crlf.md", "a\r\nb\r\nc");
@@ -134,8 +123,6 @@ class FileRepositoryPatchTest {
         assertThat(result).contains("B");
         assertThat(result).doesNotContain("\nb");
     }
-
-    // ── Edge cases ───────────────────────────────────────────────────────────
 
     @Test
     void emptyHunkListIsNoOp() throws IOException {

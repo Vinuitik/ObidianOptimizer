@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.notes;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,8 +15,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
@@ -27,31 +25,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @ExtendWith(MockitoExtension.class)
-class MyControllerTest {
+class NotesControllerTest {
 
-    @Mock FileRepository     fileRepository;
-    @Mock SettingsRepository settingsRepository;
-    @Mock ChronoService      chronoService;
+    @Mock FileRepository fileRepository;
 
     private MockMvc mvc;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders
-            .standaloneSetup(new MyController(fileRepository, settingsRepository, chronoService))
-            .build();
-    }
-
-    // ── Helper: stub settings for responses that echo current settings ────────
-
-    private void stubSettings() {
-        when(settingsRepository.getVaultPath()).thenReturn("/v");
-        when(settingsRepository.getResourcePath()).thenReturn("/v/r");
-        when(settingsRepository.getReviewPageSize()).thenReturn(20);
-        when(settingsRepository.getStartupSyncMode()).thenReturn("blocking");
-        when(settingsRepository.getMaxDailyReviews()).thenReturn(30);
-        when(settingsRepository.getBankruptcyLimit()).thenReturn(200);
+        mvc = MockMvcBuilders.standaloneSetup(new NotesController(fileRepository)).build();
     }
 
     // ── GET /names ────────────────────────────────────────────────────────────
@@ -264,177 +247,5 @@ class MyControllerTest {
                     "targetFolder", "/v/B"
                 ))))
             .andExpect(status().isBadRequest());
-    }
-
-    // ── GET /settings ─────────────────────────────────────────────────────────
-
-    @Test
-    void getSettings_returns200WithAllFields() throws Exception {
-        when(settingsRepository.getVaultPath()).thenReturn("/vault");
-        when(settingsRepository.getResourcePath()).thenReturn("/vault/resources/images");
-        when(settingsRepository.getReviewPageSize()).thenReturn(20);
-        when(settingsRepository.getStartupSyncMode()).thenReturn("blocking");
-        when(settingsRepository.getMaxDailyReviews()).thenReturn(30);
-        when(settingsRepository.getBankruptcyLimit()).thenReturn(200);
-        mvc.perform(get("/settings"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.vaultPath").value("/vault"))
-            .andExpect(jsonPath("$.resourcePath").value("/vault/resources/images"))
-            .andExpect(jsonPath("$.reviewPageSize").value(20))
-            .andExpect(jsonPath("$.startupSyncMode").value("blocking"))
-            .andExpect(jsonPath("$.maxDailyReviews").value(30))
-            .andExpect(jsonPath("$.bankruptcyLimit").value(200));
-    }
-
-    // ── PUT /settings — reviewPageSize ────────────────────────────────────────
-
-    @Test
-    void updateSettings_reviewPageSizeZero_returns400() throws Exception {
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("reviewPageSize", 0))))
-            .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void updateSettings_reviewPageSize501_returns400() throws Exception {
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("reviewPageSize", 501))))
-            .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void updateSettings_reviewPageSizeBoundary1_returns200() throws Exception {
-        stubSettings();
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("reviewPageSize", 1))))
-            .andExpect(status().isOk());
-    }
-
-    @Test
-    void updateSettings_reviewPageSizeBoundary500_returns200() throws Exception {
-        stubSettings();
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("reviewPageSize", 500))))
-            .andExpect(status().isOk());
-    }
-
-    // ── PUT /settings — startupSyncMode ──────────────────────────────────────
-
-    @Test
-    void updateSettings_invalidSyncMode_returns400() throws Exception {
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("startupSyncMode", "instant"))))
-            .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void updateSettings_asyncSyncMode_returns200() throws Exception {
-        stubSettings();
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("startupSyncMode", "async"))))
-            .andExpect(status().isOk());
-    }
-
-    @Test
-    void updateSettings_blockingSyncMode_returns200() throws Exception {
-        stubSettings();
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("startupSyncMode", "blocking"))))
-            .andExpect(status().isOk());
-    }
-
-    // ── PUT /settings — maxDailyReviews ──────────────────────────────────────
-
-    @Test
-    void updateSettings_maxDailyReviewsZero_returns400() throws Exception {
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("maxDailyReviews", 0))))
-            .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void updateSettings_maxDailyReviewsOne_returns200() throws Exception {
-        stubSettings();
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("maxDailyReviews", 1))))
-            .andExpect(status().isOk());
-    }
-
-    @Test
-    void updateSettings_maxDailyReviewsLargeValue_returns200() throws Exception {
-        stubSettings();
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("maxDailyReviews", 10000))))
-            .andExpect(status().isOk());
-    }
-
-    // ── PUT /settings — bankruptcyLimit ──────────────────────────────────────
-
-    @Test
-    void updateSettings_bankruptcyLimitZero_returns400() throws Exception {
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("bankruptcyLimit", 0))))
-            .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void updateSettings_bankruptcyLimitOne_returns200() throws Exception {
-        stubSettings();
-        mvc.perform(put("/settings")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(mapper.writeValueAsString(Map.of("bankruptcyLimit", 1))))
-            .andExpect(status().isOk());
-    }
-
-    // ── GET /chrono/status ────────────────────────────────────────────────────
-
-    @Test
-    void getChronoStatus_returns200WithLastRunDate() throws Exception {
-        when(chronoService.getLastRunDate()).thenReturn("2026-06-10");
-        mvc.perform(get("/chrono/status"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.lastRunDate").value("2026-06-10"));
-    }
-
-    @Test
-    void getChronoStatus_neverRunReturnsEmpty() throws Exception {
-        when(chronoService.getLastRunDate()).thenReturn("");
-        mvc.perform(get("/chrono/status"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.lastRunDate").value(""));
-    }
-
-    // ── POST /chrono/run ──────────────────────────────────────────────────────
-
-    @Test
-    void runChrono_success_returns200WithResult() throws Exception {
-        var bankruptcy = new BankruptcyService.BankruptcyResult(5, true, 5);
-        var spread = new SpreadService.SpreadResult(20, 3);
-        var result = new ChronoService.ChronoResult("2026-06-10", 2, 1, bankruptcy, spread);
-        when(chronoService.runAllJobs()).thenReturn(result);
-        mvc.perform(post("/chrono/run"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.filesMoved").value(2))
-            .andExpect(jsonPath("$.filesFixed").value(1))
-            .andExpect(jsonPath("$.bankruptcy.declared").value(true))
-            .andExpect(jsonPath("$.spread.moved").value(3));
-    }
-
-    @Test
-    void runChrono_exceptionReturns500() throws Exception {
-        when(chronoService.runAllJobs()).thenThrow(new RuntimeException("disk full"));
-        mvc.perform(post("/chrono/run"))
-            .andExpect(status().isInternalServerError());
     }
 }
