@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,7 +14,6 @@ public class BankruptcyService {
 
     private static final Logger log = LoggerFactory.getLogger(BankruptcyService.class);
 
-    // --- Constants (not tunable — algorithm invariants) ---
     private static final int MIN_INTERVAL            = 2;
     private static final int MIN_EASE                = 215;
     private static final int TIER_SHORT_MAX          = 7;
@@ -27,8 +26,6 @@ public class BankruptcyService {
 
     public record BankruptcyResult(int overdueCount, boolean declared, int rescheduled) {}
 
-    // If overdue notes >= bankruptcyLimit, redistributes them using tiered intervals.
-    // Returns a result summary.
     public BankruptcyResult run(List<Path> mdFiles, int bankruptcyLimit) {
         LocalDate today = LocalDate.now();
         List<Path> overdue = new ArrayList<>();
@@ -93,7 +90,6 @@ public class BankruptcyService {
         return TIER_VERY_LONG_INTERVAL;
     }
 
-    // Each slot: {load, randomTieBreaker, dayOffset}. Extracts min-load, increments, reinserts.
     private static PriorityQueue<int[]> buildHeap(int slots) {
         PriorityQueue<int[]> heap = new PriorityQueue<>(
             (a, b) -> a[0] != b[0] ? a[0] - b[0] : a[1] - b[1]
@@ -112,7 +108,6 @@ public class BankruptcyService {
         return today.plusDays(slot[2]);
     }
 
-    // O(m) pick for variable-interval short/medium tiers (m <= 15).
     private static LocalDate pickDate(LocalDate today, int interval, Map<LocalDate, Integer> dayLoad) {
         int minLoad = Integer.MAX_VALUE;
         List<LocalDate> candidates = new ArrayList<>();

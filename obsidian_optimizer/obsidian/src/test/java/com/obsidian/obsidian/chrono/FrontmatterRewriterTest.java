@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,8 +19,6 @@ class FrontmatterRewriterTest {
         Files.writeString(f, content);
         return f;
     }
-
-    // ── read() ──────────────────────────────────────────────────────────────
 
     @Test
     void read_parsesAllThreeFields() throws IOException {
@@ -58,7 +56,6 @@ class FrontmatterRewriterTest {
 
     @Test
     void read_missingIntervalAndEaseDefaultToFallbackValues() throws IOException {
-        // When sr-interval and sr-ease are absent, defaults (3, 200) apply
         Path f = writeFile("minimal.md", "---\nsr-due: 2025-06-01\n---\n");
         var fields = FrontmatterRewriter.read(f);
         assertThat(fields).isNotNull();
@@ -71,8 +68,6 @@ class FrontmatterRewriterTest {
         Path f = writeFile("bad-date.md", "---\nsr-due: not-a-date\nsr-interval: 3\n---\n");
         assertThat(FrontmatterRewriter.read(f)).isNull();
     }
-
-    // ── write() ─────────────────────────────────────────────────────────────
 
     @Test
     void write_updatesAllThreeFields() throws IOException {
@@ -119,8 +114,6 @@ class FrontmatterRewriterTest {
         assertThat(readBack.interval()).isEqualTo(newFields.interval());
         assertThat(readBack.ease()).isEqualTo(newFields.ease());
     }
-
-    // ── hasInvalidDate() ────────────────────────────────────────────────────
 
     @Test
     void hasInvalidDate_detectsCorruptionOnLine2() throws IOException {

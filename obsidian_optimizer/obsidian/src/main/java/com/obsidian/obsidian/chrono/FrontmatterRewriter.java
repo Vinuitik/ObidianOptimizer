@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,7 +12,6 @@ public class FrontmatterRewriter {
 
     public record SrFields(LocalDate due, int interval, int ease) {}
 
-    // Reads sr-due/sr-interval/sr-ease from any .md file. Returns null if no valid sr-due found.
     public static SrFields read(Path file) {
         try {
             String raw = Files.readString(file);
@@ -36,7 +35,6 @@ public class FrontmatterRewriter {
         }
     }
 
-    // Rewrites sr-due/sr-interval/sr-ease lines in place, preserving all other content and line endings.
     public static void write(Path file, SrFields fields) throws IOException {
         String raw = Files.readString(file);
         String sep = raw.contains("\r\n") ? "\r\n" : "\n";
@@ -55,7 +53,6 @@ public class FrontmatterRewriter {
         Files.writeString(file, String.join(sep, lines));
     }
 
-    // Returns true if line 2 of the file ends with "Invalid date" — Obsidian SR corruption marker.
     public static boolean hasInvalidDate(Path file) {
         try {
             String raw = Files.readString(file);

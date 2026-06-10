@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.chrono;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,8 +20,6 @@ public class FileMoverService {
     private static final Set<String> PDF_EXTS   = Set.of(".pdf");
     private static final Set<String> VIDEO_EXTS = Set.of(".mp4", ".mov", ".mkv");
 
-    // Scans vault root (non-recursive) and moves media files to resources/{images,pdf,videos}.
-    // Creates subdirectories if they don't exist. Returns count of files moved.
     public int run(String vaultRoot) {
         Path root   = Paths.get(vaultRoot);
         Path imgDir = root.resolve("resources/images");

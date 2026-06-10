@@ -1,4 +1,4 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.notes;
 
 import org.junit.jupiter.api.Test;
 
@@ -6,10 +6,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-// Tests only the static helper methods — no DB / Spring context needed.
 class NoteLinkRepositoryTest {
-
-    // ── extractTargets ───────────────────────────────────────────────────────
 
     @Test
     void extractTargets_simpleLink() {
@@ -63,8 +60,6 @@ class NoteLinkRepositoryTest {
         assertThat(NoteLinkRepository.extractTargets(content)).contains("LinkedNote");
     }
 
-    // ── rewriteLinks ─────────────────────────────────────────────────────────
-
     @Test
     void rewriteLinks_simpleLink() {
         String result = NoteLinkRepository.rewriteLinks("See [[OldName]] here.", "OldName", "NewName");
@@ -112,7 +107,6 @@ class NoteLinkRepositoryTest {
 
     @Test
     void rewriteLinks_closingBracketAfterLink_preserved() {
-        // Closing ]] is part of the link; adjacent text must survive
         String result = NoteLinkRepository.rewriteLinks("before [[OldName]] after", "OldName", "NewName");
         assertThat(result).isEqualTo("before [[NewName]] after");
     }

@@ -1,4 +1,6 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.media;
+
+import com.obsidian.obsidian.settings.SettingsRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-class ImageRepositoryUploadTest {
+class MediaControllerTest {
 
     @Mock SettingsRepository settingsRepo;
     @TempDir Path vault;
@@ -33,43 +35,43 @@ class ImageRepositoryUploadTest {
     @BeforeEach
     void setUp() {
         when(settingsRepo.getVaultPath()).thenReturn(vault.toString());
-        mvc = MockMvcBuilders.standaloneSetup(new ImageRepository(settingsRepo)).build();
+        mvc = MockMvcBuilders.standaloneSetup(new MediaController(settingsRepo)).build();
     }
 
     // ── subdirFor ─────────────────────────────────────────────────────────────
 
-    @Test void subdirFor_png()  { assertThat(ImageRepository.subdirFor("x.png")).isEqualTo("images"); }
-    @Test void subdirFor_jpg()  { assertThat(ImageRepository.subdirFor("x.jpg")).isEqualTo("images"); }
-    @Test void subdirFor_jpeg() { assertThat(ImageRepository.subdirFor("x.jpeg")).isEqualTo("images"); }
-    @Test void subdirFor_gif()  { assertThat(ImageRepository.subdirFor("x.gif")).isEqualTo("images"); }
-    @Test void subdirFor_webp() { assertThat(ImageRepository.subdirFor("x.webp")).isEqualTo("images"); }
-    @Test void subdirFor_svg()  { assertThat(ImageRepository.subdirFor("x.svg")).isEqualTo("images"); }
-    @Test void subdirFor_mp4()  { assertThat(ImageRepository.subdirFor("x.mp4")).isEqualTo("videos"); }
-    @Test void subdirFor_mov()  { assertThat(ImageRepository.subdirFor("x.mov")).isEqualTo("videos"); }
-    @Test void subdirFor_mkv()  { assertThat(ImageRepository.subdirFor("x.mkv")).isEqualTo("videos"); }
-    @Test void subdirFor_webm() { assertThat(ImageRepository.subdirFor("x.webm")).isEqualTo("videos"); }
-    @Test void subdirFor_avi()  { assertThat(ImageRepository.subdirFor("x.avi")).isEqualTo("videos"); }
-    @Test void subdirFor_mp3()  { assertThat(ImageRepository.subdirFor("x.mp3")).isEqualTo("audio"); }
-    @Test void subdirFor_wav()  { assertThat(ImageRepository.subdirFor("x.wav")).isEqualTo("audio"); }
-    @Test void subdirFor_ogg()  { assertThat(ImageRepository.subdirFor("x.ogg")).isEqualTo("audio"); }
-    @Test void subdirFor_m4a()  { assertThat(ImageRepository.subdirFor("x.m4a")).isEqualTo("audio"); }
-    @Test void subdirFor_flac() { assertThat(ImageRepository.subdirFor("x.flac")).isEqualTo("audio"); }
-    @Test void subdirFor_pdf()  { assertThat(ImageRepository.subdirFor("x.pdf")).isEqualTo("pdf"); }
-    @Test void subdirFor_zip()  { assertThat(ImageRepository.subdirFor("x.zip")).isEqualTo("files"); }
-    @Test void subdirFor_noExt(){ assertThat(ImageRepository.subdirFor("file")).isEqualTo("files"); }
-    @Test void subdirFor_upperCase() { assertThat(ImageRepository.subdirFor("x.PNG")).isEqualTo("images"); }
+    @Test void subdirFor_png()  { assertThat(MediaController.subdirFor("x.png")).isEqualTo("images"); }
+    @Test void subdirFor_jpg()  { assertThat(MediaController.subdirFor("x.jpg")).isEqualTo("images"); }
+    @Test void subdirFor_jpeg() { assertThat(MediaController.subdirFor("x.jpeg")).isEqualTo("images"); }
+    @Test void subdirFor_gif()  { assertThat(MediaController.subdirFor("x.gif")).isEqualTo("images"); }
+    @Test void subdirFor_webp() { assertThat(MediaController.subdirFor("x.webp")).isEqualTo("images"); }
+    @Test void subdirFor_svg()  { assertThat(MediaController.subdirFor("x.svg")).isEqualTo("images"); }
+    @Test void subdirFor_mp4()  { assertThat(MediaController.subdirFor("x.mp4")).isEqualTo("videos"); }
+    @Test void subdirFor_mov()  { assertThat(MediaController.subdirFor("x.mov")).isEqualTo("videos"); }
+    @Test void subdirFor_mkv()  { assertThat(MediaController.subdirFor("x.mkv")).isEqualTo("videos"); }
+    @Test void subdirFor_webm() { assertThat(MediaController.subdirFor("x.webm")).isEqualTo("videos"); }
+    @Test void subdirFor_avi()  { assertThat(MediaController.subdirFor("x.avi")).isEqualTo("videos"); }
+    @Test void subdirFor_mp3()  { assertThat(MediaController.subdirFor("x.mp3")).isEqualTo("audio"); }
+    @Test void subdirFor_wav()  { assertThat(MediaController.subdirFor("x.wav")).isEqualTo("audio"); }
+    @Test void subdirFor_ogg()  { assertThat(MediaController.subdirFor("x.ogg")).isEqualTo("audio"); }
+    @Test void subdirFor_m4a()  { assertThat(MediaController.subdirFor("x.m4a")).isEqualTo("audio"); }
+    @Test void subdirFor_flac() { assertThat(MediaController.subdirFor("x.flac")).isEqualTo("audio"); }
+    @Test void subdirFor_pdf()  { assertThat(MediaController.subdirFor("x.pdf")).isEqualTo("pdf"); }
+    @Test void subdirFor_zip()  { assertThat(MediaController.subdirFor("x.zip")).isEqualTo("files"); }
+    @Test void subdirFor_noExt(){ assertThat(MediaController.subdirFor("file")).isEqualTo("files"); }
+    @Test void subdirFor_upperCase() { assertThat(MediaController.subdirFor("x.PNG")).isEqualTo("images"); }
 
     // ── mimeFor ───────────────────────────────────────────────────────────────
 
-    @Test void mimeFor_png()  { assertThat(ImageRepository.mimeFor("x.png")).isEqualTo("image/png"); }
-    @Test void mimeFor_mp4()  { assertThat(ImageRepository.mimeFor("x.mp4")).isEqualTo("video/mp4"); }
-    @Test void mimeFor_mp3()  { assertThat(ImageRepository.mimeFor("x.mp3")).isEqualTo("audio/mpeg"); }
-    @Test void mimeFor_pdf()  { assertThat(ImageRepository.mimeFor("x.pdf")).isEqualTo("application/pdf"); }
-    @Test void mimeFor_svg()  { assertThat(ImageRepository.mimeFor("x.svg")).isEqualTo("image/svg+xml"); }
-    @Test void mimeFor_unknown() { assertThat(ImageRepository.mimeFor("x.bin")).isEqualTo("application/octet-stream"); }
-    @Test void mimeFor_noExt()   { assertThat(ImageRepository.mimeFor("file")).isEqualTo("application/octet-stream"); }
+    @Test void mimeFor_png()  { assertThat(MediaController.mimeFor("x.png")).isEqualTo("image/png"); }
+    @Test void mimeFor_mp4()  { assertThat(MediaController.mimeFor("x.mp4")).isEqualTo("video/mp4"); }
+    @Test void mimeFor_mp3()  { assertThat(MediaController.mimeFor("x.mp3")).isEqualTo("audio/mpeg"); }
+    @Test void mimeFor_pdf()  { assertThat(MediaController.mimeFor("x.pdf")).isEqualTo("application/pdf"); }
+    @Test void mimeFor_svg()  { assertThat(MediaController.mimeFor("x.svg")).isEqualTo("image/svg+xml"); }
+    @Test void mimeFor_unknown() { assertThat(MediaController.mimeFor("x.bin")).isEqualTo("application/octet-stream"); }
+    @Test void mimeFor_noExt()   { assertThat(MediaController.mimeFor("file")).isEqualTo("application/octet-stream"); }
 
-    // ── POST /upload — routing by extension ───────────────────────────────────
+    // ── POST /upload ──────────────────────────────────────────────────────────
 
     @Test
     void upload_png_savedToImagesSubdir() throws Exception {
@@ -127,7 +129,7 @@ class ImageRepositoryUploadTest {
            .andExpect(status().isBadRequest());
     }
 
-    // ── GET /images/{filename} — multi-dir search ────────────────────────────
+    // ── GET /images/{filename} ────────────────────────────────────────────────
 
     @Test
     void getImage_foundInImagesSubdir_returns200WithCorrectMime() throws Exception {
@@ -177,7 +179,7 @@ class ImageRepositoryUploadTest {
 
         mvc.perform(get("/images/img-roundtrip.png"))
            .andExpect(status().isOk())
-           .andExpect(content().bytes(content));
+           .andExpect(result -> assertThat(result.getResponse().getContentAsByteArray()).isEqualTo(content));
     }
 
     @Test

@@ -1,4 +1,6 @@
-package com.obsidian.obsidian;
+package com.obsidian.obsidian.media;
+
+import com.obsidian.obsidian.settings.SettingsRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,9 +20,9 @@ import java.util.Map;
 import java.util.Set;
 
 @RestController
-public class ImageRepository {
+public class MediaController {
 
-    private static final Logger log = LoggerFactory.getLogger(ImageRepository.class);
+    private static final Logger log = LoggerFactory.getLogger(MediaController.class);
 
     static final Set<String> IMAGE_EXTS = Set.of(".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg");
     static final Set<String> VIDEO_EXTS = Set.of(".mp4", ".mov", ".mkv", ".webm", ".avi");
@@ -31,11 +33,9 @@ public class ImageRepository {
 
     private final SettingsRepository settingsRepo;
 
-    public ImageRepository(SettingsRepository settingsRepo) {
+    public MediaController(SettingsRepository settingsRepo) {
         this.settingsRepo = settingsRepo;
     }
-
-    // ── Serve resource by filename — searches all resource subdirs ────────────
 
     @GetMapping("/images/{filename}")
     public ResponseEntity<Resource> getImage(@PathVariable String filename) {
@@ -43,7 +43,6 @@ public class ImageRepository {
         for (String subdir : SEARCH_SUBDIRS) {
             try {
                 Path candidate = resourcesRoot.resolve(subdir).resolve(filename).normalize();
-                // Path traversal guard
                 if (!candidate.startsWith(resourcesRoot)) continue;
                 Resource resource = new UrlResource(candidate.toUri());
                 if (resource.exists() && resource.isReadable()) {
@@ -57,14 +56,11 @@ public class ImageRepository {
         return ResponseEntity.notFound().build();
     }
 
-    // ── Upload: save file to correct resource subdir ──────────────────────────
-
     @PostMapping("/upload")
     public ResponseEntity<?> uploadEndpoint(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam("filename") String filename) {
+            @RequestParam MultipartFile file,
+            @RequestParam String filename) {
         log.info("[upload] filename={} size={}", filename, file.getSize());
-        // Reject filenames with path separators or traversal sequences
         if (filename.contains("/") || filename.contains("\\") || filename.contains("..")) {
             return ResponseEntity.badRequest().body("Invalid filename");
         }
@@ -88,8 +84,6 @@ public class ImageRepository {
         log.info("[upload] saved {} → resources/{}", filename, subdir);
     }
 
-    // ── Helpers (package-private for testing) ────────────────────────────────
-
     static String subdirFor(String filename) {
         int dot = filename.lastIndexOf('.');
         if (dot < 0) return "files";
@@ -105,23 +99,23 @@ public class ImageRepository {
         int dot = filename.lastIndexOf('.');
         if (dot < 0) return "application/octet-stream";
         return switch (filename.substring(dot).toLowerCase()) {
-            case ".png"        -> "image/png";
+            case ".png"          -> "image/png";
             case ".jpg", ".jpeg" -> "image/jpeg";
-            case ".gif"        -> "image/gif";
-            case ".webp"       -> "image/webp";
-            case ".svg"        -> "image/svg+xml";
-            case ".mp4"        -> "video/mp4";
-            case ".mov"        -> "video/quicktime";
-            case ".mkv"        -> "video/x-matroska";
-            case ".webm"       -> "video/webm";
-            case ".avi"        -> "video/x-msvideo";
-            case ".mp3"        -> "audio/mpeg";
-            case ".wav"        -> "audio/wav";
-            case ".ogg"        -> "audio/ogg";
-            case ".m4a"        -> "audio/mp4";
-            case ".flac"       -> "audio/flac";
-            case ".pdf"        -> "application/pdf";
-            default            -> "application/octet-stream";
+            case ".gif"          -> "image/gif";
+            case ".webp"         -> "image/webp";
+            case ".svg"          -> "image/svg+xml";
+            case ".mp4"          -> "video/mp4";
+            case ".mov"          -> "video/quicktime";
+            case ".mkv"          -> "video/x-matroska";
+            case ".webm"         -> "video/webm";
+            case ".avi"          -> "video/x-msvideo";
+            case ".mp3"          -> "audio/mpeg";
+            case ".wav"          -> "audio/wav";
+            case ".ogg"          -> "audio/ogg";
+            case ".m4a"          -> "audio/mp4";
+            case ".flac"         -> "audio/flac";
+            case ".pdf"          -> "application/pdf";
+            default              -> "application/octet-stream";
         };
     }
 }
