@@ -13,6 +13,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -54,8 +55,8 @@ public class NoteIndexRepository {
         for (File f : diskFiles) diskMap.put(f.getAbsolutePath(), f);
 
         Map<String, Long> dbMap = new HashMap<>();
-        jdbc.query("SELECT path, modified_at FROM notes", rs ->
-            dbMap.put(rs.getString("path"), rs.getLong("modified_at")));
+        jdbc.query("SELECT path, modified_at FROM notes",
+            (RowCallbackHandler) rs -> dbMap.put(rs.getString("path"), rs.getLong("modified_at")));
 
         int inserted = 0, updated = 0, deleted = 0;
 
