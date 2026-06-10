@@ -1,6 +1,6 @@
 # Frontend Flows
 
-Files: main.jsx, App.jsx, App.module.css, pages/MainPage.jsx, pages/SettingsPage.jsx, pages/SettingsPage.module.css, pages/ReviewPage.jsx, store/useStore.js, api/notes.js, env.js, utils/diff.js, utils/frontmatter.js, utils/wikiLinkPlugin.js, utils/obsidianImagePlugin.js, utils/hashtagPlugin.js, utils/livePreviewPlugin.js, utils/mathPlugin.js, utils/markdownCleanup.js, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Button.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, templates/SplitLayout.jsx
+Files: main.jsx, App.jsx, App.module.css, pages/MainPage.jsx, pages/SettingsPage.jsx, pages/SettingsPage.module.css, pages/ReviewPage.jsx, store/useStore.js, api/notes.js, env.js, utils/diff.js, utils/frontmatter.js, utils/wikiLinkPlugin.js, utils/obsidianImagePlugin.js, utils/hashtagPlugin.js, utils/livePreviewPlugin.js, utils/mathPlugin.js, utils/markdownCleanup.js, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Button.jsx, atoms/Toast.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, templates/SplitLayout.jsx
 
 Design system, state shape, and markdown rendering → [DESIGN.md](DESIGN.md)
 
@@ -95,9 +95,16 @@ Tabs only render when `tabs.length > 0`. Each tab: title, dirty indicator (•),
 
 Each entry in `tabs[]`:
 ```js
-{ path: string, pendingTitle: string, isMutable: boolean, hunks: Hunk[] }
+{
+  path: string,
+  pendingTitle: string,
+  isMutable: boolean,
+  hunks: Hunk[],
+  pendingFiles: { [filename]: { file: File, blobURL: string } }
+}
 ```
-`hunks` stores the diff from `currentNoteRaw` → `pendingRaw` for inactive tabs — used to restore unsaved edits when switching back.
+`hunks` — diff for restoring unsaved text edits on switch-back.  
+`pendingFiles` — in-memory files pasted but not yet uploaded; blob URLs serve as src during editing.
 
 ### openTab(fullPath)
 
@@ -301,15 +308,23 @@ Handles `[[target]]` / `[[target|display]]`:
 
 ### obsidianImagePlugin (`utils/obsidianImagePlugin.js`)
 
-Handles `![[filename]]`:
+Handles `![[filename]]`. Also hosts the blob registry and paste-upload helpers.
 
 | Part | Role |
 |---|---|
 | `obsidianImageRemark$` | `$remark` — splits text nodes, inserts `obsidianImage` nodes |
-| `obsidianImageNode$` | `$node` — `toDOM` → `<img class="embedded-image" src="/api/images/...">` |
+| `obsidianImageNode$` | `$node` — `toDOM` branches on `fileTypeFor(filename)`: image→`<img>`, video→`<video controls>`, audio→`<audio controls>`, pdf/other→`<a>` |
+| `pendingBlobRegistry` | Module-level `Map<filename, blobURL>` — consulted in `toDOM` before falling back to `/api/images/` |
+| `setPendingBlobs(map)` | Replaces the entire registry (called on tab switch and on store `pendingFiles` change) |
+| `addPendingBlob(fn, url)` | Adds a single entry immediately (called in paste handler before ProseMirror renders) |
+| `removePendingBlob(fn)` | Removes entry after upload |
+| `fileTypeFor(filename)` | Extension → `'image'|'video'|'audio'|'pdf'|'other'` |
+| `isWhitelisted(file)` | Checks MIME type or extension against whitelists |
+| `generateFilename(file)` | `stem-{Date.now()}{8randomhex}.ext` — collision-safe |
 
-`toMarkdown` also uses `state.addNode('html', ...)` → `![[filename]]` verbatim.  
-**Plugin order matters:** `obsidianImagePlugin` must come before `wikiLinkPlugin` in `.use()` chain.
+`toMarkdown` emits `![[filename]]` verbatim (via `state.addNode('html', ...)`).  
+**Plugin order:** `obsidianImagePlugin` before `wikiLinkPlugin` — `![[]]` must be consumed before `[[]]` scanner runs.  
+**`parseDOM` selector:** `[data-obsidian-image]` (not `img[data-obsidian-image]`) — handles video/audio/a elements too.
 
 ### hashtagPlugin (`utils/hashtagPlugin.js`)
 
@@ -356,6 +371,65 @@ Math blocks and wiki-links are also emitted as raw HTML — `cleanMilkdownOutput
 
 ---
 
+## Paste-to-Upload Flow
+
+### Accepted types
+
+Images (`.png .jpg .jpeg .gif .webp .svg`), video (`.mp4 .mov .mkv .webm .avi`), audio (`.mp3 .wav .ogg .m4a .flac`), PDF (`.pdf`). Unsupported files: toast notification via `showToast()` in store → `Toast.jsx` (fixed bottom, 4 s auto-dismiss).
+
+### Paste handler (MilkdownEditorInner)
+
+```
+paste event fires on view.dom
+  files = e.clipboardData.files
+  if no files → return (let ProseMirror handle text)
+  e.preventDefault()                              — always, to suppress browser's own file paste
+  rejected.length > 0 → onUnsupported(count) → showToast(...)
+  for each accepted file:
+    filename = generateFilename(file)             — stem-{ts}{8hex}.ext
+    blobURL  = URL.createObjectURL(file)
+    addPendingBlob(filename, blobURL)             — immediate: registry ready before toDOM runs
+    onFilePaste(filename, file, blobURL)          — store: addPendingFile() → pendingFiles[filename] = {file, blobURL}
+    getInstance().action(ctx =>
+      view.dispatch(tr.replaceSelectionWith(obsidianImageNode$.type.create({ filename })))
+    )                                             — inserts ![[filename]] node at cursor
+```
+
+`obsidianImageNode$ toDOM` resolves src: `pendingBlobRegistry.get(filename) ?? '/api/images/' + filename`
+
+### Blob registry sync (MilkdownEditor outer)
+
+```js
+useLayoutEffect(() => {
+  setPendingBlobs(pendingFiles);   // fires before Milkdown's useEffect on mount
+}, [pendingFiles]);
+```
+
+Fires on every `pendingFiles` change (new paste, tab switch). `useLayoutEffect` guarantees it runs before any `useEffect` — ensures the registry is populated before `toDOM` is called during Milkdown initialization.
+
+### Tab persistence
+
+`_snapshotTab()` saves `pendingFiles` into `tabs[activeTabIndex].pendingFiles`.  
+`switchTab(index)` restores `tab.pendingFiles` → sets `pendingFiles` in store → calls `setPendingBlobs(restored)`.  
+Tab switch: blob URLs remain valid (File objects and blob URLs travel with the tab entry).
+
+### Cleanup
+
+| Event | Action |
+|---|---|
+| Save (`syncNote`) | Upload all → `revokeObjectURL` each → clear `pendingFiles` → `setPendingBlobs({})` |
+| Cancel (`cancelEdit`) | `revokeObjectURL` each → clear `pendingFiles` → `setPendingBlobs({})` |
+| Tab close (`closeTab`) | `revokeObjectURL` each blob in the closing tab's `pendingFiles` |
+
+### Technology Notes — paste upload
+
+- **Blob URLs are tab-local**: `URL.createObjectURL` URLs are valid only in the current document session and are not persisted across page reloads. They are revoked explicitly to avoid memory leaks.
+- **`addPendingBlob` vs `setPendingBlobs`**: `addPendingBlob` is called directly in the paste handler (same event loop tick as ProseMirror transaction) to ensure `toDOM` can resolve the blob URL immediately. `setPendingBlobs` is called via `useLayoutEffect` for the tab-restore case.
+- **`useLayoutEffect` ordering**: layout effects fire synchronously after DOM mutations, before the browser paints and before `useEffect` callbacks. This guarantees the registry is populated before Milkdown's `useEffect` triggers `toDOM` on mount.
+- **No server-side blob storage**: files live in JS memory until Save. If the page is refreshed before saving, all pending files are lost.
+
+---
+
 ## CREATE
 
 `+` button on folder hover → `startNewNote(folderPath)` → `centerMode = 'new'`, `newNoteName = ''`  
@@ -377,20 +451,22 @@ To change initial frontmatter: `FileRepository.createNote()`
 User edits content and/or title → header shows editable title input (`pendingTitle`)
 
 **Save** → `syncNote()` in store:
-1. If `pendingTitle !== currentTitle` → `PATCH /api/notes/rename` → get `newPath`
-2. `computeHunks(currentNoteRaw, pendingRaw)` [utils/diff.js] — LCS diff, CRLF-normalized
-3. If hunks non-empty → `PATCH /api/notes/content` with `{ path, hunks }`
-4. If hunks empty → skip the network call
-5. `currentNoteRaw = pendingRaw`, `isMutable = false`
-6. Update active tab: `path = savePath`, `hunks = []`, `isMutable = false`
-7. Refresh: `fetchChildrenOf(parentFolder)` + `fetchNoteNames()` + `fetchReviewNotes()`
+1. Upload pending files: `Promise.all(Object.entries(pendingFiles).map(([fn,{file}]) => uploadFile(file, fn)))` → `POST /api/upload` for each; revoke blob URLs; clear `pendingFiles`; call `setPendingBlobs({})`
+2. If `pendingTitle !== currentTitle` → `PATCH /api/notes/rename` → get `newPath`
+3. `computeHunks(currentNoteRaw, pendingRaw)` [utils/diff.js] — LCS diff, CRLF-normalized
+4. If hunks non-empty → `PATCH /api/notes/content` with `{ path, hunks }`
+5. If hunks empty → skip the network call
+6. `currentNoteRaw = pendingRaw`, `isMutable = false`
+7. Update active tab: `path = savePath`, `hunks = []`, `isMutable = false`
+8. Refresh: `fetchChildrenOf(parentFolder)` + `fetchNoteNames()` + `fetchReviewNotes()`
 
 **Cancel** → `cancelEdit()` in store:
-1. `pendingRaw = currentNoteRaw` — discard all edits
-2. `pendingTitle = noteBasename(currentNotePath)` — discard title change
-3. `isMutable = false`
-4. `tabs[activeTabIndex].hunks = []` — clear dirty indicator
-5. `editorResetKey += 1` — forces Milkdown to remount with clean body (no disk fetch needed)
+1. Revoke all blob URLs in `pendingFiles`; clear `pendingFiles`; call `setPendingBlobs({})`
+2. `pendingRaw = currentNoteRaw` — discard all edits
+3. `pendingTitle = noteBasename(currentNotePath)` — discard title change
+4. `isMutable = false`
+5. `tabs[activeTabIndex].hunks = []` — clear dirty indicator
+6. `editorResetKey += 1` — forces Milkdown to remount with clean body (no disk fetch needed)
 
 Diff: `utils/diff.js lcsBacktrack()` — O(m×n) LCS → edit ops → compressed hunks  
 Hunk shape: `{ startLine: number, deleteCount: number, insertLines: string[] }`  
@@ -453,6 +529,7 @@ Write calls use `credentials: 'same-origin'` — session cookie included automat
 | `moveNote(srcPath, folder)` | `PATCH /api/notes/move` | Yes |
 | `fetchSettings()` | `GET /api/settings` | No |
 | `saveSettings(patch)` | `PUT /api/settings` | Yes |
+| `uploadFile(file, filename)` | `POST /api/upload` (multipart) | Yes |
 
 ---
 
@@ -538,6 +615,13 @@ Ports: `8083` → React (Nginx/Docker), `8082` → Java backend, `5173` → Dev 
 | WYSIWYG save flow | `useStore.js syncNote()` |
 | Tab open / switch / close | `useStore.js openTab() / switchTab() / closeTab()` |
 | Tab dirty indicator style | `molecules/TabBar.module.css` `.dirty` |
+| Paste-upload accepted types | `utils/obsidianImagePlugin.js` `*_EXTS` sets + `WHITELISTED_MIME_TYPES` |
+| Paste-upload subdir routing | `ImageRepository.subdirFor()` (backend) |
+| Paste-upload filename format | `utils/obsidianImagePlugin.js generateFilename()` |
+| Upload size limit | `application.properties spring.servlet.multipart.max-file-size` |
+| Unsupported-type toast message | `organisms/MilkdownEditor.jsx handleUnsupported` |
+| Toast UI / dismiss timing | `atoms/Toast.jsx` + `useStore.js showToast()` (4 s timeout) |
+| Blob registry sync | `utils/obsidianImagePlugin.js setPendingBlobs()` / `addPendingBlob()` |
 | Milkdown plugins | `utils/wikiLinkPlugin.js`, `utils/obsidianImagePlugin.js`, `utils/hashtagPlugin.js` |
 | Math rendering / syntax | `utils/mathPlugin.js` |
 | Live preview syntax chars | `utils/livePreviewPlugin.js` `MARK_SYNTAX` |

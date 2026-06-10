@@ -123,10 +123,32 @@ To change review sort: `NoteIndexRepository.getReviewNotesPaged()` ORDER BY clau
 
 ---
 
-## GET /images/{filename} — Image Serving
+## GET /images/{filename} — Resource Serving (multi-dir)
 
-`ImageRepository.getImage(filename)` → `serveFile(settingsRepo.getResourcePath(), filename)` → validate exists → detect MIME → return `ResponseEntity<Resource>`  
-Image dir: read from `SettingsRepository` → `app_settings.resourcePath` (default: `VAULT_PATH/resources/images`)
+`ImageRepository.getImage(filename)` → iterates `SEARCH_SUBDIRS = ["images","videos","pdf","audio","files"]`  
+For each subdir: resolves `vaultPath/resources/<subdir>/filename` → path-traversal guard (`startsWith(resourcesRoot)`) → if exists → detect MIME via `mimeFor(ext)` → return `ResponseEntity<Resource>` inline  
+Returns 404 if not found in any subdir.
+
+Filenames with `/`, `\`, or `..` are rejected with 400 before the loop.
+
+MIME map lives in `ImageRepository.mimeFor(String filename)`.  
+To add a new extension: add to the correct `*_EXTS` set in `ImageRepository` + add a MIME entry in `mimeFor()` + add the subdir to `subdirFor()`.
+
+---
+
+## POST /upload — File Upload
+
+`ImageRepository.uploadEndpoint(MultipartFile file, String filename)`:
+1. Reject filenames containing `/`, `\`, `..` → 400
+2. `subdirFor(filename)` → extension → subdir string
+3. `Files.createDirectories(vaultPath/resources/<subdir>/)`
+4. `file.transferTo(targetDir/filename)`
+5. Return `{ filename, url: "/api/images/<filename>" }`
+
+Subdir routing: `ImageRepository.subdirFor(String filename)` — `.png/.jpg/…` → `"images"`, `.mp4/…` → `"videos"`, `.mp3/…` → `"audio"`, `.pdf` → `"pdf"`, default → `"files"`.
+
+Max upload size: `application.properties` `spring.servlet.multipart.max-file-size=100MB`.  
+To change the upload size limit: `application.properties` `spring.servlet.multipart.max-*-size`.
 
 ---
 
@@ -199,7 +221,7 @@ Seeded on first boot from env vars with `ON CONFLICT DO NOTHING`.
 | Key | Default | Source |
 |---|---|---|
 | `vaultPath` | `$VAULT_PATH` | env var |
-| `resourcePath` | `$IMAGE_PATH` or `$VAULT_PATH/resources/images` | env var |
+| `resourcePath` | `$IMAGE_PATH` or `$VAULT_PATH/resources/images` | env var (legacy — multi-dir serving now uses `vaultPath/resources/`) |
 | `reviewPageSize` | `20` | hardcoded |
 | `startupSyncMode` | `"blocking"` | hardcoded |
 
@@ -240,7 +262,9 @@ Three services via `docker-compose.yml`. Start: `.\start.ps1`. Stop: `Ctrl+C`.
 | Thing to change | Where |
 |---|---|
 | Vault root path | Settings page → `PUT /api/settings` → `FileRepository.updateVaultPath()` |
-| Image directory | Settings page → `PUT /api/settings` → `SettingsRepository` |
+| Image/resource directory | Multi-dir serving under `vaultPath/resources/` — subdirs auto-created; no settings UI needed |
+| Upload size limit | `application.properties` `spring.servlet.multipart.max-file-size` |
+| Accepted file extensions | `ImageRepository.*_EXTS` sets + `subdirFor()` + `mimeFor()` |
 | Review page size | Settings page → `PUT /api/settings` → `SettingsRepository` |
 | Startup sync mode | Settings page → `PUT /api/settings` → `SettingsRepository` |
 | Server port | `application.properties → server.port` |
