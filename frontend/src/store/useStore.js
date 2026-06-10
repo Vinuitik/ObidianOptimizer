@@ -8,7 +8,9 @@ import {
   createFolder as apiCreateFolder,
   moveNote as apiMoveNote,
   fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings,
+  uploadFile as apiUploadFile,
 } from '../api/notes';
+import { setPendingBlobs } from '../utils/obsidianImagePlugin';
 import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
 
@@ -136,10 +138,32 @@ const useStore = create((set, get) => ({
   // Settings (loaded from backend on startup)
   settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking' },
 
-  // Tabs — each entry: { path, pendingTitle, isMutable, hunks }
+  // Toast notification: null | { message: string }
+  toast: null,
+
+  // Files pasted but not yet uploaded: { [filename]: { file: File, blobURL: string } }
+  pendingFiles: {},
+
+  // Tabs — each entry: { path, pendingTitle, isMutable, hunks, pendingFiles }
   // hunks stores the diff from currentNoteRaw → pendingRaw for inactive tabs.
+  // pendingFiles stores pasted-but-unsaved files for inactive tabs.
   tabs: [],
   activeTabIndex: -1,
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+
+  showToast: (message) => {
+    set({ toast: { message } });
+    setTimeout(() => set(s => s.toast?.message === message ? { toast: null } : {}), 4000);
+  },
+
+  clearToast: () => set({ toast: null }),
+
+  // ── Pending file uploads ──────────────────────────────────────────────────
+
+  addPendingFile: (filename, file, blobURL) => {
+    set(s => ({ pendingFiles: { ...s.pendingFiles, [filename]: { file, blobURL } } }));
+  },
 
   // ── Tree: initial root load ───────────────────────────────────────────────
 
@@ -230,7 +254,9 @@ const useStore = create((set, get) => ({
       pendingTitle: noteBasename(fullPath),
       isMutable: false,
       centerMode: 'view',
+      pendingFiles: {},
     });
+    setPendingBlobs({});
     // Suppress unused body — it's stored in pendingRaw; Milkdown reads it via splitFrontmatter
     void body;
   },
@@ -251,17 +277,23 @@ const useStore = create((set, get) => ({
 
   // Cancel edit — discard all pending changes and force Milkdown remount
   cancelEdit: () => {
-    const { currentNoteRaw, currentNotePath, tabs, activeTabIndex } = get();
+    const { currentNoteRaw, currentNotePath, tabs, activeTabIndex, pendingFiles } = get();
+    // Revoke blob URLs for pasted files that won't be saved
+    for (const { blobURL } of Object.values(pendingFiles)) {
+      URL.revokeObjectURL(blobURL);
+    }
     const updates = {
       pendingRaw: currentNoteRaw,
       pendingTitle: noteBasename(currentNotePath),
       isMutable: false,
       editorResetKey: get().editorResetKey + 1,
+      pendingFiles: {},
     };
+    setPendingBlobs({});
     // Clear hunks on the active tab so dirty indicator resets
     if (activeTabIndex >= 0 && tabs[activeTabIndex]) {
       const updated = [...tabs];
-      updated[activeTabIndex] = { ...updated[activeTabIndex], isMutable: false, hunks: [] };
+      updated[activeTabIndex] = { ...updated[activeTabIndex], isMutable: false, hunks: [], pendingFiles: {} };
       updates.tabs = updated;
     }
     set(updates);
@@ -270,17 +302,39 @@ const useStore = create((set, get) => ({
   // ── WYSIWYG: sync pendingRaw → disk ──────────────────────────────────────
 
   syncNote: async () => {
-    const { currentNotePath, currentNoteRaw, pendingRaw, pendingTitle } = get();
+    const { currentNotePath, currentNoteRaw, pendingRaw, pendingTitle, pendingFiles } = get();
     if (!currentNotePath) return;
     try {
+      // 1. Upload any pasted files before saving the note content
+      const uploadEntries = Object.entries(pendingFiles);
+      if (uploadEntries.length > 0) {
+        await Promise.all(
+          uploadEntries.map(([filename, { file }]) => apiUploadFile(file, filename))
+        );
+        // Revoke blob URLs now that files are on disk
+        for (const { blobURL } of Object.values(pendingFiles)) {
+          URL.revokeObjectURL(blobURL);
+        }
+        set({ pendingFiles: {} });
+        setPendingBlobs({});
+        // Update active tab snapshot
+        const { tabs, activeTabIndex } = get();
+        if (activeTabIndex >= 0 && tabs[activeTabIndex]) {
+          const updated = [...tabs];
+          updated[activeTabIndex] = { ...updated[activeTabIndex], pendingFiles: {} };
+          set({ tabs: updated });
+        }
+      }
+
+      // 2. Rename if title changed
       const currentTitle = noteBasename(currentNotePath);
       let savePath = currentNotePath;
-
       if (pendingTitle !== currentTitle) {
         const { path: newPath } = await apiRename(currentNotePath, pendingTitle);
         savePath = newPath;
       }
 
+      // 3. Patch content if changed
       const hunks = computeHunks(currentNoteRaw, pendingRaw);
       if (hunks.length > 0) {
         await apiPatch(savePath, hunks);
@@ -297,7 +351,7 @@ const useStore = create((set, get) => ({
       const { tabs, activeTabIndex } = get();
       if (activeTabIndex >= 0 && tabs[activeTabIndex]) {
         const updated = [...tabs];
-        updated[activeTabIndex] = { ...updated[activeTabIndex], path: savePath, pendingTitle: noteBasename(savePath), isMutable: false, hunks: [] };
+        updated[activeTabIndex] = { ...updated[activeTabIndex], path: savePath, pendingTitle: noteBasename(savePath), isMutable: false, hunks: [], pendingFiles: {} };
         set({ tabs: updated });
       }
 
@@ -446,11 +500,11 @@ const useStore = create((set, get) => ({
 
   // Snapshot current tab's unsaved state into the tabs array.
   _snapshotTab: () => {
-    const { tabs, activeTabIndex, currentNoteRaw, pendingRaw, pendingTitle, isMutable } = get();
+    const { tabs, activeTabIndex, currentNoteRaw, pendingRaw, pendingTitle, isMutable, pendingFiles } = get();
     if (activeTabIndex < 0 || !tabs[activeTabIndex]) return;
     const hunks = computeHunks(currentNoteRaw, pendingRaw);
     const updated = [...tabs];
-    updated[activeTabIndex] = { ...updated[activeTabIndex], pendingTitle, isMutable, hunks };
+    updated[activeTabIndex] = { ...updated[activeTabIndex], pendingTitle, isMutable, hunks, pendingFiles };
     set({ tabs: updated });
   },
 
@@ -467,7 +521,7 @@ const useStore = create((set, get) => ({
     get()._snapshotTab();
     await get().openNote(fullPath);
 
-    const newTab = { path: fullPath, pendingTitle: noteBasename(fullPath), isMutable: false, hunks: [] };
+    const newTab = { path: fullPath, pendingTitle: noteBasename(fullPath), isMutable: false, hunks: [], pendingFiles: {} };
     const newTabs = [...get().tabs, newTab];
     set({ tabs: newTabs, activeTabIndex: newTabs.length - 1 });
   },
@@ -491,6 +545,9 @@ const useStore = create((set, get) => ({
       catch { /* hunks stale — fall back to disk version */ }
     }
 
+    const restoredFiles = tab.pendingFiles ?? {};
+    setPendingBlobs(restoredFiles);
+
     set({
       currentNoteRaw: raw,
       currentNotePath: tab.path,
@@ -500,21 +557,31 @@ const useStore = create((set, get) => ({
       isMutable: tab.isMutable,
       centerMode: 'view',
       activeTabIndex: index,
+      pendingFiles: restoredFiles,
     });
   },
 
   // Close tab at index. If it was active, switch to nearest remaining tab.
   closeTab: async (index) => {
     const { tabs, activeTabIndex } = get();
+    // Revoke any pending blob URLs for the tab being closed
+    const closingTab = tabs[index];
+    if (closingTab?.pendingFiles) {
+      for (const { blobURL } of Object.values(closingTab.pendingFiles)) {
+        URL.revokeObjectURL(blobURL);
+      }
+    }
     const isActive = index === activeTabIndex;
     const newTabs = tabs.filter((_, i) => i !== index);
 
     if (newTabs.length === 0) {
+      setPendingBlobs({});
       set({
         tabs: [], activeTabIndex: -1,
         currentNoteRaw: '', currentNotePath: null,
         pendingRaw: '', pendingFrontmatter: '', pendingTitle: '',
         isMutable: false, centerMode: 'view',
+        pendingFiles: {},
       });
       return;
     }

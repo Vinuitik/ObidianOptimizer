@@ -146,6 +146,17 @@ export async function saveSettings(patch) {
   return res.json();
 }
 
+// ── Upload ───────────────────────────────────────────────────────────────────
+
+// Returns { filename, url }.
+export async function uploadFile(file, filename) {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('filename', filename);
+  const res = await req(`${BASE}/upload`, { method: 'POST', body: fd });
+  return res.json();
+}
+
 // ── Chrono ────────────────────────────────────────────────────────────────────
 
 // Returns { lastRunDate: string }.

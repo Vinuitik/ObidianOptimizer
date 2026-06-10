@@ -1,5 +1,79 @@
 import { $node, $remark } from '@milkdown/utils';
 
+// ── Module-level blob registry: filename → blobURL (for pre-save rendering) ──
+
+const pendingBlobRegistry = new Map();
+
+/** Replace the entire registry (called on tab switch / pendingFiles store change). */
+export function setPendingBlobs(pendingFilesMap) {
+  pendingBlobRegistry.clear();
+  for (const [filename, { blobURL }] of Object.entries(pendingFilesMap)) {
+    pendingBlobRegistry.set(filename, blobURL);
+  }
+}
+
+/** Add a single entry immediately (called in the paste handler before ProseMirror renders). */
+export function addPendingBlob(filename, blobURL) {
+  pendingBlobRegistry.set(filename, blobURL);
+}
+
+/** Remove a single entry after upload completes. */
+export function removePendingBlob(filename) {
+  pendingBlobRegistry.delete(filename);
+}
+
+// ── File-type helpers ─────────────────────────────────────────────────────────
+
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.mkv', '.webm', '.avi']);
+const AUDIO_EXTS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.flac']);
+const PDF_EXTS   = new Set(['.pdf']);
+
+export function fileTypeFor(filename) {
+  const dot = filename.lastIndexOf('.');
+  if (dot < 0) return 'other';
+  const ext = filename.slice(dot).toLowerCase();
+  if (IMAGE_EXTS.has(ext)) return 'image';
+  if (VIDEO_EXTS.has(ext)) return 'video';
+  if (AUDIO_EXTS.has(ext)) return 'audio';
+  if (PDF_EXTS.has(ext))   return 'pdf';
+  return 'other';
+}
+
+export const WHITELISTED_EXTS = new Set([
+  ...IMAGE_EXTS, ...VIDEO_EXTS, ...AUDIO_EXTS, ...PDF_EXTS,
+]);
+
+export const WHITELISTED_MIME_TYPES = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml',
+  'video/mp4', 'video/quicktime', 'video/x-matroska', 'video/webm', 'video/x-msvideo',
+  'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/flac',
+  'application/pdf',
+]);
+
+export function isWhitelisted(file) {
+  if (WHITELISTED_MIME_TYPES.has(file.type)) return true;
+  const name = file.name.toLowerCase();
+  const dot  = name.lastIndexOf('.');
+  return dot >= 0 && WHITELISTED_EXTS.has(name.slice(dot));
+}
+
+// ── Filename generator: stem-{timestamp}{8randomhex}.ext ─────────────────────
+
+export function generateFilename(file) {
+  const name = file.name;
+  const dotIdx = name.lastIndexOf('.');
+  const ext  = dotIdx >= 0 ? name.slice(dotIdx).toLowerCase() : '';
+  const stem = (dotIdx >= 0 ? name.slice(0, dotIdx) : name)
+    .replace(/[^a-zA-Z0-9-_]/g, '_')
+    .slice(0, 40);
+  const ts   = Date.now();
+  const rand = Array.from(crypto.getRandomValues(new Uint8Array(4)))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  return `${stem}-${ts}${rand}${ext}`;
+}
+
 // ── Remark plugin: parse ![[filename]] in the mdast ──────────────────────────
 
 function obsidianImageRemarkPlugin() {
@@ -46,7 +120,7 @@ function visit(tree, type, visitor) {
 
 export const obsidianImageRemark$ = $remark('obsidianImage', () => obsidianImageRemarkPlugin);
 
-// ── $node: renders as <img> in editor, serializes back to ![[...]] ────────────
+// ── $node: renders as appropriate element, serializes back to ![[...]] ────────
 
 export const obsidianImageNode$ = $node('obsidian_image', () => ({
   group: 'inline',
@@ -57,15 +131,53 @@ export const obsidianImageNode$ = $node('obsidian_image', () => ({
   },
   toDOM(node) {
     const { filename } = node.attrs;
+    const src = pendingBlobRegistry.get(filename) ?? `/api/images/${encodeURIComponent(filename)}`;
+    const type = fileTypeFor(filename);
+
+    if (type === 'video') {
+      return ['video', {
+        class: 'embedded-video',
+        src,
+        controls: '',
+        'data-obsidian-image': filename,
+      }];
+    }
+    if (type === 'audio') {
+      return ['audio', {
+        class: 'embedded-audio',
+        src,
+        controls: '',
+        'data-obsidian-image': filename,
+      }];
+    }
+    if (type === 'pdf') {
+      return ['a', {
+        class: 'embedded-file',
+        href: src,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        'data-obsidian-image': filename,
+      }, `📄 ${filename}`];
+    }
+    if (type === 'other') {
+      return ['a', {
+        class: 'embedded-file',
+        href: src,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        'data-obsidian-image': filename,
+      }, `📎 ${filename}`];
+    }
+    // image / svg (default)
     return ['img', {
       class: 'embedded-image',
-      src: `/api/images/${encodeURIComponent(filename)}`,
+      src,
       alt: filename,
       'data-obsidian-image': filename,
     }];
   },
   parseDOM: [{
-    tag: 'img[data-obsidian-image]',
+    tag: '[data-obsidian-image]',
     getAttrs(dom) {
       return { filename: dom.getAttribute('data-obsidian-image') ?? '' };
     },
@@ -79,13 +191,12 @@ export const obsidianImageNode$ = $node('obsidian_image', () => ({
   toMarkdown: {
     match: node => node.type.name === 'obsidian_image',
     runner: (state, node) => {
-      // Use 'html' node type to emit verbatim; mdast-util-to-markdown would otherwise escape '['.
       state.addNode('html', undefined, `![[${node.attrs.filename}]]`);
     },
   },
 }));
 
-// ── Export shape: MilkdownPlugin[] ───────────────────────────────────────────
+// ── Export shape ──────────────────────────────────────────────────────────────
 
 export const obsidianImagePlugin = [
   ...obsidianImageRemark$,
