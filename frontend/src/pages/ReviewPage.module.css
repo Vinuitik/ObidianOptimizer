@@ -1,0 +1,144 @@
+.page {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-page);
+}
+
+/* ── Left: note list ─────────────────────────────────────────────────────── */
+
+.noteList {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.listTitle {
+  font-family: var(--font-heading);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: var(--tracking-tight);
+}
+
+.listCount {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-accent-soft);
+  background: var(--color-accent-dim);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.listItems {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-2) 0;
+}
+
+.emptyMsg {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  padding: var(--sp-5) var(--sp-4);
+  text-align: center;
+}
+
+.noteItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-4);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-text-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background var(--ease-fast), color var(--ease-fast);
+}
+
+.noteItem:hover { background: var(--color-card); color: var(--color-text); }
+
+.noteItemActive {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+}
+
+.noteItemActive:hover { background: var(--color-accent-dim); }
+
+.loadMore {
+  flex-shrink: 0;
+  margin: var(--sp-2) var(--sp-4) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--text-xs);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-2);
+  cursor: pointer;
+  transition: border-color var(--ease-fast), color var(--ease-fast);
+}
+
+.loadMore:hover { border-color: var(--color-border-hover); color: var(--color-text); }
+
+/* ── Divider ─────────────────────────────────────────────────────────────── */
+
+.divider {
+  width: 1px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+/* ── Right: session pane ─────────────────────────────────────────────────── */
+
+.sessionPane {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.emptySession {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-7);
+}
+
+.emptySessionText {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  text-align: center;
+  max-width: 320px;
+  line-height: var(--leading-normal);
+}
+
+/* ── Auth gate ───────────────────────────────────────────────────────────── */
+
+.gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.gateText {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  color: var(--color-muted);
+}
