@@ -15,14 +15,15 @@ services:
       timeout: 5s
       retries: 10
 
-  ollama:
-    image: ollama/ollama
+  embedder:
+    build: ./embedder
     ports:
-      - "11434:11434"
+      - "8000:8000"
     volumes:
-      - ollama_data:/root/.ollama
-      - ./ollama-entrypoint.sh:/entrypoint.sh
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+      - embedder_models:/models
+    environment:
+      - EMBED_MODEL=${EMBED_MODEL:-mixedbread-ai/mxbai-embed-large-v1}
+      - MODEL_CACHE=/models
     deploy:
       resources:
         reservations:
@@ -30,6 +31,12 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s   # model download on first start can take a while
 
   backend:
     build: ./obsidian_optimizer/obsidian
@@ -42,14 +49,14 @@ services:
       - SPRING_DATASOURCE_USERNAME=obsidian
       - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-obsidian}
       - MCP_API_TOKEN=${MCP_API_TOKEN:-changeme}
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - EMBEDDER_URL=http://embedder:8000
     volumes:
       - ${HOST_VAULT_PATH}:/vault
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
-        condition: service_started
+      embedder:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -60,4 +67,4 @@ services:
 
 volumes:
   postgres_data:
-  ollama_data:
+  embedder_models:

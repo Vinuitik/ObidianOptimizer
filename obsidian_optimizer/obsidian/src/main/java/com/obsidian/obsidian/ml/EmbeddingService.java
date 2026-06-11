@@ -2,7 +2,6 @@ package com.obsidian.obsidian.ml;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class EmbeddingService {
@@ -23,26 +23,21 @@ public class EmbeddingService {
     private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
     private static final int SEARCH_LIMIT = 60;
 
-    @Value("${ollama.base.url:http://localhost:11434}")
-    private String ollamaBaseUrl;
+    @Value("${embedder.url:http://localhost:8000}")
+    private String embedderUrl;
 
-    private final SettingsRepository settingsRepo;
     private final NoteChunkRepository chunkRepo;
     private final MarkdownPreprocessor preprocessor;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
-    public EmbeddingService(SettingsRepository settingsRepo,
-                            NoteChunkRepository chunkRepo,
-                            MarkdownPreprocessor preprocessor) {
-        this.settingsRepo = settingsRepo;
+    public EmbeddingService(NoteChunkRepository chunkRepo, MarkdownPreprocessor preprocessor) {
         this.chunkRepo    = chunkRepo;
         this.preprocessor = preprocessor;
     }
 
     /**
-     * Full index pipeline for a single note.
-     * Called after note create/update and from ImageProcessingWorker after image text is ready.
+     * Full index pipeline for a single note: preprocess → chunk → hash-check → embed → upsert.
      */
     public void indexNote(String path) {
         String content;
@@ -53,17 +48,16 @@ public class EmbeddingService {
             return;
         }
 
-        String model = settingsRepo.getEmbedModel();
         List<NoteChunk> chunks = preprocessor.chunkNote(path, content);
 
         for (NoteChunk chunk : chunks) {
             String newHash = ImageScanService.sha256(chunk.getText());
             String storedHash = chunkRepo.getContentHash(path, chunk.getChunkIndex());
             if (newHash.equals(storedHash)) {
-                continue; // unchanged — skip Ollama call
+                continue;
             }
 
-            float[] embedding = embed(chunk.getText(), model);
+            float[] embedding = embed(chunk.getText());
             if (embedding == null) {
                 log.warn("[EmbeddingService] embed failed for {}#{} — skipping", path, chunk.getChunkIndex());
                 continue;
@@ -77,15 +71,15 @@ public class EmbeddingService {
     }
 
     /**
-     * Embeds a single text string. Returns null if Ollama is unreachable or returns an error.
+     * Embeds a single text string via the embedder service.
+     * Returns null if the service is unreachable or returns an error.
      */
-    public float[] embed(String text, String model) {
+    public float[] embed(String text) {
         try {
-            String body = objectMapper.writeValueAsString(
-                java.util.Map.of("model", model, "prompt", text));
+            String body = objectMapper.writeValueAsString(Map.of("texts", List.of(text)));
 
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ollamaBaseUrl + "/api/embeddings"))
+                .uri(URI.create(embedderUrl + "/embed"))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
@@ -93,20 +87,21 @@ public class EmbeddingService {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                log.warn("[EmbeddingService] Ollama returned HTTP {}: {}", response.statusCode(), response.body());
+                log.warn("[EmbeddingService] embedder returned HTTP {}: {}", response.statusCode(), response.body());
                 return null;
             }
 
             JsonNode root = objectMapper.readTree(response.body());
-            JsonNode embNode = root.path("embedding");
-            if (embNode.isMissingNode() || !embNode.isArray()) {
-                log.warn("[EmbeddingService] unexpected Ollama response shape: {}", response.body());
+            JsonNode embeddingsNode = root.path("embeddings");
+            if (embeddingsNode.isMissingNode() || !embeddingsNode.isArray() || embeddingsNode.isEmpty()) {
+                log.warn("[EmbeddingService] unexpected embedder response: {}", response.body());
                 return null;
             }
 
-            float[] vec = new float[embNode.size()];
+            JsonNode firstVec = embeddingsNode.get(0);
+            float[] vec = new float[firstVec.size()];
             for (int i = 0; i < vec.length; i++) {
-                vec[i] = (float) embNode.get(i).asDouble();
+                vec[i] = (float) firstVec.get(i).asDouble();
             }
             return vec;
 
@@ -120,16 +115,12 @@ public class EmbeddingService {
         }
     }
 
-    /** Embeds a query string for search (uses current model from settings). */
+    /** Embeds a query string for search. */
     public float[] embedQuery(String query) {
-        return embed(query, settingsRepo.getEmbedModel());
+        return embed(query);
     }
 
     public int getSearchLimit() {
         return SEARCH_LIMIT;
-    }
-
-    public String getModel() {
-        return settingsRepo.getEmbedModel();
     }
 }

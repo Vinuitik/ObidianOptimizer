@@ -96,7 +96,7 @@ public class ImageProcessingWorker {
             for (int i = 0; i < textChunks.size(); i++) {
                 String chunk = textChunks.get(i);
                 String hash = ImageScanService.sha256(chunk);
-                float[] embedding = embeddingService.embed(chunk, embeddingService.getModel());
+                float[] embedding = embeddingService.embed(chunk);
 
                 if (embedding != null) {
                     chunkRepo.upsertChunk(job.getNotePath(), imageChunkStartIndex + i, chunk, embedding, hash);

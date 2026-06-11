@@ -40,7 +40,7 @@ public class SettingsRepository {
         insertDefault("maxDailyReviews", "30");
         insertDefault("bankruptcyLimit", "200");
         insertDefault("chronoLastRunDate", "");
-        insertDefault("ollamaEmbedModel", "mxbai-embed-large");
+        insertDefault("ollamaEmbedModel", "mixedbread-ai/mxbai-embed-large-v1");
     }
 
     private void insertDefault(String key, String value) {

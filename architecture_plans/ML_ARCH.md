@@ -1,6 +1,7 @@
 # ML + MCP Layer — Architecture Plan
 
-Files: McpController.java, EmbeddingService.java, ImageProcessingWorker.java, ImageScanService.java, NoteChunkEntity.java, NoteChunkRepository.java, PendingImageJob.java, PendingImageJobRepository.java, MarkdownPreprocessor.java, SearchService.java
+Files: McpController.java, EmbeddingService.java, ImageProcessingWorker.java, ImageScanService.java, NoteChunkRepository.java, PendingImageJob.java, PendingImageJobRepository.java, MarkdownPreprocessor.java, SearchService.java
+Python embedder: embedder/main.py, embedder/Dockerfile, embedder/requirements.txt, embedder/tests/test_main.py
 
 ---
 
@@ -9,8 +10,8 @@ Files: McpController.java, EmbeddingService.java, ImageProcessingWorker.java, Im
 | Container | Image / Build | Purpose |
 |---|---|---|
 | `postgres` | `build: ./db` (paradedb/paradedb base) | pgvector cosine search + pg_search BM25 full-text |
-| `ollama` | `ollama/ollama` | Hosts `mxbai-embed-large` (1024-dim embeddings). GPU passthrough (GTX 1650 / NVIDIA). Falls back to CPU with log warning if no GPU detected. |
-| host-wrapper | Python/Flask on Windows host | VLM image processing via Anthropic Claude Vision — see `host-wrapper/FLOWS.md` |
+| `embedder` | `build: ./embedder` (nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04 base) | Python FastAPI + ONNX Runtime; serves mxbai-embed-large-v1 (1024-dim) embeddings via `POST /embed`. GPU passthrough (GTX 1650 / NVIDIA). Loud CPU fallback warning if no GPU detected. |
+| `host-wrapper` | Python/Flask on Windows host | VLM image processing via Anthropic Claude Vision — see `host-wrapper/FLOWS.md` |
 
 ---
 
@@ -84,14 +85,14 @@ To change chunk size / overlap: `MarkdownPreprocessor` constants
 chunk text
   → SHA-256(text) → compare against note_chunks.content_hash
   → if unchanged: skip (cache hit)
-  → POST http://ollama:11434/api/embeddings {model: mxbai-embed-large, prompt: chunk}
-  → float[1024] vector
+  → POST http://embedder:8000/embed {"texts": [chunk]}
+  → parse embeddings[0] → float[1024] vector
   → upsert note_chunks(note_path, chunk_index, text, embedding, content_hash)
   → UPDATE fts_vector = to_tsvector('english', chunk text)
 ```
 
-To change model: Settings UI → embed model field → stored in `app_settings.ollama_embed_model`  
-To change Ollama URL: `application.properties → ollama.base.url`
+To change model: `EMBED_MODEL` env var in docker-compose → rebuild embedder container (Settings UI field is display-only)  
+To change embedder URL: `application.properties → embedder.url` / `EMBEDDER_URL` env var
 
 ---
 
@@ -161,11 +162,62 @@ Lives in: existing Spring Boot container (`McpController.java`)
 
 ---
 
+## Connecting Claude (or any MCP client) to the MCP server
+
+### 1. Generate the API token
+```powershell
+# On Windows — generates a 32-byte hex secret
+-join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) })
+```
+Or on any system: `openssl rand -hex 32`
+
+Add it to your `.env` file (never commit this file):
+```
+MCP_API_TOKEN=<your-generated-secret>
+```
+The backend reads it via `MCP_API_TOKEN` env var (set in `docker-compose.yml → backend.environment`).
+
+### 2. Claude Desktop (`claude_desktop_config.json`)
+Location: `%APPDATA%\Claude\claude_desktop_config.json` on Windows.
+
+```json
+{
+  "mcpServers": {
+    "obsidian": {
+      "type": "http",
+      "url": "http://localhost:8084/api/mcp/execute",
+      "headers": {
+        "X-API-Key": "<your-generated-secret>"
+      }
+    }
+  }
+}
+```
+Restart Claude Desktop after saving. The `obsidian` server will appear in the tools list.
+
+### 3. Test the connection
+```powershell
+curl -X POST http://localhost:8084/api/mcp/execute `
+  -H "Content-Type: application/json" `
+  -H "X-API-Key: <your-secret>" `
+  -d '{"tool":"search_notes","parameters":{"query":"test","limit":3}}'
+```
+Expect `{"results":[]}` until notes are indexed. A `401` means the token is wrong.
+
+### 4. Auth token security notes
+- The token is a shared secret — anyone who has it can call all MCP tools
+- Do not expose port 8084 to the internet; keep it on localhost
+- To rotate: change `MCP_API_TOKEN` in `.env` and restart the backend container
+- The token is set at the controller level (`McpController.java`), not in Spring Security,
+  so session auth is completely bypassed for `/api/mcp/**`
+
+---
+
 ## Hybrid Search (RRF)
 
 ```
 query
-  → embed via Ollama → float[1024]
+  → POST http://embedder:8000/embed {"texts": [query]} → float[1024]
   → vector search: SELECT note_path, chunk_index, 1-(embedding <=> queryVec) AS score
                    FROM note_chunks ORDER BY embedding <=> queryVec LIMIT 60
   → BM25 search:   pg_search / paradedb BM25 index on text column LIMIT 60
@@ -179,27 +231,35 @@ To change limit: `SearchService.SEARCH_LIMIT`
 
 ---
 
-## Ollama GPU / CPU Fallback
+## Embedder GPU / CPU Fallback
 
-Docker compose passes NVIDIA device to Ollama container. On startup, an init container (or entrypoint script) attempts to detect GPU via `nvidia-smi`:
-- GPU found → pull `mxbai-embed-large` (1024-dim), log `INFO: Ollama using GPU`
-- GPU not found → log `WARN: No GPU detected — falling back to CPU with nomic-embed-text (768-dim)`, pull `nomic-embed-text`
+On startup, `embedder/main.py` calls `ort.get_available_providers()`:
+- `CUDAExecutionProvider` present → log `INFO: GPU detected — using GPU inference`
+- Not present → multiple `WARN` lines logged, falls back to `CPUExecutionProvider`
 
-**Important:** if fallback activates, embedding dimension drops to 768. The `note_chunks.embedding` column must match. Either recreate the table or keep the column as `vector(1024)` and accept the dimension mismatch error as a prompt to fix GPU setup. The warning in logs is the signal.
+The WARN output:
+```
+WARN: No GPU / CUDAExecutionProvider detected.
+WARN: Falling back to CPU inference — embeddings will be slow.
+```
 
-To fix GPU passthrough: install `nvidia-container-toolkit` on the host, ensure Docker Desktop WSL2 backend is active.
+**Dimension is always 1024** regardless of provider — mxbai-embed-large-v1 is used in both paths. No schema mismatch on CPU fallback.
+
+To fix GPU passthrough: install `nvidia-container-toolkit` on the host, ensure Docker Desktop WSL2 backend uses GPU acceleration. The `health` endpoint (`GET http://localhost:8000/health`) reports `"device": "GPU"` or `"CPU"` so you can confirm without reading logs.
 
 ---
 
 ## Technology Notes
 
 - **paradedb/paradedb**: ships pgvector + pg_search (BM25 via Tantivy). Use `paradedb.bm25()` or `@@@` operator for BM25 queries.
-- **mxbai-embed-large**: 1024-dim, 335M params, ~670MB VRAM. MTEB English 64.68 — best quality/size ratio for GTX 1650 (4GB).
-- **nomic-embed-text** (CPU fallback): 768-dim, 274MB, lower quality but CPU-viable.
+- **Python embedder (ONNX)**: FastAPI + `onnxruntime-gpu`. On first run, `optimum` downloads the PyTorch model from HuggingFace and converts to ONNX, caching to `/models` volume. Subsequent starts load from cache — no network required.
+- **mxbai-embed-large-v1** (`mixedbread-ai/mxbai-embed-large-v1`): 1024-dim encoder-only, 335M params, ~670MB VRAM. MTEB English 64.68. Fits GTX 1650 (4GB). Same dimension on CPU fallback — no schema migration needed.
+- **ONNX vs GGUF**: GGUF quantization targets autoregressive decoder LLMs. ONNX is the correct inference format for encoder-only embedding models and supports the fine-tuning export path we'll use later.
 - **ivfflat index**: requires `VACUUM ANALYZE` after bulk insert to improve clustering. Switch to `hnsw` once the chunk count stabilises.
 - **SHA-256 for content hashing**: JDK built-in, no dependency. Throughput ~500MB/s — a 10K-note vault takes ~1s in chrono. Zero false negatives.
-- **Image chunking threshold**: 1000 chars (~200 words). Large VLM outputs (detailed diagram descriptions) are split before embedding to stay within Ollama context.
+- **Image chunking threshold**: 1000 chars (~200 words). Large VLM outputs (detailed diagram descriptions) are split before embedding.
 - **Graceful degradation**: if host wrapper is down, images are marked SKIPPED and notes are still searchable on text content. Worker retries on next scheduled run.
+- **Embedder healthcheck**: `start_period: 120s` in docker-compose — first run downloads and converts the model, which takes time. Backend `depends_on: embedder: condition: service_healthy`.
 
 ---
 
@@ -207,8 +267,8 @@ To fix GPU passthrough: install `nvidia-container-toolkit` on the host, ensure D
 
 | Thing to change | Where |
 |---|---|
-| Embedding model | Settings UI → ML section → embed model field → `app_settings.ollama_embed_model` |
-| Ollama URL | `application.properties → ollama.base.url` |
+| Embedding model | `EMBED_MODEL` env var in docker-compose → rebuild embedder container |
+| Embedder URL | `EMBEDDER_URL` env var / `application.properties → embedder.url` |
 | Chunk size / overlap | `MarkdownPreprocessor` constants |
 | Hybrid search limit | `SearchService.SEARCH_LIMIT` |
 | MCP auth token | `.env → MCP_API_TOKEN` (docker-compose backend env) |
@@ -216,4 +276,4 @@ To fix GPU passthrough: install `nvidia-container-toolkit` on the host, ensure D
 | Image processing prompt | `host-wrapper/main.py → IMAGE_PROMPT` |
 | Image chunk threshold | `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD` |
 | Worker schedule | `ImageProcessingWorker` `@Scheduled(fixedDelay = ...)` |
-| GPU fallback model | Ollama entrypoint script |
+| GPU provider detection | `embedder/main.py → _detect_provider()` |
