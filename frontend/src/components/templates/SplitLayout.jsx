@@ -69,6 +69,8 @@ export default function SplitLayout() {
   const rightCollapsed = useStore(s => s.rightCollapsed);
   const toggleLeft     = useStore(s => s.toggleLeft);
   const toggleRight    = useStore(s => s.toggleRight);
+  const reviewMode     = useStore(s => s.reviewMode);
+  const showRight      = reviewMode !== 'flashcard';
   const currentNotePath = useStore(s => s.currentNotePath);
   const centerMode     = useStore(s => s.centerMode);
   const isMutable      = useStore(s => s.isMutable);
@@ -195,7 +197,7 @@ export default function SplitLayout() {
                 )}
               </>
             )}
-            {rightCollapsed && (
+            {showRight && rightCollapsed && (
               <Button onClick={toggleRight} variant="ghost">Review ◀</Button>
             )}
           </div>
@@ -205,21 +207,23 @@ export default function SplitLayout() {
       </div>
 
       {/* Right resize handle */}
-      {!rightCollapsed && (
+      {showRight && !rightCollapsed && (
         <div
           className={styles.resizeHandle}
           onMouseDown={(e) => onRightHandleDown(e, 'left')}
         />
       )}
 
-      {/* Right — Review List */}
-      <div
-        className={`${styles.panel} ${styles.panelRight} ${rightCollapsed ? styles.collapsed : ''}`}
-        style={rightCollapsed ? undefined : { width: rightWidth, minWidth: rightWidth }}
-      >
-        <PanelHeader title="Review" collapsed={rightCollapsed} onToggle={toggleRight} side="right" right={dueSlot} />
-        <ReviewList />
-      </div>
+      {/* Right — Review List (hidden in flashcard mode) */}
+      {showRight && (
+        <div
+          className={`${styles.panel} ${styles.panelRight} ${rightCollapsed ? styles.collapsed : ''}`}
+          style={rightCollapsed ? undefined : { width: rightWidth, minWidth: rightWidth }}
+        >
+          <PanelHeader title="Review" collapsed={rightCollapsed} onToggle={toggleRight} side="right" right={dueSlot} />
+          <ReviewList />
+        </div>
+      )}
     </div>
   );
 }

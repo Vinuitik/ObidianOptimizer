@@ -17,6 +17,7 @@ import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
 // ── Review session (localStorage) ────────────────────────────────────────────
 
 const REVIEW_KEY = 'obsOpt_reviewSession';
+const REVIEW_MODE_KEY = 'obsOpt_reviewMode';
 
 function getReviewSession() {
   const today = new Date().toISOString().slice(0, 10);
@@ -137,6 +138,9 @@ const useStore = create((set, get) => ({
 
   // Settings (loaded from backend on startup)
   settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking' },
+
+  // UI preference stored in localStorage — 'inline' | 'flashcard'
+  reviewMode: localStorage.getItem(REVIEW_MODE_KEY) ?? 'inline',
 
   // Toast notification: null | { message: string }
   toast: null,
@@ -603,6 +607,11 @@ const useStore = create((set, get) => ({
 
   toggleLeft:  () => set(s => ({ leftCollapsed:  !s.leftCollapsed })),
   toggleRight: () => set(s => ({ rightCollapsed: !s.rightCollapsed })),
+
+  setReviewMode: (mode) => {
+    localStorage.setItem(REVIEW_MODE_KEY, mode);
+    set({ reviewMode: mode });
+  },
 
   // ── Settings ──────────────────────────────────────────────────────────────
 

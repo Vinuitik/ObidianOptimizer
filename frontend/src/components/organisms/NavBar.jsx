@@ -6,6 +6,7 @@ import styles from './NavBar.module.css';
 
 const NAV_ITEMS = [
   { to: '/',         label: 'Notes' },
+  { to: '/learn',    label: 'Learn' },
   { to: '/review',   label: 'Review' },
   { to: '/settings', label: 'Settings' },
 ];

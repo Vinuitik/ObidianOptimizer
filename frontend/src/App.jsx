@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import MainPage from './pages/MainPage';
 import SettingsPage from './pages/SettingsPage';
 import ReviewPage from './pages/ReviewPage';
+import LearnPage from './pages/LearnPage';
 import NavBar from './components/organisms/NavBar';
 import styles from './App.module.css';
 
@@ -26,6 +27,7 @@ function AnimatedRoutes() {
       >
         <Routes location={location}>
           <Route path="/" element={<MainPage />} />
+          <Route path="/learn" element={<LearnPage />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
