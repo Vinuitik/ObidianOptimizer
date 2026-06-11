@@ -7,7 +7,7 @@ Files: SecurityConfig.java, WebConfig.java, ObsidianApplication.java, ServletIni
 ## Auth (SecurityConfig)
 
 Spring Security session-based single-user auth.  
-Credentials in `application.properties`: `app.auth.username`, `app.auth.password` (raw — BCrypt applied at startup).
+Credentials come from env vars `APP_AUTH_USERNAME` / `APP_AUTH_PASSWORD` (set in `.env`, passed via `docker-compose.yml`). `application.properties` only holds placeholders with throwaway local defaults — never put real credentials there (BCrypt is applied at startup).
 
 `POST /login` (form-encoded: `username=&password=`) → Spring Security → session cookie → 200  
 `POST /logout` → session invalidated → 200  
@@ -64,7 +64,7 @@ To change port: `application.properties server.port`
 
 | Thing to change | Where |
 |---|---|
-| Auth credentials | `application.properties app.auth.username / app.auth.password` |
+| Auth credentials | `.env APP_AUTH_USERNAME / APP_AUTH_PASSWORD` (compose fails fast if password unset) |
 | Protected vs public endpoints | `SecurityConfig.filterChain()` |
 | BCrypt cost factor | `SecurityConfig` `new BCryptPasswordEncoder(n)` |
 | Allowed CORS origins | `WebConfig.addCorsMappings()` |
