@@ -40,6 +40,7 @@ public class SettingsRepository {
         insertDefault("maxDailyReviews", "30");
         insertDefault("bankruptcyLimit", "200");
         insertDefault("chronoLastRunDate", "");
+        insertDefault("ollamaEmbedModel", "mxbai-embed-large");
     }
 
     private void insertDefault(String key, String value) {
@@ -85,5 +86,9 @@ public class SettingsRepository {
 
     public String getChronoLastRunDate() {
         return get("chronoLastRunDate");
+    }
+
+    public String getEmbedModel() {
+        return get("ollamaEmbedModel");
     }
 }

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    build: ./db
     environment:
       POSTGRES_DB: obsidian
       POSTGRES_USER: obsidian
@@ -15,6 +15,22 @@ services:
       timeout: 5s
       retries: 10
 
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./ollama-entrypoint.sh:/entrypoint.sh
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   backend:
     build: ./obsidian_optimizer/obsidian
     ports:
@@ -25,11 +41,15 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/obsidian
       - SPRING_DATASOURCE_USERNAME=obsidian
       - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-obsidian}
+      - MCP_API_TOKEN=${MCP_API_TOKEN:-changeme}
+      - OLLAMA_BASE_URL=http://ollama:11434
     volumes:
       - ${HOST_VAULT_PATH}:/vault
     depends_on:
       postgres:
         condition: service_healthy
+      ollama:
+        condition: service_started
 
   frontend:
     build: ./frontend
@@ -40,3 +60,4 @@ services:
 
 volumes:
   postgres_data:
+  ollama_data:

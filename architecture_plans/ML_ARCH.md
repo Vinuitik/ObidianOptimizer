@@ -1,16 +1,58 @@
 # ML + MCP Layer — Architecture Plan
 
-Files: [NOT IMPLEMENTED] McpController.java, EmbeddingService.java, ImagePipelineService.java, NoteChunkRepository.java, MarkdownPreprocessor.java
+Files: McpController.java, EmbeddingService.java, ImageProcessingWorker.java, ImageScanService.java, NoteChunkEntity.java, NoteChunkRepository.java, PendingImageJob.java, PendingImageJobRepository.java, MarkdownPreprocessor.java, SearchService.java
 
 ---
 
 ## New Containers (docker-compose additions)
 
-| Container | Image | Purpose |
+| Container | Image / Build | Purpose |
 |---|---|---|
-| `postgres` | `pgvector/pgvector:pg16` | Vector + full-text search |
-| `ollama` | `ollama/ollama` | Hosts `nomic-embed-text` (embeddings only) |
-| host-wrapper | Python/Flask on host | VLM image processing via Anthropic API — see `host-wrapper/FLOWS.md` |
+| `postgres` | `build: ./db` (paradedb/paradedb base) | pgvector cosine search + pg_search BM25 full-text |
+| `ollama` | `ollama/ollama` | Hosts `mxbai-embed-large` (1024-dim embeddings). GPU passthrough (GTX 1650 / NVIDIA). Falls back to CPU with log warning if no GPU detected. |
+| host-wrapper | Python/Flask on Windows host | VLM image processing via Anthropic Claude Vision — see `host-wrapper/FLOWS.md` |
+
+---
+
+## Database Schema
+
+### `notes` table (extended)
+Existing table gains one column:
+```sql
+ALTER TABLE notes ADD COLUMN content_hash TEXT;
+```
+Used by ChronoService to detect externally-edited files (via Obsidian, not the app).
+
+### `note_chunks` table
+```sql
+CREATE TABLE note_chunks (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  note_path     TEXT NOT NULL,
+  chunk_index   INT  NOT NULL,
+  text          TEXT NOT NULL,
+  embedding     vector(1024),
+  content_hash  TEXT NOT NULL,
+  fts_vector    TSVECTOR,
+  UNIQUE (note_path, chunk_index)
+);
+CREATE INDEX ON note_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+CREATE INDEX ON note_chunks USING GIN (fts_vector);
+```
+
+### `pending_image_jobs` table
+```sql
+CREATE TABLE pending_image_jobs (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  note_path     TEXT NOT NULL,
+  image_path    TEXT NOT NULL,
+  status        TEXT NOT NULL CHECK (status IN ('PENDING','DONE','SKIPPED')),
+  content_hash  TEXT,
+  created_at    TIMESTAMP NOT NULL DEFAULT now(),
+  processed_at  TIMESTAMP,
+  UNIQUE (note_path, image_path)
+);
+CREATE INDEX ON pending_image_jobs (status) WHERE status = 'PENDING';
+```
 
 ---
 
@@ -18,190 +60,146 @@ Files: [NOT IMPLEMENTED] McpController.java, EmbeddingService.java, ImagePipelin
 
 Trigger: note created or updated → `EmbeddingService.indexNote(path)`
 
-### 1. Preprocessing — `MarkdownPreprocessor.process(rawMarkdown)`
+### 1. Preprocessing — `MarkdownPreprocessor.chunk(path, rawContent)`
 
 ```
 raw markdown
-  → strip YAML frontmatter (lines between opening and closing ---)
+  → strip YAML frontmatter (--- ... ---)
   → strip HTML comments (<!-- ... -->)
-  → strip obsidian metadata tags (lines starting with #tag at end of file)
-  → normalize headers: keep ## / ### text, strip # chars (used as chunk boundaries)
-  → normalize bold/italic: **text** → text, *text* → text, ==highlight== → text
-  → extract image refs: collect all ![[name.ext]] and ![alt](path) → replace with placeholder IMAGE[name.ext]
-  → extract tables: convert markdown table → "ColA: val, ColB: val" prose lines
-  → collapse 3+ blank lines → single blank line
-→ returns: PreprocessedNote { cleanText, List<imageRef> }
+  → strip #tags at end-of-file
+  → extract image refs: ![[name.ext]] and ![alt](path) → returns alongside clean text
+  → split on ## / ### headings → semantic sections
+  → sections > 1000 chars: sliding window (size ~1000, overlap ~200)
+  → drop chunks < 50 chars
+→ returns: List<NoteChunk> (path, sectionTitle, text, imageLinks[])
 ```
 
-To change stripping rules: `MarkdownPreprocessor.process()`
+To change chunk size / overlap: `MarkdownPreprocessor` constants
 
 ---
 
-### 2. Chunking — `EmbeddingService.splitIntoChunks(cleanText)`
-
-```
-cleanText
-  → split on ## and ### header lines → semantic sections
-  → for each section > 512 tokens:
-      → split further on double-newline (paragraph boundary)
-  → for each paragraph > 512 tokens:
-      → sliding window: 512-token chunks, 50-token overlap
-  → drop chunks < 50 tokens
-→ returns: List<String> chunks
-```
-
-Chunk size unit: approximate word count (1 token ≈ 0.75 words) — exact tokenization not needed  
-To change sizes: `EmbeddingService.CHUNK_MAX_TOKENS`, `EmbeddingService.CHUNK_OVERLAP_TOKENS`
-
----
-
-### 3. Image Processing — `ImagePipelineService.toText(imageRef)` [ASYNC]
-
-```
-imageRef (e.g. "diagram.png")
-  → resolve to /vault/... absolute path
-  → check pending_image_jobs table — if already queued/done, skip
-  → insert into pending_image_jobs(note_path, image_path, status=PENDING)
-  → background thread drains queue:
-      → POST http://host.docker.internal:5001/process-image {image_path}
-      → if 200: extracted text → insert as extra chunk for note_path
-      → if wrapper unreachable: mark status=SKIPPED, continue (graceful degradation)
-      → update pending_image_jobs status
-```
-
-Image chunk is appended after text chunks for the same note  
-To change wrapper URL: `application.properties → wrapper.url`
-
----
-
-### 4. Embedding — per chunk
+### 2. Embedding — per chunk
 
 ```
 chunk text
-  → hash(chunk text) → compare against note_chunks.content_hash
+  → SHA-256(text) → compare against note_chunks.content_hash
   → if unchanged: skip (cache hit)
-  → POST http://ollama:11434/api/embeddings {model: nomic-embed-text, prompt: chunk}
-  → float[768] vector
-  → upsert note_chunks(note_path, chunk_index, text, embedding, content_hash, fts_vector)
-  → fts_vector = to_tsvector('english', chunk text)  ← postgres full-text index
+  → POST http://ollama:11434/api/embeddings {model: mxbai-embed-large, prompt: chunk}
+  → float[1024] vector
+  → upsert note_chunks(note_path, chunk_index, text, embedding, content_hash)
+  → UPDATE fts_vector = to_tsvector('english', chunk text)
 ```
 
-Ollama model pull on first run: `ollama pull nomic-embed-text`  
-To change model: `application.properties → ollama.embed.model`
+To change model: Settings UI → embed model field → stored in `app_settings.ollama_embed_model`  
+To change Ollama URL: `application.properties → ollama.base.url`
 
 ---
 
-### 5. Stale Chunk Cleanup
+### 3. Stale Chunk Cleanup
 
-After re-indexing a note: delete `note_chunks WHERE note_path = ? AND chunk_index > newChunkCount`  
-Handles note shrinking (fewer chunks than before)
-
----
-
-## Detailed Implementation Plan
-
-### 1. Database & Hybrid Search Infrastructure
-*   **Custom Docker Image**: A custom `Dockerfile` for the database will be created based on PostgreSQL. It will include `pgvector` alongside a dedicated search extension (like ParadeDB / `pg_search` or a Tantivy-based extension) to provide robust, exact BM25 scoring functionality.
-*   **Schema (`note_chunks`)**:
-    *   `id` (UUID) - Primary Key
-    *   `note_path` (String) - Logical foreign key to the original markdown file
-    *   `chunk_index` (Integer) - Order of chunk within the note
-    *   `text` (Text) - Chunk contents or transcribed image context
-    *   `embedding` (vector 768) - For Ollama's `nomic-embed-text`
-*   **Hybrid Search Math (RRF)**:
-    *   **Formula**: `(1 / (60 + rank_bm25)) + (1 / (60 + rank_vector))`
-    *   `rank_vector`: Fetched via nearest-neighbor vector sorting.
-    *   `rank_bm25`: Fetched via the custom BM25 database extension.
-
-### 2. Image Pipeline Integration
-*   Image references (`![img]`) inside chunks trigger async HTTP POSTs to the Host Wrapper (`host.docker.internal:5001`).
-*   The wrapper invokes Claude Vision APIs to transcribe image contents/diagrams.
-*   The returned transcription is stored as an independent chunk for that `note_path` and embedded via Ollama into the standard text vector space.
-
-### 3. Application MCP Server Layer
-Spring Boot will act as an internal Model Context Protocol (MCP) server, exposing tools for LLM agents or internal UI elements:
-*   **Retrieval Tools**:
-    *   `mcp_search_notes(query, limit)`: Runs the RRF Hybrid Search and returns top chunks alongside parent references.
-    *   `mcp_get_note_content(note_path)`: Retrieves the fully compiled raw markdown for context context framing.
-*   **Mutation Tools**:
-    *   `mcp_create_note(title, content)`: Creates a new note file. Triggers local `EmbeddingService` to chunk, embed, and transcribe images.
-    *   `mcp_update_note(note_path, edited_content)`: Edits an existing note, triggering stale chunk cleanup and fresh indexing.
+After re-indexing a note: `DELETE FROM note_chunks WHERE note_path = ? AND chunk_index > newChunkCount`  
+Handles note shrinking (fewer chunks than before).
 
 ---
 
-## Image Pipeline (CNN gatekeeper + VLM distillation)
+## Image Pipeline (VLM-only, queue-driven)
 
-`ImagePipelineService.toText(imagePath)`:
+All images go directly to the host wrapper (Claude Vision). No CNN classifier.
+
+### Queue table: `pending_image_jobs`
+
+**Populated by three paths:**
+
+1. **Startup scan** — `ImageScanService.scanAll()` called after `FileRepository.init()`:
+   - Walks all notes, extracts `![[img.ext]]` and `![alt](path)` refs
+   - Inserts PENDING rows for any `(note_path, image_path)` not already DONE
+
+2. **App-side writes** — `FileRepository.createNote()` / `updateNote()` / `patchNote()`:
+   - After each write, calls `ImageScanService.registerImages(path, content)`
+   - Upserts PENDING rows for any new image refs
+
+3. **Chrono hash check** — `ChronoService.runAllJobs()` step:
+   - For each `.md` file: SHA-256(fileContent) vs `notes.content_hash`
+   - If different (external Obsidian edit): `ImageScanService.registerImages(path, content)`, update `content_hash`
+
+### Worker: `ImageProcessingWorker`
+
+Background `@Scheduled` thread drains PENDING rows:
 
 ```
-image → CnnGatekeeperClient.classify(image)
-           → confidence > threshold?
-               YES "text_screenshot" → Tesseract OCR → plain text
-               YES "diagram"         → OllamaClient.vlmCaption(image, prompt) → description text
-               NO  (uncertain)       → OllamaClient.vlmCaption(image, prompt) → text
-                                        + log (imagePath, vlmOutput) to pseudo_labels table
-                                          (feeds CNN retraining pipeline)
+for each PENDING row:
+  → POST http://host.docker.internal:5001/process-image {image_path}
+  → if 200 OK:
+      extracted text
+      → if text > 1000 chars: sliding window chunk (same as MarkdownPreprocessor)
+      → each chunk → EmbeddingService.embed(chunk) → upsert note_chunks
+      → mark row DONE, set processed_at
+  → if wrapper unreachable / 4xx / 5xx:
+      → mark row SKIPPED
+      → log WARN with image_path (visible in Docker logs)
 ```
 
-Threshold: `application.properties → cnn.confidence.threshold` (default 0.80)  
-VLM prompt: "Extract all visible text. If this is a diagram, describe its structure and meaning concisely."  
-Pseudo-label table: `image_pseudo_labels(image_hash, cnn_logits, vlm_output, used_in_training)`
-
-**CNN training (offline, not in Docker):**  
-TypiClust → selects maximally diverse samples from unlabeled pool for manual labeling  
-FlexMatch → semi-supervised training on labeled + pseudo-labeled data  
-Export → ONNX → loaded by CNN sidecar  
-Distillation loop: VLM uncertain outputs → reviewed batch → retrain CNN → redeploy sidecar  
-To retrain: [NOT IMPLEMENTED] `scripts/train_cnn.py`
+Host wrapper prompt: "If this is a wall of text or screenshot, transcribe it verbatim. If it is a diagram or chart, describe its structure and meaning concisely."  
+To change prompt: `host-wrapper/main.py → IMAGE_PROMPT`
 
 ---
 
-## MCP Server Flow (note creation)
+## MCP Server
 
-Transport: HTTP/SSE on `/mcp/**`  
-Auth: `X-API-Key` header or `?token=` query param → compare against `MCP_API_TOKEN` env var → 401 if mismatch  
-Lives in: existing Spring Boot container, new `McpController.java`
+Transport: HTTP POST on `/api/mcp/execute`  
+Auth: `X-API-Key` header → compare against `MCP_API_TOKEN` env var → 401 if missing/wrong  
+Lives in: existing Spring Boot container (`McpController.java`)
 
-**Tool: `find_home_for_note(proposed_title)`**  
-`McpController` → embed `proposed_title` via Ollama → pgvector similarity search on `note_chunks`  
-→ top-N chunks → deduplicate to note level → extract parent folders  
-→ also: `SELECT name FROM notes WHERE folder IN (top_folders) LIMIT 10` (naming style examples)  
-→ return: `{ similar_notes: [...], suggested_folders: [...], name_examples: [...] }`
+### Tools
 
-**Tool: `get_folder_children(folder_path)`**  
-→ `FileRepository.listChildren(folder)` → direct children only (files + subfolders), no recursion  
-→ return names + types
-
-**Tool: `create_note(folder_path, title, content)`**  
-→ `FileRepository.createNote(folder, title)` → write content via PATCH hunks  
-→ trigger `EmbeddingService.indexNote(newPath)` async  
-→ return `{ path, status }`
+| Tool | Status | Implementation |
+|---|---|---|
+| `search_notes` | Stub → wire to SearchService | RRF hybrid search |
+| `get_note_content` | Stub | `FileRepository.getText(path)` |
+| `create_note` | Stub | `FileRepository.createNote()` + `EmbeddingService.indexNote()` async |
+| `find_home_for_note` | Stub | embed title → pgvector similarity → extract folders |
 
 ---
 
-## Hybrid Search Query (pgvector + postgres FTS)
+## Hybrid Search (RRF)
 
-```sql
-SELECT note_path, chunk_text,
-       (1 - (embedding <=> query_vec)) * 0.7
-       + ts_rank(fts_vector, plainto_tsquery('english', query_text)) * 0.3 AS score
-FROM note_chunks
-ORDER BY score DESC
-LIMIT 20;
+```
+query
+  → embed via Ollama → float[1024]
+  → vector search: SELECT note_path, chunk_index, 1-(embedding <=> queryVec) AS score
+                   FROM note_chunks ORDER BY embedding <=> queryVec LIMIT 60
+  → BM25 search:   pg_search / paradedb BM25 index on text column LIMIT 60
+  → RRF merge: score = (1/(60 + vectorRank)) + (1/(60 + bm25Rank))
+  → deduplicate: MAX(score) per note_path
+  → return top-limit SearchResult(path, snippet, score)
 ```
 
-Weights (0.7 / 0.3) tunable in `EmbeddingService.hybridSearch()`
+Weights implicit in RRF formula (equal). To bias vector: multiply vector term.  
+To change limit: `SearchService.SEARCH_LIMIT`
+
+---
+
+## Ollama GPU / CPU Fallback
+
+Docker compose passes NVIDIA device to Ollama container. On startup, an init container (or entrypoint script) attempts to detect GPU via `nvidia-smi`:
+- GPU found → pull `mxbai-embed-large` (1024-dim), log `INFO: Ollama using GPU`
+- GPU not found → log `WARN: No GPU detected — falling back to CPU with nomic-embed-text (768-dim)`, pull `nomic-embed-text`
+
+**Important:** if fallback activates, embedding dimension drops to 768. The `note_chunks.embedding` column must match. Either recreate the table or keep the column as `vector(1024)` and accept the dimension mismatch error as a prompt to fix GPU setup. The warning in logs is the signal.
+
+To fix GPU passthrough: install `nvidia-container-toolkit` on the host, ensure Docker Desktop WSL2 backend is active.
 
 ---
 
 ## Technology Notes
 
-- **pgvector**: `<=>` is cosine distance. Index type `ivfflat` for speed at scale; needs `VACUUM ANALYZE` after bulk insert. `hnsw` is faster for query but slower to build — use `ivfflat` for initial build, migrate to `hnsw` once stable.
-- **nomic-embed-text**: 768-dim embeddings, MIT license, no GPU needed. Pull: `ollama pull nomic-embed-text`.
-- **llava-phi3**: ~3GB, Ollama-hosted, CPU-viable but slow (~5-15s/image). Used only for uncertain/diagram cases — CNN keeps this rare.
-- **CNN sidecar**: ONNX Runtime Java binding (`com.microsoft.onnxruntime`) can load the model in-process in Spring Boot — no separate container needed if you prefer. Separate container gives independent redeployment.
-- **Pseudo-label loop**: VLM outputs are noisy ground truth. Review batch before using in training. `used_in_training = false` rows are the review queue.
-- **Chunking + averaging**: search returns chunks, not notes. Deduplicate by `note_path` and take `MAX(score)` per note for ranking — don't average chunk scores.
+- **paradedb/paradedb**: ships pgvector + pg_search (BM25 via Tantivy). Use `paradedb.bm25()` or `@@@` operator for BM25 queries.
+- **mxbai-embed-large**: 1024-dim, 335M params, ~670MB VRAM. MTEB English 64.68 — best quality/size ratio for GTX 1650 (4GB).
+- **nomic-embed-text** (CPU fallback): 768-dim, 274MB, lower quality but CPU-viable.
+- **ivfflat index**: requires `VACUUM ANALYZE` after bulk insert to improve clustering. Switch to `hnsw` once the chunk count stabilises.
+- **SHA-256 for content hashing**: JDK built-in, no dependency. Throughput ~500MB/s — a 10K-note vault takes ~1s in chrono. Zero false negatives.
+- **Image chunking threshold**: 1000 chars (~200 words). Large VLM outputs (detailed diagram descriptions) are split before embedding to stay within Ollama context.
+- **Graceful degradation**: if host wrapper is down, images are marked SKIPPED and notes are still searchable on text content. Worker retries on next scheduled run.
 
 ---
 
@@ -209,12 +207,13 @@ Weights (0.7 / 0.3) tunable in `EmbeddingService.hybridSearch()`
 
 | Thing to change | Where |
 |---|---|
-| Embedding model | `application.properties → ollama.embed.model` |
-| VLM model | `application.properties → ollama.vlm.model` |
-| CNN confidence threshold | `application.properties → cnn.confidence.threshold` |
-| Chunk split strategy | `EmbeddingService.splitIntoChunks()` |
-| Hybrid search weights | `EmbeddingService.hybridSearch()` |
-| MCP auth token | `.env → MCP_API_TOKEN` |
-| MCP exposed tools | `McpController.java` |
-| Pseudo-label review queue | `image_pseudo_labels` table, `used_in_training = false` |
-| CNN retrain script | `scripts/train_cnn.py` [NOT IMPLEMENTED] |
+| Embedding model | Settings UI → ML section → embed model field → `app_settings.ollama_embed_model` |
+| Ollama URL | `application.properties → ollama.base.url` |
+| Chunk size / overlap | `MarkdownPreprocessor` constants |
+| Hybrid search limit | `SearchService.SEARCH_LIMIT` |
+| MCP auth token | `.env → MCP_API_TOKEN` (docker-compose backend env) |
+| MCP tools | `McpController.java` switch |
+| Image processing prompt | `host-wrapper/main.py → IMAGE_PROMPT` |
+| Image chunk threshold | `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD` |
+| Worker schedule | `ImageProcessingWorker` `@Scheduled(fixedDelay = ...)` |
+| GPU fallback model | Ollama entrypoint script |

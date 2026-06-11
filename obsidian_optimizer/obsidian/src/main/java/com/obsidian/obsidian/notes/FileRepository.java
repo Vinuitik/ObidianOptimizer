@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.notes;
 
+import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.settings.SettingsRepository;
 
 import java.io.File;
@@ -36,13 +37,16 @@ public class FileRepository {
     private final NoteLinkRepository noteLinkRepo;
     private final SettingsRepository settingsRepo;
     private final NoteIndexRepository noteIndex;
+    private final ImageScanService imageScanService;
 
     public FileRepository(NoteLinkRepository noteLinkRepo,
                           SettingsRepository settingsRepo,
-                          NoteIndexRepository noteIndex) {
-        this.noteLinkRepo = noteLinkRepo;
-        this.settingsRepo = settingsRepo;
-        this.noteIndex    = noteIndex;
+                          NoteIndexRepository noteIndex,
+                          ImageScanService imageScanService) {
+        this.noteLinkRepo     = noteLinkRepo;
+        this.settingsRepo     = settingsRepo;
+        this.noteIndex        = noteIndex;
+        this.imageScanService = imageScanService;
     }
 
     @PostConstruct
@@ -53,11 +57,15 @@ public class FileRepository {
         String syncMode = settingsRepo.getStartupSyncMode();
         if ("async".equals(syncMode)) {
             log.info("[init] async sync started for {}", ROOT_FILE);
-            CompletableFuture.runAsync(() -> noteIndex.syncWithDisk(diskFiles));
+            CompletableFuture.runAsync(() -> {
+                noteIndex.syncWithDisk(diskFiles);
+                imageScanService.scanAll(diskFiles);
+            });
         } else {
             log.info("[init] blocking sync started for {}", ROOT_FILE);
             noteIndex.syncWithDisk(diskFiles);
             log.info("[init] blocking sync complete");
+            imageScanService.scanAll(diskFiles);
         }
     }
 
@@ -174,6 +182,7 @@ public class FileRepository {
         FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(initialContent);
         noteIndex.upsert(path, name.replace(".md", ""), meta, noteFile.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(initialContent));
+        imageScanService.registerImages(path, initialContent);
         return path;
     }
 
@@ -186,6 +195,7 @@ public class FileRepository {
         FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(content);
         noteIndex.upsert(path, title, meta, file.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
+        imageScanService.registerImages(path, content);
     }
 
     public void patchNote(String path, List<PatchHunk> hunks) throws IOException {
@@ -223,6 +233,7 @@ public class FileRepository {
         FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(newContent);
         noteIndex.upsert(path, title, meta, file.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(newContent));
+        imageScanService.registerImages(path, newContent);
     }
 
     public String renameNote(String oldPath, String newName) throws IOException {
