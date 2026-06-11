@@ -25,7 +25,8 @@ class SyncQueueRepositoryIT {
     @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =
-        new PostgreSQLContainer<>("postgres:16");
+        new PostgreSQLContainer<>(org.testcontainers.utility.DockerImageName
+            .parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
 
     static final Path VAULT;
     static {
