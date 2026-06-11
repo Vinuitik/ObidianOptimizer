@@ -6,14 +6,9 @@
       "description": "API token for MCP endpoint auth. Set via MCP_API_TOKEN env var."
     },
     {
-      "name": "ollama.base.url",
+      "name": "embedder.url",
       "type": "java.lang.String",
-      "description": "Base URL for the Ollama service. Default: http://localhost:11434."
-    },
-    {
-      "name": "ollama.embed.model",
-      "type": "java.lang.String",
-      "description": "Ollama embedding model name. Default: mxbai-embed-large (1024-dim). Overridable via Settings UI."
+      "description": "Base URL for the Python ONNX embedder service. Set via EMBEDDER_URL env var. Default: http://localhost:8000."
     },
     {
       "name": "wrapper.url",

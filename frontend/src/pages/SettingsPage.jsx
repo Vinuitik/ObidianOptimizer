@@ -71,7 +71,7 @@ const SECTIONS = [
         label: 'Embedding model',
         type: 'text',
         placeholder: 'mxbai-embed-large',
-        hint: 'Ollama model name for embeddings. Default: mxbai-embed-large (1024-dim, GPU). CPU fallback: nomic-embed-text (768-dim).',
+        hint: 'HuggingFace model ID used by the embedder service. Display only — actual model is set via EMBED_MODEL env var in docker-compose and requires a container restart to change.',
       },
     ],
   },
