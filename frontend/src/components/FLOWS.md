@@ -50,10 +50,45 @@ useEffect(() => {
 `MilkdownEditor` outer `onClick` → `e.target.closest('[data-wiki-link]')` → `noteIndex` lookup → `openTab(fullPath)`  
 `isMutable` = true: clicks pass through to ProseMirror.
 
-### Paste Handler
+### File Attach — Paste, Drag-and-Drop, File Picker
 
-See [src/utils/FLOWS.md](../utils/FLOWS.md) for `obsidianImagePlugin` paste details.  
-Paste → `view.dom addEventListener('paste')` → whitelist check → `addPendingBlob` → `onFilePaste` (store) → insert `obsidianImageNode$` at cursor.
+All three paths call the same `insertFiles(files)` function inside `MilkdownEditorInner`:
+
+```
+insertFiles(files)
+  → filter by isWhitelisted()
+  → generateFilename(file) + createObjectURL → addPendingBlob (module registry)
+  → onFilePaste(filename, file, blobURL)  — persists in store for tab switching
+  → getInstance().action → obsidianImageNode$.create({ filename }) → replaceSelectionWith
+```
+
+**Paste**: `view.dom.addEventListener('paste')` → reads `e.clipboardData.files`  
+**Drag-drop**: `dragover` → `preventDefault` if files present + `setIsDragOver(true)`; `dragleave` → clears only when leaving editor; `drop` → reads `e.dataTransfer.files`  
+**File picker button**: hidden `<input type="file" multiple accept={ACCEPT}>` triggered by `📎` button (edit mode only, bottom-right of editor). `ACCEPT` built from `WHITELISTED_EXTS`.
+
+Drag-over shows `.dragOverlay` — dashed accent border + semi-transparent bg (`pointer-events: none`).  
+To change accepted file types: `obsidianImagePlugin.js *_EXTS + WHITELISTED_MIME_TYPES`
+
+### Wiki-link Suggest (`[[` autocomplete)
+
+Triggered when the cursor is inside `[[query` text in the editor:
+
+```
+input / selectionchange event on view.dom
+  → window.getSelection().focusNode.textContent.slice(0, offset)
+  → match /\[\[([^\]]{0,80})$/
+  → setWikiQuery(match[1]), setWikiRect(range.getBoundingClientRect())
+  → WikiLinkSuggest portal: useSearch(query, minLength=1) → results dropdown
+  → onMouseDown on result → e.preventDefault() (keeps editor focused)
+      → insertWikiLink(displayName)
+          → getInstance().action → state.doc.textBetween(blockFrom, cursor)
+          → lastIndexOf('[[') → replaceWith(wikiLinkNode$.create({ target: displayName }))
+```
+
+Escape closes without inserting. `onMouseDown` + `preventDefault` is critical — prevents blur before click registers.
+
+To change trigger minimum length: `WikiLinkSuggest` → `useSearch(query, minLength)`  
+To change result count: `searchNotes` limit param
 
 ---
 
@@ -82,11 +117,23 @@ onDrop      → getData(DRAG_TYPE) → guard source !== target → moveNote()
 To change drop highlight: `NavItem.module.css .dragOver`  
 To change accepted drag types: `FolderTree.jsx DRAG_TYPE`
 
-### Search Filter
+### Search — Local Filter + Semantic Dropdown
 
-Local `query` state, passed to all `TreeNode` instances.  
-`SearchBar` above new-note button; `⌘K` / `Ctrl+K` globally focuses it (listener in `SearchBar.jsx`).  
-`hasMatch(name, node, query)` — file: substring match on display name; folder: any descendant matches.  
+Local `query` state filters the tree (substring match on display names).  
+`SearchBar` above new-note button; `⌘K` / `Ctrl+K` globally focuses it.
+
+**Semantic search dropdown** (from `SearchBar.jsx`):
+```
+onFocus → setFocused(true)
+value changes → useSearch(focused ? value : null) → 500ms debounce → GET /search?q=
+results → createPortal(<dropdown>) positioned via containerRef.getBoundingClientRect()
+onMouseDown on result → e.preventDefault() → openTab(notePath) → setFocused(false)
+onBlur → setTimeout(150ms) → setFocused(false)  ← delay allows mousedown to fire first
+```
+
+`useSearch` hook: AbortController kill-switch — each new query aborts the in-flight request before debounce timer fires. See `utils/FLOWS.md`.
+
+`hasMatch(name, node, query)` — file: substring match; folder: any descendant matches.  
 Active query: folders without matching descendants hidden; folders with matches force-open.
 
 **Hook hoisting note**: `isForceOpen` `useEffect` must be declared before any conditional early return — React hook-count invariant.
@@ -154,6 +201,11 @@ Controlled by `store.toastMessage` + `showToast()`.
 | Milkdown plugin chain | `organisms/MilkdownEditor.jsx useEditor` |
 | Wiki-link navigation | `organisms/MilkdownEditor.jsx handleClick` |
 | Editor CSS / height | `organisms/MilkdownEditor.module.css` |
+| File attach accepted types | `obsidianImagePlugin.js *_EXTS + WHITELISTED_MIME_TYPES` |
+| Drag-over overlay style | `organisms/MilkdownEditor.module.css .dragOverlay` |
+| File attach button style | `organisms/MilkdownEditor.module.css .uploadBtn` |
+| Wiki-link suggest min length | `WikiLinkSuggest` → `useSearch(query, minLength)` |
+| Semantic search dropdown style | `molecules/SearchBar.module.css .dropdown*` |
 | FolderTree drag type | `organisms/FolderTree.jsx DRAG_TYPE` |
 | Drop highlight style | `molecules/NavItem.module.css .dragOver` |
 | Search filter logic | `organisms/FolderTree.jsx hasMatch()` |

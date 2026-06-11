@@ -1,6 +1,6 @@
 # Utils Flows
 
-Files: diff.js, frontmatter.js, markdownCleanup.js, wikiLinkPlugin.js, obsidianImagePlugin.js, hashtagPlugin.js, livePreviewPlugin.js, mathPlugin.js, markdown.js
+Files: diff.js, frontmatter.js, markdownCleanup.js, wikiLinkPlugin.js, obsidianImagePlugin.js, hashtagPlugin.js, livePreviewPlugin.js, mathPlugin.js, markdown.js, useSearch.js
 
 ---
 
@@ -113,6 +113,29 @@ Math nodes are `contenteditable="false"` — read-only atoms.
 KaTeX CSS loaded globally in `main.jsx`.
 
 **Plugin order**: before `wikiLinkPlugin` — `\[...\]` must be consumed before `[[` scanner.
+
+---
+
+## useSearch.js — Debounced Semantic Search Hook
+
+```
+query changes
+  → clearTimeout(timerRef) — cancel pending debounce
+  → abortRef.current?.abort() — cancel in-flight fetch (throws AbortError, ignored)
+  → query < minLength → return [], loading=false immediately
+  → setTimeout(500ms)
+      → new AbortController → store in abortRef
+      → searchNotes(q, { signal }) → setResults(data)
+      → AbortError caught silently; other errors → setResults([])
+```
+
+`loading` stays `true` during the 500ms wait — callers can show a spinner immediately on keystroke.  
+Cleanup on unmount: clears timer + aborts any in-flight request.
+
+**Why AbortController vs just ignoring stale results**: without abort, every keystroke launches a request that runs to completion on the server and holds a DB + embedder connection. AbortController tells the browser to close the TCP connection so the server I/O unblocks early.
+
+To change debounce: `useSearch.js setTimeout(..., 500)`  
+To change minimum query length: `minLength` arg (default 2; WikiLinkSuggest uses 1)
 
 ---
 
