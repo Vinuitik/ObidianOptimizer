@@ -75,10 +75,13 @@ public class ImageScanService {
     }
 
     public static String sha256(String content) {
+        return sha256(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    public static String sha256(byte[] bytes) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
+            return HexFormat.of().formatHex(digest.digest(bytes));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 not available", e);
         }

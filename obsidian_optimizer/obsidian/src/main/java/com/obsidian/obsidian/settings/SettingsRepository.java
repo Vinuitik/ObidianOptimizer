@@ -5,6 +5,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Component
 public class SettingsRepository {
 
@@ -41,6 +43,7 @@ public class SettingsRepository {
         insertDefault("bankruptcyLimit", "200");
         insertDefault("chronoLastRunDate", "");
         insertDefault("ollamaEmbedModel", "mixedbread-ai/mxbai-embed-large-v1");
+        insertDefault("sync.device_id", "");
     }
 
     private void insertDefault(String key, String value) {
@@ -52,6 +55,12 @@ public class SettingsRepository {
     public String get(String key) {
         return jdbc.queryForObject(
             "SELECT value FROM app_settings WHERE key = ?", String.class, key);
+    }
+
+    public String getOrDefault(String key, String defaultValue) {
+        List<String> rows = jdbc.queryForList(
+            "SELECT value FROM app_settings WHERE key = ?", String.class, key);
+        return rows.isEmpty() ? defaultValue : rows.get(0);
     }
 
     public void set(String key, String value) {
