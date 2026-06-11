@@ -10,86 +10,68 @@ import java.util.Map;
 @Service
 public class SearchService {
 
-    // K is a standard constant commonly set to 60 for Reciprocal Rank Fusion
     private static final int RRF_K = 60;
 
-    /**
-     * Stubs out the Hybrid Search with Reciprocal Rank Fusion (RRF).
-     * In the future, this will query pgvector for embeddings and postgres FTS for BM25.
-     */
+    private final NoteChunkRepository chunkRepo;
+    private final EmbeddingService embeddingService;
+
+    public SearchService(NoteChunkRepository chunkRepo, EmbeddingService embeddingService) {
+        this.chunkRepo        = chunkRepo;
+        this.embeddingService = embeddingService;
+    }
+
     public List<SearchResult> search(String query, int limit) {
-        
-        // 1. Fetch from Vector Search (Stub - later calls EmbeddingService/pgvector)
-        List<NoteChunk> vectorMatches = getVectorRankedMatches(query, limit);
-        
-        // 2. Fetch from BM25 Text Search (Stub - later calls pg_search/FTS)
-        List<NoteChunk> textMatches = getTextRankedMatches(query, limit);
+        int fetchLimit = embeddingService.getSearchLimit();
 
-        // 3. Compute RRF Scores
+        List<NoteChunk> vectorMatches = getVectorRankedMatches(query, fetchLimit);
+        List<NoteChunk> textMatches   = getTextRankedMatches(query, fetchLimit);
+
         Map<String, Double> rrfScores = new HashMap<>();
-        Map<String, NoteChunk> chunkMap = new HashMap<>(); 
+        Map<String, NoteChunk> chunkMap = new HashMap<>();
 
-        double wVector = 0.7; // Weights from ML_ARCH.md
-        double wText = 0.3;
-
-        // Rank Vector matches
         for (int i = 0; i < vectorMatches.size(); i++) {
             NoteChunk match = vectorMatches.get(i);
-            int rank = i + 1;
-            double rrfScore = wVector * (1.0 / (RRF_K + rank));
             String key = match.getNotePath() + "::" + match.getChunkIndex();
-            
-            rrfScores.put(key, rrfScores.getOrDefault(key, 0.0) + rrfScore);
+            rrfScores.merge(key, 1.0 / (RRF_K + i + 1), Double::sum);
             chunkMap.putIfAbsent(key, match);
         }
 
-        // Rank Text matches
         for (int i = 0; i < textMatches.size(); i++) {
             NoteChunk match = textMatches.get(i);
-            int rank = i + 1;
-            double rrfScore = wText * (1.0 / (RRF_K + rank));
             String key = match.getNotePath() + "::" + match.getChunkIndex();
-
-            rrfScores.put(key, rrfScores.getOrDefault(key, 0.0) + rrfScore);
+            rrfScores.merge(key, 1.0 / (RRF_K + i + 1), Double::sum);
             chunkMap.putIfAbsent(key, match);
         }
 
-        // 4. Sort by RRF Score descending
-        List<Map.Entry<String, Double>> sortedEntries = new ArrayList<>(rrfScores.entrySet());
-        sortedEntries.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
+        List<Map.Entry<String, Double>> sorted = new ArrayList<>(rrfScores.entrySet());
+        sorted.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
 
-        // 5. Build results & deduplicate by note path (take best snippet per note)
         List<SearchResult> results = new ArrayList<>();
-        for (Map.Entry<String, Double> entry : sortedEntries) {
+        for (Map.Entry<String, Double> entry : sorted) {
             NoteChunk chunk = chunkMap.get(entry.getKey());
-            
-            boolean alreadyHasNote = results.stream().anyMatch(r -> r.getNotePath().equals(chunk.getNotePath()));
-            if (!alreadyHasNote) {
+            boolean seen = results.stream().anyMatch(r -> r.getNotePath().equals(chunk.getNotePath()));
+            if (!seen) {
                 SearchResult res = new SearchResult();
                 res.setNotePath(chunk.getNotePath());
-                
-                // Truncate snippet
-                String snippet = chunk.getText().length() > 150 
-                    ? chunk.getText().substring(0, 150) + "..." 
+                String snippet = chunk.getText().length() > 150
+                    ? chunk.getText().substring(0, 150) + "..."
                     : chunk.getText();
                 res.setSnippet(snippet);
                 res.setScore(entry.getValue());
-                
                 results.add(res);
                 if (results.size() >= limit) break;
             }
         }
-
         return results;
     }
 
     private List<NoteChunk> getVectorRankedMatches(String query, int limit) {
-        // STUB: Returns empty for now.
-        return new ArrayList<>(); 
+        float[] queryVec = embeddingService.embedQuery(query);
+        if (queryVec == null) return List.of();
+        return chunkRepo.findByVectorSimilarity(queryVec, limit);
     }
 
     private List<NoteChunk> getTextRankedMatches(String query, int limit) {
-        // STUB: Returns empty for now.
-        return new ArrayList<>();
+        return chunkRepo.findByTextSearch(query, limit);
     }
 }
