@@ -62,6 +62,20 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'ml',
+    title: 'ML / Search',
+    description: 'Embedding model used for semantic search. Changing this requires re-indexing all notes (restart the backend after saving).',
+    fields: [
+      {
+        key: 'embedModel',
+        label: 'Embedding model',
+        type: 'text',
+        placeholder: 'mxbai-embed-large',
+        hint: 'Ollama model name for embeddings. Default: mxbai-embed-large (1024-dim, GPU). CPU fallback: nomic-embed-text (768-dim).',
+      },
+    ],
+  },
+  {
     id: 'chrono',
     title: 'Daily Jobs',
     description: 'Hyperparameters for the automatic daily maintenance jobs (FileMover, FileChecker, BankruptcyCheck, SpreadCheck).',

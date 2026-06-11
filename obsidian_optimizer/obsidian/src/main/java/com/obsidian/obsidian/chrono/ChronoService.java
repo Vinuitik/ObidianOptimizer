@@ -1,6 +1,8 @@
 package com.obsidian.obsidian.chrono;
 
+import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 
 import jakarta.annotation.PostConstruct;
@@ -9,6 +11,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
@@ -24,16 +28,21 @@ public class ChronoService {
     private final SpreadService      spread;
     private final SettingsRepository settingsRepo;
     private final FileRepository     fileRepo;
+    private final NoteIndexRepository noteIndex;
+    private final ImageScanService   imageScanService;
 
     public ChronoService(FileMoverService fileMover, FileCheckerService fileChecker,
                          BankruptcyService bankruptcy, SpreadService spread,
-                         SettingsRepository settingsRepo, FileRepository fileRepo) {
-        this.fileMover    = fileMover;
-        this.fileChecker  = fileChecker;
-        this.bankruptcy   = bankruptcy;
-        this.spread       = spread;
-        this.settingsRepo = settingsRepo;
-        this.fileRepo     = fileRepo;
+                         SettingsRepository settingsRepo, FileRepository fileRepo,
+                         NoteIndexRepository noteIndex, ImageScanService imageScanService) {
+        this.fileMover        = fileMover;
+        this.fileChecker      = fileChecker;
+        this.bankruptcy       = bankruptcy;
+        this.spread           = spread;
+        this.settingsRepo     = settingsRepo;
+        this.fileRepo         = fileRepo;
+        this.noteIndex        = noteIndex;
+        this.imageScanService = imageScanService;
     }
 
     public record ChronoResult(
@@ -77,6 +86,27 @@ public class ChronoService {
             spread.run(mdFiles, settingsRepo.getMaxDailyReviews());
 
         fileRepo.triggerDeltaSync();
+
+        // Detect externally-edited files (via Obsidian) by comparing SHA-256 hashes.
+        // Any file whose hash changed gets its images re-queued.
+        int externallyChanged = 0;
+        for (Path mdPath : mdFiles) {
+            String absPath = mdPath.toAbsolutePath().toString();
+            try {
+                String content = Files.readString(mdPath);
+                String newHash = ImageScanService.sha256(content);
+                String storedHash = noteIndex.getContentHash(absPath);
+                if (!newHash.equals(storedHash)) {
+                    imageScanService.registerImages(absPath, content);
+                    externallyChanged++;
+                }
+            } catch (IOException e) {
+                log.warn("[ChronoService] hash check skip {}: {}", absPath, e.getMessage());
+            }
+        }
+        if (externallyChanged > 0) {
+            log.info("[ChronoService] {} externally-edited note(s) detected — images re-queued", externallyChanged);
+        }
 
         String today = LocalDate.now().toString();
         settingsRepo.set("chronoLastRunDate", today);

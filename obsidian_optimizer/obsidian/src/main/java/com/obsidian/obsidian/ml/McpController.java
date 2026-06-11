@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.ml;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -10,10 +11,10 @@ import java.util.Map;
 @RequestMapping("/api/mcp")
 public class McpController {
 
+    @Value("${mcp.api.token:}")
+    private String mcpApiToken;
+
     private final SearchService searchService;
-    
-    // Once FileRepository is introduced, inject it here for real I/O.
-    // private final FileRepository fileRepository;
 
     public McpController(SearchService searchService) {
         this.searchService = searchService;
@@ -23,62 +24,55 @@ public class McpController {
         private String tool;
         private Map<String, Object> parameters;
 
-        public String getTool() {
-            return tool;
-        }
-
-        public void setTool(String tool) {
-            this.tool = tool;
-        }
-
-        public Map<String, Object> getParameters() {
-            return parameters;
-        }
-
-        public void setParameters(Map<String, Object> parameters) {
-            this.parameters = parameters;
-        }
+        public String getTool() { return tool; }
+        public void setTool(String tool) { this.tool = tool; }
+        public Map<String, Object> getParameters() { return parameters; }
+        public void setParameters(Map<String, Object> parameters) { this.parameters = parameters; }
     }
 
     @PostMapping("/execute")
-    public ResponseEntity<?> executeTool(@RequestBody McpRequest request, 
+    public ResponseEntity<?> executeTool(@RequestBody McpRequest request,
                                          @RequestHeader(value = "X-API-Key", required = false) String apiKey) {
-        
-        // TODO: Validate apiKey against system properties
+
+        if (mcpApiToken.isBlank() || !mcpApiToken.equals(apiKey)) {
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+        }
 
         try {
             switch (request.getTool()) {
-                case "search_notes":
+                case "search_notes": {
                     String query = (String) request.getParameters().get("query");
-                    int limit = request.getParameters().containsKey("limit") 
-                                    ? (Integer) request.getParameters().get("limit") : 10;
+                    int limit = request.getParameters().containsKey("limit")
+                            ? (Integer) request.getParameters().get("limit") : 10;
                     List<SearchResult> results = searchService.search(query, limit);
                     return ResponseEntity.ok(Map.of("results", results));
+                }
 
-                case "get_note_content":
+                case "get_note_content": {
                     String notePath = (String) request.getParameters().get("note_path");
-                    // TODO: Connect to FileRepository.getText(notePath)
-                    return ResponseEntity.ok(Map.of("content", "STUB - Returns full raw content of: " + notePath));
+                    // TODO: inject FileRepository and call getText(notePath)
+                    return ResponseEntity.ok(Map.of("content", "STUB: " + notePath));
+                }
 
-                case "create_note":
+                case "create_note": {
                     String title = (String) request.getParameters().get("title");
                     String folderPath = (String) request.getParameters().get("folder_path");
-                    String content = (String) request.getParameters().get("content");
-                    // TODO: Connect to FileRepository.createNote()
+                    // TODO: inject FileRepository and call createNote(folderPath, title)
                     return ResponseEntity.ok(Map.of(
-                        "status", "success", 
-                        "path", folderPath + "/" + title + ".md",
-                        "message", "STUB - Created note in memory"
+                            "status", "success",
+                            "path", folderPath + "/" + title + ".md",
+                            "message", "STUB"
                     ));
+                }
 
-                case "find_home_for_note":
-                    String proposedTitle = (String) request.getParameters().get("proposed_title");
-                    // TODO: Implement similarity search and cluster folders
+                case "find_home_for_note": {
+                    // TODO: embed proposed_title via EmbeddingService, run pgvector similarity
                     return ResponseEntity.ok(Map.of(
-                        "similar_notes", List.of(),
-                        "suggested_folders", List.of("Inbox", "Ideas"),
-                        "name_examples", List.of()
+                            "similar_notes", List.of(),
+                            "suggested_folders", List.of("Inbox", "Ideas"),
+                            "name_examples", List.of()
                     ));
+                }
 
                 default:
                     return ResponseEntity.badRequest().body(Map.of("error", "Unknown tool: " + request.getTool()));

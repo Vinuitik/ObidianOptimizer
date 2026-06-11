@@ -67,7 +67,7 @@ To change chunk size / overlap: `MarkdownPreprocessor` constants
 | `X-API-Key` validation | Not implemented |
 | Python wrapper for image logic | Not implemented |
 
-Full architecture plan: see `memory/project_ml_mcp_plan.md`
+Full architecture plan: see `architecture_plans/ML_ARCH.md`
 
 ---
 

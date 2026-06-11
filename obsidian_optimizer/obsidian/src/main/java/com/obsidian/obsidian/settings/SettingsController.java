@@ -28,7 +28,8 @@ public class SettingsController {
             settingsRepo.getReviewPageSize(),
             settingsRepo.getStartupSyncMode(),
             settingsRepo.getMaxDailyReviews(),
-            settingsRepo.getBankruptcyLimit()
+            settingsRepo.getBankruptcyLimit(),
+            settingsRepo.getEmbedModel()
         );
     }
 
@@ -65,6 +66,13 @@ public class SettingsController {
                 }
                 settingsRepo.set("bankruptcyLimit", String.valueOf(req.bankruptcyLimit()));
             }
+            if (req.embedModel() != null) {
+                String model = req.embedModel().trim();
+                if (model.isBlank()) {
+                    return ResponseEntity.badRequest().body("embedModel cannot be empty");
+                }
+                settingsRepo.set("ollamaEmbedModel", model);
+            }
             return ResponseEntity.ok(getSettings());
         } catch (Exception e) {
             log.error("[updateSettings] failed: {}", e.getMessage());
@@ -75,7 +83,9 @@ public class SettingsController {
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
     public record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize,
-                                   String startupSyncMode, int maxDailyReviews, int bankruptcyLimit) {}
+                                   String startupSyncMode, int maxDailyReviews, int bankruptcyLimit,
+                                   String embedModel) {}
     record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize,
-                                 String startupSyncMode, Integer maxDailyReviews, Integer bankruptcyLimit) {}
+                                 String startupSyncMode, Integer maxDailyReviews, Integer bankruptcyLimit,
+                                 String embedModel) {}
 }

@@ -43,6 +43,8 @@ public class NoteIndexRepository {
             """);
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_notes_sr_due ON notes(sr_due)");
+        jdbc.execute(
+            "ALTER TABLE notes ADD COLUMN IF NOT EXISTS content_hash TEXT");
     }
 
     public void syncWithDisk(List<File> diskFiles) {
@@ -138,5 +140,15 @@ public class NoteIndexRepository {
 
     public void delete(String path) {
         jdbc.update("DELETE FROM notes WHERE path = ?", path);
+    }
+
+    public void updateContentHash(String path, String hash) {
+        jdbc.update("UPDATE notes SET content_hash = ? WHERE path = ?", hash, path);
+    }
+
+    public String getContentHash(String path) {
+        List<String> rows = jdbc.queryForList(
+            "SELECT content_hash FROM notes WHERE path = ?", String.class, path);
+        return rows.isEmpty() ? null : rows.get(0);
     }
 }
