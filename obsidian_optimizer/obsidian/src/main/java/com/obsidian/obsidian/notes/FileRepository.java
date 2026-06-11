@@ -2,6 +2,7 @@ package com.obsidian.obsidian.notes;
 
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.settings.SettingsRepository;
+import com.obsidian.obsidian.sync.SyncQueueRepository;
 
 import java.io.File;
 import java.io.IOException;
@@ -34,19 +35,22 @@ public class FileRepository {
 
     private String ROOT_FILE;
 
-    private final NoteLinkRepository noteLinkRepo;
-    private final SettingsRepository settingsRepo;
+    private final NoteLinkRepository  noteLinkRepo;
+    private final SettingsRepository  settingsRepo;
     private final NoteIndexRepository noteIndex;
-    private final ImageScanService imageScanService;
+    private final ImageScanService    imageScanService;
+    private final SyncQueueRepository syncQueueRepo;
 
     public FileRepository(NoteLinkRepository noteLinkRepo,
                           SettingsRepository settingsRepo,
                           NoteIndexRepository noteIndex,
-                          ImageScanService imageScanService) {
-        this.noteLinkRepo     = noteLinkRepo;
-        this.settingsRepo     = settingsRepo;
-        this.noteIndex        = noteIndex;
+                          ImageScanService imageScanService,
+                          SyncQueueRepository syncQueueRepo) {
+        this.noteLinkRepo  = noteLinkRepo;
+        this.settingsRepo  = settingsRepo;
+        this.noteIndex     = noteIndex;
         this.imageScanService = imageScanService;
+        this.syncQueueRepo = syncQueueRepo;
     }
 
     @PostConstruct
@@ -183,6 +187,7 @@ public class FileRepository {
         noteIndex.upsert(path, name.replace(".md", ""), meta, noteFile.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(initialContent));
         imageScanService.registerImages(path, initialContent);
+        syncQueueRepo.markPending(toRelative(path), ImageScanService.sha256(initialContent));
         return path;
     }
 
@@ -196,6 +201,7 @@ public class FileRepository {
         noteIndex.upsert(path, title, meta, file.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
         imageScanService.registerImages(path, content);
+        syncQueueRepo.markPending(toRelative(path), ImageScanService.sha256(content));
     }
 
     public void patchNote(String path, List<PatchHunk> hunks) throws IOException {
@@ -234,6 +240,7 @@ public class FileRepository {
         noteIndex.upsert(path, title, meta, file.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(newContent));
         imageScanService.registerImages(path, newContent);
+        syncQueueRepo.markPending(toRelative(path), ImageScanService.sha256(newContent));
     }
 
     public String renameNote(String oldPath, String newName) throws IOException {
@@ -273,6 +280,13 @@ public class FileRepository {
         noteIndex.rename(oldPath, newPath, newName);
         noteLinkRepo.renameTarget(oldName, newName);
         noteLinkRepo.renameSource(oldPath, newPath);
+        syncQueueRepo.delete(toRelative(oldPath));
+        try {
+            String content = Files.readString(Paths.get(newPath));
+            syncQueueRepo.markPending(toRelative(newPath), ImageScanService.sha256(content));
+        } catch (IOException e) {
+            log.warn("[renameNote] sync queue update failed for {}: {}", newPath, e.getMessage());
+        }
         return newPath;
     }
 
@@ -299,6 +313,13 @@ public class FileRepository {
 
         noteIndex.rename(sourcePath, newAbsPath, title);
         noteLinkRepo.renameSource(sourcePath, newAbsPath);
+        syncQueueRepo.delete(toRelative(sourcePath));
+        try {
+            String content = Files.readString(newPath);
+            syncQueueRepo.markPending(toRelative(newAbsPath), ImageScanService.sha256(content));
+        } catch (IOException e) {
+            log.warn("[moveNote] sync queue update failed for {}: {}", newAbsPath, e.getMessage());
+        }
         return newAbsPath;
     }
 
@@ -319,6 +340,11 @@ public class FileRepository {
 
         noteIndex.delete(path);
         noteLinkRepo.deleteSource(path);
+        syncQueueRepo.delete(toRelative(path));
+    }
+
+    private String toRelative(String absPath) {
+        return Paths.get(ROOT_FILE).relativize(Paths.get(absPath)).toString().replace('\\', '/');
     }
 
     // ── Records ───────────────────────────────────────────────────────────────
