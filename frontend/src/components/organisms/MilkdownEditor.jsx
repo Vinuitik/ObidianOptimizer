@@ -20,7 +20,10 @@ import {
   addPendingBlob,
   isWhitelisted,
   generateFilename,
+  WHITELISTED_EXTS,
 } from '../../utils/obsidianImagePlugin';
+
+const ACCEPT = [...WHITELISTED_EXTS].join(',');
 import { hashtagPlugin } from '../../utils/hashtagPlugin';
 import { livePreviewPlugin } from '../../utils/livePreviewPlugin';
 import { cleanMilkdownOutput } from '../../utils/markdownCleanup';
@@ -80,6 +83,12 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUns
   const [wikiQuery, setWikiQuery] = useState(null); // null = closed
   const [wikiRect,  setWikiRect]  = useState(null);
 
+  // Drag-over visual feedback
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // File picker ref
+  const fileInputRef = useRef(null);
+
   useEditor((root) => {
     return Editor.make()
       .config((ctx) => {
@@ -114,36 +123,21 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUns
     });
   }, [isMutable, loading]);
 
-  // Paste handler — intercepts file pastes and routes them through the upload flow
+  // File handling — paste, drag-and-drop, and file picker all share this logic
   useEffect(() => {
     if (loading) return;
     const view = getInstance()?.action(ctx => ctx.get(editorViewCtx));
     if (!view) return;
 
-    function handlePaste(e) {
-      const files = Array.from(e.clipboardData?.files ?? []);
-      if (!files.length) return;
-
+    function insertFiles(files) {
       const accepted = files.filter(isWhitelisted);
-      const rejected = files.filter(f => !isWhitelisted(f));
-
-      // Always preventDefault when there are files so ProseMirror doesn't try to paste them
-      e.preventDefault();
-
-      if (rejected.length > 0) onUnsupported(rejected.length);
-      if (!accepted.length) return;
-
+      const rejected = files.length - accepted.length;
+      if (rejected > 0) onUnsupported(rejected);
       for (const file of accepted) {
         const filename = generateFilename(file);
-        const blobURL = URL.createObjectURL(file);
-
-        // 1. Update the module-level registry immediately so toDOM uses the blob URL
+        const blobURL  = URL.createObjectURL(file);
         addPendingBlob(filename, blobURL);
-
-        // 2. Persist in the store (for tab switching and save flow)
         onFilePaste(filename, file, blobURL);
-
-        // 3. Insert the node at the current cursor position
         getInstance()?.action(ctx => {
           const v = ctx.get(editorViewCtx);
           if (!v) return;
@@ -153,8 +147,41 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUns
       }
     }
 
-    view.dom.addEventListener('paste', handlePaste);
-    return () => view.dom.removeEventListener('paste', handlePaste);
+    function handlePaste(e) {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (!files.length) return;
+      e.preventDefault();
+      insertFiles(files);
+    }
+
+    function handleDragOver(e) {
+      const hasFiles = Array.from(e.dataTransfer?.items ?? []).some(i => i.kind === 'file');
+      if (hasFiles) { e.preventDefault(); setIsDragOver(true); }
+    }
+
+    function handleDragLeave(e) {
+      // only clear when leaving the editor entirely
+      if (!view.dom.contains(e.relatedTarget)) setIsDragOver(false);
+    }
+
+    function handleDrop(e) {
+      setIsDragOver(false);
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (!files.length) return;
+      e.preventDefault();
+      insertFiles(files);
+    }
+
+    view.dom.addEventListener('paste',     handlePaste);
+    view.dom.addEventListener('dragover',  handleDragOver);
+    view.dom.addEventListener('dragleave', handleDragLeave);
+    view.dom.addEventListener('drop',      handleDrop);
+    return () => {
+      view.dom.removeEventListener('paste',     handlePaste);
+      view.dom.removeEventListener('dragover',  handleDragOver);
+      view.dom.removeEventListener('dragleave', handleDragLeave);
+      view.dom.removeEventListener('drop',      handleDrop);
+    };
   }, [loading, onFilePaste, onUnsupported]);
 
   // Detect [[query pattern as the user types inside the editor
@@ -214,9 +241,55 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUns
     setWikiQuery(null);
   }
 
+  function handleFileInputChange(e) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ''; // reset so the same file can be re-picked
+    if (!files.length) return;
+    // reuse the same insertion logic via a synthetic call
+    const accepted = files.filter(isWhitelisted);
+    const rejected = files.length - accepted.length;
+    if (rejected > 0) onUnsupported(rejected);
+    for (const file of accepted) {
+      const filename = generateFilename(file);
+      const blobURL  = URL.createObjectURL(file);
+      addPendingBlob(filename, blobURL);
+      onFilePaste(filename, file, blobURL);
+      getInstance()?.action(ctx => {
+        const v = ctx.get(editorViewCtx);
+        if (!v) return;
+        const node = obsidianImageNode$.type(ctx).create({ filename });
+        v.dispatch(v.state.tr.replaceSelectionWith(node));
+      });
+    }
+  }
+
   return (
     <>
       <Milkdown />
+      {isDragOver && (
+        <div className={styles.dragOverlay}>
+          <span className={styles.dragOverlayText}>Drop to attach</span>
+        </div>
+      )}
+      {isMutable && (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ACCEPT}
+            style={{ display: 'none' }}
+            onChange={handleFileInputChange}
+          />
+          <button
+            className={styles.uploadBtn}
+            title="Attach file"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            📎
+          </button>
+        </>
+      )}
       {wikiQuery !== null && wikiRect && (
         <WikiLinkSuggest
           query={wikiQuery}
