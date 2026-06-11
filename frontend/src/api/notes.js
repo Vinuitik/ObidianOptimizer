@@ -157,6 +157,19 @@ export async function uploadFile(file, filename) {
   return res.json();
 }
 
+// ── Search ────────────────────────────────────────────────────────────────────
+
+// Returns [{notePath, snippet, score}, ...].
+// Pass { signal: AbortController.signal } to cancel in-flight requests.
+export async function searchNotes(query, { signal } = {}) {
+  const res = await fetch(
+    `${BASE}/search?q=${encodeURIComponent(query)}&limit=10`,
+    { credentials: 'same-origin', cache: 'no-store', signal }
+  );
+  if (!res.ok) throw new ApiError(res.status);
+  return res.json();
+}
+
 // ── Chrono ────────────────────────────────────────────────────────────────────
 
 // Returns { lastRunDate: string }.

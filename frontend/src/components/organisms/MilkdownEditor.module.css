@@ -250,3 +250,58 @@
   width: 100%;
   height: 0;
 }
+
+/* ── [[wiki-link suggestion dropdown (portal, fixed position) ────────────────── */
+
+.wikiSuggest {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 260px;
+  max-width: 400px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.wikiSuggestLoading {
+  padding: 9px 13px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.wikiSuggestItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  padding: 8px 13px;
+  cursor: pointer;
+  transition: background var(--ease-fast);
+}
+
+.wikiSuggestItem:last-child {
+  border-bottom: none;
+}
+
+.wikiSuggestItem:hover {
+  background: var(--color-card);
+}
+
+.wikiSuggestTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-accent);
+}
+
+.wikiSuggestSnippet {
+  font-size: 11px;
+  color: var(--color-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

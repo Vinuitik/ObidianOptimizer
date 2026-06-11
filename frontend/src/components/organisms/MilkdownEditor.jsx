@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
 import { commonmark } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
@@ -10,7 +11,8 @@ import { defaultValueCtx, Editor, rootCtx, editorViewOptionsCtx, editorViewCtx }
 
 import useStore from '../../store/useStore';
 import { splitFrontmatter } from '../../utils/frontmatter';
-import { wikiLinkPlugin } from '../../utils/wikiLinkPlugin';
+import { wikiLinkPlugin, wikiLinkNode$ } from '../../utils/wikiLinkPlugin';
+import { useSearch } from '../../utils/useSearch';
 import {
   obsidianImagePlugin,
   obsidianImageNode$,
@@ -27,11 +29,56 @@ import FrontmatterTable from '../molecules/FrontmatterTable';
 import EditorErrorBoundary from './EditorErrorBoundary';
 import styles from './MilkdownEditor.module.css';
 
+// ── Wiki-link suggestion dropdown (portal) ────────────────────────────────────
+
+function WikiLinkSuggest({ query, rect, onSelect, onClose }) {
+  const { results, loading } = useSearch(query, 1);
+
+  useEffect(() => {
+    function handleKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  if (!loading && results.length === 0) return null;
+
+  const style = { position: 'fixed', top: rect.bottom + 6, left: rect.left, zIndex: 9999 };
+
+  return createPortal(
+    <div className={styles.wikiSuggest} style={style}>
+      {loading && results.length === 0 && (
+        <div className={styles.wikiSuggestLoading}>Searching…</div>
+      )}
+      {results.map(r => {
+        const title = r.notePath.split(/[/\\]/).pop().replace(/\.md$/, '');
+        return (
+          <button
+            key={r.notePath}
+            className={styles.wikiSuggestItem}
+            onMouseDown={e => {
+              e.preventDefault(); // keep editor focused
+              onSelect(title, r.notePath);
+            }}
+          >
+            <span className={styles.wikiSuggestTitle}>{title}</span>
+            <span className={styles.wikiSuggestSnippet}>{r.snippet}</span>
+          </button>
+        );
+      })}
+    </div>,
+    document.body
+  );
+}
+
 // ── Inner editor: mounts once per note (key forces remount on note change) ───
 
 function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUnsupported }) {
   const [loading, getInstance] = useInstance();
   const skipFirst = useRef(true);
+
+  // Wiki-link suggestion state
+  const [wikiQuery, setWikiQuery] = useState(null); // null = closed
+  const [wikiRect,  setWikiRect]  = useState(null);
 
   useEditor((root) => {
     return Editor.make()
@@ -110,7 +157,76 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUns
     return () => view.dom.removeEventListener('paste', handlePaste);
   }, [loading, onFilePaste, onUnsupported]);
 
-  return <Milkdown />;
+  // Detect [[query pattern as the user types inside the editor
+  useEffect(() => {
+    if (loading || !isMutable) { setWikiQuery(null); return; }
+    const view = getInstance()?.action(ctx => ctx.get(editorViewCtx));
+    if (!view) return;
+
+    function checkWikiQuery() {
+      const sel = window.getSelection();
+      if (!sel || !sel.focusNode) { setWikiQuery(null); return; }
+      const node = sel.focusNode;
+      // Only check text nodes inside the editor
+      if (!view.dom.contains(node)) { setWikiQuery(null); return; }
+      const textBefore = node.nodeType === Node.TEXT_NODE
+        ? node.textContent.slice(0, sel.focusOffset)
+        : '';
+      const match = textBefore.match(/\[\[([^\]]{0,80})$/);
+      if (match) {
+        try {
+          const range = sel.getRangeAt(0);
+          const rect  = range.getBoundingClientRect();
+          setWikiQuery(match[1]);
+          setWikiRect(rect);
+        } catch { setWikiQuery(null); }
+      } else {
+        setWikiQuery(null);
+      }
+    }
+
+    view.dom.addEventListener('input', checkWikiQuery);
+    document.addEventListener('selectionchange', checkWikiQuery);
+    return () => {
+      view.dom.removeEventListener('input', checkWikiQuery);
+      document.removeEventListener('selectionchange', checkWikiQuery);
+    };
+  }, [loading, isMutable]);
+
+  function insertWikiLink(displayName, notePath) {
+    getInstance()?.action(ctx => {
+      const view = ctx.get(editorViewCtx);
+      if (!view) return;
+      const { state } = view;
+      const { $anchor } = state.selection;
+      // Text content from start of current block to cursor
+      const blockFrom = $anchor.start($anchor.depth);
+      const cursorPos = $anchor.pos;
+      const text = state.doc.textBetween(blockFrom, cursorPos);
+      const idx = text.lastIndexOf('[[');
+      if (idx === -1) return;
+      const replaceFrom = blockFrom + idx;
+      const wikiType = wikiLinkNode$.type(ctx);
+      const wikiNode = wikiType.create({ target: displayName, display: null });
+      view.dispatch(state.tr.replaceWith(replaceFrom, cursorPos, wikiNode));
+      view.focus();
+    });
+    setWikiQuery(null);
+  }
+
+  return (
+    <>
+      <Milkdown />
+      {wikiQuery !== null && wikiRect && (
+        <WikiLinkSuggest
+          query={wikiQuery}
+          rect={wikiRect}
+          onSelect={insertWikiLink}
+          onClose={() => setWikiQuery(null)}
+        />
+      )}
+    </>
+  );
 }
 
 // ── Outer component: reads store, handles wiki-link click delegation ──────────
