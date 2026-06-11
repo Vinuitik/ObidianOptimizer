@@ -14,6 +14,11 @@
       "name": "ollama.embed.model",
       "type": "java.lang.String",
       "description": "Ollama embedding model name. Default: mxbai-embed-large (1024-dim). Overridable via Settings UI."
+    },
+    {
+      "name": "wrapper.url",
+      "type": "java.lang.String",
+      "description": "Base URL for the host-wrapper image processing service. Default: http://host.docker.internal:5001."
     }
   ]
 }
