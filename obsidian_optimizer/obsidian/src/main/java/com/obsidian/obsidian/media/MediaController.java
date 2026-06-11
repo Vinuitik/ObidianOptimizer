@@ -1,6 +1,8 @@
 package com.obsidian.obsidian.media;
 
+import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.settings.SettingsRepository;
+import com.obsidian.obsidian.sync.SyncQueueRepository;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,9 +34,11 @@ public class MediaController {
     private static final String[] SEARCH_SUBDIRS = {"images", "videos", "pdf", "audio", "files"};
 
     private final SettingsRepository settingsRepo;
+    private final SyncQueueRepository syncQueueRepo;
 
-    public MediaController(SettingsRepository settingsRepo) {
-        this.settingsRepo = settingsRepo;
+    public MediaController(SettingsRepository settingsRepo, SyncQueueRepository syncQueueRepo) {
+        this.settingsRepo  = settingsRepo;
+        this.syncQueueRepo = syncQueueRepo;
     }
 
     @GetMapping("/images/{filename}")
@@ -82,6 +86,14 @@ public class MediaController {
         Files.createDirectories(targetDir);
         file.transferTo(targetDir.resolve(filename).toFile());
         log.info("[upload] saved {} → resources/{}", filename, subdir);
+
+        try {
+            byte[] bytes = Files.readAllBytes(targetDir.resolve(filename));
+            String relPath = "resources/" + subdir + "/" + filename;
+            syncQueueRepo.markPending(relPath, ImageScanService.sha256(bytes));
+        } catch (Exception e) {
+            log.warn("[upload] sync queue update failed for {}: {}", filename, e.getMessage());
+        }
     }
 
     static String subdirFor(String filename) {
