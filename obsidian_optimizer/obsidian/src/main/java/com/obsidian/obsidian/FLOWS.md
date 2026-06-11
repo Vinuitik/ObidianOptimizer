@@ -10,6 +10,7 @@ Subsystem docs live next to the code they describe.
 | **media** | [media/FLOWS.md](media/FLOWS.md) | MediaController |
 | **config** | [config/FLOWS.md](config/FLOWS.md) | SecurityConfig, WebConfig, ObsidianApplication |
 | **ml** | [ml/FLOWS.md](ml/FLOWS.md) | McpController, SearchService, MarkdownPreprocessor — Phase 1/2 stubs |
+| **sync** | [sync/FLOWS.md](sync/FLOWS.md) | Per-file AES-256-GCM encrypted Google Drive sync, sync_queue, device identity |
 
 ## Cross-Package Dependencies
 
