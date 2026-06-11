@@ -1,8 +1,43 @@
 # ML Domain Flows
 
-Files: McpController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java
+Files: McpController.java, SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java
 
 Python embedder: embedder/main.py, embedder/Dockerfile, embedder/requirements.txt
+
+---
+
+## GET /search?q=&limit=10
+
+`SearchController.search(q, limit)` — semantic search endpoint for the UI (session-auth, not MCP).
+
+### Cancellation safeguard
+
+```
+DeferredResult(timeout=5000ms, timeoutValue=List.of())
+  onTimeout → cancelled.set(true) + log WARN
+CompletableFuture.supplyAsync(() → searchService.search(q, limit, cancelled))
+  .thenAccept(results → deferred.setResult(results))
+  .exceptionally(ex → deferred.setErrorResult(ex))
+```
+
+**Why DeferredResult**: frees the Tomcat servlet thread while the background work runs. The timeout ensures a slow embedder doesn't hold the thread (or a DeferredResult slot) forever.
+
+**What the AtomicBoolean catches**: if the 5s timeout fires mid-search, `cancelled` is flipped. The next checkpoint in `SearchService` sees it and skips remaining work:
+
+```
+SearchService.search(q, limit, cancelled):
+  getVectorRankedMatches(q, limit)   ← embed HTTP + vector DB (expensive)
+  if cancelled.get() → return List.of()  ← CHECKPOINT: skip BM25 if client timed out
+  getTextRankedMatches(q, limit)     ← BM25 DB query
+  RRF merge → return results
+```
+
+**What it does NOT cancel**: the embed HTTP call or vector DB query already in progress — those run to completion. The checkpoint prevents starting the *next* step.
+
+MCP calls `searchService.search(q, limit)` (no-arg overload) with a no-op `AtomicBoolean` — no timeout applies there.
+
+To change timeout: `SearchController.TIMEOUT_MS`  
+To add more checkpoints: add `if (cancelled.get()) return List.of()` between steps in `SearchService`
 
 ---
 
@@ -159,6 +194,8 @@ To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
 | Thing to change | Where |
 |---|---|
 | MCP tool dispatch | `McpController.executeTool()` switch |
+| Search request timeout | `SearchController.TIMEOUT_MS` |
+| Search cancellation checkpoints | `SearchService.search(q, limit, cancelled)` — add `if (cancelled.get())` between steps |
 | MCP auth token | `.env → MCP_API_TOKEN` |
 | Embedding model | `EMBED_MODEL` docker-compose env → rebuild embedder |
 | Embedder URL | `EMBEDDER_URL` env / `application.properties → embedder.url` |

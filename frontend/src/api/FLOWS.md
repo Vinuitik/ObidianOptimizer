@@ -1,6 +1,6 @@
 # API Layer Flows
 
-Files: notes.js
+Files: notes.js, utils/useSearch.js
 
 ---
 
@@ -34,6 +34,17 @@ Write calls use `credentials: 'same-origin'` — session cookie included automat
 | `fetchSettings()` | `GET /api/settings` | No |
 | `saveSettings(patch)` | `PUT /api/settings` | Yes |
 | `uploadFile(file, filename)` | `POST /api/upload` (multipart) | Yes |
+| `searchNotes(query, {signal?})` | `GET /api/search?q=&limit=10` | Yes |
+
+### searchNotes — AbortController pattern
+
+```js
+const ctrl = new AbortController();
+searchNotes(query, { signal: ctrl.signal });
+ctrl.abort(); // cancels in-flight fetch; throws AbortError (caught, ignored)
+```
+
+`useSearch` hook wraps this: new query → cancel previous controller → start 500ms debounce → fire with fresh controller. Prevents stale results arriving out-of-order.
 
 ---
 
@@ -44,3 +55,5 @@ Write calls use `credentials: 'same-origin'` — session cookie included automat
 | API base URL | `env.js ENV.API_BASE` |
 | Add a new API call | `api/notes.js` + corresponding store action in `store/useStore.js` |
 | 401 interception | `api/notes.js` fetch wrapper + store `showLogin` check |
+| Search debounce delay | `utils/useSearch.js` — `setTimeout(…, 500)` |
+| Search result limit | `api/notes.js searchNotes()` — `limit=10` query param |
