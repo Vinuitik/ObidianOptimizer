@@ -1,6 +1,8 @@
 package com.obsidian.obsidian.notes;
 
+import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.settings.SettingsRepository;
+import com.obsidian.obsidian.sync.SyncQueueRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,8 @@ class FileRepositoryPatchTest {
     @Mock NoteLinkRepository noteLinkRepo;
     @Mock SettingsRepository  settingsRepo;
     @Mock NoteIndexRepository noteIndex;
+    @Mock ImageScanService    imageScanService;
+    @Mock SyncQueueRepository syncQueueRepo;
 
     FileRepository repo;
 
@@ -39,7 +43,7 @@ class FileRepositoryPatchTest {
     void setUp() {
         doNothing().when(noteIndex).upsert(anyString(), anyString(), any(), anyLong());
         doNothing().when(noteLinkRepo).updateLinks(anyString(), any());
-        repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex);
+        repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex, imageScanService, syncQueueRepo);
     }
 
     private Path writeNote(String name, String content) throws IOException {
