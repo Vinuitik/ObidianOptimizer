@@ -1,6 +1,7 @@
 package com.obsidian.obsidian.media;
 
 import com.obsidian.obsidian.settings.SettingsRepository;
+import com.obsidian.obsidian.sync.SyncQueueRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class MediaControllerTest {
 
     @Mock SettingsRepository settingsRepo;
+    @Mock SyncQueueRepository syncQueueRepo;
     @TempDir Path vault;
 
     private MockMvc mvc;
@@ -35,7 +37,7 @@ class MediaControllerTest {
     @BeforeEach
     void setUp() {
         when(settingsRepo.getVaultPath()).thenReturn(vault.toString());
-        mvc = MockMvcBuilders.standaloneSetup(new MediaController(settingsRepo)).build();
+        mvc = MockMvcBuilders.standaloneSetup(new MediaController(settingsRepo, syncQueueRepo)).build();
     }
 
     // ── subdirFor ─────────────────────────────────────────────────────────────

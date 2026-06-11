@@ -151,4 +151,8 @@ public class NoteIndexRepository {
             "SELECT content_hash FROM notes WHERE path = ?", String.class, path);
         return rows.isEmpty() ? null : rows.get(0);
     }
+
+    public List<Map<String, Object>> getAllPathsWithHash() {
+        return jdbc.queryForList("SELECT path, content_hash FROM notes WHERE content_hash IS NOT NULL");
+    }
 }

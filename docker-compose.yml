@@ -50,6 +50,10 @@ services:
       - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-obsidian}
       - MCP_API_TOKEN=${MCP_API_TOKEN:-changeme}
       - EMBEDDER_URL=http://embedder:8000
+      - SYNC_PASSPHRASE=${SYNC_PASSPHRASE:-}
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID:-placeholder}
+      - GOOGLE_SERVICE_ACCOUNT_JSON=${GOOGLE_SERVICE_ACCOUNT_JSON:-placeholder}
+      - SYNC_UPLOAD_CRON=${SYNC_UPLOAD_CRON:-0 0 */6 * * *}
     volumes:
       - ${HOST_VAULT_PATH}:/vault
     depends_on:
