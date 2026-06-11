@@ -24,11 +24,6 @@ public class SearchService {
         this.embeddingService = embeddingService;
     }
 
-    /** Convenience overload used by MCP (no cancellation needed). */
-    public List<SearchResult> search(String query, int limit) {
-        return search(query, limit, new AtomicBoolean(false));
-    }
-
     public List<SearchResult> search(String query, int limit, AtomicBoolean cancelled) {
         int fetchLimit = embeddingService.getSearchLimit();
 

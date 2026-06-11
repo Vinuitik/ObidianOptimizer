@@ -32,7 +32,6 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/login", "/logout").permitAll()
                 .requestMatchers(HttpMethod.GET, "/settings").permitAll()
-                .requestMatchers("/api/mcp/**").permitAll()
                 .anyRequest().authenticated()
             )
             .formLogin(form -> form

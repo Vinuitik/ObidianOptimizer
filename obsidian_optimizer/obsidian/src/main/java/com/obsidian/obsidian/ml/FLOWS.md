@@ -1,8 +1,8 @@
 # ML Domain Flows
 
-Files: McpController.java, SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java
+Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java
 
-Python embedder: embedder/main.py, embedder/Dockerfile, embedder/requirements.txt
+Python embedder: embedder/main.py, embedder/model_runtime.py, embedder/mcp_server.py, embedder/Dockerfile, embedder/requirements.txt
 
 ---
 
@@ -34,30 +34,37 @@ SearchService.search(q, limit, cancelled):
 
 **What it does NOT cancel**: the embed HTTP call or vector DB query already in progress — those run to completion. The checkpoint prevents starting the *next* step.
 
-MCP calls `searchService.search(q, limit)` (no-arg overload) with a no-op `AtomicBoolean` — no timeout applies there.
-
 To change timeout: `SearchController.TIMEOUT_MS`  
 To add more checkpoints: add `if (cancelled.get()) return List.of()` between steps in `SearchService`
 
 ---
 
-## POST /api/mcp/execute
+## MCP Server (moved to Python — embedder/mcp_server.py)
 
-`McpController.executeTool(McpRequest, X-API-Key header)` — MCP tool gateway.
+Real Model Context Protocol: JSON-RPC over streamable HTTP at `http://localhost:8000/mcp`
+(`initialize` → `tools/list` → `tools/call`), built on the official `mcp` Python SDK (FastMCP),
+stateless mode with JSON responses. The former Java `McpController` (custom REST RPC no MCP
+client could speak) is deleted; `/api/mcp/**` no longer exists in Spring Security.
 
-Auth: `X-API-Key` header validated against `mcp.api.token` (`MCP_API_TOKEN` env var) → 401 if missing or wrong.
+Auth: `X-API-Key` header, constant-time compare (`hmac.compare_digest`) against `MCP_API_TOKEN`
+env var in `mcp_server.ApiKeyMiddleware`. Unset token fails closed. DNS-rebinding protection is
+enabled — only `localhost` / `127.0.0.1` Host headers are accepted.
 
 ```
-request.tool:
-  "search_notes"       → SearchService.search(query, limit) → List<SearchResult>
-  "get_note_content"   → [NOT IMPLEMENTED] stub returns placeholder string
-  "create_note"        → [NOT IMPLEMENTED] stub
-  "find_home_for_note" → [NOT IMPLEMENTED] stub
+tools:
+  search_notes(query, limit=10)        → hybrid RRF search, direct Postgres (note_chunks)
+  get_note_content(note_path)          → read from read-only /vault mount, path-validated
+  find_home_for_note(proposed_title)   → embed title → pgvector similarity → folder suggestions
 ```
 
-Security: `/api/mcp/**` is `permitAll()` in Spring Security — auth is handled inside the controller, not by session.  
-To wire `get_note_content`: inject `FileRepository` into `McpController`, call `FileRepository.getText(notePath)`  
-To add a tool: add case to `McpController.executeTool()` switch
+No write tools — note creation must go through the Java backend so the notes index and
+sync queue stay consistent. `[NOT IMPLEMENTED]` create_note via MCP.
+
+Claude Code: `claude mcp add --transport http obsidian http://localhost:8000/mcp --header "X-API-Key: <token>"`
+
+To add a tool: `@mcp.tool()` function in `embedder/mcp_server.py`  
+To change DB access: `mcp_server._query_db` / `DATABASE_URL` env var  
+To change vault mount: `VAULT_DIR` env var + compose volume `${HOST_VAULT_PATH}:/vault:ro`
 
 ---
 
@@ -172,9 +179,7 @@ To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
 
 | Feature | Status |
 |---|---|
-| `get_note_content` MCP tool | Stub — FileRepository not injected into McpController |
-| `create_note` MCP tool | Stub |
-| `find_home_for_note` MCP tool | Stub |
+| `create_note` MCP tool | Deliberately not exposed — writes must go through the Java backend (index + sync queue) |
 
 ---
 
@@ -185,7 +190,9 @@ To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
 - **paradedb**: `<=>` cosine operator from pgvector + `@@@` / `pg_search` BM25 from Tantivy. Both required for hybrid search.
 - **RRF**: order-invariant rank fusion — stable rankings regardless of raw score scales from different retrievers.
 - **CPU fallback dimension**: always 1024 — mxbai-embed-large-v1 used in both GPU and CPU paths. No schema migration if GPU unavailable.
-- **MCP permitAll in Spring Security**: session auth is bypassed for `/api/mcp/**`. Auth is X-API-Key checked in controller. No CSRF risk (JSON API, no browser session).
+- **MCP session manager**: `mcp.session_manager.run()` must be entered in the FastAPI lifespan or `/mcp` 500s. It can only be started once per process — relevant for tests (module-scoped client).
+- **MCP stateless mode**: no session persistence; every request is self-contained. Fine for tool calls; would need stateful mode for subscriptions/sampling.
+- **Embedder DB access**: the MCP tools read Postgres directly with psycopg (connection per call, no pool). Low traffic by design; add a pool if MCP usage grows.
 
 ---
 
@@ -193,7 +200,8 @@ To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
 
 | Thing to change | Where |
 |---|---|
-| MCP tool dispatch | `McpController.executeTool()` switch |
+| MCP tools | `embedder/mcp_server.py` — `@mcp.tool()` functions |
+| MCP auth | `embedder/mcp_server.py ApiKeyMiddleware` / `.env → MCP_API_TOKEN` |
 | Search request timeout | `SearchController.TIMEOUT_MS` |
 | Search cancellation checkpoints | `SearchService.search(q, limit, cancelled)` — add `if (cancelled.get())` between steps |
 | MCP auth token | `.env → MCP_API_TOKEN` |

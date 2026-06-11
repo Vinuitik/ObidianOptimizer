@@ -145,24 +145,32 @@ To change prompt: `host-wrapper/main.py → IMAGE_PROMPT`
 
 ---
 
-## MCP Server
+## MCP Server [IMPLEMENTED — lives in the embedder container]
 
-Transport: HTTP POST on `/api/mcp/execute`  
-Auth: `X-API-Key` header → compare against `MCP_API_TOKEN` env var → 401 if missing/wrong  
-Lives in: existing Spring Boot container (`McpController.java`)
+Transport: real Model Context Protocol — JSON-RPC over streamable HTTP at
+`http://localhost:8000/mcp` (`initialize` → `tools/list` → `tools/call`).
+Built on the official `mcp` Python SDK (FastMCP), stateless mode, JSON responses.
+Lives in: `embedder/mcp_server.py`, mounted into the FastAPI app (`embedder/main.py`).
+
+The original plan put a custom REST RPC in the Spring container (`McpController.java`);
+that was not protocol-compliant — no MCP client could speak to it — and has been deleted.
+
+Auth: `X-API-Key` header, constant-time compare against `MCP_API_TOKEN` env var
+(`ApiKeyMiddleware`). Fails closed when the token is unset. DNS-rebinding protection
+enabled: only `localhost`/`127.0.0.1` Host headers accepted.
 
 ### Tools
 
 | Tool | Status | Implementation |
 |---|---|---|
-| `search_notes` | Stub → wire to SearchService | RRF hybrid search |
-| `get_note_content` | Stub | `FileRepository.getText(path)` |
-| `create_note` | Stub | `FileRepository.createNote()` + `EmbeddingService.indexNote()` async |
-| `find_home_for_note` | Stub | embed title → pgvector similarity → extract folders |
+| `search_notes` | ✅ | hybrid RRF: pgvector cosine + Postgres FTS, direct psycopg queries on `note_chunks` |
+| `get_note_content` | ✅ | reads from read-only `/vault` mount, path-validated against traversal |
+| `find_home_for_note` | ✅ | embed title → pgvector similarity → folder frequency ranking |
+| `create_note` | deliberately not exposed | writes must go through the Java backend (notes index + sync queue consistency) |
 
 ---
 
-## Connecting Claude (or any MCP client) to the MCP server
+## Connecting Claude (or any MCP client)
 
 ### 1. Generate the API token
 ```powershell
@@ -175,41 +183,33 @@ Add it to your `.env` file (never commit this file):
 ```
 MCP_API_TOKEN=<your-generated-secret>
 ```
-The backend reads it via `MCP_API_TOKEN` env var (set in `docker-compose.yml → backend.environment`).
+The embedder container reads it via `MCP_API_TOKEN` (set in `docker-compose.yml → embedder.environment`).
 
-### 2. Claude Desktop (`claude_desktop_config.json`)
-Location: `%APPDATA%\Claude\claude_desktop_config.json` on Windows.
-
-```json
-{
-  "mcpServers": {
-    "obsidian": {
-      "type": "http",
-      "url": "http://localhost:8084/api/mcp/execute",
-      "headers": {
-        "X-API-Key": "<your-generated-secret>"
-      }
-    }
-  }
-}
+### 2. Claude Code
+```powershell
+claude mcp add --transport http obsidian http://localhost:8000/mcp --header "X-API-Key: <your-generated-secret>"
 ```
-Restart Claude Desktop after saving. The `obsidian` server will appear in the tools list.
+
+For Claude Desktop, add the same URL + header as a custom connector
+(Settings → Connectors → Add custom connector).
 
 ### 3. Test the connection
 ```powershell
-curl -X POST http://localhost:8084/api/mcp/execute `
+curl -X POST http://localhost:8000/mcp `
   -H "Content-Type: application/json" `
+  -H "Accept: application/json, text/event-stream" `
   -H "X-API-Key: <your-secret>" `
-  -d '{"tool":"search_notes","parameters":{"query":"test","limit":3}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
-Expect `{"results":[]}` until notes are indexed. A `401` means the token is wrong.
+Expect a JSON-RPC result listing the three tools. A `401` means the token is wrong;
+a `421` means the Host header isn't localhost (rebinding protection).
 
 ### 4. Auth token security notes
 - The token is a shared secret — anyone who has it can call all MCP tools
-- Do not expose port 8084 to the internet; keep it on localhost
-- To rotate: change `MCP_API_TOKEN` in `.env` and restart the backend container
-- The token is set at the controller level (`McpController.java`), not in Spring Security,
-  so session auth is completely bypassed for `/api/mcp/**`
+- Port 8000 is bound to 127.0.0.1 only (see docker-compose) — never expose it
+- To rotate: change `MCP_API_TOKEN` in `.env` and restart the embedder container
+- `/health` and `/embed` on the same container are unauthenticated (backend-internal);
+  only `/mcp` requires the key
 
 ---
 
