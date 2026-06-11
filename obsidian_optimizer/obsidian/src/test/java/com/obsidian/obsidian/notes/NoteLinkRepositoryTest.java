@@ -110,4 +110,44 @@ class NoteLinkRepositoryTest {
         String result = NoteLinkRepository.rewriteLinks("before [[OldName]] after", "OldName", "NewName");
         assertThat(result).isEqualTo("before [[NewName]] after");
     }
+
+    // ── Heading anchors: [[Note#section]] ─────────────────────────────────────
+
+    @Test
+    void extractTargets_headingAnchor_targetsTheNote() {
+        assertThat(NoteLinkRepository.extractTargets("See [[NoteA#Methods]]."))
+            .containsExactly("NoteA");
+    }
+
+    @Test
+    void extractTargets_headingAnchorWithPathAndAlias() {
+        assertThat(NoteLinkRepository.extractTargets("[[Folder/NoteB#Results|the results]]"))
+            .containsExactly("NoteB");
+    }
+
+    @Test
+    void extractTargets_selfHeadingLink_ignored() {
+        // [[#Heading]] links within the same note — no external target
+        assertThat(NoteLinkRepository.extractTargets("Jump to [[#Conclusion]].")).isEmpty();
+    }
+
+    @Test
+    void rewriteLinks_preservesHeadingAnchor() {
+        String result = NoteLinkRepository.rewriteLinks("see [[OldName#Setup]] first", "OldName", "NewName");
+        assertThat(result).isEqualTo("see [[NewName#Setup]] first");
+    }
+
+    @Test
+    void rewriteLinks_headingAnchorWithAlias() {
+        String result = NoteLinkRepository.rewriteLinks("[[OldName#Setup|setup docs]]", "OldName", "NewName");
+        assertThat(result).isEqualTo("[[NewName#Setup|setup docs]]");
+    }
+
+    @Test
+    void rewriteLinks_prefixNameWithHeading_notConfusedWithSubstring() {
+        // "OldNameExtended" must not be rewritten when renaming "OldName"
+        String content = "[[OldNameExtended#Setup]] and [[OldName#Setup]]";
+        String result = NoteLinkRepository.rewriteLinks(content, "OldName", "NewName");
+        assertThat(result).isEqualTo("[[OldNameExtended#Setup]] and [[NewName#Setup]]");
+    }
 }

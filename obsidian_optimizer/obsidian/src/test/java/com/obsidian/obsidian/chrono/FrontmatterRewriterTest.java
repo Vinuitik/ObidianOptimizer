@@ -116,6 +116,43 @@ class FrontmatterRewriterTest {
     }
 
     @Test
+    void read_srDueInBodyOnly_returnsNull_bodyIsNotFrontmatter() throws IOException {
+        Path f = writeFile("body-only.md",
+            "# Notes on spaced repetition\n\nThe plugin stores sr-due: 2025-01-01 in frontmatter.\n");
+        assertThat(FrontmatterRewriter.read(f)).isNull();
+    }
+
+    @Test
+    void read_ignoresSrLinesInBody_whenFrontmatterAlsoPresent() throws IOException {
+        Path f = writeFile("both.md",
+            "---\nsr-due: 2025-03-15\nsr-interval: 7\nsr-ease: 250\n---\n\n"
+            + "```\nsr-due: 1999-01-01\nsr-interval: 99\n```\n");
+        var fields = FrontmatterRewriter.read(f);
+        assertThat(fields).isNotNull();
+        assertThat(fields.due()).isEqualTo(LocalDate.of(2025, 3, 15));
+        assertThat(fields.interval()).isEqualTo(7);
+    }
+
+    @Test
+    void write_neverTouchesSrLinesInBody() throws IOException {
+        String body = "```yaml\nsr-due: 1999-01-01\nsr-ease: 111\n```";
+        Path f = writeFile("guarded.md",
+            "---\nsr-due: 2024-01-01\nsr-interval: 3\nsr-ease: 200\n---\n\n" + body + "\n");
+        FrontmatterRewriter.write(f, new FrontmatterRewriter.SrFields(LocalDate.of(2026, 6, 10), 14, 300));
+        String result = Files.readString(f);
+        assertThat(result).contains(body);                   // body untouched
+        assertThat(result).contains("sr-due: 2026-06-10");   // frontmatter updated
+    }
+
+    @Test
+    void write_fileWithoutFrontmatter_isLeftUnchanged() throws IOException {
+        String content = "No frontmatter here.\nsr-due: 2020-01-01 mentioned in prose.\n";
+        Path f = writeFile("no-fm.md", content);
+        FrontmatterRewriter.write(f, new FrontmatterRewriter.SrFields(LocalDate.of(2026, 1, 1), 3, 200));
+        assertThat(Files.readString(f)).isEqualTo(content);
+    }
+
+    @Test
     void hasInvalidDate_detectsCorruptionOnLine2() throws IOException {
         Path f = writeFile("corrupt.md",
             "---\nsr-due: Invalid date\nsr-interval: 3\nsr-ease: 200\n---\n\nBody.");

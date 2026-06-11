@@ -218,6 +218,47 @@ describe('closeTab', () => {
     await getState().closeTab(1);
     expect(getState().activeTabIndex).toBe(0);
   });
+
+  // Regression: closing an active NON-LAST tab used to leave activeTabIndex
+  // equal to the new index, so switchTab early-returned and the editor kept
+  // showing the closed note's content.
+  it('loads the next tab content when closing an active middle tab', async () => {
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().openTab('/vault/A.md');
+    api.fetchNoteContent.mockResolvedValue('# B');
+    await getState().openTab('/vault/B.md');
+    api.fetchNoteContent.mockResolvedValue('# C');
+    await getState().openTab('/vault/C.md');
+    // Make A (index 0) active, then close it
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().switchTab(0);
+    api.fetchNoteContent.mockResolvedValue('# B');
+    await getState().closeTab(0);
+
+    expect(getState().tabs.map(t => t.path)).toEqual(['/vault/B.md', '/vault/C.md']);
+    expect(getState().activeTabIndex).toBe(0);
+    expect(getState().currentNotePath).toBe('/vault/B.md');
+    expect(getState().currentNoteRaw).toBe('# B');
+  });
+
+  it('does not snapshot the closed tab state onto the tab that takes its slot', async () => {
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().openTab('/vault/A.md');
+    api.fetchNoteContent.mockResolvedValue('# B');
+    await getState().openTab('/vault/B.md');
+    // Make A active and give it unsaved edits
+    api.fetchNoteContent.mockResolvedValue('# A');
+    await getState().switchTab(0);
+    useStore.setState({ pendingRaw: '# A\nedited but discarded', isMutable: true });
+    // Close A — its dirty state must NOT leak into B (which moves into slot 0)
+    api.fetchNoteContent.mockResolvedValue('# B');
+    await getState().closeTab(0);
+
+    expect(getState().tabs[0].path).toBe('/vault/B.md');
+    expect(getState().tabs[0].hunks).toHaveLength(0);
+    expect(getState().tabs[0].isMutable).toBe(false);
+    expect(getState().pendingRaw).toBe('# B');
+  });
 });
 
 // ── cancelEdit ────────────────────────────────────────────────────────────────
