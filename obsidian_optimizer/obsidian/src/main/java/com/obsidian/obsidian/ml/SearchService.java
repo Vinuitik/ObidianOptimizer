@@ -1,15 +1,19 @@
 package com.obsidian.obsidian.ml;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class SearchService {
 
+    private static final Logger log = LoggerFactory.getLogger(SearchService.class);
     private static final int RRF_K = 60;
 
     private final NoteChunkRepository chunkRepo;
@@ -20,10 +24,23 @@ public class SearchService {
         this.embeddingService = embeddingService;
     }
 
+    /** Convenience overload used by MCP (no cancellation needed). */
     public List<SearchResult> search(String query, int limit) {
+        return search(query, limit, new AtomicBoolean(false));
+    }
+
+    public List<SearchResult> search(String query, int limit, AtomicBoolean cancelled) {
         int fetchLimit = embeddingService.getSearchLimit();
 
+        // Step 1: embed query + vector search (the expensive HTTP call is inside here)
         List<NoteChunk> vectorMatches = getVectorRankedMatches(query, fetchLimit);
+
+        // Cheap checkpoint: if the client already left (timeout fired), skip BM25
+        if (cancelled.get()) {
+            log.debug("[Search] cancelled after vector step — skipping BM25 for '{}'", query);
+            return List.of();
+        }
+
         List<NoteChunk> textMatches   = getTextRankedMatches(query, fetchLimit);
 
         Map<String, Double> rrfScores = new HashMap<>();
