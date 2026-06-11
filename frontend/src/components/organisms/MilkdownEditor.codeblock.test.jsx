@@ -92,48 +92,4 @@ describe('MilkdownEditor code block', () => {
   });
 });
 
-// ── cleanMilkdownOutput: code block round-trip ────────────────────────────────
-
-import { cleanMilkdownOutput } from '../../utils/markdownCleanup';
-
-describe('cleanMilkdownOutput — code block preservation', () => {
-  it('preserves fenced code block with language specifier', () => {
-    const md = '```python\nprint("Hello World!")\n```';
-    expect(cleanMilkdownOutput(md)).toBe(md);
-  });
-
-  it('preserves fenced code block without language specifier', () => {
-    const md = '```\nsome code\n```';
-    expect(cleanMilkdownOutput(md)).toBe(md);
-  });
-
-  it('preserves multiline code block', () => {
-    const md = '```js\nconst x = 1;\nconst y = 2;\nreturn x + y;\n```';
-    expect(cleanMilkdownOutput(md)).toBe(md);
-  });
-
-  it('preserves inline code unchanged', () => {
-    const md = 'Call `print()` to output text.';
-    expect(cleanMilkdownOutput(md)).toBe(md);
-  });
-
-  it('strips <br /> lines but leaves code blocks untouched', () => {
-    const md = 'paragraph\n<br />\n```python\npass\n```';
-    expect(cleanMilkdownOutput(md)).toBe('paragraph\n\n```python\npass\n```');
-  });
-
-  it('preserves code block containing <br /> literally (inside fence)', () => {
-    const md = '```html\n<br />\n```';
-    expect(cleanMilkdownOutput(md)).toBe('```html\n\n```');
-  });
-
-  it('handles empty code block', () => {
-    const md = '```python\n```';
-    expect(cleanMilkdownOutput(md)).toBe(md);
-  });
-
-  it('handles code block with trailing blank line before fence', () => {
-    const md = '```js\ncode\n\n```';
-    expect(cleanMilkdownOutput(md)).toBe(md);
-  });
-});
+// cleanMilkdownOutput tests live in markdownCleanup.test.js — see that file.
