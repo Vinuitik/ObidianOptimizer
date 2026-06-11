@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -50,9 +51,14 @@ public class MediaController {
                 if (!candidate.startsWith(resourcesRoot)) continue;
                 Resource resource = new UrlResource(candidate.toUri());
                 if (resource.exists() && resource.isReadable()) {
+                    // ContentDisposition builder escapes quotes/control chars and
+                    // RFC 5987-encodes non-ASCII — raw interpolation allowed header injection.
+                    ContentDisposition disposition = ContentDisposition.inline()
+                            .filename(filename, java.nio.charset.StandardCharsets.UTF_8)
+                            .build();
                     return ResponseEntity.ok()
                             .contentType(MediaType.parseMediaType(mimeFor(filename)))
-                            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                            .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                             .body(resource);
                 }
             } catch (Exception ignored) {}

@@ -36,13 +36,16 @@ RRF_K = 60          # reciprocal-rank-fusion constant (matches Java SearchServic
 FETCH_LIMIT = 60    # candidates fetched per ranking before the RRF merge
 SNIPPET_LEN = 150
 
-# DNS-rebinding protection stays ON, but only localhost access is legal —
-# the port is bound to 127.0.0.1 and MCP clients run on the same machine.
+# DNS-rebinding protection stays ON. Local MCP clients (Claude Code / Claude
+# Desktop on this machine) send Host: localhost:8000 and pass the default list.
+# To allow additional hosts (e.g. a reverse-proxied domain), set
+# MCP_ALLOWED_HOSTS to a comma-separated list — origins are derived from it.
+_extra_hosts = [h.strip() for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+_allowed_hosts = ["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*", *_extra_hosts]
 _security = TransportSecuritySettings(
     enable_dns_rebinding_protection=True,
-    allowed_hosts=["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*"],
-    allowed_origins=["http://localhost", "http://localhost:*",
-                     "http://127.0.0.1", "http://127.0.0.1:*"],
+    allowed_hosts=_allowed_hosts,
+    allowed_origins=[f"{scheme}://{h}" for h in _allowed_hosts for scheme in ("http", "https")],
 )
 
 mcp = FastMCP("obsidian-vault", stateless_http=True, json_response=True,

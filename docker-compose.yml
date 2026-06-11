@@ -28,6 +28,7 @@ services:
       - DATABASE_URL=postgresql://obsidian:${POSTGRES_PASSWORD:-obsidian}@postgres:5432/obsidian
       - VAULT_DIR=/vault
       - MCP_API_TOKEN=${MCP_API_TOKEN:?set MCP_API_TOKEN in .env}
+      - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -43,7 +43,11 @@ class FileRepositoryPatchTest {
     void setUp() {
         doNothing().when(noteIndex).upsert(anyString(), anyString(), any(), anyLong());
         doNothing().when(noteLinkRepo).updateLinks(anyString(), any());
+        // requireInsideVault needs a vault root — init() against the temp dir
+        org.mockito.Mockito.when(settingsRepo.getVaultPath()).thenReturn(tmp.toString());
+        org.mockito.Mockito.when(settingsRepo.getStartupSyncMode()).thenReturn("blocking");
         repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex, imageScanService, syncQueueRepo);
+        repo.init();
     }
 
     private Path writeNote(String name, String content) throws IOException {

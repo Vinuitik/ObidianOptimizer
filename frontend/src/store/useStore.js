@@ -595,8 +595,11 @@ const useStore = create((set, get) => ({
       : index < activeTabIndex ? activeTabIndex - 1 : activeTabIndex;
 
     if (isActive) {
-      // Load the new active tab (don't snapshot — we're discarding the closing tab)
-      set({ tabs: newTabs });
+      // Invalidate activeTabIndex BEFORE switching: switchTab early-returns when
+      // index === activeTabIndex (closing a non-last active tab leaves them equal,
+      // which kept showing the closed note), and _snapshotTab must not write the
+      // closed tab's state onto whichever tab now occupies that slot.
+      set({ tabs: newTabs, activeTabIndex: -1 });
       await get().switchTab(newActiveIndex);
     } else {
       set({ tabs: newTabs, activeTabIndex: newActiveIndex });

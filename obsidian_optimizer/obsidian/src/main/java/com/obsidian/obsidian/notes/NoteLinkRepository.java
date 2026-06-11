@@ -98,17 +98,23 @@ public class NoteLinkRepository {
             String raw = m.group(1).trim();
             int slash = raw.lastIndexOf('/');
             String name = slash >= 0 ? raw.substring(slash + 1) : raw;
+            // [[Note#heading]] targets Note — strip the anchor so backlink
+            // lookups during rename find these sources too.
+            int hash = name.indexOf('#');
+            if (hash >= 0) name = name.substring(0, hash).trim();
             if (!name.isBlank()) targets.add(name);
         }
         return targets;
     }
 
     public static String rewriteLinks(String content, String oldName, String newName) {
+        // group 3: optional #heading anchor — preserved through the rename
         Pattern p = Pattern.compile(
-            "\\[\\[([^|\\]]*/)?(" + Pattern.quote(oldName) + ")([|\\]])");
+            "\\[\\[([^|\\]]*/)?(" + Pattern.quote(oldName) + ")(#[^|\\]]*)?([|\\]])");
         return p.matcher(content).replaceAll(mr -> {
             String pathPrefix = mr.group(1) != null ? mr.group(1) : "";
-            return "[[" + pathPrefix + newName + mr.group(3);
+            String heading    = mr.group(3) != null ? mr.group(3) : "";
+            return "[[" + pathPrefix + newName + heading + mr.group(4);
         });
     }
 }

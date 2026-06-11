@@ -44,12 +44,37 @@ public class SyncQueueRepository {
             """, path, contentHash);
     }
 
-    public void markDone(String path, String driveFileId) {
-        jdbc.update("""
+    /**
+     * Marks DONE only if the row still holds the hash that was uploaded.
+     * If a fresh edit re-marked the row PENDING with a new hash between the
+     * upload read and this call, the update matches nothing and the row stays
+     * PENDING — the newer content is uploaded on the next pass.
+     * Returns true if the row transitioned to DONE.
+     */
+    public boolean markDoneIfHashMatches(String path, String driveFileId, String uploadedHash) {
+        return jdbc.update("""
             UPDATE sync_queue
             SET status = 'DONE', last_synced_at = ?, drive_file_id = ?
-            WHERE path = ?
-            """, System.currentTimeMillis(), driveFileId, path);
+            WHERE path = ? AND content_hash = ?
+            """, System.currentTimeMillis(), driveFileId, path, uploadedHash) > 0;
+    }
+
+    /**
+     * Records a downloaded file as in-sync: upserts the row to DONE with the
+     * hash from Drive metadata. Unlike markDoneIfHashMatches this must upsert —
+     * files created on another device have no local queue row yet.
+     */
+    public void markSynced(String path, String contentHash, String driveFileId) {
+        jdbc.update("""
+            INSERT INTO sync_queue(path, content_hash, status, last_synced_at, drive_file_id, retry_count)
+            VALUES (?, ?, 'DONE', ?, ?, 0)
+            ON CONFLICT (path) DO UPDATE SET
+                content_hash   = EXCLUDED.content_hash,
+                status         = 'DONE',
+                last_synced_at = EXCLUDED.last_synced_at,
+                drive_file_id  = EXCLUDED.drive_file_id,
+                retry_count    = 0
+            """, path, contentHash, System.currentTimeMillis(), driveFileId);
     }
 
     public void markFailed(String path) {

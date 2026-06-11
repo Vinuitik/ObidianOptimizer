@@ -93,6 +93,7 @@ public class FileRepository {
 
     public String getText(String path) {
         try {
+            requireInsideVault(path);
             String content = Files.readString(Paths.get(path));
             log.debug("[getText] read {} bytes from {}", content.length(), path);
             return content;
@@ -118,9 +119,15 @@ public class FileRepository {
     }
 
     public ChildrenResult getDirectChildren(String folderPath) {
-        File dir = new File(folderPath);
         List<String> folderPaths = new ArrayList<>();
         List<String> filePaths   = new ArrayList<>();
+        try {
+            requireInsideVault(folderPath);
+        } catch (IOException e) {
+            log.warn("[getDirectChildren] rejected: {}", e.getMessage());
+            return new ChildrenResult(folderPath, folderPaths, filePaths);
+        }
+        File dir = new File(folderPath);
 
         File[] children = dir.listFiles();
         if (children != null) {
@@ -148,12 +155,11 @@ public class FileRepository {
     // ── CRUD ─────────────────────────────────────────────────────────────────
 
     public String createFolder(String parentPath, String name) throws IOException {
+        requireInsideVault(parentPath);
+        requireSimpleName(name);
         File parent = new File(parentPath);
         if (!parent.exists() || !parent.isDirectory()) {
             throw new IOException("Parent folder not found: " + parentPath);
-        }
-        if (name == null || name.isBlank() || name.contains("/") || name.contains("\\")) {
-            throw new IOException("Invalid folder name: " + name);
         }
         File newDir = new File(parent, name);
         if (newDir.exists()) {
@@ -166,6 +172,8 @@ public class FileRepository {
     }
 
     public String createNote(String folderPath, String name) throws IOException {
+        requireInsideVault(folderPath);
+        requireSimpleName(name);
         File folder = new File(folderPath);
         if (!folder.exists() || !folder.isDirectory()) {
             throw new IOException("Folder not found: " + folderPath);
@@ -192,6 +200,7 @@ public class FileRepository {
     }
 
     public void updateNote(String path, String content) throws IOException {
+        requireInsideVault(path);
         File file = new File(path);
         if (!file.exists()) throw new IOException("Note not found: " + path);
         Files.writeString(Paths.get(path), content);
@@ -207,6 +216,7 @@ public class FileRepository {
     public void patchNote(String path, List<PatchHunk> hunks) throws IOException {
         log.info("[patchNote] applying {} hunks to {}", hunks == null ? 0 : hunks.size(), path);
         if (hunks == null || hunks.isEmpty()) return;
+        requireInsideVault(path);
         File file = new File(path);
         if (!file.exists()) throw new IOException("Note not found: " + path);
 
@@ -244,6 +254,8 @@ public class FileRepository {
     }
 
     public String renameNote(String oldPath, String newName) throws IOException {
+        requireInsideVault(oldPath);
+        requireSimpleName(newName);
         File oldFile = new File(oldPath);
         if (!oldFile.exists()) throw new IOException("Note not found: " + oldPath);
 
@@ -271,6 +283,11 @@ public class FileRepository {
                 String updated = NoteLinkRepository.rewriteLinks(content, oldName, newName);
                 if (!updated.equals(content)) {
                     Files.writeString(sourceFile.toPath(), updated);
+                    // Rewritten backlink sources changed on disk — keep their index
+                    // hash current and queue them for Drive sync, or the Drive copy
+                    // stays stale until the next unrelated edit.
+                    imageScanService.registerImages(sourcePath, updated);
+                    syncQueueRepo.markPending(toRelative(sourcePath), ImageScanService.sha256(updated));
                 }
             } catch (IOException e) {
                 log.warn("[renameNote] failed to rewrite links in {}: {}", sourcePath, e.getMessage());
@@ -291,6 +308,8 @@ public class FileRepository {
     }
 
     public String moveNote(String sourcePath, String targetFolder) throws IOException {
+        requireInsideVault(sourcePath);
+        requireInsideVault(targetFolder);
         File sourceFile = new File(sourcePath);
         if (!sourceFile.exists()) throw new IOException("Note not found: " + sourcePath);
 
@@ -324,6 +343,7 @@ public class FileRepository {
     }
 
     public void softDeleteNote(String path) throws IOException {
+        requireInsideVault(path);
         File file = new File(path);
         if (!file.exists()) throw new IOException("Note not found: " + path);
 
@@ -345,6 +365,32 @@ public class FileRepository {
 
     private String toRelative(String absPath) {
         return Paths.get(ROOT_FILE).relativize(Paths.get(absPath)).toString().replace('\\', '/');
+    }
+
+    // ── Path guards ───────────────────────────────────────────────────────────
+
+    /**
+     * Every client-supplied path must resolve inside the vault. Without this,
+     * any authenticated request could read or write arbitrary files.
+     */
+    Path requireInsideVault(String rawPath) throws IOException {
+        if (rawPath == null || rawPath.isBlank()) {
+            throw new IOException("Path required");
+        }
+        Path vaultRoot = Paths.get(ROOT_FILE).toAbsolutePath().normalize();
+        Path candidate = Paths.get(rawPath).toAbsolutePath().normalize();
+        if (!candidate.startsWith(vaultRoot)) {
+            throw new IOException("Path is outside the vault: " + rawPath);
+        }
+        return candidate;
+    }
+
+    /** File/folder names must be a single path segment — no separators, no traversal. */
+    static void requireSimpleName(String name) throws IOException {
+        if (name == null || name.isBlank()
+                || name.contains("/") || name.contains("\\") || name.contains("..")) {
+            throw new IOException("Invalid name: " + name);
+        }
     }
 
     // ── Records ───────────────────────────────────────────────────────────────

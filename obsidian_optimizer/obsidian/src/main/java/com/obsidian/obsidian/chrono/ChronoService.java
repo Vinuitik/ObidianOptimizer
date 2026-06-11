@@ -4,6 +4,7 @@ import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
+import com.obsidian.obsidian.sync.SyncQueueRepository;
 
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -30,11 +31,13 @@ public class ChronoService {
     private final FileRepository     fileRepo;
     private final NoteIndexRepository noteIndex;
     private final ImageScanService   imageScanService;
+    private final SyncQueueRepository syncQueueRepo;
 
     public ChronoService(FileMoverService fileMover, FileCheckerService fileChecker,
                          BankruptcyService bankruptcy, SpreadService spread,
                          SettingsRepository settingsRepo, FileRepository fileRepo,
-                         NoteIndexRepository noteIndex, ImageScanService imageScanService) {
+                         NoteIndexRepository noteIndex, ImageScanService imageScanService,
+                         SyncQueueRepository syncQueueRepo) {
         this.fileMover        = fileMover;
         this.fileChecker      = fileChecker;
         this.bankruptcy       = bankruptcy;
@@ -43,6 +46,7 @@ public class ChronoService {
         this.fileRepo         = fileRepo;
         this.noteIndex        = noteIndex;
         this.imageScanService = imageScanService;
+        this.syncQueueRepo    = syncQueueRepo;
     }
 
     public record ChronoResult(
@@ -87,9 +91,14 @@ public class ChronoService {
 
         fileRepo.triggerDeltaSync();
 
-        // Detect externally-edited files (via Obsidian) by comparing SHA-256 hashes.
-        // Any file whose hash changed gets its images re-queued.
-        int externallyChanged = 0;
+        // Detect changed files by comparing SHA-256 hashes. This catches both
+        // external Obsidian edits AND the frontmatter rewrites the chrono jobs
+        // above just made (spread/bankruptcy/checker write directly to disk).
+        // Each changed file gets its images re-queued AND is marked PENDING for
+        // Drive sync — without the markPending, the scheduled 2am run's changes
+        // never reached Drive until the next app restart.
+        java.nio.file.Path vaultRootPath = java.nio.file.Paths.get(vaultRoot).toAbsolutePath().normalize();
+        int changed = 0;
         for (Path mdPath : mdFiles) {
             String absPath = mdPath.toAbsolutePath().toString();
             try {
@@ -98,14 +107,17 @@ public class ChronoService {
                 String storedHash = noteIndex.getContentHash(absPath);
                 if (!newHash.equals(storedHash)) {
                     imageScanService.registerImages(absPath, content);
-                    externallyChanged++;
+                    String rel = vaultRootPath.relativize(mdPath.toAbsolutePath().normalize())
+                            .toString().replace('\\', '/');
+                    syncQueueRepo.markPending(rel, newHash);
+                    changed++;
                 }
             } catch (IOException e) {
                 log.warn("[ChronoService] hash check skip {}: {}", absPath, e.getMessage());
             }
         }
-        if (externallyChanged > 0) {
-            log.info("[ChronoService] {} externally-edited note(s) detected — images re-queued", externallyChanged);
+        if (changed > 0) {
+            log.info("[ChronoService] {} changed note(s) detected — images re-queued, sync queued", changed);
         }
 
         String today = LocalDate.now().toString();

@@ -141,10 +141,20 @@ public class SyncService {
                 byte[] plaintext = readFile(absPath, entry.path());
                 byte[] encrypted = encryptionService.encrypt(plaintext);
 
+                // Hash what was actually read — Drive metadata must describe the
+                // uploaded bytes, not the (possibly stale) hash from queue time.
+                String actualHash = ImageScanService.sha256(plaintext);
                 String driveFileId = driveService.uploadFile(
-                    entry.path(), encrypted, entry.contentHash(), deviceId, entry.driveFileId());
+                    entry.path(), encrypted, actualHash, deviceId, entry.driveFileId());
 
-                syncQueueRepo.markDone(entry.path(), driveFileId);
+                // Conditional on the queue-time hash: if an edit re-marked the row
+                // PENDING while we were uploading, it stays PENDING and the newer
+                // content goes out on the next pass.
+                boolean done = syncQueueRepo.markDoneIfHashMatches(
+                    entry.path(), driveFileId, entry.contentHash());
+                if (!done) {
+                    log.info("[SyncService.uploadPending] {} changed during upload — stays PENDING", entry.path());
+                }
                 uploaded++;
             } catch (Exception e) {
                 log.error("[SyncService.uploadPending] failed for {}: {}", entry.path(), e.getMessage());
@@ -168,12 +178,19 @@ public class SyncService {
         }
 
         String vaultRoot = settingsRepo.getVaultPath();
+        Path vaultRootPath = Paths.get(vaultRoot).toAbsolutePath().normalize();
         List<DriveFileInfo> driveFiles = driveService.listAllFiles();
-        int downloaded = 0, skipped = 0;
+        int downloaded = 0, skipped = 0, kept = 0;
 
         for (DriveFileInfo df : driveFiles) {
             try {
-                String absPath  = Paths.get(vaultRoot, df.vaultPath()).toString();
+                // vault_path comes from Drive metadata — never trust it blindly.
+                Path target = vaultRootPath.resolve(df.vaultPath()).normalize();
+                if (!target.startsWith(vaultRootPath)) {
+                    log.error("[SyncService.downloadAll] rejected Drive path escaping vault: {}", df.vaultPath());
+                    continue;
+                }
+                String absPath  = target.toString();
                 String localHash = computeLocalHash(absPath, df.vaultPath());
 
                 if (df.contentHash().equals(localHash)) {
@@ -181,17 +198,27 @@ public class SyncService {
                     continue;
                 }
 
+                // A PENDING local edit hasn't reached Drive yet — overwriting it
+                // here would destroy it (and markSynced would cancel its upload).
+                // Local wins until uploadPending has run.
+                SyncEntry existing = syncQueueRepo.findByPath(df.vaultPath());
+                if (existing != null && "PENDING".equals(existing.status())) {
+                    log.info("[SyncService.downloadAll] {} has a pending local edit — skipping download", df.vaultPath());
+                    kept++;
+                    continue;
+                }
+
                 byte[] encrypted = driveService.downloadFile(df.fileId());
                 byte[] plaintext = encryptionService.decrypt(encrypted);
                 writeDownloaded(absPath, df.vaultPath(), plaintext);
-                syncQueueRepo.markDone(df.vaultPath(), df.fileId());
+                syncQueueRepo.markSynced(df.vaultPath(), df.contentHash(), df.fileId());
                 downloaded++;
 
             } catch (Exception e) {
                 log.error("[SyncService.downloadAll] failed for {}: {}", df.vaultPath(), e.getMessage());
             }
         }
-        log.info("[SyncService.downloadAll] downloaded={}, skipped={}", downloaded, skipped);
+        log.info("[SyncService.downloadAll] downloaded={}, skipped={}, keptLocal={}", downloaded, skipped, kept);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
