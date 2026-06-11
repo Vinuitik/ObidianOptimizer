@@ -13,10 +13,14 @@ Credentials come from env vars `APP_AUTH_USERNAME` / `APP_AUTH_PASSWORD` (set in
 `POST /logout` → session invalidated → 200  
 `GET /me` → 200 + username if authenticated, 401 if not
 
-`GET /settings`, `GET /chrono/status` are public. All other API endpoints require session auth.  
+Only `/login` and `/logout` are public — **everything else requires session auth**
+(`GET /settings` was public until the security-hardening pass; it leaked the vault path).  
 To add/remove protected endpoints: `SecurityConfig.filterChain()` `authorizeHttpRequests`
 
 CSRF disabled — app is session-cookie-based, not token-based. Enabling CSRF requires adding a token to every mutating frontend request.
+
+`server.forward-headers-strategy=framework` — Spring honors `X-Forwarded-Proto: https`
+from the nginx TLS edge, so the session cookie is marked `Secure` behind the proxy.
 
 ---
 

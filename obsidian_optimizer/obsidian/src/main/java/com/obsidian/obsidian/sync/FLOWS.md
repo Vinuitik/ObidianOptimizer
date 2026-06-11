@@ -17,9 +17,11 @@ Three entry points all call `syncQueueRepo.markPending(relativePath, sha256)`:
 ```
 FileRepository.createNote/updateNote/patchNote → markPending (after imageScanService.registerImages)
 FileRepository.renameNote/moveNote             → delete(oldRelPath) + markPending(newRelPath)
+FileRepository.renameNote backlink rewrites    → markPending for every source whose [[links]] were rewritten
 FileRepository.softDeleteNote                  → delete(relPath)   — trashed files not synced
 MediaController.uploadFile                     → markPending("resources/<subdir>/<filename>")
 SyncService.initialScan()                      → scans notes table + resources/ BFS on startup
+ChronoService.runAllJobs() hash loop           → markPending for chrono frontmatter rewrites + external edits
 ```
 
 `markPending` is an idempotent upsert — safe to call on every write.  
@@ -35,16 +37,20 @@ Paths are vault-relative with forward slashes: `folder/note.md`, `resources/imag
 syncQueueRepo.findByStatus("PENDING")
 for each entry:
   readFile(vaultRoot + entry.path)          — UTF-8 string for .md, raw bytes for resources
+  actualHash = sha256(plaintext)            — hash of what is ACTUALLY uploaded (not queue-time hash)
   VaultEncryptionService.encrypt(plaintext)
     → gzip(plaintext)
     → random 12B IV
     → AES-256-GCM encrypt(compressed)
     → [12B IV][ciphertext+tag]
-  DriveService.uploadFile(relativePath, bytes, contentHash, deviceId, existingFileId)
+  DriveService.uploadFile(relativePath, bytes, actualHash, deviceId, existingFileId)
     → ensureFolderPath (creates Drive folders, cached in folderIdCache)
     → files().update(existingFileId) if known, else files().create()
     → stores appProperties: {vault_path, content_hash, device_id, uploaded_at}
-  syncQueueRepo.markDone(path, driveFileId)
+  syncQueueRepo.markDoneIfHashMatches(path, driveFileId, entry.contentHash)
+    → conditional UPDATE (WHERE content_hash matches): if the note was edited
+      mid-upload (row re-marked PENDING with a new hash), DONE is refused and
+      the newer content uploads next pass — closes the lost-edit race
 ```
 
 Drive file name: `<original-filename>.enc` (e.g. `note.md.enc`, `photo.png.enc`).  
@@ -60,8 +66,12 @@ To change schedule: `SYNC_UPLOAD_CRON` env var / `sync.upload.cron` property
 ```
 DriveService.listAllFiles()               — recursive BFS of Drive sync root
 for each DriveFileInfo:
+  validate vault_path appProperty         — resolve under vault root, reject traversal (../)
   computeLocalHash(absPath, relativePath) — SHA-256 of local file (empty string if missing)
   if contentHash matches Drive → skip
+  if sync_queue row is PENDING → skip     — LOCAL WINS: a queued local edit hasn't
+                                            reached Drive yet; overwriting it here
+                                            would silently destroy it
   DriveService.downloadFile(fileId)       — byte[]
   VaultEncryptionService.decrypt(bytes)
     → AES-256-GCM decrypt (IV from first 12 bytes)
@@ -69,11 +79,13 @@ for each DriveFileInfo:
   writeDownloaded(absPath, relativePath, plaintext):
     .md  → Files.writeString + noteIndex.upsert + noteLinkRepo.updateLinks + imageScanService.registerImages
     else → Files.write (raw bytes)
-  syncQueueRepo.markDone(path, driveFileId)
+  syncQueueRepo.markSynced(path, driveContentHash, driveFileId)  — upsert DONE
+    (upsert because files created on another device have no local row yet)
 ```
 
-Download is last-write-wins with no conflict resolution (V1 scope).  
-Future conflict detection: compare `device_id` + `content_hash` in `appProperties` before downloading.
+Conflict rule: **PENDING local edits always win over Drive** until uploaded.
+Files without pending edits are overwritten by Drive (Drive-wins for clean files).
+Future per-file merge: compare `device_id` + `uploaded_at` in `appProperties`.
 
 ---
 
@@ -149,5 +161,9 @@ sync_queue(
 | Device ID computation | `DeviceIdentityService.computeDeviceId()` |
 | Upload batch (PENDING → Drive) | `SyncService.uploadPending()` |
 | Download logic (Drive → disk) | `SyncService.downloadAll()` |
+| Upload race window (DONE refusal) | `SyncQueueRepository.markDoneIfHashMatches()` |
+| Download bookkeeping (upsert DONE) | `SyncQueueRepository.markSynced()` |
+| Local-wins download rule | `SyncService.downloadAll()` PENDING check |
+| Drive path validation | `SyncService.downloadAll()` `target.startsWith(vaultRootPath)` |
 | Initial vault scan | `SyncService.initialScan()` |
 | Folder ID cache invalidation | `DriveService.folderCache.clear()` |

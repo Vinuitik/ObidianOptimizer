@@ -24,13 +24,15 @@ notes    ← chrono (ChronoService calls FileRepository.listMdPaths, triggerDelt
 
 ## Infrastructure
 
-`docker-compose.yml` — three services. Start: `.\start.ps1`.
+`docker-compose.yml` — four services (+ optional tunnel). Start: `.\start.ps1` (generates self-signed certs into `./certs` on first run).
 
-| Service | Port | Notes |
+| Service | Host port | Notes |
 |---|---|---|
-| Java backend | 8082 | WAR, self-executable jar |
-| Postgres + pgvector | 5432 | `pgvector/pgvector:pg16`, data in `postgres_data` volume |
-| Frontend (Nginx) | 8083 | `/api/*` proxied to backend |
+| Frontend (Nginx TLS edge) | 8443 (https), 8083 (http→https redirect) | security headers, login rate limit, `/api/*` → backend; internal :8081 for tunnel ingress |
+| Java backend | 127.0.0.1:8084 | loopback only — browsers go through nginx |
+| Postgres + pgvector | 127.0.0.1:5432 | loopback only; `pgvector/pgvector:pg16`, data in `postgres_data` volume |
+| Embedder + MCP | 127.0.0.1:8000 | `/embed`, `/health`, and MCP at `/mcp` (X-API-Key) |
+| cloudflared | — | opt-in: `docker compose --profile tunnel up`; public hostname → `http://frontend:8081` |
 
 ## Testing Quick Reference
 

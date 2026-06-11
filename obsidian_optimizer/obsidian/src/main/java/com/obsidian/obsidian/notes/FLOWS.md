@@ -38,6 +38,20 @@ To trigger full re-index at runtime: `PUT /api/settings { vaultPath }` (same pat
 
 ---
 
+## Path Guards (security boundary)
+
+Every client-supplied path goes through `FileRepository.requireInsideVault(rawPath)` —
+normalize → must resolve under the vault root, else IOException (→ 400). Applied in:
+getText, getDirectChildren, createFolder, createNote, updateNote, patchNote,
+renameNote, moveNote, softDeleteNote.
+
+New file/folder names go through `FileRepository.requireSimpleName(name)` —
+rejects `/`, `\`, `..` (single path segment only). Applied in: createFolder, createNote, renameNote.
+
+Without these, any authenticated request could read or write arbitrary files on the container.
+
+---
+
 ## FrontmatterParser
 
 `FrontmatterParser.parse(rawContent)` → `NoteMetadata(srDue, srInterval, srEase)`  
@@ -53,12 +67,13 @@ To add a new frontmatter field: `FrontmatterParser.parse()` + `NoteIndexReposito
 
 ```sql
 notes(
-  path        TEXT PRIMARY KEY,
-  title       TEXT NOT NULL,
-  sr_due      DATE,           -- NULL = no review date
-  sr_interval INT,
-  sr_ease     INT,
-  modified_at BIGINT NOT NULL -- file.lastModified() epoch ms
+  path         TEXT PRIMARY KEY,
+  title        TEXT NOT NULL,
+  sr_due       DATE,           -- NULL = no review date
+  sr_interval  INT,
+  sr_ease      INT,
+  modified_at  BIGINT NOT NULL, -- file.lastModified() epoch ms
+  content_hash TEXT            -- SHA-256 of content; maintained by ImageScanService.registerImages()
 )
 INDEX idx_notes_sr_due ON notes(sr_due)
 ```
@@ -151,9 +166,14 @@ Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String>
 → `FileRepository.renameNote()`:
 1. `NoteLinkRepository.findSourcesByTarget(oldName)` → backlink list
 2. `File.renameTo()` on disk
-3. Rewrite `[[oldName]]` → `[[newName]]` in each backlink source
+3. Rewrite `[[oldName]]` → `[[newName]]` in each backlink source — heading anchors
+   (`[[oldName#section]]`) and aliases (`[[oldName|text]]`) are preserved.
+   Each rewritten source is re-hashed (`registerImages`) and `markPending`'d for Drive sync.
 4. `NoteIndexRepository.rename(oldPath, newPath, newTitle)`
 5. `NoteLinkRepository.renameTarget()` + `renameSource()`
+
+`extractTargets` strips `#heading` anchors, so `[[Note#sec]]` indexes as a link to `Note`
+(and is found as a backlink during rename). `[[#same-file-heading]]` produces no link row.
 
 ---
 
@@ -188,6 +208,7 @@ Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String>
 | Review sort order | `NoteIndexRepository.getReviewNotesPaged()` ORDER BY |
 | Frontmatter keys indexed | `FrontmatterParser.parse()` + `NoteIndexRepository` schema + `upsert()` |
 | Diff hunk DTO | `FileRepository.PatchHunk` |
-| Wiki-link extract regex | `NoteLinkRepository.WIKI_LINK` |
+| Wiki-link extract regex | `NoteLinkRepository.WIKI_LINK` (+ `#anchor` strip in `extractTargets`) |
 | Wiki-link rewrite regex | `NoteLinkRepository.rewriteLinks()` |
+| Vault path boundary | `FileRepository.requireInsideVault()` / `requireSimpleName()` |
 | Force full re-index | `TRUNCATE notes; TRUNCATE note_links;` in psql → restart, or `PUT /api/settings` with same vaultPath |

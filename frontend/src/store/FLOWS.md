@@ -101,12 +101,17 @@ Re-fetch on every switch picks up external changes. `applyHunks` falls back to d
 ```
 Remove from tabs[]
 Revoke all blobURLs in closing tab's pendingFiles
-If was active + more tabs remain → switchTab(min(index, newLen-1))
+If was active + more tabs remain → set activeTabIndex: -1, THEN switchTab(min(index, newLen-1))
 If was active + no tabs remain   → clear all editor state
 If was not active                → adjust activeTabIndex
 ```
 
 No disk write — unsaved changes are discarded silently.
+
+The `activeTabIndex: -1` reset before switchTab is load-bearing: switchTab
+early-returns when `index === activeTabIndex` (closing a non-last active tab
+left them equal → editor kept showing the closed note), and `_snapshotTab`
+must not write the closed tab's dirty state onto the tab taking its slot.
 
 ---
 

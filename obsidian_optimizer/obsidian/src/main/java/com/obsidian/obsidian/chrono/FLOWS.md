@@ -26,7 +26,11 @@ ChronoService.runAllJobs()
   3. BankruptcyService.run(mdFiles, limit)    — limit from SettingsRepository.getBankruptcyLimit()
   4. SpreadService.run(mdFiles, max)          — max from SettingsRepository.getMaxDailyReviews()
   5. FileRepository.triggerDeltaSync()        — delta resync so DB reflects modified files
-  6. SettingsRepository.set("chronoLastRunDate", today)
+  6. Hash loop: sha256(file) vs notes.content_hash — for every changed file
+     (chrono rewrites from steps 2-4 AND external Obsidian edits):
+     imageScanService.registerImages() + syncQueueRepo.markPending()
+     — without the markPending, the 2am run's changes never reached Drive until restart
+  7. SettingsRepository.set("chronoLastRunDate", today)
 ```
 
 `FileRepository.listMdPaths()` called once in `runAllJobs()`; result passed to all services. Reuses `bfsDiskFiles()` + `EXCLUDED_DIRS` — `_trash/` and `resources/` skipped.
@@ -82,6 +86,11 @@ Shared utility used by `FileCheckerService` and `BankruptcyService`.
 `read(Path)` → `SrFields(due, interval, ease)` or null if no valid sr-due  
 `write(Path, SrFields)` → rewrites `sr-due/sr-interval/sr-ease` in place, preserves line endings  
 `hasInvalidDate(Path)` → true if line 2 ends with `"Invalid date"`
+
+**Frontmatter-scoped**: read/write only touch lines strictly between the opening and
+closing `---` (`frontmatterBounds()`). An `sr-due:` mention in a note body or code
+fence is never parsed or rewritten — matches `FrontmatterParser` (notes package).
+Files without a frontmatter block are skipped entirely.
 
 ---
 
