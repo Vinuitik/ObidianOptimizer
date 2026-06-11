@@ -14,6 +14,26 @@
       "name": "wrapper.url",
       "type": "java.lang.String",
       "description": "Base URL for the host-wrapper image processing service. Default: http://host.docker.internal:5001."
+    },
+    {
+      "name": "sync.passphrase",
+      "type": "java.lang.String",
+      "description": "Passphrase used to derive the AES-256 encryption key for vault sync. Set via SYNC_PASSPHRASE env var."
+    },
+    {
+      "name": "sync.google.service-account-json",
+      "type": "java.lang.String",
+      "description": "Full JSON content of the Google service account key. Set via GOOGLE_SERVICE_ACCOUNT_JSON env var."
+    },
+    {
+      "name": "sync.google.drive.folder-id",
+      "type": "java.lang.String",
+      "description": "Google Drive folder ID to use as the sync root. Set via GOOGLE_DRIVE_FOLDER_ID env var."
+    },
+    {
+      "name": "sync.upload.cron",
+      "type": "java.lang.String",
+      "description": "Cron expression controlling scheduled upload cadence. Set via SYNC_UPLOAD_CRON env var. Default: every 6 hours."
     }
   ]
 }
