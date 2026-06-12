@@ -209,8 +209,48 @@ VRAM per stage (GTX 1650, 4GB, mxbai 670MB always resident → ~3.3GB free):
 ## Decision points
 
 1. **Synthesis LLM** — ✅ DECIDED (user, 2026-06-11): Claude API, **Haiku 4.5 default** (`claude-haiku-4-5`), Sonnet allowed via `SYNTH_MODEL` env var for hard sources. Budget guard: bundle text only, 2 passes, no images in context. Local LLM ruled out — 4GB GPU writes worse notes than Haiku.
-2. **Send keyframes to VLM for captions, or embed raw?** — Recommended: embed raw, no captions at ingest time. The existing pending_image_jobs pipeline will caption/index them lazily anyway. Zero extra cost, no duplicate path.
+   *Implementation note (2026-06-13): `ANTHROPIC_API_KEY` is currently empty in .env, so v1 routes synthesis through host-wrapper `POST /complete` (same path as the flashcard agent — free chain first, claude-cli subscription Haiku last). `SYNTH_BACKEND=anthropic` env switch flips to the direct Claude API once a key exists. Same Haiku-class final model either way.*
+2. **Send keyframes to VLM for captions, or embed raw?** — ✅ DECIDED (2026-06-13, recommendation accepted): embed raw, no captions at ingest time. The existing pending_image_jobs pipeline will caption/index them lazily anyway. Zero extra cost, no duplicate path.
 3. **Video downloads** — ✅ DECIDED (user, 2026-06-11): yt-dlp lives in **VideoManager**, a separate container (it is a thin yt-dlp wrapper). Ingest calls it over HTTP: `POST /api/v1/download {url}` for full video, plus a new subs-only endpoint to add (`POST /api/v1/subs {url}` → VTT, no video download) for the captions-fast-path. No yt-dlp binary in the embedder image.
+
+---
+
+## Note splitter — post-factum breakup of oversized notes (added 2026-06-13)
+
+User-triggered harness, NOT part of the ingest pipeline run: an existing note grew
+too big → split it into N concept notes + rewrite the original as a hub.
+
+```
+POST /ingest/split-note {note_path}   (embedder; also MCP tool split_note)
+  → read note from /vault (read-only)
+  → MarkdownPreprocessor-style sectioning (headings → segments) — deterministic
+  → reuse OUTLINE pass (same prompt/schema as ingest): segments → N note plans
+  → reuse WRITE pass per planned note
+  → original becomes a hub: title + 1-line summary per child + [[links]] (deterministic template)
+  → all writes via Java backend API (create children, PATCH original) — index/sync stay consistent
+Guard: refuse if note < SPLIT_MIN_CHARS (default 6000) — splitting small notes is noise.
+```
+
+Shares `synthesize.py` outline/write code paths — the splitter is "ingest where the
+extractor is the note itself".
+
+---
+
+## Execution plan — v1 stages (2026-06-13)
+
+Priority: user's immediate pain is **audio/video files sitting in notes untranscribed**.
+
+| Stage | Builds | Proves |
+|---|---|---|
+| **1. A/V spine** | ffmpeg + faster-whisper in embedder image; `ingest/router.py`, `extract_av.py` (local files first, YouTube captions path stubbed to VideoManager), bundle contract, async job API (`POST /ingest`, `GET /ingest/{id}`) | local .mp3/.mp4 → timestamped transcript bundle |
+| **2. Synthesis** | `bundle.py` windowing, `synthesize.py` outline+write via host-wrapper `/complete`, `validate.py`, find_home_for_note, create via Java backend | bundle → real vault notes, end to end |
+| **3. PDF + web** | `extract_pdf.py` (PyMuPDF + Tesseract fallback), `extract_web.py` (trafilatura) | PDF/article → notes |
+| **4. Keyframes** | `keyframes.py` (PySceneDetect → CLIP filter/dedupe), frames returned to Java for vault write | video slides land as ![[frames]] in notes |
+| **5. Splitter + UI** | `/ingest/split-note` + MCP tools (`ingest_resource`, `split_note`), dashboard "Video & Resource Queue" card wired to `/ingest` jobs | full loop visible in UI |
+
+VideoManager subs-only endpoint (`POST /api/v1/subs`) lands with stage 1 (it is ~20 lines around existing yt-dlp plumbing).
+
+**GPU caveat (stage 1):** ctranslate2 ≥ 4.5 requires cuDNN 9; the embedder base image is cudnn8. Pin `ctranslate2<4.5` (or run whisper int8 on CPU — acceptable for overnight jobs) — decide at implementation against what actually resolves in the image.
 
 ---
 
