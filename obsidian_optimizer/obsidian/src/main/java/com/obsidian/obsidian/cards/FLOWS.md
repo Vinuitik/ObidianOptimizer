@@ -1,8 +1,40 @@
 # Cards Domain Flows
 
-Files: CardRepository.java, CardGenerationService.java, CardJobWorker.java, CardController.java
+Files: CardRepository.java, CardGenerationService.java, CardJobWorker.java, CardController.java, FsrsService.java, BanditService.java, ReviewService.java, ReviewController.java, NoteReviewRepository.java
 Python agent: embedder/flashcards/generate.py, validate.py, solver_sandbox.py
 Architecture: architecture_plans/FLASHCARDS_ARCH.md
+
+---
+
+## Review Flow (FSRS + bandit)
+
+```
+POST /api/reviews/grade {notePath, band}     band ∈ HARD/GOOD/EASY/VERY_EASY
+  → ReviewService.grade():
+    1. delayed bandit reward: previous pending (bucket, arm) on the note_reviews
+       row gets α+1 if band ≥ GOOD else β+1   (BanditService.reward)
+    2. pure FSRS-6 update (FsrsService — recall path only, NO Again/lapse grade;
+       VERY_EASY maps to FSRS Easy, the distinction exists for band labels/rewards)
+    3. bandit (Thompson Sampling, Beta per bucket×arm) samples arm
+       m ∈ {0.7, 0.85, 1.0, 1.2, 1.5}; due = now + round(fsrsInterval × m)
+       — Option A: the arm scales the SCHEDULED DATE only, never stored S/D
+  → upsert note_reviews (stability, difficulty, due, pending_bucket, pending_arm)
+
+GET /api/reviews/due?limit=50 → notes due now, most overdue first
+```
+
+Both UI modes converge here: slideshow posts the pressed button's band;
+flashcards mode computes the band from the assignment score via
+`ReviewService.Band.fromScore()` (GRADE_BANDS 40/70/90).
+
+Context buckets: difficulty {<4, 4-7, >7} × stability {<7d, 7-30d, >30d} —
+9 buckets × 5 arms. Historical recall rate as context: deferred until attempt
+history accumulates.
+
+FsrsService is pinned against py-fsrs outputs (FsrsServiceTest); reference
+values regenerate via `embedder/_fsrs_reference.py`. Subtlety: difficulty
+mean-reversion uses the UNCLAMPED Easy initial difficulty (negative with
+default weights) — matching py-fsrs exactly.
 
 ---
 
@@ -76,3 +108,9 @@ call-site hooks. The attempt ledger (card_gen_attempts) bounds retries.
 | Sandbox limits | `solver_sandbox.py → TIMEOUT_S / MEM_MB / ALLOWED_* / DENIED_NAMES` |
 | Random validation samples | `validate.py → K_SAMPLES` |
 | Eligibility rule | `CardRepository.findNotesNeedingCards()` WHERE clause |
+| Desired retention | `fsrs.desired-retention` property (default 0.9) |
+| FSRS weights | `FsrsService.W` (FSRS-6 defaults — regenerate test refs if changed) |
+| Bandit arms | `BanditService.ARMS` |
+| Context bucketing | `BanditService.bucket()` |
+| Score→band thresholds | `ReviewService.Band.fromScore()` (40/70/90) |
+| Reward rule (recalled) | `ReviewService.grade()` — `band != HARD` |
