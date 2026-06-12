@@ -66,6 +66,25 @@ notes.content_hash ↔ cards.source_hash diff IS the work list — covers app
 edits, sync downloads, chrono rewrites, and external Obsidian edits with zero
 call-site hooks. The attempt ledger (card_gen_attempts) bounds retries.
 
+## Assignment Flow (sessions)
+
+```
+POST /api/assignments {scope, points}        scope = note path or folder prefix
+  → AssignmentService.build(): greedy round-robin bag draws per (scope, type)
+    (AssignmentRepository.drawCard — drawn_cycle < current_cycle, refill bumps
+    the cycle), final slot tries difficulty == remaining budget;
+    exercises rolled NOW via embedder /flashcards/roll → params + rendered +
+    expected answer frozen into assignments.variants
+POST /api/attempts {assignmentId, cardId, answer}
+  → mcq: index compare · exercise: frozen expected (numeric tolerance /
+    normalized string) · open: embedder /flashcards/judge (cosine bands
+    0.70/0.85, middle band → wrapper CLI judge with key_points rubric)
+  → verdict CORRECT (full difficulty points) / PARTIAL (half) / WRONG (0)
+POST /api/assignments/{id}/complete
+  → per-note score = Σ earned / Σ difficulty (GROUP BY note)
+  → ReviewService.Band.fromScore → grade() → FSRS + bandit → due dates
+```
+
 ## REST Endpoints (session auth)
 
 | Method | Path | Does |
@@ -73,6 +92,11 @@ call-site hooks. The attempt ledger (card_gen_attempts) bounds retries.
 | GET | `/api/cards?notePath=` | ACTIVE cards for a note |
 | GET | `/api/cards/stats` | active/archived/notes-with-cards counts |
 | POST | `/api/cards/generate {notePath}` | force generation now, synchronous |
+| GET | `/api/reviews/due` | notes due per FSRS (+bandit), most overdue first |
+| POST | `/api/reviews/grade {notePath, band}` | manual grade (slideshow mode) |
+| POST | `/api/assignments {scope, points}` | build a session |
+| POST | `/api/attempts {assignmentId, cardId, answer}` | verify + record one answer |
+| POST | `/api/assignments/{id}/complete` | score → bands → schedule notes |
 
 ## Card types (payload JSONB)
 

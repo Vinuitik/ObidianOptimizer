@@ -49,6 +49,18 @@ class GenerateCardsRequest(BaseModel):
     source_hash: str | None = None  # omitted → sha256(content)
 
 
+class RollRequest(BaseModel):
+    payload: dict                   # full exercise card payload
+    condition: str | None = None    # named condition; omitted → random sample
+
+
+class JudgeRequest(BaseModel):
+    question: str
+    answer: str
+    reference_answers: list[str]
+    key_points: list[str] | None = None
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -93,6 +105,41 @@ def generate_cards(req: GenerateCardsRequest):
 
     source_hash = req.source_hash or hashlib.sha256(content.encode("utf-8")).hexdigest()
     return card_gen.generate_for_note(req.note_path, content, source_hash)
+
+
+@app.post("/flashcards/roll")
+def roll_exercise(req: RollRequest):
+    """Roll an exercise variant: pick/sample params, render the template, and
+    compute the expected answer NOW (frozen into the assignment by the backend
+    so answer-time verification needs no further hops)."""
+    import random
+
+    from flashcards import validate as card_validate
+    from flashcards.solver_sandbox import SandboxError, run_solver
+
+    payload = req.payload
+    try:
+        if req.condition:
+            match = next((c for c in payload.get("conditions", [])
+                          if c.get("name") == req.condition), None)
+            if match is None:
+                raise HTTPException(status_code=422, detail=f"unknown condition: {req.condition}")
+            params = match["values"]
+        else:
+            params = card_validate._sample_params(payload["params"], random.Random())
+        rendered = payload["template"].format(**params)
+        expected = run_solver(payload["solver"], params)
+    except (SandboxError, KeyError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=f"roll failed: {e}")
+    return {"params": params, "rendered": rendered, "expected": expected}
+
+
+@app.post("/flashcards/judge")
+def judge_answer(req: JudgeRequest):
+    """Open-answer verification: banded cosine, LLM judge for the middle band."""
+    from flashcards.judge import judge_open_answer
+
+    return judge_open_answer(req.question, req.answer, req.reference_answers, req.key_points)
 
 
 # ---------------------------------------------------------------------------
