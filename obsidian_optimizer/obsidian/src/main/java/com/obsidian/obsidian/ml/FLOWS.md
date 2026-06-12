@@ -1,6 +1,6 @@
 # ML Domain Flows
 
-Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java
+Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java, NoteEmbeddingWorker.java
 
 Python embedder: embedder/main.py, embedder/model_runtime.py, embedder/mcp_server.py, embedder/Dockerfile, embedder/requirements.txt
 
@@ -68,25 +68,43 @@ To change vault mount: `VAULT_DIR` env var + compose volume `${HOST_VAULT_PATH}:
 
 ---
 
-## Embedding Pipeline
+## Embedding Pipeline (note text)
 
-Trigger: `EmbeddingService.indexNote(path)` — called after note create/update.
+No call-site hooks: `NoteEmbeddingWorker` (`@Scheduled` every 30s, batch 20) diffs
+`notes.content_hash ↔ notes.embedded_hash` — the diff IS the work list (same
+philosophy as the cards worker). Covers note creation, app edits, sync downloads,
+chrono rewrites, external Obsidian edits (hash loop), and first-boot backfill
+(embedded_hash starts NULL for every note).
 
 ```
-rawContent
-  → MarkdownPreprocessor.chunkNote(path, rawContent) → List<NoteChunk>
-  → for each chunk:
-      SHA-256(chunk.text) vs note_chunks.content_hash → skip if unchanged
-      POST http://embedder:8000/embed {"texts": [chunk.text]}
-      → parse embeddings[0] → float[1024]
-      → NoteChunkRepository.upsertChunk(path, index, text, embedding, hash)
-      → fts_vector updated via upsert trigger
-  → NoteChunkRepository.deleteStaleChunks(path, newCount)
+NoteEmbeddingWorker.embedPendingNotes():
+  NoteIndexRepository.findNotesNeedingEmbedding(20)   — (path, content_hash) pairs
+  → per note: EmbeddingService.indexNote(path):
+      rawContent
+        → MarkdownPreprocessor.chunkNote(path, rawContent) → List<NoteChunk>
+        → for each chunk:
+            SHA-256(chunk.text) vs note_chunks.content_hash (source='text') → skip if unchanged
+            POST http://embedder:8000/embed {"texts": [chunk.text]}
+            → parse embeddings[0] → float[1024]
+            → NoteChunkRepository.upsertChunk(path, index, 'text', text, embedding, hash)
+        → deleteStaleChunks(path, 'text', newCount)
+        → returns false on any embed failure
+  → success: markEmbedded(path, hash) — guarded UPDATE (path AND content_hash=hash)
+    so a note edited mid-index stays in the work list
+  → failure (embedder down): stays in diff, retried next cycle
 ```
+
+**source column**: text chunks (`source='text'`) and image chunks (`source='image'`)
+have independent chunk_index ranges — unique key is (note_path, source, chunk_index).
+Pre-migration rows default to 'image' (they were all written by the image worker).
+
+Orphan cleanup: `NoteEmbeddingWorker.purgeOrphanChunks()` (daily) deletes chunks
+whose note_path no longer exists in `notes` (deleted/renamed notes).
 
 To change model: `EMBED_MODEL` env var in docker-compose, rebuild embedder container  
 To change embedder URL: `EMBEDDER_URL` env var / `application.properties → embedder.url`  
-To change chunk size/overlap: `MarkdownPreprocessor` constants
+To change chunk size/overlap: `MarkdownPreprocessor` constants  
+To change batch/schedule: `NoteEmbeddingWorker.BATCH_SIZE / @Scheduled`
 
 ---
 
@@ -221,3 +239,6 @@ To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
 | Chunk size / overlap | `MarkdownPreprocessor` constants |
 | Image processing prompt | `host-wrapper/main.py → IMAGE_PROMPT` |
 | Image worker schedule | `ImageProcessingWorker @Scheduled` |
+| Note embedding batch/schedule | `NoteEmbeddingWorker.BATCH_SIZE / @Scheduled` |
+| Embedding work list rule | `NoteIndexRepository.findNotesNeedingEmbedding()` |
+| Orphan chunk cleanup | `NoteEmbeddingWorker.purgeOrphanChunks()` (daily) |

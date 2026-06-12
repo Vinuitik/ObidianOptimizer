@@ -1,6 +1,7 @@
 package com.obsidian.obsidian.cards;
 
 import jakarta.annotation.PostConstruct;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -8,6 +9,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+// attempts.card_id REFERENCES cards(id) — CardRepository.initSchema must run first.
+// Without this, first boot on a FRESH database fails (alphabetical bean order
+// initializes AssignmentRepository before CardRepository).
+@DependsOn("cardRepository")
 @Repository
 public class AssignmentRepository {
 

@@ -148,7 +148,8 @@ public class ImageProcessingWorker {
                 return;
             }
 
-            // Determine starting chunk_index after existing text chunks for this note
+            // Image chunks live in their own source='image' index range — appended
+            // after this note's existing image chunks, independent of text chunks
             int imageChunkStartIndex = getNextChunkIndex(job.getNotePath());
 
             List<String> textChunks = splitImageText(extractedText);
@@ -158,7 +159,7 @@ public class ImageProcessingWorker {
                 float[] embedding = embeddingService.embed(chunk);
 
                 if (embedding != null) {
-                    chunkRepo.upsertChunk(job.getNotePath(), imageChunkStartIndex + i, chunk, embedding, hash);
+                    chunkRepo.upsertChunk(job.getNotePath(), imageChunkStartIndex + i, "image", chunk, embedding, hash);
                 }
             }
 
@@ -194,13 +195,9 @@ public class ImageProcessingWorker {
     }
 
     private int getNextChunkIndex(String notePath) {
-        // Image chunks are appended after text chunks — find the highest existing index + 1
-        try {
-            Integer max = chunkRepo.queryMaxChunkIndex(notePath);
-            return max == null ? 0 : max + 1;
-        } catch (Exception e) {
-            return 10_000; // safe offset: image chunks start well after text chunks
-        }
+        // Highest existing image-chunk index + 1 (text chunks are a separate range)
+        Integer max = chunkRepo.queryMaxChunkIndex(notePath, "image");
+        return max == null ? 0 : max + 1;
     }
 
     /** Splits large VLM output into overlapping chunks. */

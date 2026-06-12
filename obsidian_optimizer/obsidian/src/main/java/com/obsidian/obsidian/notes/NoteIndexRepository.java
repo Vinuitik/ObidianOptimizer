@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.sql.Date;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -45,6 +46,32 @@ public class NoteIndexRepository {
             "CREATE INDEX IF NOT EXISTS idx_notes_sr_due ON notes(sr_due)");
         jdbc.execute(
             "ALTER TABLE notes ADD COLUMN IF NOT EXISTS content_hash TEXT");
+        // content_hash of the version whose text chunks are in note_chunks —
+        // the diff against content_hash IS the embedding work list (NoteEmbeddingWorker)
+        jdbc.execute(
+            "ALTER TABLE notes ADD COLUMN IF NOT EXISTS embedded_hash TEXT");
+    }
+
+    /** Notes whose text changed since they were last embedded (or never were).
+     *  Returns path → content_hash at selection time. */
+    public Map<String, String> findNotesNeedingEmbedding(int limit) {
+        Map<String, String> out = new LinkedHashMap<>();
+        jdbc.query("""
+            SELECT path, content_hash FROM notes
+            WHERE content_hash IS NOT NULL
+              AND content_hash IS DISTINCT FROM embedded_hash
+            ORDER BY modified_at DESC
+            LIMIT ?
+            """, rs -> { out.put(rs.getString("path"), rs.getString("content_hash")); }, limit);
+        return out;
+    }
+
+    /** Records that {@code indexedHash} is fully embedded. Guarded so a note
+     *  edited mid-indexing stays in the work list (hash no longer matches). */
+    public void markEmbedded(String path, String indexedHash) {
+        jdbc.update(
+            "UPDATE notes SET embedded_hash = ? WHERE path = ? AND content_hash = ?",
+            indexedHash, path, indexedHash);
     }
 
     public void syncWithDisk(List<File> diskFiles) {

@@ -37,37 +37,45 @@ public class EmbeddingService {
     }
 
     /**
-     * Full index pipeline for a single note: preprocess → chunk → hash-check → embed → upsert.
+     * Full index pipeline for a single note's TEXT chunks:
+     * preprocess → chunk → hash-check → embed → upsert. Image chunks
+     * (source='image') are owned by ImageProcessingWorker and untouched here.
+     *
+     * @return true when every chunk is indexed (or unchanged) — false on any
+     *         read/embed failure so the caller can retry the note later.
      */
-    public void indexNote(String path) {
+    public boolean indexNote(String path) {
         String content;
         try {
             content = Files.readString(Paths.get(path));
         } catch (IOException e) {
             log.warn("[EmbeddingService] cannot read {}: {}", path, e.getMessage());
-            return;
+            return false;
         }
 
         List<NoteChunk> chunks = preprocessor.chunkNote(path, content);
+        boolean allOk = true;
 
         for (NoteChunk chunk : chunks) {
             String newHash = ImageScanService.sha256(chunk.getText());
-            String storedHash = chunkRepo.getContentHash(path, chunk.getChunkIndex());
+            String storedHash = chunkRepo.getContentHash(path, "text", chunk.getChunkIndex());
             if (newHash.equals(storedHash)) {
                 continue;
             }
 
             float[] embedding = embed(chunk.getText());
             if (embedding == null) {
-                log.warn("[EmbeddingService] embed failed for {}#{} — skipping", path, chunk.getChunkIndex());
+                log.warn("[EmbeddingService] embed failed for {}#{} — will retry", path, chunk.getChunkIndex());
+                allOk = false;
                 continue;
             }
 
-            chunkRepo.upsertChunk(path, chunk.getChunkIndex(), chunk.getText(), embedding, newHash);
+            chunkRepo.upsertChunk(path, chunk.getChunkIndex(), "text", chunk.getText(), embedding, newHash);
         }
 
-        chunkRepo.deleteStaleChunks(path, chunks.size() - 1);
-        log.debug("[EmbeddingService] indexed {} chunk(s) for {}", chunks.size(), path);
+        chunkRepo.deleteStaleChunks(path, "text", chunks.size() - 1);
+        log.debug("[EmbeddingService] indexed {} text chunk(s) for {}", chunks.size(), path);
+        return allOk;
     }
 
     /**

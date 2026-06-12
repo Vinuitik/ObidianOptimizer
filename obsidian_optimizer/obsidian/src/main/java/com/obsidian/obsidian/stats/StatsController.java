@@ -49,11 +49,11 @@ public class StatsController {
     public Map<String, Object> stats() {
         Map<String, Object> out = new LinkedHashMap<>();
 
-        // 1. Vector embedding progress — notes with at least one embedded chunk.
-        //    (Notes whose content is all sub-50-char fragments never produce
-        //    chunks, so "embedded" can stay slightly below "total" forever.)
+        // 1. Vector embedding progress — a note counts as embedded when its
+        //    current content_hash equals embedded_hash (NoteEmbeddingWorker)
         long notesTotal    = count("SELECT COUNT(*) FROM notes");
-        long notesEmbedded = count("SELECT COUNT(DISTINCT note_path) FROM note_chunks");
+        long notesEmbedded = count(
+            "SELECT COUNT(*) FROM notes WHERE embedded_hash IS NOT NULL AND embedded_hash = content_hash");
         long chunksTotal   = count("SELECT COUNT(*) FROM note_chunks");
         out.put("embedding", Map.of(
             "notesTotal", notesTotal,

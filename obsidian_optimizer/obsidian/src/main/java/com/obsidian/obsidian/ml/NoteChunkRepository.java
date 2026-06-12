@@ -27,43 +27,57 @@ public class NoteChunkRepository {
                 id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 note_path     TEXT NOT NULL,
                 chunk_index   INT  NOT NULL,
+                source        TEXT NOT NULL DEFAULT 'image',
                 text          TEXT NOT NULL,
                 embedding     vector(1024),
                 content_hash  TEXT NOT NULL,
-                fts_vector    TSVECTOR,
-                UNIQUE (note_path, chunk_index)
+                fts_vector    TSVECTOR
             )
             """);
+        // Migration: text and image chunks have independent index ranges.
+        // Pre-source rows were ALL written by the image worker → default 'image' is correct.
+        jdbc.execute(
+            "ALTER TABLE note_chunks ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'image'");
+        jdbc.execute(
+            "ALTER TABLE note_chunks DROP CONSTRAINT IF EXISTS note_chunks_note_path_chunk_index_key");
+        jdbc.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_note_chunks_path_source_idx ON note_chunks(note_path, source, chunk_index)");
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_chunks_fts ON note_chunks USING GIN(fts_vector)");
         // ivfflat index requires rows to exist first; created lazily by EmbeddingService after bulk insert
     }
 
-    public void upsertChunk(String notePath, int chunkIndex, String text,
+    public void upsertChunk(String notePath, int chunkIndex, String source, String text,
                             float[] embedding, String contentHash) {
         jdbc.update("""
-            INSERT INTO note_chunks(note_path, chunk_index, text, embedding, content_hash, fts_vector)
-            VALUES (?, ?, ?, ?::vector, ?, to_tsvector('english', ?))
-            ON CONFLICT (note_path, chunk_index) DO UPDATE SET
+            INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector)
+            VALUES (?, ?, ?, ?, ?::vector, ?, to_tsvector('english', ?))
+            ON CONFLICT (note_path, source, chunk_index) DO UPDATE SET
               text         = EXCLUDED.text,
               embedding    = EXCLUDED.embedding,
               content_hash = EXCLUDED.content_hash,
               fts_vector   = EXCLUDED.fts_vector
             """,
-            notePath, chunkIndex, text, floatArrayToString(embedding), contentHash, text);
+            notePath, chunkIndex, source, text, floatArrayToString(embedding), contentHash, text);
     }
 
-    /** Removes chunks beyond newMaxIndex to handle note shrinkage. */
-    public void deleteStaleChunks(String notePath, int newMaxIndex) {
+    /** Removes chunks of one source beyond newMaxIndex to handle note shrinkage. */
+    public void deleteStaleChunks(String notePath, String source, int newMaxIndex) {
         jdbc.update(
-            "DELETE FROM note_chunks WHERE note_path = ? AND chunk_index > ?",
-            notePath, newMaxIndex);
+            "DELETE FROM note_chunks WHERE note_path = ? AND source = ? AND chunk_index > ?",
+            notePath, source, newMaxIndex);
     }
 
-    public String getContentHash(String notePath, int chunkIndex) {
+    /** Removes chunks for notes that no longer exist in the notes index (deleted/renamed). */
+    public int deleteOrphanChunks() {
+        return jdbc.update(
+            "DELETE FROM note_chunks WHERE NOT EXISTS (SELECT 1 FROM notes WHERE notes.path = note_chunks.note_path)");
+    }
+
+    public String getContentHash(String notePath, String source, int chunkIndex) {
         List<String> rows = jdbc.queryForList(
-            "SELECT content_hash FROM note_chunks WHERE note_path = ? AND chunk_index = ?",
-            String.class, notePath, chunkIndex);
+            "SELECT content_hash FROM note_chunks WHERE note_path = ? AND source = ? AND chunk_index = ?",
+            String.class, notePath, source, chunkIndex);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
@@ -90,10 +104,11 @@ public class NoteChunkRepository {
             """, new NoteChunkRowMapper(), query, query, limit);
     }
 
-    /** Returns the highest chunk_index for a note, or null if none exist. */
-    public Integer queryMaxChunkIndex(String notePath) {
+    /** Returns the highest chunk_index for a note within one source, or null if none exist. */
+    public Integer queryMaxChunkIndex(String notePath, String source) {
         List<Integer> rows = jdbc.queryForList(
-            "SELECT MAX(chunk_index) FROM note_chunks WHERE note_path = ?", Integer.class, notePath);
+            "SELECT MAX(chunk_index) FROM note_chunks WHERE note_path = ? AND source = ?",
+            Integer.class, notePath, source);
         return (rows.isEmpty() || rows.get(0) == null) ? null : rows.get(0);
     }
 
