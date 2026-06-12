@@ -1,18 +1,25 @@
 import os
-import base64
-import json
-import shutil
-import subprocess
 from pathlib import Path
-from flask import Flask, request, jsonify
-import anthropic
+
 from dotenv import load_dotenv
 
-load_dotenv()
+# SSOT: all credentials live in the repo-root .env. The local host-wrapper/.env
+# is an optional override (e.g. a different PORT) and wins when both define a key.
+_ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_ROOT_ENV)
+load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+
+from flask import Flask, request, jsonify  # noqa: E402
+
+import llm_router  # noqa: E402  (reads env at import — keep after load_dotenv)
 
 app = Flask(__name__)
-client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-VAULT_HOST_PATH = os.environ["VAULT_HOST_PATH"].replace("\\", "/")
+router = llm_router.Router()
+
+# host-wrapper historically used VAULT_HOST_PATH; the root .env calls it
+# HOST_VAULT_PATH (same value, used by docker-compose). Accept either.
+VAULT_HOST_PATH = (os.environ.get("VAULT_HOST_PATH")
+                   or os.environ["HOST_VAULT_PATH"]).replace("\\", "/")
 
 MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".gif": "image/gif", ".webp": "image/webp"}
@@ -29,6 +36,12 @@ def health():
     return {"status": "ok"}
 
 
+@app.route("/providers")
+def providers():
+    """Router introspection: configured providers, cooldowns, ok/fail counts."""
+    return jsonify(router.status())
+
+
 @app.route("/process-image", methods=["POST"])
 def process_image():
     data = request.json
@@ -39,64 +52,38 @@ def process_image():
         return jsonify({"error": f"not found: {host_path}"}), 404
 
     media_type = MEDIA_TYPES.get(host_path.suffix.lower(), "image/png")
-    image_data = base64.standard_b64encode(host_path.read_bytes()).decode()
 
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": [
-            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_data}},
-            {"type": "text", "text": IMAGE_PROMPT}
-        ]}]
-    )
-    return jsonify({"text": message.content[0].text})
+    try:
+        text, provider = router.complete_vision(
+            IMAGE_PROMPT, host_path.read_bytes(), media_type)
+    except llm_router.RouterError as e:
+        return jsonify({"error": str(e)}), 503
 
-
-CLI_TIMEOUT_S = int(os.environ.get("CLI_TIMEOUT_S", "180"))
+    return jsonify({"text": text, "provider": provider})
 
 
 @app.route("/complete", methods=["POST"])
 def complete():
-    """Text completion via the `claude` CLI (headless -p mode).
-
-    Bills the Claude subscription's included credits, NOT API credits —
-    that's the whole reason this endpoint exists. Used by the flashcard
-    generation agent (embedder/flashcards/generate.py).
+    """Text completion through the router (free providers first, Claude CLI last).
 
     Request:  {"prompt": str, "system"?: str, "model"?: str}
-    Response: {"text": str} or {"error": str}
+    Response: {"text": str, "provider": str} or {"error": str}
+    The "model" field only applies when the claude-cli provider is reached.
     """
     data = request.json or {}
     prompt = data.get("prompt", "")
     if not prompt:
         return jsonify({"error": "prompt required"}), 422
 
-    # On Windows the npm-installed CLI is claude.cmd — which() resolves it,
-    # avoiding shell=True and its quoting hazards.
-    claude_bin = shutil.which("claude") or "claude"
-    cmd = [claude_bin, "-p", "--output-format", "json",
-           "--model", data.get("model", os.environ.get("SYNTH_MODEL", "haiku"))]
-    if data.get("system"):
-        cmd += ["--append-system-prompt", data["system"]]
-
     try:
-        result = subprocess.run(
-            cmd, input=prompt, capture_output=True, text=True,
-            encoding="utf-8", timeout=CLI_TIMEOUT_S,
-        )
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": f"claude CLI timed out after {CLI_TIMEOUT_S}s"}), 504
+        text, provider = router.complete_text(
+            prompt, system=data.get("system"), cli_model=data.get("model"))
+    except llm_router.RouterError as e:
+        return jsonify({"error": str(e)}), 503
 
-    if result.returncode != 0:
-        return jsonify({"error": f"claude CLI exit {result.returncode}: {result.stderr[:500]}"}), 502
-
-    try:
-        payload = json.loads(result.stdout)
-        return jsonify({"text": payload.get("result", "")})
-    except json.JSONDecodeError:
-        # CLI printed plain text (older versions / unexpected format)
-        return jsonify({"text": result.stdout.strip()})
+    return jsonify({"text": text, "provider": provider})
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5001)))
+    # threaded so concurrent image requests can shard across providers
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5001)), threaded=True)
