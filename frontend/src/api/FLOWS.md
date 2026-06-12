@@ -1,6 +1,6 @@
 # API Layer Flows
 
-Files: notes.js, utils/useSearch.js
+Files: notes.js, stats.js, utils/useSearch.js
 
 ---
 
@@ -35,6 +35,7 @@ Write calls use `credentials: 'same-origin'` — session cookie included automat
 | `saveSettings(patch)` | `PUT /api/settings` | Yes |
 | `uploadFile(file, filename)` | `POST /api/upload` (multipart) | Yes |
 | `searchNotes(query, {signal?})` | `GET /api/search?q=&limit=10` | Yes |
+| `fetchStats()` (stats.js) | `GET /api/stats` | Yes |
 
 ### searchNotes — AbortController pattern
 

@@ -5,7 +5,7 @@ Subsystem docs live next to the code they describe.
 | Subsystem | FLOWS.md | Key files |
 |---|---|---|
 | **store** | [src/store/FLOWS.md](src/store/FLOWS.md) | useStore.js — all Zustand state, tab management, sync/cancel |
-| **api** | [src/api/FLOWS.md](src/api/FLOWS.md) | notes.js — all API calls, ApiError, endpoint table |
+| **api** | [src/api/FLOWS.md](src/api/FLOWS.md) | notes.js, stats.js — all API calls, ApiError, endpoint table |
 | **utils** | [src/utils/FLOWS.md](src/utils/FLOWS.md) | diff.js, frontmatter.js, markdownCleanup.js, all Milkdown plugins |
 | **components** | [src/components/FLOWS.md](src/components/FLOWS.md) | MilkdownEditor, FolderTree, TabBar, SplitLayout, NavBar, LoginModal |
 | **pages** | [src/pages/FLOWS.md](src/pages/FLOWS.md) | MainPage startup, SettingsPage SECTIONS pattern, Chrono panel |
@@ -16,7 +16,7 @@ Subsystem docs live next to the code they describe.
 
 ```js
 ENV.API_BASE    — base path for all API calls (default '/api')
-ENV.PORTS       — FRONTEND:8083, BACKEND:8082, DEV:5173
+ENV.PORTS       — FRONTEND:8083, BACKEND:8084, DEV:5173
 ENV.FEATURES    — REVIEW_PANEL, TRASH_RESTORE, CROSS_FILE_RENAME
 ENV.LIMITS      — ITEMS_PER_PAGE
 ```
@@ -40,7 +40,9 @@ ENV.LIMITS      — ITEMS_PER_PAGE
 | Path | Page |
 |---|---|
 | `/` | `MainPage` — 3-panel note editor |
+| `/learn` | `LearnPage` — split view: ResourcePanel (pdf/video) + NotePanel |
 | `/review` | `ReviewPage` — due list + FlashcardSession (tests) or SlideshowReview (self-rate), per `flashcardsEnabled` |
+| `/dashboard` | `DashboardPage` — live processing stats, polls `/api/stats` every 3s |
 | `/settings` | `SettingsPage` — vault path, review settings, chrono |
 
 Route transitions: `AnimatePresence mode="wait"` + Framer Motion 180ms opacity fade.  

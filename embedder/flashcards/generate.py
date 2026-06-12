@@ -1,9 +1,10 @@
 """
 Flashcard generation agent.
 
-LLM calls go through the host-wrapper's /complete endpoint, which shells out to
-the `claude` CLI — billing the Claude subscription's included credits, NOT the
-Anthropic API (deliberate; see FLASHCARDS_ARCH).
+LLM calls go through the host-wrapper's /complete endpoint, which routes through
+the LLM router: free-tier providers (Groq/GitHub/Mistral/...) first, the `claude`
+CLI (subscription credits, never the Anthropic API) only as the last resort
+(see host-wrapper/FLOWS.md). The "model" field only applies if the CLI is reached.
 
 Pipeline per note:
   PASS 1  generate cards as JSON (schema in prompt)

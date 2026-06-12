@@ -65,8 +65,9 @@ CardJobWorker @Scheduled (default every 30min, 2min after startup)
   → POST embedder /flashcards/generate {note_path, source_hash}
       embedder reads the note from its read-only /vault mount
       → flashcards/generate.py:
-          PASS 1: GEN_PROMPT → host-wrapper POST /complete (claude CLI,
-                  subscription credits — NEVER the Anthropic API)
+          PASS 1: GEN_PROMPT → host-wrapper POST /complete (LLM router: free
+                  providers first, claude CLI subscription credits LAST —
+                  never the Anthropic API; see host-wrapper/FLOWS.md)
           PASS 2: blind self-check — model re-answers its own mcq/exercise
                   questions without seeing answers; mismatches dropped
           validate.py: schema + solver sandbox checks; failures re-prompted,
