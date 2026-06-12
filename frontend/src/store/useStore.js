@@ -96,7 +96,9 @@ function noteBasename(fullPath) {
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
-const useStore = create((set, get) => ({
+// Everything loaded from the vault/backend — created fresh at startup and
+// wiped on logout so no note content survives signing out.
+const initialDataState = () => ({
   // Vault tree (lazily populated)
   tree: { type: 'folder', children: {}, fullPath: '', loaded: false },
   vaultRoot: '',
@@ -114,13 +116,6 @@ const useStore = create((set, get) => ({
   // Whether the editor is in editable mode
   isMutable: false,
 
-  // Incremented on cancel to force Milkdown remount with clean content
-  editorResetKey: 0,
-
-  // Auth
-  isAuthenticated: false,
-  showLogin: false,
-
   // Center panel mode: 'view' | 'new'
   // 'edit' is now conveyed by isMutable; centerMode only distinguishes new-note form
   centerMode: 'view',
@@ -132,15 +127,8 @@ const useStore = create((set, get) => ({
   reviewOffset: 0,
   reviewHasMore: false,
 
-  // Panel collapse
-  leftCollapsed: false,
-  rightCollapsed: false,
-
   // Settings (loaded from backend on startup)
   settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true },
-
-  // UI preference stored in localStorage — 'inline' | 'flashcard'
-  reviewMode: localStorage.getItem(REVIEW_MODE_KEY) ?? 'inline',
 
   // Toast notification: null | { message: string }
   toast: null,
@@ -153,6 +141,24 @@ const useStore = create((set, get) => ({
   // pendingFiles stores pasted-but-unsaved files for inactive tabs.
   tabs: [],
   activeTabIndex: -1,
+});
+
+const useStore = create((set, get) => ({
+  ...initialDataState(),
+
+  // Incremented on cancel to force Milkdown remount with clean content
+  editorResetKey: 0,
+
+  // Auth
+  isAuthenticated: false,
+  showLogin: false,
+
+  // Panel collapse
+  leftCollapsed: false,
+  rightCollapsed: false,
+
+  // UI preference stored in localStorage — 'inline' | 'flashcard'
+  reviewMode: localStorage.getItem(REVIEW_MODE_KEY) ?? 'inline',
 
   // ── Toast ─────────────────────────────────────────────────────────────────
 
@@ -390,7 +396,17 @@ const useStore = create((set, get) => ({
 
   logout: async () => {
     await apiLogout();
-    set({ isAuthenticated: false });
+    // wipe everything loaded from the vault — note content must not survive sign-out
+    Object.values(get().pendingFiles).forEach(({ blobURL }) => {
+      try { URL.revokeObjectURL(blobURL); } catch {}
+    });
+    setPendingBlobs({});
+    localStorage.removeItem(REVIEW_KEY);
+    set(s => ({
+      ...initialDataState(),
+      isAuthenticated: false,
+      editorResetKey: s.editorResetKey + 1,
+    }));
   },
 
   setShowLogin: (v) => set({ showLogin: v }),

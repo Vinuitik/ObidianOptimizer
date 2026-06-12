@@ -144,6 +144,23 @@ No disk fetch needed — `currentNoteRaw` is still the saved version.
 
 ---
 
+## logout()
+
+```
+POST /logout (server session invalidated)
+revoke all pendingFiles blobURLs; setPendingBlobs({})
+localStorage.removeItem(REVIEW_KEY)        — review session offset
+set({ ...initialDataState(), isAuthenticated: false, editorResetKey+1 })
+```
+
+`initialDataState()` is the single factory for all vault/backend-loaded state —
+store creation and logout both spread it, so the wipe list can't drift from the
+field list. UI prefs survive (reviewMode, panel collapse): not vault data.
+
+To add a field that must be wiped on logout: put it in `initialDataState()`.
+
+---
+
 ## moveNote(sourcePath, targetFolder)
 
 `PATCH /api/notes/move` → `{ path: newAbsPath }` → update open tab path if source matches → `fetchChildrenOf` both source parent and target folder → `fetchNoteNames()`
@@ -168,5 +185,6 @@ No disk fetch needed — `currentNoteRaw` is still the saved version.
 | Dirty detection | `useStore.js syncNote()` `computeHunks` call |
 | Drag-and-drop move | `useStore.js moveNote()` |
 | New note mode | `useStore.js startNewNote() / cancelNewNote()` |
+| Logout wipe list | `useStore.js initialDataState()` |
 | Toast display timing | `useStore.js showToast()` (4 s timeout) |
 | Persist tabs on refresh | Add Zustand persist middleware (not implemented) |

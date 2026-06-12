@@ -508,3 +508,50 @@ describe('syncNote with pendingFiles', () => {
     expect(api.uploadFile).not.toHaveBeenCalled();
   });
 });
+
+describe('logout wipes loaded data', () => {
+  beforeEach(() => {
+    api.logout.mockResolvedValue();
+  });
+
+  it('clears vault tree, note content, tabs, and review data', async () => {
+    useStore.setState({
+      isAuthenticated: true,
+      vaultRoot: '/vault',
+      tree: { type: 'folder', children: { a: { type: 'file', fullPath: '/vault/a.md' } }, fullPath: '/vault', loaded: true },
+      noteIndex: new Map([['a', '/vault/a.md']]),
+      currentNotePath: '/vault/a.md',
+      currentNoteRaw: 'secret note content',
+      pendingRaw: 'secret edits',
+      tabs: [{ path: '/vault/a.md' }],
+      activeTabIndex: 0,
+      reviewNotes: [{ shortName: 'a', fullPath: '/vault/a.md' }],
+    });
+
+    await getState().logout();
+
+    expect(getState().isAuthenticated).toBe(false);
+    expect(getState().vaultRoot).toBe('');
+    expect(getState().tree.children).toEqual({});
+    expect(getState().noteIndex.size).toBe(0);
+    expect(getState().currentNotePath).toBeNull();
+    expect(getState().currentNoteRaw).toBe('');
+    expect(getState().pendingRaw).toBe('');
+    expect(getState().tabs).toEqual([]);
+    expect(getState().activeTabIndex).toBe(-1);
+    expect(getState().reviewNotes).toEqual([]);
+  });
+
+  it('revokes pending blob URLs and clears the image plugin map', async () => {
+    useStore.setState({
+      isAuthenticated: true,
+      pendingFiles: { 'img.png': { file: {}, blobURL: 'blob:logout-test' } },
+    });
+
+    await getState().logout();
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:logout-test');
+    expect(imagePlugin.setPendingBlobs).toHaveBeenCalledWith({});
+    expect(getState().pendingFiles).toEqual({});
+  });
+});
