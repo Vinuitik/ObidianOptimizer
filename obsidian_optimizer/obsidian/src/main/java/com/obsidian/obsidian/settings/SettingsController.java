@@ -29,7 +29,8 @@ public class SettingsController {
             settingsRepo.getStartupSyncMode(),
             settingsRepo.getMaxDailyReviews(),
             settingsRepo.getBankruptcyLimit(),
-            settingsRepo.getEmbedModel()
+            settingsRepo.getEmbedModel(),
+            settingsRepo.isFlashcardsEnabled()
         );
     }
 
@@ -66,6 +67,9 @@ public class SettingsController {
                 }
                 settingsRepo.set("bankruptcyLimit", String.valueOf(req.bankruptcyLimit()));
             }
+            if (req.flashcardsEnabled() != null) {
+                settingsRepo.set("flashcardsEnabled", String.valueOf(req.flashcardsEnabled()));
+            }
             if (req.embedModel() != null) {
                 String model = req.embedModel().trim();
                 if (model.isBlank()) {
@@ -84,8 +88,8 @@ public class SettingsController {
 
     public record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize,
                                    String startupSyncMode, int maxDailyReviews, int bankruptcyLimit,
-                                   String embedModel) {}
+                                   String embedModel, boolean flashcardsEnabled) {}
     record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize,
                                  String startupSyncMode, Integer maxDailyReviews, Integer bankruptcyLimit,
-                                 String embedModel) {}
+                                 String embedModel, Boolean flashcardsEnabled) {}
 }

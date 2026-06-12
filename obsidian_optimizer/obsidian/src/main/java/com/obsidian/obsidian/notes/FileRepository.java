@@ -367,6 +367,23 @@ public class FileRepository {
         return Paths.get(ROOT_FILE).relativize(Paths.get(absPath)).toString().replace('\\', '/');
     }
 
+    /**
+     * Re-index one note after something other than this class wrote it to disk
+     * (e.g. ReviewService updating sr-due frontmatter after an FSRS grade).
+     * Same bookkeeping as updateNote minus the write itself.
+     */
+    public void reindexAfterExternalWrite(String path) throws IOException {
+        requireInsideVault(path);
+        File file = new File(path);
+        if (!file.exists()) throw new IOException("Note not found: " + path);
+        String content = Files.readString(Paths.get(path));
+        noteIndex.upsert(path, file.getName().replace(".md", ""),
+            FrontmatterParser.parse(content), file.lastModified());
+        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
+        imageScanService.registerImages(path, content);
+        syncQueueRepo.markPending(toRelative(path), ImageScanService.sha256(content));
+    }
+
     // ── Path guards ───────────────────────────────────────────────────────────
 
     /**

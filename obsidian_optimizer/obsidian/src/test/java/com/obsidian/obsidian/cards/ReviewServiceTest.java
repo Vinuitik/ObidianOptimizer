@@ -29,6 +29,7 @@ class ReviewServiceTest {
 
     @Mock BanditService bandit;
     @Mock NoteReviewRepository reviewRepo;
+    @Mock com.obsidian.obsidian.notes.FileRepository fileRepo;
 
     ReviewService service;
     final Instant now = Instant.parse("2026-06-12T10:00:00Z");
@@ -39,7 +40,7 @@ class ReviewServiceTest {
         ReflectionTestUtils.setField(fsrs, "desiredRetention", 0.9);
         when(bandit.bucket(anyDouble(), anyDouble())).thenReturn("dEasy:sShort");
         when(bandit.chooseArm(anyString())).thenReturn(1.0);
-        service = new ReviewService(fsrs, bandit, reviewRepo);
+        service = new ReviewService(fsrs, bandit, reviewRepo, fileRepo);
     }
 
     @Test

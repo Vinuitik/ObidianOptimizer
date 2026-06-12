@@ -40,7 +40,7 @@ ENV.LIMITS      — ITEMS_PER_PAGE
 | Path | Page |
 |---|---|
 | `/` | `MainPage` — 3-panel note editor |
-| `/review` | `ReviewPage` — [STUB] |
+| `/review` | `ReviewPage` — due list + FlashcardSession (tests) or SlideshowReview (self-rate), per `flashcardsEnabled` |
 | `/settings` | `SettingsPage` — vault path, review settings, chrono |
 
 Route transitions: `AnimatePresence mode="wait"` + Framer Motion 180ms opacity fade.  
@@ -60,6 +60,5 @@ Test files sit next to the component or util they cover: `ComponentName.test.jsx
 
 - Frontmatter inline editing
 - Trash UI (list + restore from `_trash/`)
-- ReviewPage UI
 - Math node inline editing
 - Tab persistence across page refresh

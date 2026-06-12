@@ -44,6 +44,7 @@ public class SettingsRepository {
         insertDefault("chronoLastRunDate", "");
         insertDefault("ollamaEmbedModel", "mixedbread-ai/mxbai-embed-large-v1");
         insertDefault("sync.device_id", "");
+        insertDefault("flashcardsEnabled", "true");
     }
 
     private void insertDefault(String key, String value) {
@@ -99,5 +100,9 @@ public class SettingsRepository {
 
     public String getEmbedModel() {
         return get("ollamaEmbedModel");
+    }
+
+    public boolean isFlashcardsEnabled() {
+        return Boolean.parseBoolean(getOrDefault("flashcardsEnabled", "true"));
     }
 }

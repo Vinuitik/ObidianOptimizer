@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import useStore from '../../store/useStore';
+import { gradeNote } from '../../api/notes';
 import styles from './ReviewRating.module.css';
 
 const OPTIONS = [
-  { label: 'Easy', value: 'easy', cls: styles.easy },
-  { label: 'Good', value: 'good', cls: styles.good },
-  { label: 'Hard', value: 'hard', cls: styles.hard },
+  { label: 'Very easy', value: 'VERY_EASY', cls: styles.easy },
+  { label: 'Easy',      value: 'EASY',      cls: styles.easy },
+  { label: 'Good',      value: 'GOOD',      cls: styles.good },
+  { label: 'Hard',      value: 'HARD',      cls: styles.hard },
 ];
 
 export default function ReviewRating({ fullPath }) {
@@ -26,9 +28,10 @@ export default function ReviewRating({ fullPath }) {
 
   function handleRate(e, value) {
     e.stopPropagation();
-    dismissFromReview(fullPath);
     setOpen(false);
-    // TODO: POST rating to backend when API is ready
+    gradeNote(fullPath, value)
+      .then(() => dismissFromReview(fullPath))
+      .catch(err => console.error('grade failed:', err));
   }
 
   return (

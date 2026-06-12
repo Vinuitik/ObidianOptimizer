@@ -42,6 +42,16 @@ const SECTIONS = [
         max: 500,
         hint: 'How many notes are loaded per review session.',
       },
+      {
+        key: 'flashcardsEnabled',
+        label: 'Flashcard tests',
+        type: 'select',
+        options: [
+          { value: true,  label: 'On — reviews run as auto-graded mini-tests built from AI flashcards' },
+          { value: false, label: 'Off — slideshow: read the note and self-rate with the four buttons' },
+        ],
+        hint: 'Either way the grade feeds the same FSRS + bandit scheduler.',
+      },
     ],
   },
   {

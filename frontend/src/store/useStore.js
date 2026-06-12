@@ -137,7 +137,7 @@ const useStore = create((set, get) => ({
   rightCollapsed: false,
 
   // Settings (loaded from backend on startup)
-  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking' },
+  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true },
 
   // UI preference stored in localStorage — 'inline' | 'flashcard'
   reviewMode: localStorage.getItem(REVIEW_MODE_KEY) ?? 'inline',

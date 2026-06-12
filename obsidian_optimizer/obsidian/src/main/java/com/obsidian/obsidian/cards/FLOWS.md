@@ -27,6 +27,19 @@ Both UI modes converge here: slideshow posts the pressed button's band;
 flashcards mode computes the band from the assignment score via
 `ReviewService.Band.fromScore()` (GRADE_BANDS 40/70/90).
 
+**sr-due write-back bridge**: after every grade, `ReviewService.writeSrFrontmatter`
+rewrites the note's `sr-due`/`sr-interval` (ease preserved untouched) and
+`FileRepository.reindexAfterExternalWrite` keeps the index + Drive sync queue
+current. Without this, graded notes would never leave the sr_due-driven review
+queue, and chrono/Obsidian-SR would diverge from FSRS. Notes without
+frontmatter are skipped (they aren't in the legacy queue anyway).
+
+**UI modes** (`flashcardsEnabled` setting, toggle in Settings → Review):
+- ON: ReviewPage → FlashcardSession.jsx — builds a 10-point assignment for the
+  note, verifies each answer server-side, completes → band + next due shown.
+- OFF: ReviewPage → SlideshowReview (in ReviewPage.jsx) — four band buttons →
+  POST /reviews/grade. ReviewRating.jsx (list dropdown) posts the same.
+
 Context buckets: difficulty {<4, 4-7, >7} × stability {<7d, 7-30d, >30d} —
 9 buckets × 5 arms. Historical recall rate as context: deferred until attempt
 history accumulates.

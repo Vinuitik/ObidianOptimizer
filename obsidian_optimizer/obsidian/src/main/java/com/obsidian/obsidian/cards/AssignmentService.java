@@ -94,6 +94,14 @@ public class AssignmentService {
         int actual = targetPoints - budget;
         UUID[] ids = picked.stream().map(c -> (UUID) c.get("id")).toArray(UUID[]::new);
         UUID id = repo.insertAssignment(scope, targetPoints, actual, ids, variants.toString());
+        // payload arrives as PGobject — hand the frontend parsed JSON, not a JDBC wrapper
+        for (Map<String, Object> c : picked) {
+            try {
+                c.put("payload", mapper.readTree(c.get("payload").toString()));
+            } catch (Exception e) {
+                log.warn("[Assignment] unparseable payload on card {}", c.get("id"));
+            }
+        }
         log.info("[Assignment] built {} scope={} cards={} points={}/{}",
             id, scope, picked.size(), actual, targetPoints);
         return Map.of("id", id, "scope", scope, "targetPoints", targetPoints,

@@ -170,6 +170,54 @@ export async function searchNotes(query, { signal } = {}) {
   return res.json();
 }
 
+// ── Reviews (FSRS + bandit) ──────────────────────────────────────────────────
+
+// Returns [{note_path, stability, difficulty, reps, last_review, due}, ...].
+export async function fetchDueReviews(limit = 50) {
+  const res = await fetch(`${BASE}/reviews/due?limit=${limit}`, { credentials: 'same-origin', cache: 'no-store' });
+  if (!res.ok) throw new ApiError(res.status);
+  return res.json();
+}
+
+// band: 'HARD' | 'GOOD' | 'EASY' | 'VERY_EASY'.
+// Returns {notePath, band, stability, difficulty, baseIntervalDays, banditArm, due}.
+export async function gradeNote(notePath, band) {
+  const res = await req(`${BASE}/reviews/grade`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notePath, band }),
+  });
+  return res.json();
+}
+
+// ── Flashcard assignments ────────────────────────────────────────────────────
+
+// Returns {id, scope, targetPoints, actualPoints, cards[], variants{}}.
+export async function buildAssignment(scope, points) {
+  const res = await req(`${BASE}/assignments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope, points }),
+  });
+  return res.json();
+}
+
+// Returns {verdict, pointsEarned, maxPoints, feedback?}.
+export async function submitAttempt(assignmentId, cardId, answer) {
+  const res = await req(`${BASE}/attempts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assignmentId, cardId, answer }),
+  });
+  return res.json();
+}
+
+// Returns {assignmentId, notes: [{notePath, score, band, due}]}.
+export async function completeAssignment(assignmentId) {
+  const res = await req(`${BASE}/assignments/${assignmentId}/complete`, { method: 'POST' });
+  return res.json();
+}
+
 // ── Chrono ────────────────────────────────────────────────────────────────────
 
 // Returns { lastRunDate: string }.

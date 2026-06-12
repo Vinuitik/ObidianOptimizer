@@ -21,6 +21,8 @@ Seeded on first boot from env vars via `ON CONFLICT DO NOTHING`.
 | `maxDailyReviews` | `30` | hardcoded |
 | `bankruptcyLimit` | `200` | hardcoded |
 | `chronoLastRunDate` | `""` | internal |
+| `ollamaEmbedModel` | `mixedbread-ai/mxbai-embed-large-v1` | hardcoded (display-only — real model is `EMBED_MODEL` env) |
+| `flashcardsEnabled` | `"true"` | hardcoded — review UI mode: tests (on) vs self-rated slideshow (off) |
 
 To force re-seed: `DELETE FROM app_settings;` → restart
 
@@ -29,8 +31,8 @@ To force re-seed: `DELETE FROM app_settings;` → restart
 ## GET /settings
 
 `SettingsController.getSettings()` → `SettingsRepository.get*()`  
-Returns `{ vaultPath, resourcePath, reviewPageSize, startupSyncMode, maxDailyReviews, bankruptcyLimit }`  
-**Public endpoint** — no auth required.
+Returns `{ vaultPath, resourcePath, reviewPageSize, startupSyncMode, maxDailyReviews, bankruptcyLimit, embedModel, flashcardsEnabled }`  
+Requires session auth (was public until the security-hardening pass — it leaked the vault path).
 
 ---
 
