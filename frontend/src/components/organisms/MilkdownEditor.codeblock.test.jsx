@@ -48,6 +48,10 @@ vi.mock('../../utils/obsidianImagePlugin', () => ({
   addPendingBlob: vi.fn(),
   isWhitelisted: vi.fn(() => false),
   generateFilename: vi.fn(() => 'test.png'),
+  WHITELISTED_EXTS: new Set(['png']),
+  WHITELISTED_MIME_TYPES: new Set(['image/png']),
+  fileTypeFor: vi.fn(() => 'image'),
+  removePendingBlob: vi.fn(),
 }));
 vi.mock('../molecules/FrontmatterTable', () => ({ default: () => null }));
 vi.mock('./EditorErrorBoundary', () => ({ default: ({ children }) => <>{children}</> }));

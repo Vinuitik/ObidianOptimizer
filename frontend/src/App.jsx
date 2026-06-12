@@ -4,6 +4,7 @@ import MainPage from './pages/MainPage';
 import SettingsPage from './pages/SettingsPage';
 import ReviewPage from './pages/ReviewPage';
 import LearnPage from './pages/LearnPage';
+import DashboardPage from './pages/DashboardPage';
 import NavBar from './components/organisms/NavBar';
 import styles from './App.module.css';
 
@@ -29,6 +30,7 @@ function AnimatedRoutes() {
           <Route path="/" element={<MainPage />} />
           <Route path="/learn" element={<LearnPage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </motion.div>

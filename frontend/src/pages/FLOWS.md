@@ -1,6 +1,6 @@
 # Pages Flows
 
-Files: MainPage.jsx, SettingsPage.jsx, ReviewPage.jsx
+Files: MainPage.jsx, LearnPage.jsx, ReviewPage.jsx, DashboardPage.jsx, SettingsPage.jsx
 
 ---
 
@@ -52,9 +52,47 @@ To add more result fields: `ChronoService.ChronoResult` record + update display 
 
 ---
 
-## ReviewPage — [STUB]
+## LearnPage — Split-view study (`/learn`)
 
-`ReviewPage.jsx` — placeholder, not yet built.
+Auth-gated ("Sign in to use Learn" when logged out).
+
+```
+LearnPage → LearnLayout(orientation, slotA, slotB)
+  slotA: ResourcePanel (pdf | video | …) — resourceType state lives in LearnPage
+  slotB: NotePanel
+orientation: video → horizontal split, everything else → vertical
+on mount (authed, no vaultRoot): fetchRootChildren() → fetchNoteNames()
+```
+
+To change the split rule: `LearnPage.jsx → orientation` ternary
+To add a resource type: `ResourcePanel.jsx` + orientation rule above
+
+---
+
+## DashboardPage — Processing dashboard (`/dashboard`)
+
+Live view of async AI processing (INFO_DASHBOARD_ARCH). Polls `GET /api/stats`
+every 3s (`POLL_MS`), pauses while `document.hidden`, shows stale indicator on
+fetch errors (keeps last data).
+
+```
+fetchStats() → { embedding, images, flashcards, resources, wrapper }
+  → Note Embedding donut (recharts Pie): notesEmbedded / notesTotal
+  → Image Processing donut: done / pending / skipped (the multi-day queue)
+  → Flashcard Coverage bar: notesWithCards / eligibleNotes (+ active/archived)
+  → LLM Providers table: per-provider state (ready/working/cooling/no key)
+      from host-wrapper /providers, proxied by StatsController
+  → Video & Resource Queue: [NOT IMPLEMENTED] — ingest agent not built
+```
+
+To change poll rate: `DashboardPage.jsx → POLL_MS`
+To add a chart: section in DashboardPage + counter in `StatsController.java`
+
+---
+
+## ReviewPage
+
+Flashcard tests vs self-rated slideshow (see cards FLOWS + frontend/FLOWS.md).
 
 ---
 
@@ -66,4 +104,6 @@ To add more result fields: `ChronoService.ChronoResult` record + update display 
 | Page routes | `App.jsx <Routes>` + `NavBar.jsx NAV_ITEMS` |
 | Settings sections / fields | `SettingsPage.jsx SECTIONS` array |
 | Chrono result display | `SettingsPage.jsx` chrono status section |
-| ReviewPage UI | `ReviewPage.jsx` — currently stub |
+| Learn split orientation | `LearnPage.jsx` orientation ternary |
+| Dashboard poll rate | `DashboardPage.jsx → POLL_MS` |
+| Dashboard counters | `stats/StatsController.java` (backend) |

@@ -1,0 +1,117 @@
+package com.obsidian.obsidian.stats;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.obsidian.obsidian.cards.CardRepository;
+import com.obsidian.obsidian.ml.PendingImageJobRepository;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * Lightweight count aggregates for the info dashboard (INFO_DASHBOARD_ARCH).
+ * Polled every few seconds by the frontend — every query here must stay an
+ * indexed COUNT, never a row fetch.
+ */
+@RestController
+public class StatsController {
+
+    private final JdbcTemplate jdbc;
+    private final CardRepository cardRepo;
+    private final PendingImageJobRepository imageJobRepo;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final HttpClient httpClient = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(2))
+        .build();
+
+    @Value("${wrapper.url:http://host.docker.internal:5001}")
+    private String wrapperUrl;
+
+    public StatsController(JdbcTemplate jdbc,
+                           CardRepository cardRepo,
+                           PendingImageJobRepository imageJobRepo) {
+        this.jdbc = jdbc;
+        this.cardRepo = cardRepo;
+        this.imageJobRepo = imageJobRepo;
+    }
+
+    @GetMapping("/api/stats")
+    public Map<String, Object> stats() {
+        Map<String, Object> out = new LinkedHashMap<>();
+
+        // 1. Vector embedding progress — notes with at least one embedded chunk.
+        //    (Notes whose content is all sub-50-char fragments never produce
+        //    chunks, so "embedded" can stay slightly below "total" forever.)
+        long notesTotal    = count("SELECT COUNT(*) FROM notes");
+        long notesEmbedded = count("SELECT COUNT(DISTINCT note_path) FROM note_chunks");
+        long chunksTotal   = count("SELECT COUNT(*) FROM note_chunks");
+        out.put("embedding", Map.of(
+            "notesTotal", notesTotal,
+            "notesEmbedded", Math.min(notesEmbedded, notesTotal),
+            "chunksTotal", chunksTotal));
+
+        // 2. Image pipeline queue (the multi-day, rate-limited operation)
+        Map<String, Integer> byStatus = imageJobRepo.countByStatus();
+        out.put("images", Map.of(
+            "pending", byStatus.getOrDefault("PENDING", 0),
+            "done",    byStatus.getOrDefault("DONE", 0),
+            "skipped", byStatus.getOrDefault("SKIPPED", 0)));
+
+        // 3. Flashcard generation coverage — eligible = notes with sr_due set
+        long eligible = count("SELECT COUNT(*) FROM notes WHERE sr_due IS NOT NULL");
+        Map<String, Object> cardStats = cardRepo.stats();
+        out.put("flashcards", Map.of(
+            "eligibleNotes",  eligible,
+            "notesWithCards", ((Number) cardStats.get("notes_with_cards")).longValue(),
+            "activeCards",    ((Number) cardStats.get("active_cards")).longValue(),
+            "archivedCards",  ((Number) cardStats.get("archived_cards")).longValue()));
+
+        // 4. Video & external resource queue — ingest agent [NOT IMPLEMENTED]
+        out.put("resources", Map.of("implemented", false));
+
+        // 5. LLM provider health, proxied from the host wrapper's router
+        out.put("wrapper", wrapperProviders());
+
+        return out;
+    }
+
+    private long count(String sql) {
+        Long n = jdbc.queryForObject(sql, Long.class);
+        return n == null ? 0 : n;
+    }
+
+    private Map<String, Object> wrapperProviders() {
+        Map<String, Object> wrapper = new HashMap<>();
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(wrapperUrl + "/providers"))
+                .timeout(Duration.ofSeconds(3))
+                .GET()
+                .build();
+            HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() == 200) {
+                JsonNode providers = objectMapper.readTree(res.body());
+                wrapper.put("up", true);
+                wrapper.put("providers", providers);
+                return wrapper;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+            // wrapper down — report and move on, dashboard shows it offline
+        }
+        wrapper.put("up", false);
+        wrapper.put("providers", null);
+        return wrapper;
+    }
+}
