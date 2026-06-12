@@ -23,6 +23,8 @@ Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notl
 | [ML Architecture](architecture_plans/ML_ARCH.md) | Architecture | MCP server (Python, /mcp — implemented), pgvector search, VLM image pipeline |
 | [ML FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/ml/FLOWS.md) | Flows | Hybrid search, embedding pipeline, MCP tools (embedder/mcp_server.py) |
 | [Sync FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/sync/FLOWS.md) | Flows | Per-file AES-256-GCM Google Drive sync, queue, device identity |
+| [Cards FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/cards/FLOWS.md) | Flows | Flashcard agent: hash-diff worker, CLI generation, solver sandbox |
+| [Flashcards Architecture](architecture_plans/FLASHCARDS_ARCH.md) | Architecture | Card types, FSRS-on-notes + bandit (Option A), assignments [PARTIALLY IMPLEMENTED] |
 | [Backend FLOWS — Chrono](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#chrono-service) | Flows | Daily jobs: FileMover, FileChecker, BankruptcyCheck, SpreadCheck |
 | [Mobile Architecture](architecture_plans/MOBILE_ARCH.md) | Architecture | Offline-first mobile app, sync engine [NOT IMPLEMENTED] |
 | [Backend Testing](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#testing) | Testing | Unit tests (7 service layers), MockMvc controller tests, Testcontainers IT |

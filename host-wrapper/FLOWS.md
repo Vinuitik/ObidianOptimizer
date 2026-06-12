@@ -38,6 +38,25 @@ Model: `claude-haiku-4-5-20251001` — cheapest Claude with vision, ~$0.25/MTok 
 Called only for images in notes — infrequent, low cost.
 
 **Requires:** `ANTHROPIC_API_KEY` from console.anthropic.com (separate from Claude.ai subscription).
+[Migration option: route through `claude -p` like /complete below to use subscription credits instead.]
+
+---
+
+## POST /complete
+
+Request: `{"prompt": str, "system"?: str, "model"?: str}` → Response: `{"text": str}`
+
+Shells out to the **`claude` CLI** (headless `-p --output-format json`) — bills the
+Claude **subscription's included credits, NOT API credits**. That's the whole point:
+used by the flashcard generation agent (`embedder/flashcards/generate.py`).
+
+`main.complete()`:
+→ resolve CLI via `shutil.which("claude")` (npm shim is `claude.cmd` on Windows)
+→ prompt on stdin, `--model` from request or `SYNTH_MODEL` env (default haiku)
+→ parse stdout JSON → return `result` field
+→ 504 on timeout (`CLI_TIMEOUT_S`, default 180s), 502 on nonzero exit
+
+**Requires:** `claude` CLI installed and authenticated on the host — no API key.
 
 ---
 
@@ -59,3 +78,5 @@ Called only for images in notes — infrequent, low cost.
 | Port | `.env → PORT` |
 | Vision model | `main.py → process_image()` model param |
 | Extraction prompt | `main.py → IMAGE_PROMPT` |
+| CLI completion model | request `model` field / `SYNTH_MODEL` env (default haiku) |
+| CLI timeout | `CLI_TIMEOUT_S` env (default 180s) |

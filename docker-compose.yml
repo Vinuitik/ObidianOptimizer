@@ -29,6 +29,8 @@ services:
       - VAULT_DIR=/vault
       - MCP_API_TOKEN=${MCP_API_TOKEN:?set MCP_API_TOKEN in .env}
       - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}
+      - WRAPPER_URL=${WRAPPER_URL:-http://host.docker.internal:5001}
+      - SYNTH_MODEL=${SYNTH_MODEL:-haiku}
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +59,7 @@ services:
       - SPRING_DATASOURCE_USERNAME=obsidian
       - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-obsidian}
       - APP_AUTH_USERNAME=${APP_AUTH_USERNAME:-admin}
+      - CARDS_ENABLED=${CARDS_ENABLED:-true}
       - APP_AUTH_PASSWORD=${APP_AUTH_PASSWORD:?set APP_AUTH_PASSWORD in .env}
       - EMBEDDER_URL=http://embedder:8000
       - SYNC_PASSPHRASE=${SYNC_PASSPHRASE:-}

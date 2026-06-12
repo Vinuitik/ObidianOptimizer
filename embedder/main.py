@@ -43,6 +43,12 @@ class EmbedResponse(BaseModel):
     dim: int
 
 
+class GenerateCardsRequest(BaseModel):
+    note_path: str
+    content: str | None = None      # omitted → read from the /vault mount
+    source_hash: str | None = None  # omitted → sha256(content)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -67,6 +73,26 @@ def embed(req: EmbedRequest):
         model=state["model_name"],
         dim=state["dim"],
     )
+
+
+@app.post("/flashcards/generate")
+def generate_cards(req: GenerateCardsRequest):
+    """Internal (backend → embedder): run the card-generation agent for one note.
+    LLM calls route through the host-wrapper's claude CLI endpoint."""
+    import hashlib
+
+    from flashcards import generate as card_gen
+    from mcp_server import _resolve_in_vault
+
+    content = req.content
+    if content is None:
+        try:
+            content = _resolve_in_vault(req.note_path).read_text(encoding="utf-8")
+        except (ValueError, OSError) as e:
+            raise HTTPException(status_code=404, detail=f"cannot read note: {e}")
+
+    source_hash = req.source_hash or hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return card_gen.generate_for_note(req.note_path, content, source_hash)
 
 
 # ---------------------------------------------------------------------------

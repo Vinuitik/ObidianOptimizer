@@ -1,5 +1,8 @@
 import os
 import base64
+import json
+import shutil
+import subprocess
 from pathlib import Path
 from flask import Flask, request, jsonify
 import anthropic
@@ -47,6 +50,52 @@ def process_image():
         ]}]
     )
     return jsonify({"text": message.content[0].text})
+
+
+CLI_TIMEOUT_S = int(os.environ.get("CLI_TIMEOUT_S", "180"))
+
+
+@app.route("/complete", methods=["POST"])
+def complete():
+    """Text completion via the `claude` CLI (headless -p mode).
+
+    Bills the Claude subscription's included credits, NOT API credits —
+    that's the whole reason this endpoint exists. Used by the flashcard
+    generation agent (embedder/flashcards/generate.py).
+
+    Request:  {"prompt": str, "system"?: str, "model"?: str}
+    Response: {"text": str} or {"error": str}
+    """
+    data = request.json or {}
+    prompt = data.get("prompt", "")
+    if not prompt:
+        return jsonify({"error": "prompt required"}), 422
+
+    # On Windows the npm-installed CLI is claude.cmd — which() resolves it,
+    # avoiding shell=True and its quoting hazards.
+    claude_bin = shutil.which("claude") or "claude"
+    cmd = [claude_bin, "-p", "--output-format", "json",
+           "--model", data.get("model", os.environ.get("SYNTH_MODEL", "haiku"))]
+    if data.get("system"):
+        cmd += ["--append-system-prompt", data["system"]]
+
+    try:
+        result = subprocess.run(
+            cmd, input=prompt, capture_output=True, text=True,
+            encoding="utf-8", timeout=CLI_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": f"claude CLI timed out after {CLI_TIMEOUT_S}s"}), 504
+
+    if result.returncode != 0:
+        return jsonify({"error": f"claude CLI exit {result.returncode}: {result.stderr[:500]}"}), 502
+
+    try:
+        payload = json.loads(result.stdout)
+        return jsonify({"text": payload.get("result", "")})
+    except json.JSONDecodeError:
+        # CLI printed plain text (older versions / unexpected format)
+        return jsonify({"text": result.stdout.strip()})
 
 
 if __name__ == "__main__":

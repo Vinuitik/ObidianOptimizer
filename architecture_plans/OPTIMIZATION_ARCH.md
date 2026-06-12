@@ -24,6 +24,24 @@ Currently, caching is disabled to prevent stale data while developing. Once the 
 *   **SQLite FTS5**: The mobile app will rely entirely on SQLite's built-in FTS5 (Full Text Search) extensions, which are written in C and highly optimized for mobile ARM processors.
 *   **Background Fetch**: Syncing the Google Drive zip file happens silently in the background (`expo-background-fetch`). When you actually open the app, it doesn't need to load; the data is already there.
 
+## 5. Parked Option: strict FSRS lapse mode could retire the chrono jobs
+
+The flashcard system (see FLASHCARDS_ARCH) deliberately runs FSRS **without** the
+"Again"/lapse band — a failed review never resets a note's stability to near-zero.
+Rationale: skipping a few days must not cascade into mass interval resets, and overload
+management already exists (BankruptcyService, SpreadService).
+
+The parked optimisation: if we ever enable strict FSRS lapse semantics (fail → stability
+reset), FSRS would self-manage review load — overdue notes would naturally re-enter with
+short intervals, making the bankruptcy/spread/sr-due frontmatter machinery largely
+redundant. Retiring those chrono jobs would cut:
+*   the 2am scheduled run and its full-vault read pass,
+*   the startup chrono check (blocking app start when `chronoLastRunDate` is stale),
+*   the FrontmatterRewriter disk writes (and their Drive sync churn).
+
+**Deliberately not doing this now** — too punitive for real usage patterns. Revisit only
+if startup/chrono cost actually becomes a measured bottleneck (step 2 below).
+
 ## Execution Strategy
 1. Build the feature with caching disabled to guarantee correctness.
 2. Identify the bottlenecks (e.g., "loading the tree takes 2 seconds").

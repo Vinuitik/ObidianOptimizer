@@ -1,6 +1,7 @@
 # Flashcards Creator Agent — Architecture Plan
 
-Files: [NOT IMPLEMENTED] — planned: embedder/flashcards/generate.py, embedder/flashcards/validate.py, embedder/flashcards/solver_sandbox.py, embedder/flashcards/judge.py; Java: CardService.java, CardController.java, AssignmentService.java, BagDrawService.java, CardJobWorker.java
+Files: **IMPLEMENTED** — embedder/flashcards/{generate.py, validate.py, solver_sandbox.py}; Java cards/{CardRepository, CardGenerationService, CardJobWorker, CardController}; host-wrapper /complete (claude CLI). See cards/FLOWS.md.
+[NOT IMPLEMENTED] — judge.py (open-answer verification), AssignmentService, BagDrawService, FsrsService, bandit, code-runner container, UI modes.
 
 A **separate agent** from the ingest agent (deliberate — one agent, one job). Same philosophy: LLM only generates, behind a schema, with a capped retry budget; everything else — variant generation, answer verification, session draws, assignment assembly — is deterministic code.
 
@@ -80,11 +81,21 @@ Verified by the banded cosine + judge scheme (below).
 
 ## Generation pipeline (LLM, constrained)
 
-Trigger: queue table `pending_card_jobs`, populated exactly like `pending_image_jobs` (see ML_ARCH): on note create/update via the backend, plus chrono hash-check for external Obsidian edits. Worker `CardJobWorker` drains it on a schedule — overnight-friendly.
+Trigger — **implemented as a hash-diff scan, not the queue table planned here**:
+`CardJobWorker` periodically selects review notes (sr_due set) where
+`notes.content_hash` has no matching ACTIVE `cards.source_hash` and no prior
+attempt for that hash (`card_gen_attempts` ledger bounds retries). Same coverage
+as the queue (app writes, sync downloads, chrono rewrites, external edits) with
+zero call-site hooks. Batch-capped per pass (`cards.batch-limit`).
+
+**DECIDED — LLM calls go through the host-wrapper's `claude` CLI endpoint
+(`POST /complete`), NOT the Anthropic API.** The CLI bills the Claude subscription
+(included credits); the API would bill separately. `SYNTH_MODEL` selects the model
+(default haiku). The embedder never holds an API key for this.
 
 ```
 note content (already-chunked text from note_chunks, or raw note)
-  → PASS 1 — GENERATE (Haiku, 1 call): emit card set as schema-validated JSON
+  → PASS 1 — GENERATE (Haiku via wrapper CLI, 1 call): emit card set as schema-validated JSON
       target mix per note: ~N_MCQ mcq + ~N_OPEN open + ~N_EX exercises,
       difficulties spread 1–5 (prompt-enforced, validator-checked)
   → PASS 2 — BLIND SELF-CHECK (Haiku, 1 call, cheap): model answers its own
@@ -161,13 +172,31 @@ Standard FSRS input is the user self-rating recall of one card ("again/hard/good
 assignment finished (scope may span notes)
   → per-note sub-score: points earned / points possible over that note's cards
     (attempts → card_id → note_path, so this is a GROUP BY)
-  → map score to FSRS grade:   < 50% Again · 50–70% Hard · 70–90% Good · ≥ 90% Easy
+  → map score to band:  < 40% Hard · 40–70% Good · 70–90% Easy · ≥ 90% Very Easy
+    (FSRS grades: Hard / Good / Easy / Easy — NO "Again"/lapse band, see below)
   → FSRS update on note_reviews row → new stability, difficulty, due date
+  → bandit picks arm m ∈ {0.7, 0.85, 1.0, 1.2, 1.5} → due = now + interval × m
+    (Option A — DECIDED: the multiplier applies to the OUTPUT interval only;
+     the stored FSRS stability/difficulty state is never touched by the bandit)
   → GET /api/reviews/due → notes due now, ordered by overdue-ness
   → user (or one click) builds the next assignment scoped to due notes → loop
 ```
 
+**DECIDED — no fire-on-fail.** The "Again" lapse band is deliberately absent: a bad
+session grades as Hard (short interval) but never resets stability to near-zero.
+Skipping days must not cascade into mass resets; overload is already managed by
+BankruptcyService/SpreadService. Consequence to monitor: a genuinely forgotten note's
+interval plateaus instead of shrinking — repeated <40% scores keep it at Hard spacing.
+The strict-lapse alternative is parked in OPTIMIZATION_ARCH §5.
+
 Grade thresholds: `AssignmentService.GRADE_BANDS` — this mapping is the tuning surface (see Technology Notes). A note with no cards yet is invisible to the queue; card generation is the price of entry.
+
+**Two UI modes** (Settings toggle `flashcardsEnabled`):
+- **OFF — slideshow**: due notes shown directly; user self-rates with the same four
+  buttons (Hard / Good / Easy / Very Easy) → identical FSRS+bandit path, manual grade.
+- **ON — test view**: separate view; mini-assignment drawn from the note's cards;
+  band decided automatically from the score; note itself is openable at the end of
+  the test for direct review.
 
 ---
 
