@@ -70,6 +70,19 @@ public class PendingImageJobRepository {
             "UPDATE pending_image_jobs SET status = 'SKIPPED', processed_at = now() WHERE id::text = ?", id);
     }
 
+    /** Daily safety net: gives SKIPPED jobs another chance. Returns rows requeued. */
+    public int requeueSkipped() {
+        return jdbc.update("UPDATE pending_image_jobs SET status = 'PENDING' WHERE status = 'SKIPPED'");
+    }
+
+    /** status → count, for the info dashboard. */
+    public java.util.Map<String, Integer> countByStatus() {
+        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+        jdbc.query("SELECT status, COUNT(*) AS n FROM pending_image_jobs GROUP BY status",
+            rs -> { counts.put(rs.getString("status"), rs.getInt("n")); });
+        return counts;
+    }
+
     private static class JobRowMapper implements RowMapper<PendingImageJob> {
         @Override
         public PendingImageJob mapRow(ResultSet rs, int rowNum) throws SQLException {

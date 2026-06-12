@@ -163,14 +163,22 @@ Queue table: `pending_image_jobs` (PENDING / DONE / SKIPPED).
 
 **Drained by** `ImageProcessingWorker` (`@Scheduled` every 30s):
 ```
-for each PENDING row:
-  POST http://host.docker.internal:5001/process-image {image_path}
-  → 200: extracted text → chunk if > 1000 chars → EmbeddingService.embed() → upsert note_chunks → DONE
-  → error: SKIPPED (logged WARN with image_path; retried next run)
+batch of PENDING rows → grouped by note_path → groups run in PARALLEL
+(fixed pool, image.worker.parallelism=4) so the wrapper's LLM router shards
+images across providers (image A → Gemini while image B → Groq).
+Same-note images stay sequential — getNextChunkIndex() would collide otherwise.
+
+per job: POST http://host.docker.internal:5001/process-image {image_path}
+  → 200: {"text", "provider"} → chunk if > 1000 chars → EmbeddingService.embed() → upsert note_chunks → DONE
+  → 404 (image file gone): SKIPPED
+  → 503 / network error (LLM providers exhausted): stays PENDING — retried next 30s cycle
+SKIPPED rows get one retry per day: ImageProcessingWorker.requeueSkipped()
 ```
 
 To change image prompt: `host-wrapper/main.py → IMAGE_PROMPT`  
 To change schedule: `ImageProcessingWorker @Scheduled(fixedDelay = ...)`  
+To change parallelism: `.env → IMAGE_WORKER_PARALLELISM` (≈ number of configured vision providers)  
+To change provider order/keys: root `.env` → see `host-wrapper/FLOWS.md`  
 To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
 
 ---

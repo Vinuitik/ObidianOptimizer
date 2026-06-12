@@ -2,6 +2,8 @@ package com.obsidian.obsidian.ml;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,9 +14,14 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Component
 public class ImageProcessingWorker {
@@ -25,15 +32,21 @@ public class ImageProcessingWorker {
     static final int IMAGE_CHUNK_THRESHOLD = 1000;
     private static final int IMAGE_CHUNK_OVERLAP = 200;
     private static final int BATCH_SIZE = 10;
+    // Router acquire deadline (150s) + LLM request (120s) + margin
+    private static final Duration WRAPPER_TIMEOUT = Duration.ofSeconds(300);
 
     @Value("${wrapper.url:http://host.docker.internal:5001}")
     private String wrapperUrl;
+
+    @Value("${image.worker.parallelism:4}")
+    private int parallelism;
 
     private final PendingImageJobRepository jobRepo;
     private final EmbeddingService embeddingService;
     private final NoteChunkRepository chunkRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
+    private ExecutorService pool;
 
     public ImageProcessingWorker(PendingImageJobRepository jobRepo,
                                  EmbeddingService embeddingService,
@@ -41,6 +54,16 @@ public class ImageProcessingWorker {
         this.jobRepo          = jobRepo;
         this.embeddingService = embeddingService;
         this.chunkRepo        = chunkRepo;
+    }
+
+    @PostConstruct
+    void initPool() {
+        pool = Executors.newFixedThreadPool(Math.max(1, parallelism));
+    }
+
+    @PreDestroy
+    void shutdownPool() {
+        pool.shutdownNow();
     }
 
     @Scheduled(fixedDelay = 30_000)
@@ -56,8 +79,36 @@ public class ImageProcessingWorker {
             return;
         }
 
+        // Parallelize across NOTES, not jobs: images of the same note must run
+        // sequentially because getNextChunkIndex() would collide otherwise.
+        // Concurrent requests let the wrapper's LLM router shard across
+        // providers (image A → Gemini while image B → Groq).
+        Map<String, List<PendingImageJob>> byNote = new LinkedHashMap<>();
         for (PendingImageJob job : batch) {
-            processJob(job);
+            byNote.computeIfAbsent(job.getNotePath(), k -> new ArrayList<>()).add(job);
+        }
+
+        List<Callable<Void>> tasks = byNote.values().stream()
+            .map(jobs -> (Callable<Void>) () -> {
+                jobs.forEach(this::processJob);
+                return null;
+            })
+            .toList();
+
+        try {
+            pool.invokeAll(tasks); // block so fixedDelay paces batches correctly
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("[ImageProcessingWorker] interrupted while waiting for batch");
+        }
+    }
+
+    /** Safety net: SKIPPED jobs (permanent-looking failures) get one retry per day. */
+    @Scheduled(fixedDelay = 86_400_000, initialDelay = 3_600_000)
+    public void requeueSkipped() {
+        int requeued = jobRepo.requeueSkipped();
+        if (requeued > 0) {
+            log.info("[ImageProcessingWorker] requeued {} SKIPPED image job(s) for daily retry", requeued);
         }
     }
 
@@ -67,21 +118,29 @@ public class ImageProcessingWorker {
 
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(wrapperUrl + "/process-image"))
+                .timeout(WRAPPER_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() != 200) {
-                log.warn("[ImageProcessingWorker] wrapper returned HTTP {} for {} — marking SKIPPED",
-                    response.statusCode(), job.getImagePath());
+            if (response.statusCode() == 404) {
+                // image file gone — permanent until the note changes; daily requeue covers it
+                log.warn("[ImageProcessingWorker] image not found for {} — marking SKIPPED", job.getImagePath());
                 jobRepo.markSkipped(job.getId());
+                return;
+            }
+            if (response.statusCode() != 200) {
+                // transient (503 = all LLM providers exhausted/cooling) — keep PENDING, retry next cycle
+                log.warn("[ImageProcessingWorker] wrapper returned HTTP {} for {} — leaving PENDING for retry",
+                    response.statusCode(), job.getImagePath());
                 return;
             }
 
             JsonNode root = objectMapper.readTree(response.body());
             String extractedText = root.path("text").asText("").trim();
+            String provider = root.path("provider").asText("unknown");
 
             if (extractedText.isEmpty()) {
                 log.debug("[ImageProcessingWorker] empty text for {} — marking DONE", job.getImagePath());
@@ -104,14 +163,16 @@ public class ImageProcessingWorker {
             }
 
             jobRepo.markDone(job.getId());
-            log.debug("[ImageProcessingWorker] processed {} -> {} chunk(s)", job.getImagePath(), textChunks.size());
+            log.debug("[ImageProcessingWorker] processed {} via {} -> {} chunk(s)",
+                job.getImagePath(), provider, textChunks.size());
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("[ImageProcessingWorker] interrupted during job {}", job.getId());
         } catch (Exception e) {
-            log.warn("[ImageProcessingWorker] failed job {} ({}): {}", job.getId(), job.getImagePath(), e.getMessage());
-            jobRepo.markSkipped(job.getId());
+            // network/timeout — transient, keep PENDING so the multi-day backlog never drops images
+            log.warn("[ImageProcessingWorker] failed job {} ({}) — leaving PENDING for retry: {}",
+                job.getId(), job.getImagePath(), e.getMessage());
         }
     }
 
@@ -119,10 +180,14 @@ public class ImageProcessingWorker {
         try {
             HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(wrapperUrl + "/health"))
+                .timeout(Duration.ofSeconds(5))
                 .GET()
                 .build();
             HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             return res.statusCode() == 200;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
         } catch (Exception e) {
             return false;
         }
