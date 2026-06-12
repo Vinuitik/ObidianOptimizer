@@ -50,10 +50,15 @@ public class CardJobWorker {
         for (Map<String, Object> row : pending) {
             String path = (String) row.get("path");
             String hash = (String) row.get("content_hash");
-            // Record the attempt FIRST — a note that yields zero valid cards
-            // must not be retried every cycle (credits). An edit re-arms it.
-            cardRepo.recordAttempt(path, hash);
-            generationService.generateFor(path, hash);
+            var result = generationService.generateFor(path, hash);
+            // Record the attempt only when the embedder actually answered:
+            // a zero-yield generation must not retry every cycle (credits),
+            // but a transport failure (wrapper/embedder down — typical right
+            // after boot) must NOT burn the ledger, or those notes would
+            // never retry until edited.
+            if (result != null) {
+                cardRepo.recordAttempt(path, hash);
+            }
         }
     }
 }

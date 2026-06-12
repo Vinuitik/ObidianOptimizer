@@ -59,8 +59,9 @@ CardJobWorker @Scheduled (default every 30min, 2min after startup)
       SQL diff: notes WHERE sr_due IS NOT NULL
         AND no ACTIVE cards with source_hash == notes.content_hash
         AND no card_gen_attempts row for that (path, hash)
-  → per note: recordAttempt(path, hash) FIRST (zero-card notes must not retry
-      every cycle — CLI credits), then CardGenerationService.generateFor()
+  → per note: CardGenerationService.generateFor(), then recordAttempt(path, hash)
+      ONLY if the embedder answered — zero-yield generations don't retry
+      (credits), but transport failures (wrapper down) retry next cycle
   → POST embedder /flashcards/generate {note_path, source_hash}
       embedder reads the note from its read-only /vault mount
       → flashcards/generate.py:

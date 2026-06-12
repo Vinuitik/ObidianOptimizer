@@ -39,11 +39,11 @@ public class CardController {
         if (hash == null) {
             return ResponseEntity.badRequest().body("note not indexed: " + req.notePath());
         }
-        cardRepo.recordAttempt(req.notePath(), hash);
         JsonNode result = generationService.generateFor(req.notePath(), hash);
         if (result == null) {
             return ResponseEntity.internalServerError().body("generation failed — see backend logs");
         }
+        cardRepo.recordAttempt(req.notePath(), hash);
         return ResponseEntity.ok(result);
     }
 

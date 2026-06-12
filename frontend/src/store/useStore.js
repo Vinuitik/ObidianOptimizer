@@ -379,6 +379,8 @@ const useStore = create((set, get) => ({
     const ok = await apiLogin(username, password);
     if (ok) {
       set({ isAuthenticated: true, showLogin: false });
+      // settings require auth — without this they'd sit at defaults until reload
+      await get().loadSettings();
       await get().fetchRootChildren();
       get().fetchNoteNames();
       await get().initReviewSession();
@@ -621,7 +623,7 @@ const useStore = create((set, get) => ({
   loadSettings: async () => {
     try {
       const settings = await apiFetchSettings();
-      set({ settings });
+      if (settings && typeof settings === 'object') set({ settings });
     } catch {
       // Non-fatal — defaults remain
     }
