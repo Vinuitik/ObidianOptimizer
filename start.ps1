@@ -19,9 +19,27 @@ if (-not (Test-Path "$certDir\selfsigned.crt")) {
     }
 }
 
+# Enable the Cloudflare tunnel only when a token is present in .env. The
+# cloudflared service is behind the "tunnel" compose profile; starting it
+# without a token would crash-loop (restart: unless-stopped), so we detect it.
+$composeArgs = @("-f", "$PSScriptRoot\docker-compose.yml")
+if (Select-String -Path $envFile -Pattern '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S' -Quiet) {
+    Write-Host "Cloudflare tunnel token found in .env — starting with the 'tunnel' profile."
+    $composeArgs += @("--profile", "tunnel")
+} else {
+    Write-Host "No CLOUDFLARE_TUNNEL_TOKEN in .env — starting without the Cloudflare tunnel."
+}
+
+# Force plain BuildKit output. The animated TTY progress doesn't render in some
+# PowerShell hosts (shows nothing during the build, then clears on Ctrl-C). Set
+# via env var, not `--progress` — older Compose rejects that flag on `up`.
+$env:BUILDKIT_PROGRESS = "plain"
+
 try {
-    docker compose -f "$PSScriptRoot\docker-compose.yml" up --build
+    # Plain build output appends one persistent line per step so the build is
+    # visible; runtime container logs then stream as usual while attached.
+    docker compose @composeArgs up --build
 } finally {
     Write-Host "Shutting down containers..."
-    docker compose -f "$PSScriptRoot\docker-compose.yml" down
+    docker compose @composeArgs down
 }
