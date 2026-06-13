@@ -1,0 +1,337 @@
+{
+  "counts": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "images": [
+    "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20260228203813.png",
+    "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20251003200420.png",
+    "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20250908225723.png",
+    "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20260512190440.png",
+    "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20251022185805.png",
+    "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20250808184346.png",
+    "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20250716135813.png",
+    "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20251210194425.png"
+  ],
+  "results": [
+    {
+      "provider": "gemini",
+      "n": 2,
+      "latency_s": 5.79,
+      "per_image_s": 2.9,
+      "kept_separate": true,
+      "similarity_to_solo": 0.999,
+      "responses": [
+        "There is a common refrain from many that “why can't agents just be tools?”. This blog provides\na point of view about why tools and agents should be treated differently, and why there needs\nto be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in\nanother agent, we need to define the types of operational boundaries that e",
+        "fulfillment paths, and demand scenarios would affect a\nproduct's contribution profit. This, in turn, gives Amazon.\ncom the ability to understand how changes in these variables\nwould impact FCF. Very few retailers have this in-depth fi-\nnancial view of their products; thus, they have a difficult job\nmaking decisions and building processes that optimize the\neconomics. Amazon.com uses this knowledge "
+      ]
+    },
+    {
+      "provider": "gemini",
+      "n": 4,
+      "latency_s": 7.34,
+      "per_image_s": 1.84,
+      "kept_separate": true,
+      "similarity_to_solo": 0.969,
+      "responses": [
+        "There is a common refrain from many that \"why can't agents just be tools?\". This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that e",
+        "fulfillment paths, and demand scenarios would affect a product's contribution profit. This, in turn, gives Amazon. com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth fi- nancial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge ",
+        "Sometimes making friends is simply a matter of being in the right place at the right time. When people feel good about themselves and do not attribute the good feeling to a specific cause, they tend to associate the cause of that good feeling with the person who is physically close to them at the time. If you happen to be that person, you're going to benefit and be liked not for anything you did b",
+        "Bloom Filters\n\nThe problem: \"Probabilistic (approximate) set membership test\"\nGiven a set S = {X1, X2,..., Xn}, is y in S?\n\nConstruct a data structure to answer that is:\n\nFast (Faster than searching through S).\nSmall (Smaller than explicit representation).\n\nTo obtain speed and size improvements, allow some probability of error.\n\nFalse positives: y S but we report y ∈ S\n\nFalse negatives: y ∈ S but "
+      ]
+    },
+    {
+      "provider": "gemini",
+      "n": 8,
+      "latency_s": 10.89,
+      "per_image_s": 1.36,
+      "kept_separate": true,
+      "similarity_to_solo": 0.876,
+      "responses": [
+        "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that e",
+        "fulfillment paths, and demand scenarios would affect a product's contribution profit. This, in turn, gives Amazon.com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth financial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge to ",
+        "Sometimes making friends is simply a matter of being in the right place at the right time. When people feel good about themselves and do not attribute the good feeling to a specific cause, they tend to associate the cause of that good feeling with the person who is physically close to them at the time. If you happen to be that person, you're going to benefit and be liked not for anything you did b",
+        "Bloom Filters\n\nThe problem: “Probabilistic (approximate) set membership test”\nGiven a set S = {x₁, x₂, ..., xₙ}, is y in S ?\nConstruct a data structure to answer that is:\n\nFast (Faster than searching through S).\nSmall (Smaller than explicit representation).\n\nTo obtain speed and size improvements, allow some probability of error.\n\nFalse positives: y ∉ S but we report y ∈ S\nFalse negatives: y ∈ S bu",
+        "What the Books Get Wrong about AI [Double Descent]\nDATA AUGMENTATION\n\n4:09 / 34:05\nAlexNet & Overfitting >",
+        "Applications\n\nEmbeddings models are one of the fundamental machine learning models that power a variety of applications. We summarize some popular applications in the following table.\n\nTask Description\nRetrieval Given a query and a set of objects (for example, documents, images, and videos), retrieve the most relevant objects. Based on the definition of relevant objects, the subtasks include quest",
+        "Summary\n\nLayer Implementation\nUser-facing API Python\nGraph runtime C++\nKernels (ops) C++\nDevice drivers (GPU/TPU) CUDA, specialized libraries",
+        "Primary vs Foreign Key\n\nStudents\nStudentID (PK) Name Major\n1 Alice CS\n2 Rose Maths\n3 Charlie Physics\n\nSchool\nCourses\nCopy debug info\nCourseID (PK) Module\n101 Databases\n102 Algorithms\n\nEnrolments\nCourseID (FK) StudentID (FK)\n101 1\n102 2"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "n": 1,
+      "per_image_s": 7.89,
+      "baselines": [
+        {
+          "image": "Pasted image 20260228203813.png",
+          "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides\na point of view about why tools and agents should be treated differently, and why there needs\nto be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in\nanother agent, we need to define the types of operational boundaries that exist. To do this we\nmust move our thinking to the source of the control flow decisions and the scope that\ndecisions are to be made in.\n\nThe well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action,\neither gather information, make a change or to transform information from one form to another.\nIn each of these cases, there is a temporal relationship that input is provided and some output\nis returned. This is illustrated in the figure below, where there is also an example of streaming\naction.",
+          "latency_s": 5.379735946655273
+        },
+        {
+          "image": "Pasted image 20251003200420.png",
+          "error": "'content'"
+        },
+        {
+          "image": "Pasted image 20250908225723.png",
+          "text": "Sometimes making friends is simply a matter of being in the right place at the\nright time. When people feel good about themselves and do not attribute the\ngood feeling to a specific cause, they tend to associate the cause of that good\nfeeling with the person who is physically close to them at the time. If you\nhappen to be that person, you're going to benefit and be liked not for anything\nyou did but because of the “misattribution.” In a sense, what we have here is a\ncase of collateral benefit rather than collateral damage.\nConsider this example. When people exercise, their brains release\nendorphins. The release of endorphins gives these individuals a nonspecific\nsense of well-being. Since the effect of the endorphins is not directly attributed\nto exercise, the good feeling tends to be linked to another person, if one\nhappens to be nearby. Think of it as the “collateral benefit.” Since that good\nfeeling is “misattributed” to the nearby person, he or she is subconsciously seen\nas the cause of the good feeling and, therefore, appears more attractive.\nHow can you use this information to get someone to like you? Actually, you\ncan take advantage of this phenomenon in a number of ways. If you are in\nshape, you can arrange a meeting around an exercise activity, join a fitness\nclub, or participate in sports (organized walks or runs—“fun” or otherwise—\nprovide a great opportunity for misattribution to work).",
+          "latency_s": 13.541098833084106
+        },
+        {
+          "image": "Pasted image 20260512190440.png",
+          "text": "Bloom Filters\n\nThe problem: \"Probabilistic (approximate) set membership test\"\nGiven a set S = {x₁, x₂, ..., xₙ}, is y in S?\nConstruct a data structure to answer that is:\nFast (Faster than searching through S).\nSmall (Smaller than explicit representation).\nTo obtain speed and size improvements, allow some probability of error.\nFalse positives: y ∉ S but we report y ∈ S\nFalse negatives: y ∈ S but we report y ∉ S\n\nBloom filter\nData structure for probabilistic set membership testing\nZero false negatives\nNonzero false positives",
+          "latency_s": 8.749676704406738
+        },
+        {
+          "image": "Pasted image 20251022185805.png",
+          "text": "What the Books Get Wrong about AI [Double Descent]\nDATA AUGMENTATION\n4:09 / 34:05\nAlexNet & Overfitting",
+          "latency_s": 9.025299310684204
+        },
+        {
+          "image": "Pasted image 20250808184346.png",
+          "text": "Applications\nEmbeddings models are one of the fundamental machine learning models that power a variety of applications. We summarize some popular applications in the following table.\n\nTask\nDescription\nRetrieval\nGiven a query and a set of objects (for example, documents, images, and videos), retrieve the most relevant objects. Based on the definition of relevant objects, the subtasks include question answering and recommendations.\nSemantic text similarity\nDetermine whether two sentences have the same semantic meaning. The subtasks include: paraphrasing, duplicate detection, and bitext mining.\nClassification\nClassify objects into possible categories. Based on the number of labels, the subtasks include binary classification, multi-class classification, and multilabel classifications.\nClustering\nCluster similar objects together.\nReranking\nRerank a set of objects based on a certain query.\n\nEmbeddings together with vector stores providing ANN are powerful tools which can be used for a variety of applications. These include Retrieval Augmented Generation (RAG) for LLMs, Search, Recommendation Systems, Anomaly detection, few shot- classification and much more.",
+          "latency_s": 4.865986108779907
+        },
+        {
+          "image": "Pasted image 20250716135813.png",
+          "text": "Summary\nLayer | Implementation\nUser-facing API | Python\nGraph runtime | C++\nKernels (ops) | C++\nDevice drivers (GPU/TPU) | CUDA, specialized libraries",
+          "latency_s": 5.51616358757019
+        },
+        {
+          "image": "Pasted image 20251210194425.png",
+          "text": "Primary vs Foreign Key\n\nSchool\nStudents\nCourses\nEnrolments\n\nStudentID (PK)\n1\n2\n3\nName\nAlice\nRose\nCharlie\nMajor\nCS\n",
+          "latency_s": 8.153596878051758
+        }
+      ]
+    },
+    {
+      "provider": "github",
+      "n": 2,
+      "latency_s": 8.0,
+      "per_image_s": 4.0,
+      "kept_separate": true,
+      "similarity_to_solo": 0.998,
+      "responses": [
+        "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that e",
+        "fulfillment paths, and demand scenarios would affect a product’s contribution profit. This, in turn, gives Amazon.com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth financial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge to "
+      ]
+    },
+    {
+      "provider": "github",
+      "n": 4,
+      "error": "28"
+    },
+    {
+      "provider": "github",
+      "n": 8,
+      "error": "17"
+    },
+    {
+      "provider": "github",
+      "n": 1,
+      "per_image_s": 7.5,
+      "baselines": [
+        {
+          "image": "Pasted image 20260228203813.png",
+          "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\nThe well-defined nature of a tool  \nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action.",
+          "latency_s": 5.839486122131348
+        },
+        {
+          "image": "Pasted image 20251003200420.png",
+          "text": "fulfillment paths, and demand scenarios would affect a product’s contribution profit. This, in turn, gives Amazon. com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth financial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge to do things like determine the number of warehouses they need and where they should be placed, quickly assess and respond to vendor offers, accurately measure inventory margin health, calculate to the penny the cost of holding a unit of inventory over a specified period of time, and much more.\n\nWhile Amazon.com’s short-term investors may grouse that Amazon.com should be “making more money,” Jeff continues to build one of the most dominant, enduring, and valuable enterprises in the world. Meanwhile, other Internet boom companies have bit the dust, mostly because they put too much emphasis on short-term profitability and failed to invest enough in long-term value creation.\n\nJeff explains it this way, “Take a long-term view, and the interests of customers and shareholders align.” That’s the philosophy that has made Amazon so successful. Another way of saying it: If you’re inefficient and have fat margins, you die a Darwinian death.\n\nOn the Origin of Species . . . now there’s a business model that thinks big.",
+          "latency_s": 6.28882622718811
+        },
+        {
+          "image": "Pasted image 20250908225723.png",
+          "text": "Sometimes making friends is simply a matter of being in the right place at the right time. When people feel good about themselves and do not attribute the good feeling to a specific cause, they tend to associate the cause of that good feeling with the person who is physically close to them at the time. If you happen to be that person, you’re going to benefit and be liked not for anything you did but because of the “misattribution.” In a sense, what we have here is a case of collateral benefit rather than collateral damage.\n\nConsider this example. When people exercise, their brains release endorphins. The release of endorphins gives these individuals a nonspecific sense of well-being. Since the effect of the endorphins is not directly attributed to exercise, the good feeling tends to be linked to another person, if one happens to be nearby. Think of it as the “collateral benefit.” Since that good feeling is “misattributed” to the nearby person, he or she is subconsciously seen as the cause of the good feeling and, therefore, appears more attractive.\n\nHow can you use this information to get someone to like you? Actually, you can take advantage of this phenomenon in a number of ways. If you are in shape, you can arrange a meeting around an exercise activity, join a fitness club, or participate in sports (organized walks or runs—“fun” or otherwise—provide a great opportunity for misattribution to work).",
+          "latency_s": 6.765733242034912
+        },
+        {
+          "image": "Pasted image 20260512190440.png",
+          "text": "**Bloom Filters**\n\nThe problem: “Probabilistic (approximate) set membership test”\nGiven a set \\( S = \\{x_1, x_2, \\ldots, x_n\\} \\), is \\( y \\in S \\)?\n\nConstruct a data structure to answer that is:\n- Fast (Faster than searching through \\( S \\)).\n- Small (Smaller than explicit representation).\n\nTo obtain speed and size improvements, allow some probability of error.\n- False positives: \\( y \\notin S \\) but we report \\( y \\in S \\)\n- False negatives: \\( y \\in S \\) but we report \\( y \\notin S \\)\n\nBloom filter  \nData structure for probabilistic set membership testing  \n- Zero false negatives  \n- Nonzero false positives  ",
+          "latency_s": 15.010509729385376
+        },
+        {
+          "image": "Pasted image 20251022185805.png",
+          "error": "8"
+        },
+        {
+          "image": "Pasted image 20250808184346.png",
+          "error": "1"
+        },
+        {
+          "image": "Pasted image 20250716135813.png",
+          "text": "Summary\n\nLayer                      Implementation  \nUser-facing API       Python  \nGraph runtime         C++  \nKernels (ops)        C++  \nDevice drivers (GPU/TPU)  CUDA, specialized libraries  ",
+          "latency_s": 4.856963396072388
+        },
+        {
+          "image": "Pasted image 20251210194425.png",
+          "text": "**Primary vs Foreign Key**\n\n**Students**\n- StudentID (PK) | Name   | Major  \n- 1               | Alice  | CS  \n- 2               | Rose   | Maths  \n- 3               | Charlie| Physics  \n\n**Courses**\n- CourseID (PK) | Module  \n- 101            | Databases  \n- 102            | Algorithms  \n\n**Enrolments**\n- CourseID (FK) | StudentID (FK)  \n- 101           | 1  \n- 102           | 2  ",
+          "latency_s": 6.208728313446045
+        }
+      ]
+    },
+    {
+      "provider": "mistral",
+      "n": 2,
+      "latency_s": 3.29,
+      "per_image_s": 1.64,
+      "kept_separate": true,
+      "similarity_to_solo": 0.814,
+      "responses": [
+        "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them. When asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that ex",
+        "fulfillment paths, and demand scenarios would affect a product’s contribution profit. This, in turn, gives Amazon.com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth financial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge to "
+      ]
+    },
+    {
+      "provider": "mistral",
+      "n": 4,
+      "latency_s": 7.21,
+      "per_image_s": 1.8,
+      "kept_separate": true,
+      "similarity_to_solo": 0.98,
+      "responses": [
+        "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that e",
+        "fulfillment paths, and demand scenarios would affect a product’s contribution profit. This, in turn, gives Amazon.com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth financial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge to ",
+        "Sometimes making friends is simply a matter of being in the right place at the right time. When people feel good about themselves and do not attribute the good feeling to a specific cause, they tend to associate the cause of that good feeling with the person who is physically close to them at the time. If you happen to be that person, you’re going to benefit and be liked not for anything you did b",
+        "### Bloom Filters\n\n#### The problem: “Probabilistic (approximate) set membership test”\nGiven a set S = {x1,x2,…,xn}, is y in S ?\nConstruct a data structure to answer that is:\n\n- Fast (Faster than searching through S).\n- Small (Smaller than explicit representation).\n\nTo obtain speed and size improvements, allow some probability of error.\n\n- False positives: y ∉ S but we report y ∈ S\n- False negativ"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "n": 8,
+      "latency_s": 9.99,
+      "per_image_s": 1.25,
+      "kept_separate": true,
+      "similarity_to_solo": 0.058,
+      "responses": [
+        "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.",
+        "When asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.",
+        "Consider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action.",
+        "fulfillment paths, and demand scenarios would affect a product’s contribution profit. This, in turn, gives Amazon.com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth financial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge to ",
+        "While Amazon.com’s short-term investors may grouse that Amazon.com should be “making more money,” Jeff continues to build one of the most dominant, enduring, and valuable enterprises in the world. Meanwhile, other Internet boom companies have bit the dust, mostly because they put too much emphasis on short-term profitability and failed to invest enough in long-term value creation.",
+        "Jeff explains it this way, “Take a long-term view, and the interests of customers and shareholders align.” That’s the philosophy that has made Amazon so successful. Another way of saying it: If you’re inefficient and have fat margins, you die a Darwinian death.",
+        "Sometimes making friends is simply a matter of being in the right place at the right time. When people feel good about themselves and do not attribute the good feeling to a specific cause, they tend to associate the cause of that good feeling with the person who is physically close to them at the time. If you happen to be that person, you’re going to benefit and be liked not for anything you did b",
+        "Consider this example. When people exercise, their brains release endorphins. The release of endorphins gives these individuals a nonspecific sense of well-being. Since the effect of the endorphins is not directly attributed to exercise, the good feeling tends to be linked to another person, if one happens to be nearby. Think of it as the “collateral benefit.” Since that good feeling is “misattrib"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "n": 1,
+      "per_image_s": 3.4,
+      "baselines": [
+        {
+          "image": "Pasted image 20260228203813.png",
+          "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\n### The well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action.",
+          "latency_s": 5.984509229660034
+        },
+        {
+          "image": "Pasted image 20251003200420.png",
+          "text": "fulfillment paths, and demand scenarios would affect a product's contribution profit. This, in turn, gives Amazon.com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth financial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge to do things like determine the number of warehouses they need and where they should be placed, quickly assess and respond to vendor offers, accurately measure inventory margin health, calculate the penny cost of holding a unit of inventory over a specified period of time, and much more.\n\nWhile Amazon.com's short-term investors may grouse that Amazon.com should be \"making more money,\" Jeff continues to build one of the most dominant, enduring, and valuable enterprises in the world. Meanwhile, other Internet boom companies have bit the dust, mostly because they put too much emphasis on short-term profitability and failed to invest enough in long-term value creation.\n\nJeff explains it this way, \"Take a long-term view, and the interests of customers and shareholders align.\" That's the philosophy that has made Amazon so successful. Another way of saying it: If you're inefficient and have fat margins, you die a Darwinian death.\n\n_On the Origin of Species_ ... now there's a business model that thinks big.",
+          "latency_s": 3.350712776184082
+        },
+        {
+          "image": "Pasted image 20250908225723.png",
+          "text": "Sometimes making friends is simply a matter of being in the right place at the right time. When people feel good about themselves and do not attribute the good feeling to a specific cause, they tend to associate the cause of that good feeling with the person who is physically close to them at the time. If you happen to be that person, you’re going to benefit and be liked not for anything you did but because of the “misattribution.” In a sense, what we have here is a case of collateral benefit rather than collateral damage.\n\nConsider this example. When people exercise, their brains release endorphins. The release of endorphins gives these individuals a nonspecific sense of well-being. Since the effect of the endorphins is not directly attributed to exercise, the good feeling tends to be linked to another person, if one happens to be nearby. Think of it as the “collateral benefit.” Since that good feeling is “misattributed” to the nearby person, he or she is subconsciously seen as the cause of the good feeling and, therefore, appears more attractive.\n\nHow can you use this information to get someone to like you? Actually, you can take advantage of this phenomenon in a number of ways. If you are in shape, you can arrange a meeting around an exercise activity, join a fitness club, or participate in sports (organized walks or runs—“fun” or otherwise—provide a great opportunity for misattribution to work).",
+          "latency_s": 4.250379800796509
+        },
+        {
+          "image": "Pasted image 20260512190440.png",
+          "text": "# Bloom Filters\n\n**The problem: \"Probabilistic (approximate) set membership test\"**\n\nGiven a set S = {x1, x2, ..., xn}, is y in S?\n\nConstruct a data structure to answer that is:\n\n- Fast (Faster than searching through S).\n- Small (Smaller than explicit representation).\n\nTo obtain speed and size improvements, allow some probability of error.\n\n- False positives: y ∉ S but we report y ∈ S\n- False negatives: y ∈ S but we report y ∉ S\n\n**Bloom filter**\n\nData structure for probabilistic set membership testing\n\n- Zero false negatives\n- Nonzero false positives",
+          "latency_s": 3.1907618045806885
+        },
+        {
+          "image": "Pasted image 20251022185805.png",
+          "text": "What the Books Get Wrong about AI [Double Descent]\nDATA AUGMENTATION",
+          "latency_s": 3.2440273761749268
+        },
+        {
+          "image": "Pasted image 20250808184346.png",
+          "text": "# Applications\n\nEmbeddings models are one of the fundamental machine learning models that power a variety of applications. We summarize some popular applications in the following table.\n\n| Task | Description |\n| --- | --- |\n| Retrieval | Given a query and a set of objects (for example, documents, images, and videos), retrieve the most relevant objects. Based on the definition of relevant objects, the subtasks include question answering and recommendations. |\n| Semantic text similarity | Determine whether two sentences have the same semantic meaning. The subtasks include: paraphrasing, duplicate detection, and bitext mining. |\n| Classification | Classify objects into possible categories. Based on the number of labels, the subtasks include binary classification, multi-class classification, and multilabel classifications. |\n| Clustering | Cluster similar objects together. |\n| Reranking | Rerank a set of objects based on a certain query. |\n\nEmbeddings together with vector stores providing ANN are powerful tools which can be used for a variety of applications. These include Retrieval Augmented Generation (RAG) for LLMs, Search, Recommendation Systems, Anomaly detection, few shot- classification and much more.",
+          "latency_s": 3.058884620666504
+        },
+        {
+          "image": "Pasted image 20250716135813.png",
+          "text": "# Summary\n\n| Layer | Implementation |\n|-------|----------------|\n| User-facing API | Python |\n| Graph runtime | C++ |\n| Kernels (ops) | C++ |\n| Device drivers (GPU/TPU) | CUDA, specialized libraries |",
+          "latency_s": 1.3739440441131592
+        },
+        {
+          "image": "Pasted image 20251210194425.png",
+          "text": "# Primary vs Foreign Key\n\n| StudentID (PK) | Name  | Major  |\n|----------------|-------|--------|\n| 1              | Alice | CS     |\n| 2              | Rose  | Maths  |\n| 3              | Charlie | Physics |\n\n| ModuleID | Module      |\n|----------|-------------|\n| 101      | Databases   |\n| 102      | Algorithms  |\n\n| CourseID (FK) | StudentID (FK) |\n|---------------|----------------|\n| 101           | 1              |\n| 102           | 2              |",
+          "latency_s": 2.718088388442993
+        }
+      ]
+    },
+    {
+      "provider": "groq",
+      "n": 2,
+      "latency_s": 2.25,
+      "per_image_s": 1.13,
+      "kept_separate": true,
+      "similarity_to_solo": 0.969,
+      "responses": [
+        "There is a common refrain from many that “why can’t agents just be tools?” This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that ex",
+        "fulfillment paths, and demand scenarios would affect a product’s contribution profit. This, in turn, gives Amazon.com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth financial view of their products; thus, they have a difficult job making decisions and building processes that optimize the making decisions and building processes that "
+      ]
+    },
+    {
+      "provider": "groq",
+      "n": 4,
+      "error": "18"
+    },
+    {
+      "provider": "groq",
+      "n": 8,
+      "error": "HTTP 400: {\"error\":{\"message\":\"Too many images provided.  This model supports up to 5 images\",\"type\":\"invalid_request_error\"}}\n"
+    },
+    {
+      "provider": "groq",
+      "n": 1,
+      "per_image_s": 1.84,
+      "baselines": [
+        {
+          "image": "Pasted image 20260228203813.png",
+          "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\n**The well-defined nature of a tool**\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action.",
+          "latency_s": 1.5579028129577637
+        },
+        {
+          "image": "Pasted image 20251003200420.png",
+          "text": "fulfillment paths, and demand scenarios would affect a product's contribution profit. This, in turn, gives Amazon. com the ability to understand how changes in these variables would impact FCF. Very few retailers have this in-depth fi- nancial view of their products; thus, they have a difficult job making decisions and building processes that optimize the economics. Amazon.com uses this knowledge to do things like determine the number of warehouses they need and where they should be placed, quickly assess and respond to vendor offers, accurately measure inventory margin health, calculate to the penny the cost of holding a unit of inventory over a specified period of time, and much more.\n\nWhile Amazon.com's short-term investors may grouse that Amazon.com should be \"making more money,\" Jeff continues to build one of the most dominant, enduring, and valuable enterprises in the world. Meanwhile, other Internet boom companies have bit the dust, mostly because they put too much emphasis on short-term profitability and failed to invest enough in long-term value creation.\n\nJeff explains it this way, \"Take a long-term view, and the interests of customers and shareholders align.\" That's the philosophy that has made Amazon so successful. Another way of saying it: If you're inefficient and have fat margins, you die a Darwinian death.\n\nOn the Origin of Species ... now there's a business model that thinks big.",
+          "latency_s": 1.7151579856872559
+        },
+        {
+          "image": "Pasted image 20250908225723.png",
+          "text": "Sometimes making friends is simply a matter of being in the right place at the right time. When people feel good about themselves and do not attribute the good feeling to a specific cause, they tend to associate the cause of that good feeling with the person who is physically close to them at the time. If you happen to be that person, you're going to benefit and be liked not for anything you did but because of the “misattribution.” In a sense, what we have here is a case of collateral benefit rather than collateral damage.\n\nConsider this example. When people exercise, their brains release endorphins. The release of endorphins gives these individuals a nonspecific sense of well-being. Since the effect of the endorphins is not directly attributed to exercise, the good feeling tends to be linked to another person, if one happens to be nearby. Think of it as the “collateral benefit.” Since that good feeling is “misattributed” to the nearby person, he or she is subconsciously seen as the cause of the good feeling and, therefore, appears more attractive.\n\nHow can you use this information to get someone to like you? Actually, you can take advantage of this phenomenon in a number of ways. If you are in shape, you can arrange a meeting around an exercise activity, join a fitness club, or participate in sports (organized walks or runs—“fun” or otherwise—provide a great opportunity for misattribution to work).",
+          "latency_s": 1.9585232734680176
+        },
+        {
+          "image": "Pasted image 20260512190440.png",
+          "text": "Bloom Filters\n\nThe problem: “Probabilistic (approximate) set membership test” \nGiven a set $S = \\{x_1,x_2,...,x_n\\}$, is $y$ in $S$?\nConstruct a data structure to answer that is:\nFast (Faster than searching through $S$). \nSmall (Smaller than explicit representation).\nTo obtain speed and size improvements, allow some probability of error.\nFalse positives: $y \\not\\in S$ but we report $y \\in S$\nFalse negatives: $y \\in S$ but we report $y \\not\\in S$\n\nBloom filter \nData structure for probabilistic set membership testing\nZero false negatives\nNonzero false positives",
+          "latency_s": 2.0972907543182373
+        },
+        {
+          "image": "Pasted image 20251022185805.png",
+          "text": "What the Books Get Wrong about AI [Double Descent]\nDATA AUGMENTATION \n4:09 / 34:05 \nAlexNet & Overfitting >",
+          "latency_s": 2.5873208045959473
+        },
+        {
+          "image": "Pasted image 20250808184346.png",
+          "text": "Applications\n\nEmbeddings models are one of the fundamental machine learning models that power a variety of applications. We summarize some popular applications in the following table.\n\n| Task | Description |\n| --- | --- |\n| Retrieval | Given a query and a set of objects (for example, documents, images, and videos), retrieve the most relevant objects. Based on the definition of relevant objects, the subtasks include question answering and recommendations. |\n| Semantic text similarity | Determine whether two sentences have the same semantic meaning. The subtasks include: paraphrasing, duplicate detection, and bitext mining. |\n| Classification | Classify objects into possible categories. Based on the number of labels, the subtasks include binary classification, multi-class classification, and multilabel classifications. |\n| Clustering | Cluster similar objects together. |\n| Reranking | Rerank a set of objects based on a certain query. |\n\nEmbeddings together with vector stores providing ANN are powerful tools which can be used for a variety of applications. These include Retrieval Augmented Generation (RAG) for LLMs, Search, Recommendation Systems, Anomaly detection, few shot-classification and much more.",
+          "latency_s": 1.8535940647125244
+        },
+        {
+          "image": "Pasted image 20250716135813.png",
+          "text": "Summary\n\nLayer  Implementation\nUser-facing API  Python\nGraph runtime  C++\nKernels (ops)  C++\nDevice drivers (GPU/TPU)  CUDA, specialized libraries",
+          "latency_s": 1.0394222736358643
+        },
+        {
+          "image": "Pasted image 20251210194425.png",
+          "text": "Primary vs Foreign Key\n\n**Students**\n| StudentID (PK) | Name  | Major    |\n|----------------|-------|----------|\n| 1              | Alice | CS       |\n| 2              | Rose  | Maths    |\n| 3              | Charlie| Physics  |\n\n**Courses**\n| CourseID (PK) | Module    |\n|--------------|-----------|\n| 101          | Databases |\n| 102          | Algorithms|\n\n**Enrolments**\n| CourseID (FK) | StudentID (FK) |\n|---------------|----------------|\n| 101           | 1              |\n| 102           | 2              |\n\n**School**\n- Students\n- Courses\n- Enrolments",
+          "latency_s": 1.876291275024414
+        }
+      ]
+    }
+  ]
+}

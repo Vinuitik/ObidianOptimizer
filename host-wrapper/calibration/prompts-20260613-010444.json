@@ -1,0 +1,117 @@
+{
+  "image": "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20260228203813.png",
+  "results": [
+    {
+      "provider": "gemini",
+      "variant": "current",
+      "latency_s": 3.15,
+      "chars": 969,
+      "text": "There is a common refrain from many that \"why can't agents just be tools?\". This blog provides\na point of view about why tools and agents should be treated differently, and why there needs\nto be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in\nanother agent, we need to define the types of operational boundaries that exist. To do this we\nmust move our thinking to the source of the control flow decisions and the scope that\ndecisions are to be made in.\n\n**The well-defined nature of a tool**\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action,\neither gather information, make a change or to transform information from one form to another.\nIn each of these cases, there is a temporal relationship that input is provided and some output\nis returned. This is illustrated in the figure below, where there is also an example of streaming\naction."
+    },
+    {
+      "provider": "gemini",
+      "variant": "ocr-strict",
+      "latency_s": 3.7,
+      "chars": 969,
+      "text": "There is a common refrain from many that \"why can't agents just be tools?\". This blog provides\na point of view about why tools and agents should be treated differently, and why there needs\nto be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in\nanother agent, we need to define the types of operational boundaries that exist. To do this we\nmust move our thinking to the source of the control flow decisions and the scope that\ndecisions are to be made in.\n\n**The well-defined nature of a tool**\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action,\neither gather information, make a change or to transform information from one form to another.\nIn each of these cases, there is a temporal relationship that input is provided and some output\nis returned. This is illustrated in the figure below, where there is also an example of streaming\naction."
+    },
+    {
+      "provider": "gemini",
+      "variant": "structured-md",
+      "latency_s": 3.57,
+      "chars": 967,
+      "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\n# The well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action."
+    },
+    {
+      "provider": "gemini",
+      "variant": "diagram-deep",
+      "latency_s": 2.39,
+      "chars": 969,
+      "text": "There is a common refrain from many that \"why can't agents just be tools?\". This blog provides\na point of view about why tools and agents should be treated differently, and why there needs\nto be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in\nanother agent, we need to define the types of operational boundaries that exist. To do this we\nmust move our thinking to the source of the control flow decisions and the scope that\ndecisions are to be made in.\n\n**The well-defined nature of a tool**\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action,\neither gather information, make a change or to transform information from one form to another.\nIn each of these cases, there is a temporal relationship that input is provided and some output\nis returned. This is illustrated in the figure below, where there is also an example of streaming\naction."
+    },
+    {
+      "provider": "github",
+      "variant": "current",
+      "latency_s": 6.29,
+      "chars": 965,
+      "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\nThe well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action."
+    },
+    {
+      "provider": "github",
+      "variant": "ocr-strict",
+      "latency_s": 8.94,
+      "chars": 965,
+      "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\nThe well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action."
+    },
+    {
+      "provider": "github",
+      "variant": "structured-md",
+      "latency_s": 6.81,
+      "chars": 983,
+      "text": "```markdown\nThere is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\n# The well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action.\n```"
+    },
+    {
+      "provider": "github",
+      "variant": "diagram-deep",
+      "latency_s": 5.46,
+      "chars": 265,
+      "text": "Diagram Type: Illustration\n\nLabeled Elements:\n1. Agent\n2. Tools\n3. Action\n4. Input\n5. Output\n\nRelationships:\n- Agent -> Tools: utilizes\n- Tools -> Action: used to take\n- Action -> Input: provided\n- Action -> Output: returned\n- Input -> Output: temporal relationship"
+    },
+    {
+      "provider": "mistral",
+      "variant": "current",
+      "latency_s": 2.44,
+      "chars": 969,
+      "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\n### The well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action."
+    },
+    {
+      "provider": "mistral",
+      "variant": "ocr-strict",
+      "latency_s": 2.57,
+      "chars": 974,
+      "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\n---\n\n### The well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action."
+    },
+    {
+      "provider": "mistral",
+      "variant": "structured-md",
+      "latency_s": 2.61,
+      "chars": 1042,
+      "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the **control flow decisions** and the scope that decisions are to be made in.\n\n### The well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action.\n\n- **Tool**\n  - Input\n    - Parameters\n  - Output\n    - Return value"
+    },
+    {
+      "provider": "mistral",
+      "variant": "diagram-deep",
+      "latency_s": 1.97,
+      "chars": 141,
+      "text": "The provided text does not contain any image, diagram, chart, or graph. Therefore, there is nothing to transcribe or describe in that regard."
+    },
+    {
+      "provider": "groq",
+      "variant": "current",
+      "latency_s": 2.18,
+      "chars": 965,
+      "text": "There is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\nThe well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action."
+    },
+    {
+      "provider": "groq",
+      "variant": "ocr-strict",
+      "latency_s": 2.56,
+      "chars": 1009,
+      "text": "The image contains the following text:\n\nThere is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\n**The well-defined nature of a tool**\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action."
+    },
+    {
+      "provider": "groq",
+      "variant": "structured-md",
+      "latency_s": 2.3,
+      "chars": 1424,
+      "text": "# The well-defined nature of a tool\n\nThere is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\n## The well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action. \n\nNo diagram available, but here is how it could be represented:\n* Node 1: Agent \n  * Node 1.1: Tool 1 \n    + Connection: Input to Tool 1\n    + Connection: Output from Tool 1\n  * Node 1.2: Tool 2 \n    + Connection: Input to Tool 2\n    + Connection: Output from Tool 2\n* Relationship: \n  + Node 1 uses Node 1.1 and Node 1.2\n\nNo code, tables or math available. \n\nThe text is the main content and has been included as is."
+    },
+    {
+      "provider": "groq",
+      "variant": "diagram-deep",
+      "latency_s": 3.13,
+      "chars": 1018,
+      "text": "There is no diagram, chart or graph. \n\nThe text is:\n\nThere is a common refrain from many that “why can’t agents just be tools?”. This blog provides a point of view about why tools and agents should be treated differently, and why there needs to be a different way to interact with them.\n\nWhen asking about whether agent interoperation is simply just using an agent as a tool in another agent, we need to define the types of operational boundaries that exist. To do this we must move our thinking to the source of the control flow decisions and the scope that decisions are to be made in.\n\nThe well-defined nature of a tool\n\nConsider the case of an agent that can utilize multiple tools. The tools are used to take action, either gather information, make a change or to transform information from one form to another. In each of these cases, there is a temporal relationship that input is provided and some output is returned. This is illustrated in the figure below, where there is also an example of streaming action."
+    }
+  ]
+}

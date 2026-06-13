@@ -1,0 +1,33 @@
+{
+  "image": "C:\\Users\\ACER\\Desktop\\NewLife\\resources\\images\\Pasted image 20260228203813.png",
+  "rows": [
+    {
+      "provider": "gemini",
+      "text_model": "gemini-2.5-flash",
+      "vision_model": "gemini-2.5-flash",
+      "text": "OK 3.0s ('ok')",
+      "vision": "OK 3.5s (965 chars)"
+    },
+    {
+      "provider": "github",
+      "text_model": "openai/gpt-4o-mini",
+      "vision_model": "openai/gpt-4o-mini",
+      "text": "OK 2.4s ('ok')",
+      "vision": "OK 6.9s (965 chars)"
+    },
+    {
+      "provider": "mistral",
+      "text_model": "mistral-small-latest",
+      "vision_model": "mistral-small-latest",
+      "text": "OK 1.1s ('Ok')",
+      "vision": "OK 2.9s (969 chars)"
+    },
+    {
+      "provider": "groq",
+      "text_model": "llama-3.3-70b-versatile",
+      "vision_model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "text": "OK 1.1s ('ok')",
+      "vision": "OK 2.5s (965 chars)"
+    }
+  ]
+}
