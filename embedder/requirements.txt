@@ -21,6 +21,7 @@ numpy>=1.26.0
 # ctranslate2 >=4.5 needs cuDNN 9, which the base image now ships (see Dockerfile).
 faster-whisper>=1.1.0
 ctranslate2>=4.5
+requests>=2.31.0   # extract_av → VideoManager /subs (YouTube subtitle fetch)
 
 # Ingest stages 2-5: PDF, web, keyframes
 # CLIP keyframe/diagram selection runs via ingest.clip_onnx (pre-exported ONNX,

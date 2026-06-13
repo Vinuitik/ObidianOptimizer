@@ -56,7 +56,7 @@ public class MarkdownPreprocessor {
         }
         text = wikiImgMatcher.replaceAll("");
 
-        Pattern mdImgPattern = Pattern.compile("!\\[.*?)]\\((.*?)\\)");
+        Pattern mdImgPattern = Pattern.compile("!\\[.*?]\\((.*?)\\)");
         Matcher mdImgMatcher = mdImgPattern.matcher(text);
         while (mdImgMatcher.find()) {
             imageRefs.add(mdImgMatcher.group(1));

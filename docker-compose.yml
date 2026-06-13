@@ -49,7 +49,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 120s   # model download on first start can take a while
+      # First start downloads ~1.3GB of ONNX weights (onnx/model.onnx) into the
+      # /models volume — at typical Hub speeds that's several minutes. Failures
+      # inside start_period don't count, so the backend's service_healthy wait
+      # won't abort the stack mid-download. Cached after the first run → fast.
+      start_period: 600s
 
   backend:
     build: ./obsidian_optimizer/obsidian

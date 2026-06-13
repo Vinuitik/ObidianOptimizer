@@ -30,9 +30,29 @@ if (Select-String -Path $envFile -Pattern '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S'
     Write-Host "No CLOUDFLARE_TUNNEL_TOKEN in .env — starting without the Cloudflare tunnel."
 }
 
+# Start the host-wrapper (the LLM bridge) on the host — it runs OUTSIDE docker on
+# :5001, reachable from the containers via host.docker.internal:5001. It's not a
+# compose service because it needs host-side access to local LLM tooling/creds.
+# Without it, image captioning + note synthesis silently skip ("host wrapper
+# unreachable"). Launches in its own window so its logs are visible; killed below.
+$wrapperDir = "$PSScriptRoot\host-wrapper"
+$wrapper = $null
+Write-Host "Installing host-wrapper deps and starting it on :5001 ..."
+& python -m pip install -q -r "$wrapperDir\requirements.txt"
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "host-wrapper pip install failed — is 'python' on PATH? Continuing without it (LLM features will skip)."
+} else {
+    $wrapper = Start-Process -FilePath python -ArgumentList "main.py" -WorkingDirectory $wrapperDir -PassThru
+    Write-Host "host-wrapper started (PID $($wrapper.Id))."
+}
+
 try {
     docker compose @composeArgs up --build
 } finally {
     Write-Host "Shutting down containers..."
     docker compose @composeArgs down
+    if ($wrapper -and -not $wrapper.HasExited) {
+        Write-Host "Stopping host-wrapper (PID $($wrapper.Id))..."
+        Stop-Process -Id $wrapper.Id -Force -ErrorAction SilentlyContinue
+    }
 }
