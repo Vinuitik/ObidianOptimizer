@@ -31,6 +31,8 @@ services:
       - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}
       - WRAPPER_URL=${WRAPPER_URL:-http://host.docker.internal:5001}
       - SYNTH_MODEL=${SYNTH_MODEL:-haiku}
+      - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
+      - VIDEOMANAGER_URL=${VIDEOMANAGER_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

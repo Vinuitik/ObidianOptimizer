@@ -5,7 +5,7 @@ FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
-        python3.11 python3.11-venv curl \
+        python3.11 python3.11-venv curl ffmpeg \
     && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -13,6 +13,9 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
+# faster-whisper drags in CPU onnxruntime, whose files clobber onnxruntime-gpu's
+# in the shared namespace — reinstall the GPU wheel last so CUDA EP survives.
+RUN python3.11 -m pip install --no-cache-dir --force-reinstall --no-deps "onnxruntime-gpu>=1.19.0"
 
 COPY . .
 

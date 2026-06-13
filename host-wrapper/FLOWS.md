@@ -1,6 +1,13 @@
 # Host Wrapper Service — the LLM Gateway
 
-Files: main.py, llm_router.py, requirements.txt, .env.example, start.bat
+Files: main.py, llm_router.py, calibrate.py, tests/, requirements.txt, .env.example, start.bat
+
+Tests: `python -m pytest tests/` (33 tests, all provider HTTP mocked — never hits real APIs).
+Live calibration (burns real quota): `python calibrate.py probe|batch|prompts` →
+results in `calibration/*.json`. 2026-06-13 findings: all 4 free providers accept
+images via API; batching sweet spots — gemini n=4 (sim 0.97 vs solo), mistral n=4
+(0.98; n=8 collapses to 0.06), github n=2 (429s above), groq n=2 (hard cap 5 images,
+429s above 2 in practice).
 
 Runs on Windows host (NOT in Docker). Spring Boot + embedder containers call it via
 `host.docker.internal:5001`. **This is the single place the app talks to any LLM** —

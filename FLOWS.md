@@ -26,6 +26,9 @@ Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notl
 | [Cards FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/cards/FLOWS.md) | Flows | Flashcard agent: hash-diff worker, CLI generation, solver sandbox |
 | [Flashcards Architecture](architecture_plans/FLASHCARDS_ARCH.md) | Architecture | Card types, FSRS-on-notes + bandit (Option A), assignments [PARTIALLY IMPLEMENTED] |
 | [Backend FLOWS — Chrono](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#chrono-service) | Flows | Daily jobs: FileMover, FileChecker, BankruptcyCheck, SpreadCheck |
+| [Ingest FLOWS](embedder/ingest/FLOWS.md) | Flows | Resource→notes stage 1: A/V whisper transcription, job API |
+| [Ingest Architecture](architecture_plans/INGEST_AGENT_ARCH.md) | Architecture | Full pipeline plan + v1 execution stages, note splitter |
+| [Link Sniffer Architecture](architecture_plans/LINK_SNIFFER_AGENT_ARCH.md) | Architecture | Extension-connected capture agent [NOT IMPLEMENTED] |
 | [Mobile Architecture](architecture_plans/MOBILE_ARCH.md) | Architecture | Offline-first mobile app, sync engine [NOT IMPLEMENTED] |
 | [Backend Testing](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#testing) | Testing | Unit tests (7 service layers), MockMvc controller tests, Testcontainers IT |
 | [Frontend Testing](frontend/FLOWS.md#testing) | Testing | Vitest: useStore, TabBar, FolderTree filter, diff, LoginModal, NewNoteForm |

@@ -61,6 +61,11 @@ class JudgeRequest(BaseModel):
     key_points: list[str] | None = None
 
 
+class IngestRequest(BaseModel):
+    ref: str                        # /vault-relative path or URL
+    force_whisper: bool = False     # re-transcribe even if captions exist
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -140,6 +145,48 @@ def judge_answer(req: JudgeRequest):
     from flashcards.judge import judge_open_answer
 
     return judge_open_answer(req.question, req.answer, req.reference_answers, req.key_points)
+
+
+@app.post("/ingest")
+def ingest_submit(req: IngestRequest):
+    """Resource → notes pipeline (INGEST_AGENT_ARCH). Async: jobs are
+    minutes-long (whisper). Stage 1: A/V extraction to a bundle."""
+    from ingest import jobs as ingest_jobs
+    from ingest import router as ingest_router
+    from mcp_server import _resolve_in_vault
+
+    try:
+        ingest_router.route(req.ref)   # fail fast on unroutable input
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    resolved = None
+    if not req.ref.startswith(("http://", "https://")):
+        try:
+            resolved = _resolve_in_vault(req.ref)
+        except (ValueError, OSError) as e:
+            raise HTTPException(status_code=404, detail=f"cannot resolve in vault: {e}")
+        if not resolved.exists():
+            raise HTTPException(status_code=404, detail=f"not in vault: {req.ref}")
+
+    return ingest_jobs.submit(req.ref, resolved, req.force_whisper)
+
+
+@app.get("/ingest/{job_id}")
+def ingest_status(job_id: str):
+    from ingest import jobs as ingest_jobs
+
+    job = ingest_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown job id")
+    return job
+
+
+@app.get("/ingest")
+def ingest_list():
+    from ingest import jobs as ingest_jobs
+
+    return {"jobs": ingest_jobs.list_jobs()}
 
 
 # ---------------------------------------------------------------------------

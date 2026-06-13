@@ -6,12 +6,19 @@ uvicorn[standard]>=0.30.0
 onnxruntime-gpu>=1.19.0
 
 # Model loading + ONNX export (converts PyTorch → ONNX on first run, then caches)
-optimum>=1.21.0
+# <2.0: optimum 2.x moved optimum.onnxruntime into the separate optimum-onnx
+# package (which drags in CPU onnxruntime alongside onnxruntime-gpu)
+optimum>=1.21.0,<2.0
 transformers>=4.44.0
 torch>=2.3.0          # needed by optimum for the one-time ONNX export; not used at inference time
 
 # Numerics
 numpy>=1.26.0
+
+# Ingest agent — A/V transcription (INGEST_AGENT_ARCH stage 1)
+# ctranslate2 pinned <4.5: 4.5+ needs cuDNN 9, base image ships cuDNN 8
+faster-whisper>=1.1.0
+ctranslate2>=4.0,<4.5
 
 # MCP server (JSON-RPC over streamable HTTP) + direct Postgres access for tools
 mcp>=1.8.0
