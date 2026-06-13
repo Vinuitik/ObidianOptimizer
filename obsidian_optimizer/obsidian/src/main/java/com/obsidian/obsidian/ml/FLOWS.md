@@ -1,6 +1,8 @@
 # ML Domain Flows
 
-Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java, NoteEmbeddingWorker.java
+Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java, NoteEmbeddingWorker.java, ResourceScanService.java
+
+Ingest agent (resource → in-place notes): embedder/ingest/FLOWS.md
 
 Python embedder: embedder/main.py, embedder/model_runtime.py, embedder/mcp_server.py, embedder/Dockerfile, embedder/requirements.txt
 
@@ -198,6 +200,20 @@ To change schedule: `ImageProcessingWorker @Scheduled(fixedDelay = ...)`
 To change parallelism: `.env → IMAGE_WORKER_PARALLELISM` (≈ number of configured vision providers)  
 To change provider order/keys: root `.env` → see `host-wrapper/FLOWS.md`  
 To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
+
+---
+
+## Resource Ingest Trigger
+
+`ResourceScanService.scan(absPath, content)` runs at the same chokepoint as
+`registerImages` (called at its tail), so every note write is covered. For each
+`![[*.mp4|mkv|webm|mov|avi|mp3|m4a|wav|ogg|flac|pdf]]` lacking a `<!-- ingest:… -->`
+marker it POSTs the embedder `/ingest {ref, note_path}` off-thread (best-effort).
+The embedder synthesizes a note and injects it below the embed; the next write-back
+carries the marker, so re-scans skip it. Pipeline detail: embedder/ingest/FLOWS.md.
+
+To change which embeds trigger ingest: `ResourceScanService.RESOURCE_EMBED`
+To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 
 ---
 

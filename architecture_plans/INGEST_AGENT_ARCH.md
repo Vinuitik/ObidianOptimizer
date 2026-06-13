@@ -1,6 +1,9 @@
 # Resource → Notes Ingest Agent — Architecture Plan
 
-Files: [NOT IMPLEMENTED] — planned: embedder/ingest/router.py, embedder/ingest/extract_pdf.py, embedder/ingest/extract_web.py, embedder/ingest/extract_av.py, embedder/ingest/keyframes.py, embedder/ingest/bundle.py, embedder/ingest/synthesize.py, embedder/ingest/validate.py
+Files: embedder/ingest/{router,extract_av,extract_pdf,extract_web,keyframes,bundle,synthesize,publish,split_note,jobs}.py; Java com.obsidian.obsidian.ml.ResourceScanService, com.obsidian.obsidian.internalapi.InternalAgentController. Flows: embedder/ingest/FLOWS.md.
+
+**STATUS (2026-06-13): IMPLEMENTED, stages 1–5.** One amendment to the plan below:
+placement is **in-place injection**, not standalone notes (see "In-place placement").
 
 **Core principle: pipeline-first, agent-last.** Extraction is 100% deterministic code (no LLM in the loop). The LLM appears only at the final synthesis step, constrained to schema-validated JSON with a capped retry budget. No open-ended agent loop, no tool browsing.
 
@@ -165,7 +168,36 @@ tags: [from outline pass]
 
 ---
 
-## Stage 5 — Validation & placement (deterministic)
+## In-place placement (amends Stage 5) — ✅ DECIDED (user, 2026-06-13)
+
+The primary use case is a note that **embeds a resource**: `![[lecture.mp4]]`,
+`![[talk.mp3]]`, `![[paper.pdf]]`. Raw A/V/PDF embeds are invisible to the chunker
+(`MarkdownPreprocessor` strips `![[…]]`), so that content never gets embedded. Fix:
+
+```
+Java ResourceScanService (hooked into ImageScanService.registerImages — the
+universal post-write chokepoint) finds resource embeds without an ingest marker
+  → POST embedder /ingest {ref: embed, note_path}
+  → extract → bundle → keyframes/figures → synthesize ONE block (## per outline
+    plan; split into sections allowed) → inject DIRECTLY BELOW the embed in the
+    SAME note (embed kept) wrapped in <!-- ingest:<base> sha=… --> … markers
+  → publish.update_note via Java internal API → re-index + re-sync
+The injected prose + ![[keyframe.jpg]] images are what the chunker now embeds;
+the marker is an HTML comment (invisible render, chunker-stripped). Idempotent:
+marker presence = done; the scanner re-fires until the marker lands; the embedder
+de-dups concurrent (note, embed) jobs. sha= records the resource hash for a future
+"resource changed → re-ingest" auto-diff [NOT IMPLEMENTED — delete marker to re-run].
+```
+
+The original Stage-5 standalone path (find_home + create new note) remains for
+bare-ref ingest (URLs) and is what `split_note.py` uses. Decision: keep both;
+`note_path` present ⇒ in-place, absent ⇒ standalone.
+
+PDF figures additionally pass `keyframes.diagram_keep_mask()` (same CLIP KEEP/DROP
+prompts as video keyframes) so logos/headshots are dropped and real diagrams kept —
+the user's "extract important diagrams" requirement.
+
+## Stage 5 — Validation & placement (deterministic, standalone path)
 
 ```
 generated note

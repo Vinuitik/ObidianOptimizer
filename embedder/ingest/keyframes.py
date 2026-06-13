@@ -110,21 +110,73 @@ def _grab_frame(video_path: Path, ts: float, out: Path) -> bool:
 
 # ── CLIP filter + dedupe (sequential model policy: load → use → free) ────
 
+def _load_clip():
+    """Load the CLIP model on the best device. Shared by keyframe selection
+    and PDF diagram filtering (extract_pdf) — same model, same prompts."""
+    import open_clip
+    import torch
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        CLIP_MODEL, pretrained="openai", cache_dir=MODEL_CACHE,
+        precision="fp16" if device == "cuda" else "fp32")
+    model = model.to(device).eval()
+    tokenizer = open_clip.get_tokenizer(CLIP_MODEL)
+    return model, preprocess, tokenizer, device
+
+
+def diagram_keep_mask(images_png: list[bytes]) -> list[bool]:
+    """True where the image reads as a diagram/chart/figure (vs a photo or
+    decorative graphic), via CLIP zero-shot — the same KEEP/DROP prompts the
+    keyframe selector uses. Best-effort: if CLIP is unavailable, keep all.
+
+    Used by extract_pdf to drop logos/headshots while keeping real figures —
+    the user's 'extract important diagrams' requirement.
+    """
+    if not images_png:
+        return []
+    try:
+        import gc
+        import io
+
+        import torch
+        from PIL import Image
+
+        model, preprocess, tokenizer, device = _load_clip()
+        with torch.no_grad():
+            text_feat = model.encode_text(
+                tokenizer(KEEP_PROMPTS + DROP_PROMPTS).to(device)).float()
+            text_feat /= text_feat.norm(dim=-1, keepdim=True)
+            mask = []
+            for raw in images_png:
+                img = preprocess(Image.open(io.BytesIO(raw)).convert("RGB")
+                                 ).unsqueeze(0).to(device)
+                f = model.encode_image(img).float()
+                f /= f.norm(dim=-1, keepdim=True)
+                sims = f.squeeze(0) @ text_feat.T
+                keep = sims[:len(KEEP_PROMPTS)].max().item()
+                drop = sims[len(KEEP_PROMPTS):].max().item()
+                mask.append(keep >= drop)
+        del model, text_feat
+        gc.collect()
+        if device == "cuda":
+            torch.cuda.empty_cache()
+        return mask
+    except Exception as e:
+        log.warning("CLIP diagram filter unavailable (%s) — keeping all", e)
+        return [True] * len(images_png)
+
+
 def _clip_filter_dedupe(frames: list[dict]) -> list[dict]:
     if not frames:
         return []
     try:
         import gc
-        import open_clip
+
         import torch
         from PIL import Image
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model, _, preprocess = open_clip.create_model_and_transforms(
-            CLIP_MODEL, pretrained="openai", cache_dir=MODEL_CACHE,
-            precision="fp16" if device == "cuda" else "fp32")
-        model = model.to(device).eval()
-        tokenizer = open_clip.get_tokenizer(CLIP_MODEL)
+        model, preprocess, tokenizer, device = _load_clip()
 
         with torch.no_grad():
             text_feat = model.encode_text(

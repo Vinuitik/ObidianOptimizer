@@ -101,6 +101,71 @@ def test_media_outside_segments_not_embedded(monkeypatch):
     assert "far.jpg" not in note
 
 
+# ── in-place assembly ────────────────────────────────────────────────────
+
+def test_build_inplace_body_has_no_frontmatter_and_joins_sections(monkeypatch):
+    monkeypatch.setattr(synthesize, "_complete", lambda p, s: "Body text.")
+    bundle = make_bundle(2, media=[
+        {"path": "lec-60.jpg", "loc": {"t": 65.0}, "trigger": "cue",
+         "cue_text": "look here"}])
+    plans = [{"title": "Part One", "segment_ids": [0], "tags": []},
+             {"title": "Part Two", "segment_ids": [1], "tags": []}]
+    numbered = bundle_util.number_segments(bundle)
+    block = synthesize.build_inplace_body(bundle, plans, numbered)
+
+    assert not block.startswith("---")            # parent note owns frontmatter
+    assert "## Part One" in block and "## Part Two" in block
+    assert "![[lec-60.jpg]]" in block             # t=65 ∈ seg 1 (Part Two)
+    assert block.count("## Source") == 1          # one footer across sections
+    assert "#review" not in block                 # not a standalone note
+
+
+# ── in-place injection ───────────────────────────────────────────────────
+
+NOTE = ("---\ntags: []\n---\n# My Lecture\n\n"
+        "Some intro.\n\n![[lecture.mp4]]\n\nMore text after.\n")
+
+
+def test_inject_block_inserts_below_embed():
+    out = publish.inject_block(NOTE, "lecture.mp4", "synth body", "ab12")
+    assert "<!-- ingest:lecture.mp4 sha=ab12 -->" in out
+    assert "<!-- /ingest:lecture.mp4 -->" in out
+    # block sits between the embed and the following text
+    embed_i = out.index("![[lecture.mp4]]")
+    block_i = out.index("<!-- ingest:lecture.mp4")
+    after_i = out.index("More text after.")
+    assert embed_i < block_i < after_i
+    assert "![[lecture.mp4]]" in out              # embed is preserved
+
+
+def test_inject_block_is_idempotent():
+    once = publish.inject_block(NOTE, "lecture.mp4", "first body", "ab12")
+    twice = publish.inject_block(once, "lecture.mp4", "second body", "cd34")
+    assert once.count("<!-- ingest:lecture.mp4") == 1
+    assert twice.count("<!-- ingest:lecture.mp4") == 1   # replaced, not stacked
+    assert "second body" in twice and "first body" not in twice
+    assert "sha=cd34" in twice
+
+
+def test_inject_block_resolves_basename_against_pathful_embed():
+    note = "# N\n\n![[resources/videos/lecture.mp4]]\n\ntail\n"
+    out = publish.inject_block(note, "resources/videos/lecture.mp4", "b", "x1")
+    assert "<!-- ingest:lecture.mp4 sha=x1 -->" in out
+    assert out.index("lecture.mp4]]") < out.index("<!-- ingest:lecture.mp4")
+
+
+def test_inject_block_missing_embed_raises():
+    with pytest.raises(publish.PublishError, match="not found"):
+        publish.inject_block("# no embed here\n", "ghost.mp4", "b", "x")
+
+
+def test_validate_embeds_only_gates_produced_media():
+    body = "text " * 50 + "![[frame-1.jpg]] and ![[frame-2.jpg]]"
+    assert publish.validate_embeds(body, {"frame-1.jpg"}) == \
+        ["embed does not resolve: frame-2.jpg"]
+    assert publish.validate_embeds(body, {"frame-1.jpg", "frame-2.jpg"}) == []
+
+
 # ── validation ───────────────────────────────────────────────────────────
 
 def test_validate_note_catches_problems():

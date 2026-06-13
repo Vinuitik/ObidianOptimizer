@@ -65,6 +65,8 @@ class IngestRequest(BaseModel):
     ref: str                        # /vault-relative path or URL
     force_whisper: bool = False     # re-transcribe even if captions exist
     extract_only: bool = False      # stop after the bundle (skip synthesis)
+    note_path: str | None = None    # in-place mode: host note holding the embed
+    embed_ref: str | None = None    # the ![[…]] target to ingest below
 
 
 class SplitNoteRequest(BaseModel):
@@ -155,27 +157,63 @@ def judge_answer(req: JudgeRequest):
 @app.post("/ingest")
 def ingest_submit(req: IngestRequest):
     """Resource → notes pipeline (INGEST_AGENT_ARCH). Async: jobs are
-    minutes-long (whisper). Stage 1: A/V extraction to a bundle."""
+    minutes-long (whisper).
+
+    Two modes:
+      • standalone — {ref}: extract → synthesize → create new note(s).
+      • in-place   — {ref|embed_ref, note_path}: synthesize ONE block and
+        inject it below the embed in note_path (the embed is kept; the
+        chunker indexes the injected text). This is what the auto-scanner
+        (ResourceScanService) fires for video/audio/PDF embeds in notes.
+    """
     from ingest import jobs as ingest_jobs
     from ingest import router as ingest_router
-    from mcp_server import _resolve_in_vault
+
+    in_place = bool(req.note_path)
+    target = req.embed_ref or req.ref if in_place else req.ref
 
     try:
-        ingest_router.route(req.ref)   # fail fast on unroutable input
+        ingest_router.route(target)    # fail fast on unroutable input
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     resolved = None
-    if not req.ref.startswith(("http://", "https://")):
-        try:
-            resolved = _resolve_in_vault(req.ref)
-        except (ValueError, OSError) as e:
-            raise HTTPException(status_code=404, detail=f"cannot resolve in vault: {e}")
-        if not resolved.exists():
-            raise HTTPException(status_code=404, detail=f"not in vault: {req.ref}")
+    if not target.startswith(("http://", "https://")):
+        resolved = _resolve_embed(target)
+        if resolved is None:
+            raise HTTPException(status_code=404, detail=f"not in vault: {target}")
 
-    return ingest_jobs.submit(req.ref, resolved, req.force_whisper,
-                              req.extract_only)
+    if in_place:
+        from mcp_server import _resolve_in_vault
+        try:
+            note = _resolve_in_vault(req.note_path)
+        except (ValueError, OSError) as e:
+            raise HTTPException(status_code=404, detail=f"bad note_path: {e}")
+        if not note.is_file():
+            raise HTTPException(status_code=404, detail=f"note not found: {req.note_path}")
+
+    return ingest_jobs.submit(
+        target, resolved, req.force_whisper, req.extract_only,
+        note_path=req.note_path, embed_ref=(target if in_place else None))
+
+
+def _resolve_embed(ref: str):
+    """Resolve a vault embed to a file. Tries the path as written; if that
+    misses (Obsidian embeds are usually bare basenames while the file lives
+    under resources/…), searches the vault for a matching basename."""
+    from mcp_server import VAULT_DIR, _resolve_in_vault
+
+    try:
+        p = _resolve_in_vault(ref)
+        if p.exists():
+            return p
+    except (ValueError, OSError):
+        pass
+    base = ref.rsplit("/", 1)[-1]
+    for hit in VAULT_DIR.rglob(base):
+        if hit.is_file():
+            return hit
+    return None
 
 
 @app.post("/ingest/split-note")

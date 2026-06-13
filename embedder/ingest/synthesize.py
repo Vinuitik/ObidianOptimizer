@@ -144,12 +144,17 @@ def _outline_window(bundle: dict, window: list[dict]) -> list[dict]:
 
 def write_note(bundle: dict, plan: dict, all_segments: list[dict]) -> str:
     by_id = {s["id"]: s for s in all_segments}
+    body, segs = _write_body(bundle, plan, by_id)
+    return assemble(bundle, plan, segs, body)
+
+
+def _write_body(bundle: dict, plan: dict, by_id: dict[int, dict]) -> tuple[str, list[dict]]:
+    """One WRITE call → markdown body + the segments it was built from."""
     segs = [by_id[i] for i in plan["segment_ids"] if i in by_id]
     body = _complete(WRITE_PROMPT.format(
         title=plan["title"], summary_hint=plan.get("summary_hint", ""),
         segments=bundle_util.render_segments(segs)), WRITE_SYSTEM)
-    body = _strip_fences(body)
-    return assemble(bundle, plan, segs, body)
+    return _strip_fences(body), segs
 
 
 def _strip_fences(body: str) -> str:
@@ -162,7 +167,30 @@ def _strip_fences(body: str) -> str:
     return t.strip()
 
 
-# ── deterministic assembly ───────────────────────────────────────────────
+# ── in-place assembly (inject below an embed, no frontmatter) ─────────────
+
+def build_inplace_body(bundle: dict, plans: list[dict],
+                       all_segments: list[dict]) -> str:
+    """Synthesize ALL plans into ONE block injected below a resource embed.
+
+    Unlike assemble() (standalone note: frontmatter + sr fields + #review),
+    this returns only the inner body — the parent note owns its frontmatter.
+    Each plan becomes a ## section; media interleave by loc; one source footer.
+    """
+    by_id = {s["id"]: s for s in all_segments}
+    sections, used = [], []
+    for plan in plans:
+        body, segs = _write_body(bundle, plan, by_id)
+        used.extend(segs)
+        media_lines = _media_for_segments(bundle, segs)
+        section = f"## {plan['title']}\n\n{body.rstrip()}"
+        if media_lines:
+            section += "\n\n" + "\n".join(media_lines)
+        sections.append(section)
+    return "\n\n".join(sections) + "\n\n" + _source_section(bundle["source"], used)
+
+
+# ── deterministic assembly (standalone note) ─────────────────────────────
 
 def assemble(bundle: dict, plan: dict, segs: list[dict], body: str) -> str:
     src = bundle["source"]

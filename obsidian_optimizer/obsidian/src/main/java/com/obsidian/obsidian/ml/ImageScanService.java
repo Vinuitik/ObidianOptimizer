@@ -30,10 +30,13 @@ public class ImageScanService {
 
     private final PendingImageJobRepository jobRepo;
     private final NoteIndexRepository noteIndexRepo;
+    private final ResourceScanService resourceScanService;
 
-    public ImageScanService(PendingImageJobRepository jobRepo, NoteIndexRepository noteIndexRepo) {
-        this.jobRepo       = jobRepo;
-        this.noteIndexRepo = noteIndexRepo;
+    public ImageScanService(PendingImageJobRepository jobRepo, NoteIndexRepository noteIndexRepo,
+                            ResourceScanService resourceScanService) {
+        this.jobRepo             = jobRepo;
+        this.noteIndexRepo       = noteIndexRepo;
+        this.resourceScanService = resourceScanService;
     }
 
     /** Called after FileRepository.init() — walks all indexed notes and queues unprocessed images. */
@@ -62,6 +65,9 @@ public class ImageScanService {
         }
         String hash = sha256(content);
         noteIndexRepo.updateContentHash(notePath, hash);
+        // Same chokepoint, second job: trigger in-place ingest of any A/V or
+        // PDF embeds in this note (best-effort, off-thread — never blocks).
+        resourceScanService.scan(notePath, content);
         return refs.size();
     }
 

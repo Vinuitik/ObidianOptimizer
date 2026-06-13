@@ -28,12 +28,23 @@ _worker_started = False
 
 
 def submit(ref: str, resolved_path, force_whisper: bool = False,
-           extract_only: bool = False) -> dict:
+           extract_only: bool = False, note_path: str | None = None,
+           embed_ref: str | None = None) -> dict:
+    # In-place dedup: never run two jobs for the same (note, embed) at once —
+    # the auto-scanner re-fires on every save until the marker lands.
+    if note_path and embed_ref:
+        with _lock:
+            for j in _jobs.values():
+                if (j.get("note_path") == note_path
+                        and j.get("embed_ref") == embed_ref
+                        and j["status"] in ("QUEUED", "RUNNING")):
+                    return public_view(j)
     job_id = uuid.uuid4().hex[:12]
     job = {
         "id": job_id, "ref": ref, "status": "QUEUED", "stage": None,
         "created_at": time.time(), "error": None, "bundle_path": None,
         "force_whisper": force_whisper, "extract_only": extract_only,
+        "note_path": note_path, "embed_ref": embed_ref,
         "_resolved_path": str(resolved_path) if resolved_path else None,
     }
     with _lock:
@@ -120,7 +131,10 @@ def _run(job: dict):
         return
 
     job["stage"] = "synthesize"
-    _synthesize_and_publish(job, bundle)
+    if job.get("note_path"):
+        _synthesize_and_inject(job, bundle)        # in-place: below the embed
+    else:
+        _synthesize_and_publish(job, bundle)       # standalone: new note(s)
     job["status"] = "DONE"
     log.info("ingest job %s: %d segments, %d note(s) from %s",
              job["id"], len(bundle["segments"]),
@@ -140,16 +154,51 @@ def _attach_keyframes(job: dict, bundle: dict, video_path: Path):
                     job["ref"], e)
 
 
-def _synthesize_and_publish(job: dict, bundle: dict):
-    from ingest import publish, synthesize
-    from ingest import bundle as bundle_util
-
-    # store media first so embeds resolve at validation time
+def _store_media(bundle: dict) -> set[str]:
+    """Persist agent-produced media (keyframes, PDF figures) via the Java
+    internal API so the ![[…]] embeds resolve. Returns the stored basenames."""
+    from ingest import publish
     stored_names = set()
     for m in bundle.get("media", []):
         if "data_b64" in m:
             publish.store_media(m["path"], m.pop("data_b64"))
         stored_names.add(m["path"].rsplit("/", 1)[-1])
+    return stored_names
+
+
+def _synthesize_and_inject(job: dict, bundle: dict):
+    """In-place: synthesize ONE block and inject it below the resource embed
+    in the host note (the embed is kept; the chunker indexes the block)."""
+    import hashlib
+
+    from ingest import publish, synthesize
+    from ingest import bundle as bundle_util
+    from mcp_server import _resolve_in_vault
+
+    stored_names = _store_media(bundle)
+    plans = synthesize.outline(bundle)
+    job["planned_notes"] = [p["title"] for p in plans]
+    numbered = bundle_util.number_segments(bundle)
+    block = synthesize.build_inplace_body(bundle, plans, numbered)
+
+    problems = publish.validate_embeds(block, stored_names)
+    if problems:
+        raise publish.PublishError("; ".join(problems))
+
+    resolved = Path(job["_resolved_path"]) if job["_resolved_path"] else None
+    sha = hashlib.sha256(resolved.read_bytes()).hexdigest()[:16] if resolved else "live"
+    content = _resolve_in_vault(job["note_path"]).read_text(encoding="utf-8")
+    new_content = publish.inject_block(content, job["embed_ref"], block, sha)
+    publish.update_note(job["note_path"], new_content)
+    job["notes_created"] = [job["note_path"]]
+
+
+def _synthesize_and_publish(job: dict, bundle: dict):
+    from ingest import publish, synthesize
+    from ingest import bundle as bundle_util
+
+    # store media first so embeds resolve at validation time
+    stored_names = _store_media(bundle)
 
     plans = synthesize.outline(bundle)
     job["planned_notes"] = [p["title"] for p in plans]

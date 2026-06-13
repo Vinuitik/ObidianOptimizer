@@ -23,18 +23,50 @@ class PublishError(Exception):
     pass
 
 
+def validate_embeds(content: str, stored_media_names: set[str]) -> list[str]:
+    """Every ![[…]] embed the LLM body references must resolve to a file we
+    actually stored. Ignores embeds whose target already exists in the vault
+    (e.g. the source video itself) — only media WE produced is gated here."""
+    problems = []
+    for name in _EMBED_RE.findall(content):
+        base = name.split("|")[0].strip().rsplit("/", 1)[-1]
+        if base not in stored_media_names:
+            problems.append(f"embed does not resolve: {base}")
+    return problems
+
+
 def validate_note(content: str, stored_media_names: set[str]) -> list[str]:
-    """Deterministic checks; returns list of problems (empty = valid)."""
+    """Standalone-note checks; returns list of problems (empty = valid)."""
     problems = []
     if not content.startswith("---\n") or "\n---\n" not in content[4:]:
         problems.append("frontmatter missing or unterminated")
-    for name in _EMBED_RE.findall(content):
-        base = name.split("|")[0].strip()
-        if base not in stored_media_names:
-            problems.append(f"embed does not resolve: {base}")
+    problems.extend(validate_embeds(content, stored_media_names))
     if len(content) < 200:
         problems.append("note suspiciously short (<200 chars)")
     return problems
+
+
+def inject_block(content: str, embed_ref: str, body: str, sha: str) -> str:
+    """Insert (or replace) the synthesized block directly below the resource
+    embed in `content`. Idempotent: a second run with the same embed replaces
+    the existing block rather than stacking. The marker is an HTML comment so
+    it renders invisibly and the chunker strips it (MarkdownPreprocessor)."""
+    base = embed_ref.rsplit("/", 1)[-1]
+    block = (f"<!-- ingest:{base} sha={sha} -->\n"
+             f"{body.strip()}\n<!-- /ingest:{base} -->")
+
+    existing = re.compile(
+        rf"<!-- ingest:{re.escape(base)} [^\n>]*-->.*?<!-- /ingest:{re.escape(base)} -->",
+        re.DOTALL)
+    if existing.search(content):
+        return existing.sub(lambda _m: block, content, count=1)
+
+    embed_line = re.compile(
+        rf"^.*!\[\[[^\]]*{re.escape(base)}[^\]]*\]\].*$", re.MULTILINE)
+    m = embed_line.search(content)
+    if not m:
+        raise PublishError(f"embed {base!r} not found in note — cannot inject")
+    return content[:m.end()] + "\n\n" + block + content[m.end():]
 
 
 def find_home(title: str) -> str:

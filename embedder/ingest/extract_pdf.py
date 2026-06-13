@@ -33,8 +33,22 @@ def extract(ref: str, resolved_path: Path) -> dict:
         "source": {"type": "pdf", "ref": ref, "title": title,
                    "duration_s": 0, "chapters": []},
         "segments": segments,
-        "media": media,
+        "media": _keep_diagrams(media),
     }
+
+
+def _keep_diagrams(media: list[dict]) -> list[dict]:
+    """Drop decorative images (logos, headshots) — keep diagrams/charts/figures
+    via CLIP zero-shot, the user's 'important diagrams only' requirement.
+    Best-effort: CLIP unavailable → keep all (mask is all-True)."""
+    if not media:
+        return media
+    from ingest import keyframes
+    pngs = [base64.standard_b64decode(m["data_b64"]) for m in media]
+    mask = keyframes.diagram_keep_mask(pngs)
+    kept = [m for m, keep in zip(media, mask) if keep]
+    log.info("pdf diagrams: kept %d of %d embedded images", len(kept), len(media))
+    return kept
 
 
 def _ocr_page(page) -> str:
