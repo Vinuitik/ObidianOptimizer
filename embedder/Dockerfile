@@ -4,8 +4,13 @@
 FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-        python3.11 python3.11-venv curl ffmpeg tesseract-ocr \
+# --no-install-recommends keeps this to the packages we actually use. Without it,
+# ffmpeg drags in ~230 X11/mesa/SDL video-display libs (including libxcb-present0,
+# which we never need for audio transcription and which has 404'd on flaky mirrors).
+# tesseract-ocr-eng and ca-certificates are Recommends we DO need, so list them.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv curl ca-certificates \
+        ffmpeg tesseract-ocr tesseract-ocr-eng \
     && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 \
     && rm -rf /var/lib/apt/lists/*
 
