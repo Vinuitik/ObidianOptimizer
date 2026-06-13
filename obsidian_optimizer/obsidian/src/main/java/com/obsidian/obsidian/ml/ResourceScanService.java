@@ -50,7 +50,11 @@ public class ResourceScanService {
 
     private final SettingsRepository settingsRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    // HTTP_1_1 is mandatory: the embedder is uvicorn, which doesn't support the
+    // h2c cleartext upgrade the JDK client attempts by default — that handshake
+    // makes uvicorn drop the request body, yielding a 422 "body field required".
     private final HttpClient httpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(2))
         .build();
     private final ExecutorService pool = Executors.newSingleThreadExecutor(r -> {

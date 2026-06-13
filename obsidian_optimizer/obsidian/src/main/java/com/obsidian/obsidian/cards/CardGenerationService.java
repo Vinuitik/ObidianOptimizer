@@ -28,7 +28,10 @@ public class CardGenerationService {
     private String embedderUrl;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    // HTTP_1_1: uvicorn embedder can't do the JDK client's default h2c upgrade,
+    // which drops POST bodies (422). See ResourceScanService for the full detail.
+    private final HttpClient httpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1).build();
 
     /** Returns the embedder's result summary, or null on failure (logged). */
     public JsonNode generateFor(String notePath, String sourceHash) {

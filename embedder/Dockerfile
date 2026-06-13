@@ -1,7 +1,9 @@
-# CUDA 12 base — onnxruntime-gpu uses CUDAExecutionProvider when CUDA is available.
-# If the container starts without --gpus / no nvidia-container-toolkit, CUDA provider
-# is absent at runtime and the service falls back to CPU with a loud warning.
-FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
+# CUDA 12 + cuDNN 9 base — onnxruntime-gpu uses CUDAExecutionProvider when CUDA is
+# available. cuDNN 9 is REQUIRED: onnxruntime-gpu >=1.19 and ctranslate2 >=4.5 both
+# need cuDNN 9. The old cudnn8 base made onnxruntime fail to load libcudnn.so.9 and
+# silently fall back to CPU. If the container starts without --gpus / no
+# nvidia-container-toolkit, the CUDA provider is absent and it falls back to CPU.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 # --no-install-recommends keeps this to the packages we actually use. Without it,

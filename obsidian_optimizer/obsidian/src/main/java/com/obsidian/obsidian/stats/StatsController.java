@@ -30,7 +30,10 @@ public class StatsController {
     private final CardRepository cardRepo;
     private final PendingImageJobRepository imageJobRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    // HTTP_1_1: uvicorn (embedder/wrapper) can't do the JDK client's default h2c
+    // upgrade, which corrupts POST bodies. See ResourceScanService for the detail.
     private final HttpClient httpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
         .connectTimeout(Duration.ofSeconds(2))
         .build();
 

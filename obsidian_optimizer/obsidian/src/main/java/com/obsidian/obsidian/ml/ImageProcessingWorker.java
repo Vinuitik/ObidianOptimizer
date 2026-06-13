@@ -50,7 +50,10 @@ public class ImageProcessingWorker {
     private final EmbeddingService embeddingService;
     private final NoteChunkRepository chunkRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    // HTTP_1_1: uvicorn embedder can't do the JDK client's default h2c upgrade,
+    // which drops POST bodies (422). See ResourceScanService for the full detail.
+    private final HttpClient httpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1).build();
     private ExecutorService pool;
 
     public ImageProcessingWorker(PendingImageJobRepository jobRepo,

@@ -37,7 +37,10 @@ public class AssignmentService {
     private final AssignmentRepository repo;
     private final ReviewService reviewService;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final HttpClient http = HttpClient.newHttpClient();
+    // HTTP_1_1: uvicorn embedder can't do the JDK client's default h2c upgrade,
+    // which drops POST bodies (422). See ResourceScanService for the full detail.
+    private final HttpClient http = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1).build();
 
     public AssignmentService(AssignmentRepository repo, ReviewService reviewService) {
         this.repo = repo;

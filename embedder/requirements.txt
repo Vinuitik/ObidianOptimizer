@@ -18,9 +18,9 @@ huggingface_hub>=0.24.0   # hf_hub_download for the pre-exported onnx/ weights
 numpy>=1.26.0
 
 # Ingest agent — A/V transcription (INGEST_AGENT_ARCH stage 1)
-# ctranslate2 pinned <4.5: 4.5+ needs cuDNN 9, base image ships cuDNN 8
+# ctranslate2 >=4.5 needs cuDNN 9, which the base image now ships (see Dockerfile).
 faster-whisper>=1.1.0
-ctranslate2>=4.0,<4.5
+ctranslate2>=4.5
 
 # Ingest stages 2-5: PDF, web, keyframes
 # CLIP keyframe/diagram selection runs via ingest.clip_onnx (pre-exported ONNX,

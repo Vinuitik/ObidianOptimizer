@@ -27,7 +27,11 @@ state: dict = {}
 def detect_provider() -> str:
     available = ort.get_available_providers()
     if "CUDAExecutionProvider" in available:
-        log.info("GPU detected (CUDAExecutionProvider available) — using GPU inference.")
+        # NOTE: "available" only means the provider is compiled in — NOT that it
+        # can actually initialise. If cuDNN/CUDA libs are missing it loads, then
+        # fails at session creation and onnxruntime silently falls back to CPU.
+        # init() verifies the *active* provider after the session is built.
+        log.info("CUDAExecutionProvider is available — requesting GPU (verified after load).")
         return "CUDAExecutionProvider"
     log.warning("=" * 70)
     log.warning("WARN: No GPU / CUDAExecutionProvider detected.")
@@ -62,6 +66,16 @@ def init() -> None:
     dim = AutoConfig.from_pretrained(EMBED_MODEL, cache_dir=MODEL_CACHE).hidden_size
 
     active = session.get_providers()[0]
+    # Verify the GPU actually engaged. onnxruntime falls back to CPU silently when
+    # the CUDA provider is listed but can't load its libs (e.g. cuDNN version
+    # mismatch) — surface that loudly instead of quietly running slow on CPU.
+    if provider == "CUDAExecutionProvider" and active != "CUDAExecutionProvider":
+        log.warning("=" * 70)
+        log.warning("WARN: CUDA was requested but the session is running on %s.", active)
+        log.warning("WARN: onnxruntime-gpu couldn't initialise the CUDA provider —")
+        log.warning("WARN: usually a cuDNN/CUDA version mismatch (needs cuDNN 9 + CUDA 12)")
+        log.warning("WARN: or a missing driver. Check the onnxruntime error logged above.")
+        log.warning("=" * 70)
     log.info("Model ready — dim=%d, provider=%s", dim, active)
     state.update({
         "tokenizer": tokenizer,
