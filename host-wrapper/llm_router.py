@@ -33,6 +33,25 @@ VISION_MAX_TOKENS = int(os.environ.get("LLM_VISION_MAX_TOKENS", "1024"))
 CLI_TIMEOUT_S = int(os.environ.get("CLI_TIMEOUT_S", "180"))
 
 
+def _parse_batch_limits():
+    """LLM_VISION_BATCH=gemini:4,github:2,... — images per request a provider
+    handles without quality collapse or 429s (calibrated 2026-06-13, see
+    host-wrapper/calibration/). Unlisted providers default to 1 (no batching)."""
+    raw = os.environ.get("LLM_VISION_BATCH", "")
+    limits = {}
+    for part in raw.split(","):
+        if ":" in part:
+            name, _, n = part.strip().partition(":")
+            try:
+                limits[name.strip()] = max(1, int(n))
+            except ValueError:
+                pass
+    return limits
+
+
+VISION_BATCH_LIMITS = _parse_batch_limits()
+
+
 class RouterError(Exception):
     """All candidate providers failed or none are configured."""
 
@@ -54,6 +73,7 @@ class Provider:
         self.text_model = text_model
         self.vision_model = vision_model
         self.min_interval = min_interval
+        self.vision_batch = VISION_BATCH_LIMITS.get(name, 1)
         # mutable state, guarded by Router._lock
         self.in_flight = 0
         self.next_start = 0.0
@@ -202,6 +222,18 @@ class Router:
         b64 = base64.standard_b64encode(image_bytes).decode()
         return self._run("vision", lambda p: self._call_vision(p, prompt, b64, media_type))
 
+    def complete_vision_batch(self, single_prompt, batch_prompt_tmpl, images):
+        """images: list of (bytes, media_type). Returns (list[str], provider).
+
+        One provider lease serves the whole list, split into that provider's
+        calibrated sub-batch size (vision_batch). A sub-batch whose JSON-array
+        reply doesn't keep the images separate falls back to per-image calls
+        on the same provider — callers always get len(images) results.
+        """
+        encoded = [(base64.standard_b64encode(b).decode(), mt) for b, mt in images]
+        return self._run("vision", lambda p: self._call_vision_batch(
+            p, single_prompt, batch_prompt_tmpl, encoded))
+
     def _run(self, capability, call):
         skip = set()
         errors = []
@@ -241,20 +273,48 @@ class Router:
         return _openai_chat(p, p.text_model, messages, TEXT_MAX_TOKENS)
 
     def _call_vision(self, p, prompt, b64, media_type):
+        return self._vision_request(p, prompt, [(b64, media_type)], VISION_MAX_TOKENS)
+
+    def _vision_request(self, p, prompt, encoded, max_tokens):
+        """One HTTP request carrying 1..N images."""
         if p.kind == "anthropic":
-            content = [
-                {"type": "image", "source": {"type": "base64",
-                                             "media_type": media_type, "data": b64}},
-                {"type": "text", "text": prompt},
-            ]
+            content = [{"type": "image",
+                        "source": {"type": "base64", "media_type": mt, "data": b64}}
+                       for b64, mt in encoded]
+            content.append({"type": "text", "text": prompt})
             return _anthropic_messages(p, [{"role": "user", "content": content}],
-                                       max_tokens=VISION_MAX_TOKENS)
-        messages = [{"role": "user", "content": [
-            {"type": "text", "text": prompt},
-            {"type": "image_url",
-             "image_url": {"url": f"data:{media_type};base64,{b64}"}},
-        ]}]
-        return _openai_chat(p, p.vision_model, messages, VISION_MAX_TOKENS)
+                                       max_tokens=max_tokens)
+        parts = [{"type": "text", "text": prompt}]
+        parts += [{"type": "image_url",
+                   "image_url": {"url": f"data:{mt};base64,{b64}"}}
+                  for b64, mt in encoded]
+        return _openai_chat(p, p.vision_model,
+                            [{"role": "user", "content": parts}], max_tokens)
+
+    def _call_vision_batch(self, p, single_prompt, batch_tmpl, encoded):
+        limit = max(1, p.vision_batch)
+        out = []
+        for i in range(0, len(encoded), limit):
+            sub = encoded[i:i + limit]
+            if i > 0:
+                time.sleep(p.min_interval)   # pace sub-requests within one lease
+            if len(sub) == 1:
+                out.append(self._vision_request(p, single_prompt, sub,
+                                                VISION_MAX_TOKENS))
+                continue
+            text = self._vision_request(p, batch_tmpl.format(n=len(sub)), sub,
+                                        VISION_MAX_TOKENS * len(sub))
+            arr = _parse_json_array(text)
+            if arr is not None and len(arr) == len(sub):
+                out.extend(str(a) for a in arr)
+            else:
+                # model merged the images — degrade to per-image calls here
+                for j, one in enumerate(sub):
+                    if j > 0:
+                        time.sleep(p.min_interval)
+                    out.append(self._vision_request(p, single_prompt, [one],
+                                                    VISION_MAX_TOKENS))
+        return out
 
     # ── introspection (dashboard / debugging) ────────────────────────────
 
@@ -283,6 +343,27 @@ def _openai_chat(p, model, messages, max_tokens):
     if resp.status_code >= 400:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
     return resp.json()["choices"][0]["message"]["content"]
+
+
+def _parse_json_array(text):
+    """Best-effort: strip code fences, find the outermost JSON array."""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.split("```")[1]
+        if t.startswith("json"):
+            t = t[4:]
+    try:
+        out = json.loads(t)
+        return out if isinstance(out, list) else None
+    except json.JSONDecodeError:
+        lo, hi = t.find("["), t.rfind("]")
+        if 0 <= lo < hi:
+            try:
+                out = json.loads(t[lo:hi + 1])
+                return out if isinstance(out, list) else None
+            except json.JSONDecodeError:
+                return None
+    return None
 
 
 def _retry_after(resp):

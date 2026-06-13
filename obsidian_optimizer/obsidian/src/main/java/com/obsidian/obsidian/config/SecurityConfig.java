@@ -31,6 +31,9 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/login", "/logout").permitAll()
+                // service-to-service agent API — token-guarded inside the
+                // controller (X-Internal-Token = MCP_API_TOKEN, fail closed)
+                .requestMatchers("/api/internal/**").permitAll()
                 .anyRequest().authenticated()
             )
             .formLogin(form -> form

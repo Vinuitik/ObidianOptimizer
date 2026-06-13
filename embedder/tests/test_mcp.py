@@ -135,12 +135,13 @@ def test_initialize_returns_server_info(client):
     assert "protocolVersion" in result
 
 
-def test_tools_list_exposes_the_three_tools(client):
+def test_tools_list_exposes_the_tools(client):
     _initialize(client)
     resp = _rpc(client, "tools/list", id_=2)
     assert resp.status_code == 200
     tools = {t["name"] for t in resp.json()["result"]["tools"]}
-    assert tools == {"search_notes", "get_note_content", "find_home_for_note"}
+    assert tools == {"search_notes", "get_note_content", "find_home_for_note",
+                     "ingest_resource", "split_note"}
 
 
 def test_tools_call_search_notes_returns_rrf_results(client):

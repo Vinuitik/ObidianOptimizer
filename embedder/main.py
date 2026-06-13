@@ -64,6 +64,11 @@ class JudgeRequest(BaseModel):
 class IngestRequest(BaseModel):
     ref: str                        # /vault-relative path or URL
     force_whisper: bool = False     # re-transcribe even if captions exist
+    extract_only: bool = False      # stop after the bundle (skip synthesis)
+
+
+class SplitNoteRequest(BaseModel):
+    note_path: str                  # vault-relative .md path
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +174,25 @@ def ingest_submit(req: IngestRequest):
         if not resolved.exists():
             raise HTTPException(status_code=404, detail=f"not in vault: {req.ref}")
 
-    return ingest_jobs.submit(req.ref, resolved, req.force_whisper)
+    return ingest_jobs.submit(req.ref, resolved, req.force_whisper,
+                              req.extract_only)
+
+
+@app.post("/ingest/split-note")
+def split_note(req: SplitNoteRequest):
+    """Break an oversized note into concept notes + a hub (synchronous —
+    a few LLM calls, not a whisper job)."""
+    from ingest import split_note as splitter
+    from mcp_server import _resolve_in_vault
+
+    try:
+        content = _resolve_in_vault(req.note_path).read_text(encoding="utf-8")
+    except (ValueError, OSError) as e:
+        raise HTTPException(status_code=404, detail=f"cannot read note: {e}")
+    try:
+        return splitter.split(req.note_path, content)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/ingest/{job_id}")

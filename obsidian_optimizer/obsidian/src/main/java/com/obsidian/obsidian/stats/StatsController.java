@@ -37,6 +37,9 @@ public class StatsController {
     @Value("${wrapper.url:http://host.docker.internal:5001}")
     private String wrapperUrl;
 
+    @Value("${embedder.url:http://embedder:8000}")
+    private String embedderUrl;
+
     public StatsController(JdbcTemplate jdbc,
                            CardRepository cardRepo,
                            PendingImageJobRepository imageJobRepo) {
@@ -76,8 +79,8 @@ public class StatsController {
             "activeCards",    ((Number) cardStats.get("active_cards")).longValue(),
             "archivedCards",  ((Number) cardStats.get("archived_cards")).longValue()));
 
-        // 4. Video & external resource queue — ingest agent [NOT IMPLEMENTED]
-        out.put("resources", Map.of("implemented", false));
+        // 4. Video & external resource queue — ingest agent jobs (embedder)
+        out.put("resources", ingestJobs());
 
         // 5. LLM provider health, proxied from the host wrapper's router
         out.put("wrapper", wrapperProviders());
@@ -88,6 +91,36 @@ public class StatsController {
     private long count(String sql) {
         Long n = jdbc.queryForObject(sql, Long.class);
         return n == null ? 0 : n;
+    }
+
+    private Map<String, Object> ingestJobs() {
+        Map<String, Object> res = new HashMap<>();
+        res.put("implemented", true);
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(embedderUrl + "/ingest"))
+                .timeout(Duration.ofSeconds(3))
+                .GET()
+                .build();
+            HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() == 200) {
+                JsonNode jobs = objectMapper.readTree(r.body()).path("jobs");
+                Map<String, Integer> byStatus = new HashMap<>();
+                for (JsonNode j : jobs) {
+                    byStatus.merge(j.path("status").asText("?"), 1, Integer::sum);
+                }
+                res.put("up", true);
+                res.put("counts", byStatus);
+                res.put("recent", jobs.size() > 5 ? null : jobs); // small payload only
+                return res;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+            // embedder down — dashboard shows it offline
+        }
+        res.put("up", false);
+        return res;
     }
 
     private Map<String, Object> wrapperProviders() {

@@ -86,6 +86,18 @@ public class MediaController {
         }
     }
 
+    /** Byte-array variant for the internal agent API (keyframes etc.). */
+    public String storeResourceBytes(String filename, byte[] bytes) throws IOException {
+        String subdir = subdirFor(filename);
+        Path targetDir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve(subdir);
+        Files.createDirectories(targetDir);
+        Files.write(targetDir.resolve(filename), bytes);
+        String relPath = "resources/" + subdir + "/" + filename;
+        syncQueueRepo.markPending(relPath, ImageScanService.sha256(bytes));
+        log.info("[storeResourceBytes] saved {} ({} bytes)", relPath, bytes.length);
+        return relPath;
+    }
+
     void uploadFile(MultipartFile file, String filename) throws IOException {
         String subdir = subdirFor(filename);
         Path targetDir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve(subdir);

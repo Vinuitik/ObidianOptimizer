@@ -41,6 +41,11 @@ public class ImageProcessingWorker {
     @Value("${image.worker.parallelism:4}")
     private int parallelism;
 
+    // Images per wrapper request (per note). The wrapper sub-batches further to
+    // each provider's calibrated LLM_VISION_BATCH limit — see host-wrapper/FLOWS.md.
+    @Value("${image.batch.size:4}")
+    private int imageBatchSize;
+
     private final PendingImageJobRepository jobRepo;
     private final EmbeddingService embeddingService;
     private final NoteChunkRepository chunkRepo;
@@ -90,7 +95,12 @@ public class ImageProcessingWorker {
 
         List<Callable<Void>> tasks = byNote.values().stream()
             .map(jobs -> (Callable<Void>) () -> {
-                jobs.forEach(this::processJob);
+                // same-note images batch into ONE wrapper request (they are
+                // sequential anyway), in slices of imageBatchSize
+                for (int i = 0; i < jobs.size(); i += Math.max(1, imageBatchSize)) {
+                    processJobBatch(jobs.subList(i,
+                        Math.min(jobs.size(), i + Math.max(1, imageBatchSize))));
+                }
                 return null;
             })
             .toList();
@@ -112,12 +122,13 @@ public class ImageProcessingWorker {
         }
     }
 
-    private void processJob(PendingImageJob job) {
+    private void processJobBatch(List<PendingImageJob> jobs) {
         try {
-            String body = objectMapper.writeValueAsString(Map.of("image_path", job.getImagePath()));
+            List<String> paths = jobs.stream().map(PendingImageJob::getImagePath).toList();
+            String body = objectMapper.writeValueAsString(Map.of("image_paths", paths));
 
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(wrapperUrl + "/process-image"))
+                .uri(URI.create(wrapperUrl + "/process-images"))
                 .timeout(WRAPPER_TIMEOUT)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -125,56 +136,63 @@ public class ImageProcessingWorker {
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() == 404) {
-                // image file gone — permanent until the note changes; daily requeue covers it
-                log.warn("[ImageProcessingWorker] image not found for {} — marking SKIPPED", job.getImagePath());
-                jobRepo.markSkipped(job.getId());
-                return;
-            }
             if (response.statusCode() != 200) {
                 // transient (503 = all LLM providers exhausted/cooling) — keep PENDING, retry next cycle
-                log.warn("[ImageProcessingWorker] wrapper returned HTTP {} for {} — leaving PENDING for retry",
-                    response.statusCode(), job.getImagePath());
+                log.warn("[ImageProcessingWorker] wrapper returned HTTP {} for {} image(s) — leaving PENDING for retry",
+                    response.statusCode(), jobs.size());
                 return;
             }
 
             JsonNode root = objectMapper.readTree(response.body());
-            String extractedText = root.path("text").asText("").trim();
+            JsonNode results = root.path("results");
             String provider = root.path("provider").asText("unknown");
 
-            if (extractedText.isEmpty()) {
-                log.debug("[ImageProcessingWorker] empty text for {} — marking DONE", job.getImagePath());
-                jobRepo.markDone(job.getId());
-                return;
+            for (int i = 0; i < jobs.size() && i < results.size(); i++) {
+                handleResult(jobs.get(i), results.get(i), provider);
             }
-
-            // Image chunks live in their own source='image' index range — appended
-            // after this note's existing image chunks, independent of text chunks
-            int imageChunkStartIndex = getNextChunkIndex(job.getNotePath());
-
-            List<String> textChunks = splitImageText(extractedText);
-            for (int i = 0; i < textChunks.size(); i++) {
-                String chunk = textChunks.get(i);
-                String hash = ImageScanService.sha256(chunk);
-                float[] embedding = embeddingService.embed(chunk);
-
-                if (embedding != null) {
-                    chunkRepo.upsertChunk(job.getNotePath(), imageChunkStartIndex + i, "image", chunk, embedding, hash);
-                }
-            }
-
-            jobRepo.markDone(job.getId());
-            log.debug("[ImageProcessingWorker] processed {} via {} -> {} chunk(s)",
-                job.getImagePath(), provider, textChunks.size());
-
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.warn("[ImageProcessingWorker] interrupted during job {}", job.getId());
+            log.warn("[ImageProcessingWorker] interrupted during batch of {}", jobs.size());
         } catch (Exception e) {
             // network/timeout — transient, keep PENDING so the multi-day backlog never drops images
-            log.warn("[ImageProcessingWorker] failed job {} ({}) — leaving PENDING for retry: {}",
-                job.getId(), job.getImagePath(), e.getMessage());
+            log.warn("[ImageProcessingWorker] batch of {} failed — leaving PENDING for retry: {}",
+                jobs.size(), e.getMessage());
         }
+    }
+
+    private void handleResult(PendingImageJob job, JsonNode result, String provider) {
+        if ("not_found".equals(result.path("error").asText(null))) {
+            // image file gone — permanent until the note changes; daily requeue covers it
+            log.warn("[ImageProcessingWorker] image not found for {} — marking SKIPPED", job.getImagePath());
+            jobRepo.markSkipped(job.getId());
+            return;
+        }
+
+        String extractedText = result.path("text").asText("").trim();
+        if (extractedText.isEmpty()) {
+            log.debug("[ImageProcessingWorker] empty text for {} — marking DONE", job.getImagePath());
+            jobRepo.markDone(job.getId());
+            return;
+        }
+
+        // Image chunks live in their own source='image' index range — appended
+        // after this note's existing image chunks, independent of text chunks
+        int imageChunkStartIndex = getNextChunkIndex(job.getNotePath());
+
+        List<String> textChunks = splitImageText(extractedText);
+        for (int i = 0; i < textChunks.size(); i++) {
+            String chunk = textChunks.get(i);
+            String hash = ImageScanService.sha256(chunk);
+            float[] embedding = embeddingService.embed(chunk);
+
+            if (embedding != null) {
+                chunkRepo.upsertChunk(job.getNotePath(), imageChunkStartIndex + i, "image", chunk, embedding, hash);
+            }
+        }
+
+        jobRepo.markDone(job.getId());
+        log.debug("[ImageProcessingWorker] processed {} via {} -> {} chunk(s)",
+            job.getImagePath(), provider, textChunks.size());
     }
 
     private boolean checkWrapperHealth() {

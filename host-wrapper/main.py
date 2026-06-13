@@ -30,6 +30,22 @@ IMAGE_PROMPT = (
     "and relationships concisely. Output only the extracted content, no preamble."
 )
 
+# Multi-image transcription (calibrated batch path) — must stay a JSON array
+# so the router can verify the model kept the images separate.
+IMAGE_BATCH_PROMPT = (
+    "You are given {n} images. For each one: extract all visible text exactly as "
+    "written; if it is a diagram, chart, or visual structure, describe its key "
+    "elements and relationships concisely. Return ONLY a JSON array of {n} "
+    "strings, element i covering image i in order. No markdown fences, no commentary."
+)
+
+
+def _resolve_vault_image(container_path):
+    host_path = Path(container_path.replace("/vault", VAULT_HOST_PATH, 1))
+    if not host_path.exists():
+        return None, None
+    return host_path, MEDIA_TYPES.get(host_path.suffix.lower(), "image/png")
+
 
 @app.route("/health")
 def health():
@@ -60,6 +76,40 @@ def process_image():
         return jsonify({"error": str(e)}), 503
 
     return jsonify({"text": text, "provider": provider})
+
+
+@app.route("/process-images", methods=["POST"])
+def process_images():
+    """Batch variant: {"image_paths": [...]} → per-image results, one provider
+    lease, sub-batched to the provider's calibrated LLM_VISION_BATCH size.
+
+    Response: {"results": [{"text": str} | {"error": "not_found"}], "provider": str}
+    Results align with image_paths by index. 503 only when the router is exhausted.
+    """
+    data = request.json or {}
+    paths = data.get("image_paths") or []
+    if not paths:
+        return jsonify({"error": "image_paths required"}), 422
+
+    resolved = [_resolve_vault_image(p) for p in paths]
+    present = [(host.read_bytes(), mt) for host, mt in resolved if host is not None]
+
+    texts = []
+    provider = None
+    if present:
+        try:
+            texts, provider = router.complete_vision_batch(
+                IMAGE_PROMPT, IMAGE_BATCH_PROMPT, present)
+        except llm_router.RouterError as e:
+            return jsonify({"error": str(e)}), 503
+
+    results, it = [], iter(texts)
+    for host, _ in resolved:
+        if host is None:
+            results.append({"error": "not_found"})
+        else:
+            results.append({"text": next(it)})
+    return jsonify({"results": results, "provider": provider})
 
 
 @app.route("/complete", methods=["POST"])

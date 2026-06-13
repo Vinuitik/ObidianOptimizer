@@ -33,6 +33,7 @@ services:
       - SYNTH_MODEL=${SYNTH_MODEL:-haiku}
       - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
       - VIDEOMANAGER_URL=${VIDEOMANAGER_URL:-}
+      - BACKEND_URL=${BACKEND_URL:-http://backend:8084}
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,10 +66,12 @@ services:
       - APP_AUTH_PASSWORD=${APP_AUTH_PASSWORD:?set APP_AUTH_PASSWORD in .env}
       - EMBEDDER_URL=http://embedder:8000
       - IMAGE_WORKER_PARALLELISM=${IMAGE_WORKER_PARALLELISM:-4}
+      - IMAGE_BATCH_SIZE=${IMAGE_BATCH_SIZE:-4}
       - SYNC_PASSPHRASE=${SYNC_PASSPHRASE:-}
       - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID:-placeholder}
       - GOOGLE_SERVICE_ACCOUNT_JSON=${GOOGLE_SERVICE_ACCOUNT_JSON:-placeholder}
       - SYNC_UPLOAD_CRON=${SYNC_UPLOAD_CRON:-0 0 */6 * * *}
+      - MCP_API_TOKEN=${MCP_API_TOKEN:-}   # internal agent API token (embedder → backend)
     volumes:
       - ${HOST_VAULT_PATH}:/vault
     depends_on:

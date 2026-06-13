@@ -85,6 +85,49 @@ def test_process_image_unknown_extension_defaults_png(client, vault_image, monke
     assert captured["media_type"] == "image/png"
 
 
+# ── /process-images (batch) ──────────────────────────────────────────────
+
+def test_process_images_aligns_results_with_missing_files(client, vault_image, monkeypatch):
+    def fake_batch(single_prompt, batch_tmpl, images):
+        return [f"text-{i}" for i in range(len(images))], "gemini"
+
+    monkeypatch.setattr(main.router, "complete_vision_batch", fake_batch)
+    res = client.post("/process-images", json={"image_paths": [
+        "/vault/resources/images/shot.png",
+        "/vault/resources/images/missing.png",
+        "/vault/resources/images/shot.png",
+    ]})
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["provider"] == "gemini"
+    assert body["results"][0] == {"text": "text-0"}
+    assert body["results"][1] == {"error": "not_found"}
+    assert body["results"][2] == {"text": "text-1"}
+
+
+def test_process_images_422_on_empty(client):
+    assert client.post("/process-images", json={}).status_code == 422
+
+
+def test_process_images_503_when_exhausted(client, vault_image, monkeypatch):
+    def exhausted(*a, **k):
+        raise llm_router.RouterError("exhausted")
+    monkeypatch.setattr(main.router, "complete_vision_batch", exhausted)
+    res = client.post("/process-images", json={
+        "image_paths": ["/vault/resources/images/shot.png"]})
+    assert res.status_code == 503
+
+
+def test_process_images_all_missing_skips_router(client, vault_image, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("router must not be called with zero images")
+    monkeypatch.setattr(main.router, "complete_vision_batch", boom)
+    res = client.post("/process-images",
+                      json={"image_paths": ["/vault/nope1.png", "/vault/nope2.png"]})
+    assert res.status_code == 200
+    assert res.get_json()["results"] == [{"error": "not_found"}] * 2
+
+
 # ── /complete ────────────────────────────────────────────────────────────
 
 def test_complete_routes_through_text_chain(client, monkeypatch):

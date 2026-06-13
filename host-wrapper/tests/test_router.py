@@ -2,6 +2,7 @@
 
 All provider HTTP is monkeypatched; nothing here talks to a real API.
 """
+import json
 import threading
 import time
 
@@ -258,6 +259,78 @@ def test_vision_message_shape_openai_compat(router, no_rate_spacing, monkeypatch
     assert kinds == {"text", "image_url"}
     url = next(p for p in parts if p["type"] == "image_url")["image_url"]["url"]
     assert url.startswith("data:image/png;base64,")
+
+
+# ── vision batching ──────────────────────────────────────────────────────
+
+def test_batch_limits_parsed_from_env(router):
+    assert router.providers["gemini"].vision_batch == 4
+    assert router.providers["github"].vision_batch == 2
+    assert router.providers["deepseek"].vision_batch == 1  # unlisted → 1
+
+
+def test_parse_json_array_variants():
+    assert llm_router._parse_json_array('["a", "b"]') == ["a", "b"]
+    assert llm_router._parse_json_array('```json\n["a"]\n```') == ["a"]
+    assert llm_router._parse_json_array('noise ["x", "y"] trailing') == ["x", "y"]
+    assert llm_router._parse_json_array('{"not": "array"}') is None
+    assert llm_router._parse_json_array("garbage") is None
+
+
+def _images(n):
+    return [(bytes([i]), "image/png") for i in range(n)]
+
+
+def test_vision_batch_splits_to_provider_limit(router, no_rate_spacing, monkeypatch):
+    """gemini limit=4: 6 images → one 4-batch + one 2-batch, single lease."""
+    r = no_rate_spacing(router)
+    requests_seen = []
+
+    def fake_request(p, prompt, encoded, max_tokens):
+        requests_seen.append((p.name, len(encoded)))
+        return json.dumps([f"t{i}" for i in range(len(encoded))])
+
+    monkeypatch.setattr(llm_router.Router, "_vision_request",
+                        lambda self, p, prompt, encoded, mt:
+                        fake_request(p, prompt, encoded, mt))
+    texts, provider = r.complete_vision_batch("solo", "batch {n}", _images(6))
+    assert provider == "gemini"
+    assert requests_seen == [("gemini", 4), ("gemini", 2)]
+    assert len(texts) == 6
+
+
+def test_vision_batch_falls_back_to_singles_on_garbled_reply(
+        router, no_rate_spacing, monkeypatch):
+    r = no_rate_spacing(router)
+    calls = []
+
+    def fake_request(self, p, prompt, encoded, max_tokens):
+        calls.append(len(encoded))
+        if len(encoded) > 1:
+            return "one merged blob, not a JSON array"
+        return f"solo-{encoded[0][0][:8]}"
+
+    monkeypatch.setattr(llm_router.Router, "_vision_request", fake_request)
+    texts, provider = r.complete_vision_batch("solo", "batch {n}", _images(2))
+    assert provider == "gemini"
+    assert calls == [2, 1, 1]          # failed batch, then per-image fallback
+    assert len(texts) == 2
+    assert all(t.startswith("solo-") for t in texts)
+
+
+def test_vision_batch_failover_to_next_provider(router, no_rate_spacing, monkeypatch):
+    r = no_rate_spacing(router)
+
+    def fake_request(self, p, prompt, encoded, max_tokens):
+        if p.name == "gemini":
+            raise RuntimeError("HTTP 500: down")
+        import json as _json
+        return _json.dumps(["a", "b"]) if len(encoded) > 1 else "single"
+
+    monkeypatch.setattr(llm_router.Router, "_vision_request", fake_request)
+    texts, provider = r.complete_vision_batch("solo", "batch {n}", _images(2))
+    assert provider == "github"
+    assert texts == ["a", "b"]
 
 
 # ── status introspection ─────────────────────────────────────────────────

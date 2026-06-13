@@ -115,7 +115,8 @@ def _wait_done(job_id, timeout=5.0):
 
 
 def test_job_runs_to_done_and_persists_bundle(stub_extract, tmp_path):
-    job = ingest_jobs.submit("resources/audio/x.mp3", tmp_path / "x.mp3")
+    job = ingest_jobs.submit("resources/audio/x.mp3", tmp_path / "x.mp3",
+                             extract_only=True)
     assert job["status"] in ("QUEUED", "RUNNING")
     done = _wait_done(job["id"])
     assert done["status"] == "DONE"
@@ -133,7 +134,7 @@ def test_job_failure_is_captured_not_fatal(stub_extract, monkeypatch):
 
     monkeypatch.setattr(extract_av, "boom_marker", True, raising=False)
     monkeypatch.setattr(extract_av, "extract", boom)
-    job = ingest_jobs.submit("resources/audio/bad.mp3", None)
+    job = ingest_jobs.submit("resources/audio/bad.mp3", None, extract_only=True)
     done = _wait_done(job["id"])
     assert done["status"] == "FAILED"
     assert "ffmpeg exploded" in done["error"]
@@ -143,7 +144,7 @@ def test_job_failure_is_captured_not_fatal(stub_extract, monkeypatch):
                             "source": {"type": "audio", "ref": ref, "title": "t",
                                        "duration_s": 1.0, "chapters": []},
                             "segments": [], "media": []})
-    job2 = ingest_jobs.submit("resources/audio/ok.mp3", None)
+    job2 = ingest_jobs.submit("resources/audio/ok.mp3", None, extract_only=True)
     assert _wait_done(job2["id"])["status"] == "DONE"
 
 
@@ -187,7 +188,8 @@ def test_ingest_endpoint_accepts_existing_file(client, tmp_path, monkeypatch):
     f.parent.mkdir(parents=True)
     f.write_bytes(b"fake")
 
-    res = client.post("/ingest", json={"ref": "resources/videos/clip.mp4"})
+    res = client.post("/ingest", json={"ref": "resources/videos/clip.mp4",
+                                       "extract_only": True})
     assert res.status_code == 200
     job_id = res.json()["id"]
     deadline = time.time() + 5

@@ -180,6 +180,35 @@ def find_home_for_note(proposed_title: str) -> dict:
     }
 
 
+@mcp.tool()
+def ingest_resource(ref: str, force_whisper: bool = False) -> dict:
+    """Turn a resource into Obsidian notes (async job). ref is a vault-relative
+    path (resources/videos/x.mp4, folder/slides.pdf) or a URL (article,
+    YouTube). Returns the job descriptor — poll status via job id at
+    GET /ingest/{id}. Pipeline: deterministic extraction (whisper/PyMuPDF/
+    trafilatura/keyframes) → constrained LLM synthesis → notes via backend."""
+    from ingest import jobs as ingest_jobs
+    from ingest import router as ingest_router
+
+    ingest_router.route(ref)  # raises ValueError on unroutable input
+    resolved = None
+    if not ref.startswith(("http://", "https://")):
+        resolved = _resolve_in_vault(ref)
+        if not resolved.exists():
+            raise ValueError(f"not in vault: {ref}")
+    return ingest_jobs.submit(ref, resolved, force_whisper)
+
+
+@mcp.tool()
+def split_note(note_path: str) -> dict:
+    """Split an oversized note (>6000 chars) into focused concept notes and
+    rewrite the original as a hub of [[links]]. Synchronous — a few LLM calls."""
+    from ingest import split_note as splitter
+
+    content = _resolve_in_vault(note_path).read_text(encoding="utf-8")
+    return splitter.split(note_path, content)
+
+
 # ---------------------------------------------------------------------------
 # Auth — constant-time X-API-Key check wrapped around the MCP ASGI app
 # ---------------------------------------------------------------------------

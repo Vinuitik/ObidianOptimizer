@@ -17,6 +17,7 @@ os.environ["MISTRAL_API_KEY"] = "test-mistral"
 os.environ["GROQ_API_KEY"] = "test-groq"
 os.environ["DEEPSEEK_API_KEY"] = ""          # unconfigured on purpose
 os.environ["ANTHROPIC_API_KEY"] = ""         # unconfigured on purpose
+os.environ["LLM_VISION_BATCH"] = "gemini:4,github:2,mistral:4,groq:2"
 
 import pytest  # noqa: E402
 

@@ -206,10 +206,28 @@ export default function DashboardPage() {
           )}
         </section>
 
-        {/* 5. External resource queue — ingest agent not built yet */}
-        <section className={`${styles.card} ${styles.cardDisabled}`}>
+        {/* 5. External resource queue — ingest agent jobs (embedder /ingest) */}
+        <section className={stats.resources?.up ? styles.card : `${styles.card} ${styles.cardDisabled}`}>
           <h2 className={styles.cardTitle}>Video &amp; Resource Queue</h2>
-          <p className={styles.muted}>Ingest agent not implemented yet (INGEST_AGENT_ARCH).</p>
+          {!stats.resources?.up ? (
+            <p className={styles.muted}>Ingest agent offline (embedder unreachable).</p>
+          ) : (
+            <>
+              <p>
+                {['QUEUED', 'RUNNING', 'DONE', 'FAILED'].map((s) => (
+                  <span key={s} style={{ marginRight: 12 }}>
+                    {s.toLowerCase()}: <strong>{stats.resources.counts?.[s] ?? 0}</strong>
+                  </span>
+                ))}
+              </p>
+              {(stats.resources.recent ?? []).map((j) => (
+                <p key={j.id} className={styles.muted}>
+                  {j.status} · {j.stage ?? ''} · {j.ref}
+                  {j.notes_created?.length ? ` → ${j.notes_created.length} note(s)` : ''}
+                </p>
+              ))}
+            </>
+          )}
         </section>
       </div>
     </div>
