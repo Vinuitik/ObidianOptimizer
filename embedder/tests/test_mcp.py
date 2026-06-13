@@ -34,19 +34,26 @@ class _MockTokenizer:
         }
 
 
-class _MockModelOutput:
-    def __init__(self, batch, seq, dim):
+class _Info:
+    def __init__(self, name):
+        self.name = name
+
+
+class _MockSession:
+    """Stands in for an onnxruntime.InferenceSession (see test_main)."""
+    def get_inputs(self):
+        return [_Info("input_ids"), _Info("attention_mask")]
+
+    def get_outputs(self):
+        return [_Info("last_hidden_state")]
+
+    def get_providers(self):
+        return ["CPUExecutionProvider"]
+
+    def run(self, output_names, feeds):
         rng = np.random.default_rng(42)
-        self.last_hidden_state = rng.standard_normal((batch, seq, dim)).astype(np.float32)
-
-
-class _MockModel:
-    class config:
-        hidden_size = FAKE_DIM
-
-    def __call__(self, **kwargs):
-        batch, seq = kwargs["input_ids"].shape
-        return _MockModelOutput(batch, seq, FAKE_DIM)
+        batch, seq = feeds["input_ids"].shape
+        return [rng.standard_normal((batch, seq, FAKE_DIM)).astype(np.float32)]
 
 
 FAKE_ROWS = [
@@ -61,7 +68,7 @@ def mcp_env(monkeypatch):
     state.clear()
     state.update({
         "tokenizer": _MockTokenizer(),
-        "model": _MockModel(),
+        "session": _MockSession(),
         "dim": FAKE_DIM,
         "provider": "CPUExecutionProvider",
         "model_name": "mock-embed-model",

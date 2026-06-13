@@ -10,20 +10,10 @@ def _stub_module(name):
     sys.modules[name] = mod
     return mod
 
-# onnxruntime
+# onnxruntime — inference is pure onnxruntime now (no optimum/torch). Tests inject
+# a fake session into model_runtime.state, so InferenceSession is never built here.
 ort_mod = _stub_module("onnxruntime")
 ort_mod.get_available_providers = lambda: ["CPUExecutionProvider"]
-
-# optimum
-_stub_module("optimum")
-ort_sub = _stub_module("optimum.onnxruntime")
-
-class _FakeORTModel:
-    @classmethod
-    def from_pretrained(cls, *args, **kwargs):
-        return cls()
-
-ort_sub.ORTModelForFeatureExtraction = _FakeORTModel
 
 # transformers
 trans = _stub_module("transformers")
@@ -34,6 +24,3 @@ class _FakeTokenizer:
         return cls()
 
 trans.AutoTokenizer = _FakeTokenizer
-
-# torch (imported transitively)
-_stub_module("torch")

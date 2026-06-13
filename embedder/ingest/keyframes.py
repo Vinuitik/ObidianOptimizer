@@ -23,7 +23,7 @@ CUE_OFFSET_S = 1.5
 PRE_CUT_OFFSET_S = 0.5
 CLIP_SIM_THRESHOLD = float(os.environ.get("CLIP_SIM_THRESHOLD", "0.92"))
 MAX_FRAMES = int(os.environ.get("MAX_FRAMES", "40"))
-CLIP_MODEL = os.environ.get("CLIP_MODEL", "ViT-L-14")
+# CLIP model selection now lives in ingest.clip_onnx (CLIP_ONNX_REPO / CLIP_HF_MODEL).
 MODEL_CACHE = os.environ.get("MODEL_CACHE", "/models")
 
 CUE_PATTERNS = re.compile(
@@ -108,22 +108,7 @@ def _grab_frame(video_path: Path, ts: float, out: Path) -> bool:
     return proc.returncode == 0 and out.exists() and out.stat().st_size > 0
 
 
-# ── CLIP filter + dedupe (sequential model policy: load → use → free) ────
-
-def _load_clip():
-    """Load the CLIP model on the best device. Shared by keyframe selection
-    and PDF diagram filtering (extract_pdf) — same model, same prompts."""
-    import open_clip
-    import torch
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, _, preprocess = open_clip.create_model_and_transforms(
-        CLIP_MODEL, pretrained="openai", cache_dir=MODEL_CACHE,
-        precision="fp16" if device == "cuda" else "fp32")
-    model = model.to(device).eval()
-    tokenizer = open_clip.get_tokenizer(CLIP_MODEL)
-    return model, preprocess, tokenizer, device
-
+# ── CLIP filter + dedupe (pure ONNX via ingest.clip_onnx — GPU or CPU) ────
 
 def diagram_keep_mask(images_png: list[bytes]) -> list[bool]:
     """True where the image reads as a diagram/chart/figure (vs a photo or
@@ -136,32 +121,20 @@ def diagram_keep_mask(images_png: list[bytes]) -> list[bool]:
     if not images_png:
         return []
     try:
-        import gc
         import io
 
-        import torch
         from PIL import Image
 
-        model, preprocess, tokenizer, device = _load_clip()
-        with torch.no_grad():
-            text_feat = model.encode_text(
-                tokenizer(KEEP_PROMPTS + DROP_PROMPTS).to(device)).float()
-            text_feat /= text_feat.norm(dim=-1, keepdim=True)
-            mask = []
-            for raw in images_png:
-                img = preprocess(Image.open(io.BytesIO(raw)).convert("RGB")
-                                 ).unsqueeze(0).to(device)
-                f = model.encode_image(img).float()
-                f /= f.norm(dim=-1, keepdim=True)
-                sims = f.squeeze(0) @ text_feat.T
-                keep = sims[:len(KEEP_PROMPTS)].max().item()
-                drop = sims[len(KEEP_PROMPTS):].max().item()
-                mask.append(keep >= drop)
-        del model, text_feat
-        gc.collect()
-        if device == "cuda":
-            torch.cuda.empty_cache()
-        return mask
+        from . import clip_onnx
+
+        imgs = [Image.open(io.BytesIO(raw)).convert("RGB") for raw in images_png]
+        text_feat = clip_onnx.encode_text(KEEP_PROMPTS + DROP_PROMPTS)  # (P, D)
+        feats = clip_onnx.encode_image(imgs)                            # (N, D)
+        sims = feats @ text_feat.T                                      # (N, P)
+        k = len(KEEP_PROMPTS)
+        keep = sims[:, :k].max(axis=1)
+        drop = sims[:, k:].max(axis=1)
+        return (keep >= drop).tolist()
     except Exception as e:
         log.warning("CLIP diagram filter unavailable (%s) — keeping all", e)
         return [True] * len(images_png)
@@ -171,49 +144,35 @@ def _clip_filter_dedupe(frames: list[dict]) -> list[dict]:
     if not frames:
         return []
     try:
-        import gc
-
-        import torch
         from PIL import Image
 
-        model, preprocess, tokenizer, device = _load_clip()
+        from . import clip_onnx
 
-        with torch.no_grad():
-            text_feat = model.encode_text(
-                tokenizer(KEEP_PROMPTS + DROP_PROMPTS).to(device)).float()
-            text_feat /= text_feat.norm(dim=-1, keepdim=True)
+        text_feat = clip_onnx.encode_text(KEEP_PROMPTS + DROP_PROMPTS)  # (P, D)
+        imgs = [Image.open(fr["file"]).convert("RGB") for fr in frames]
+        feats = clip_onnx.encode_image(imgs)                           # (N, D), L2-normed
+        k = len(KEEP_PROMPTS)
 
-            feats = []
-            for fr in frames:
-                img = preprocess(Image.open(fr["file"])).unsqueeze(0).to(device)
-                f = model.encode_image(img).float()
-                feats.append((f / f.norm(dim=-1, keepdim=True)).squeeze(0))
+        survivors = []
+        for fr, feat in zip(frames, feats):
+            sims = feat @ text_feat.T
+            keep_score = sims[:k].max()
+            drop_score = sims[k:].max()
+            if fr["trigger"] == "cue" or keep_score > drop_score:
+                survivors.append((fr, feat))
 
-            survivors = []
-            for fr, feat in zip(frames, feats):
-                sims = (feat @ text_feat.T)
-                keep_score = sims[:len(KEEP_PROMPTS)].max().item()
-                drop_score = sims[len(KEEP_PROMPTS):].max().item()
-                if fr["trigger"] == "cue" or keep_score > drop_score:
-                    survivors.append((fr, feat))
-
-            # dedupe: within a duplicate run keep the LATEST frame
-            deduped = []
-            for fr, feat in survivors:                    # already time-sorted
-                replaced = False
-                for i, (kfr, kfeat) in enumerate(deduped):
-                    if (feat @ kfeat).item() > CLIP_SIM_THRESHOLD:
-                        if fr["trigger"] == "cue" or kfr["trigger"] != "cue":
-                            deduped[i] = (fr, feat)       # later frame wins
-                        replaced = True
-                        break
-                if not replaced:
-                    deduped.append((fr, feat))
-
-        del model, feats, text_feat
-        gc.collect()
-        if device == "cuda":
-            torch.cuda.empty_cache()
+        # dedupe: within a duplicate run keep the LATEST frame
+        deduped = []
+        for fr, feat in survivors:                        # already time-sorted
+            replaced = False
+            for i, (kfr, kfeat) in enumerate(deduped):
+                if float(feat @ kfeat) > CLIP_SIM_THRESHOLD:
+                    if fr["trigger"] == "cue" or kfr["trigger"] != "cue":
+                        deduped[i] = (fr, feat)           # later frame wins
+                    replaced = True
+                    break
+            if not replaced:
+                deduped.append((fr, feat))
 
         kept = [fr for fr, _ in deduped]
     except Exception as e:

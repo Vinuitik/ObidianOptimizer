@@ -1,6 +1,6 @@
 # Ingest Module Flows — resource → notes
 
-Files: router.py, extract_av.py, extract_pdf.py, extract_web.py, keyframes.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
+Files: router.py, extract_av.py, extract_pdf.py, extract_web.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
 Architecture: architecture_plans/INGEST_AGENT_ARCH.md
 
 Two output modes share one extraction+synthesis core:
@@ -82,6 +82,11 @@ keyframes  : scene-cut + 1/15s + transcript-cue candidates → CLIP keep/drop �
 `extract_pdf._keep_diagrams()` drops logos/headshots via `keyframes.diagram_keep_mask()`
 (same CLIP KEEP/DROP prompts as keyframes) — keeps real figures/charts only.
 
+CLIP runs through `clip_onnx.py` — **pure onnxruntime, no torch/open_clip**.
+`encode_text()` / `encode_image()` load pre-exported ViT-L/14 ONNX from the Hub
+(`CLIP_ONNX_REPO`) once, cache the sessions, and return L2-normalised features;
+callers dot-product them. GPU via CUDAExecutionProvider, CPU fallback automatic.
+
 ## synthesize.py — the ONLY LLM in the pipeline
 
 ```
@@ -124,8 +129,20 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
   `![[lecture.mp4]]` does not, so the source embed never enters the image pipeline.
 - **faster-whisper pulls CPU onnxruntime** (VAD) which clobbers onnxruntime-gpu —
   Dockerfile force-reinstalls `onnxruntime-gpu` last. `ctranslate2<4.5` (cuDNN 8).
-- **CLIP loads once per job** (sequential model policy: load → use → free). A pdf
-  job never runs keyframes, so the model is only ever loaded for one purpose at a time.
+- **Pure-ONNX inference, no torch/optimum/open_clip.** Both the text embedder
+  (`model_runtime.py`) and CLIP (`clip_onnx.py`) run pre-exported ONNX as raw
+  `onnxruntime.InferenceSession`s. This was deliberate: the torch CUDA wheel
+  shipped its own ~3-4GB nvidia-* CUDA pip stack (cuDNN/cuBLAS/…) **on top of**
+  the base image's CUDA — a duplicate download that pushed the image build to ~1h.
+  Removing it cuts the build to ~10min and loses nothing, because onnxruntime-gpu
+  already uses the base image's CUDA. Trade-off: if a future model has **no**
+  pre-exported ONNX on the Hub, there is no longer an in-process exporter — export
+  it offline (optimum-cli) and host the ONNX, or point `EMBED_ONNX_FILE` at it.
+- **CLIP sessions are cached, not freed per job.** `clip_onnx._state` holds the
+  ViT-L/14 sessions for the process lifetime (loaded lazily on first use). The text
+  embedder (~650MB fp16) and CLIP (~1.2GB fp32) co-reside in VRAM — fine on a normal
+  GPU; on a tiny one this could pressure memory (the old open_clip path freed CLIP
+  after each job). To revert to load→free, clear `clip_onnx._state` after use.
 - **In-memory jobs dict**: restart loses job *status* but not extracted bundles.
 
 ---
@@ -143,6 +160,8 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 | Whisper model / device | `WHISPER_MODEL` env / `extract_av._pick_device()` |
 | PDF diagram keep/drop | `keyframes.KEEP_PROMPTS / DROP_PROMPTS`, `extract_pdf._keep_diagrams()` |
 | Keyframe tuning | `keyframes.py → SCENE_THRESHOLD / MAX_FRAMES / CLIP_SIM_THRESHOLD / CUE_PATTERNS` |
+| CLIP model / ONNX source | `clip_onnx.py → CLIP_ONNX_REPO / CLIP_HF_MODEL` env |
+| Text embed model / ONNX file | `model_runtime.py → EMBED_MODEL / EMBED_ONNX_FILE` env |
 | Outline/write prompts | `synthesize.py → OUTLINE_PROMPT / WRITE_PROMPT` |
 | Chunk window size | `bundle.py → WINDOW_TOKENS` (`INGEST_WINDOW_TOKENS` env) |
 | Default standalone folder | `INGEST_DEFAULT_FOLDER` env |

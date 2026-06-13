@@ -24,29 +24,36 @@ class _MockTokenizer:
         }
 
 
-class _MockModelOutput:
-    def __init__(self, batch, seq, dim):
-        self.last_hidden_state = np.random.randn(batch, seq, dim).astype(np.float32)
+class _Info:
+    def __init__(self, name):
+        self.name = name
 
 
-class _MockModel:
-    class config:
-        hidden_size = FAKE_DIM
+class _MockSession:
+    """Stands in for an onnxruntime.InferenceSession — returns a random
+    last_hidden_state so embed_texts can mean-pool and normalise it."""
+    def get_inputs(self):
+        return [_Info("input_ids"), _Info("attention_mask")]
 
-    def __call__(self, **kwargs):
-        batch = kwargs["input_ids"].shape[0]
-        seq = kwargs["input_ids"].shape[1]
-        return _MockModelOutput(batch, seq, FAKE_DIM)
+    def get_outputs(self):
+        return [_Info("last_hidden_state")]
+
+    def get_providers(self):
+        return ["CPUExecutionProvider"]
+
+    def run(self, output_names, feeds):
+        batch, seq = feeds["input_ids"].shape
+        return [np.random.randn(batch, seq, FAKE_DIM).astype(np.float32)]
 
 
 @pytest.fixture(autouse=True)
 def mock_model_state():
-    """Inject a fake model into the shared state before every test."""
+    """Inject a fake session into the shared state before every test."""
     embedder_main.state.clear()
     embedder_main.state.update(
         {
             "tokenizer": _MockTokenizer(),
-            "model": _MockModel(),
+            "session": _MockSession(),
             "dim": FAKE_DIM,
             "provider": "CPUExecutionProvider",
             "model_name": "mock-embed-model",

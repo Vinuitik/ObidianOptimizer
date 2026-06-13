@@ -2,15 +2,17 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 
-# ONNX inference — GPU-capable; falls back to CPU at runtime if no CUDA present
+# ONNX inference — GPU-capable; falls back to CPU at runtime if no CUDA present.
+# This is the ONLY inference engine: both the text embedder (mxbai) and CLIP run
+# as raw InferenceSessions on pre-exported ONNX pulled from the Hub. No torch,
+# no optimum, no open_clip — that stack only existed for a one-time PyTorch→ONNX
+# export we no longer do, and it dragged in a duplicate ~3-4GB CUDA pip stack
+# (nvidia-cudnn/cublas/etc.) on top of the base image's CUDA.
 onnxruntime-gpu>=1.19.0
 
-# Model loading + ONNX export (converts PyTorch → ONNX on first run, then caches)
-# <2.0: optimum 2.x moved optimum.onnxruntime into the separate optimum-onnx
-# package (which drags in CPU onnxruntime alongside onnxruntime-gpu)
-optimum>=1.21.0,<2.0
+# Tokenizers + image preprocessing (numpy path, no torch) + model config lookup.
 transformers>=4.44.0
-torch>=2.3.0          # needed by optimum for the one-time ONNX export; not used at inference time
+huggingface_hub>=0.24.0   # hf_hub_download for the pre-exported onnx/ weights
 
 # Numerics
 numpy>=1.26.0
@@ -21,12 +23,13 @@ faster-whisper>=1.1.0
 ctranslate2>=4.0,<4.5
 
 # Ingest stages 2-5: PDF, web, keyframes
+# CLIP keyframe/diagram selection runs via ingest.clip_onnx (pre-exported ONNX,
+# pure onnxruntime) — open_clip_torch is intentionally gone.
 pymupdf>=1.24.0
 pytesseract>=0.3.10
 Pillow>=10.0.0
 trafilatura>=1.12.0
 scenedetect[opencv-headless]>=0.6.4
-open_clip_torch>=2.24.0
 
 # MCP server (JSON-RPC over streamable HTTP) + direct Postgres access for tools
 mcp>=1.8.0
