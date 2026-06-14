@@ -12,8 +12,8 @@ Pipeline per note:
           WITHOUT seeing the marked answers; mismatches are dropped
   validate.py — deterministic schema + solver checks; failures re-prompted
           with the error list, MAX_RETRIES budget
-  upsert survivors into postgres (keyed note_path+card_hash); stale cards
-          (different source_hash) archived, attempt history preserved
+  upsert survivors into postgres (keyed note_path+card_hash); cards from older
+          versions are kept ACTIVE (never auto-archived) — removal is user-only
 """
 import json
 import logging
@@ -154,10 +154,11 @@ def ensure_schema(conn) -> None:
 def _store(note_path: str, source_hash: str, cards: list[dict]) -> dict:
     with psycopg.connect(DATABASE_URL) as conn:
         ensure_schema(conn)
-        # archive cards generated from an older version of this note
-        archived = conn.execute(
-            "UPDATE cards SET status='ARCHIVED' WHERE note_path=%s AND source_hash<>%s AND status='ACTIVE'",
-            (note_path, source_hash)).rowcount
+        # NOTE: cards from older versions of this note are intentionally NOT archived.
+        # Edits are usually additive (more structure), so old cards stay valid and
+        # remain in the ACTIVE pool the review draw samples from. Removal is user-only
+        # (explicit delete) — never automatic. New cards are added/deduped below.
+        archived = 0
         inserted = 0
         for card in cards:
             ch = validate.card_hash(card)
