@@ -120,6 +120,27 @@ def test_validate_exercise_rejects_template_param_mismatch():
     assert any("template render failed" in e for e in errors)
 
 
+def test_validate_exercise_rejects_literal_braces_without_crashing():
+    # Regression: LLM exercise templates with UNescaped literal braces (LaTeX
+    # \binom{}{}, code, set notation, a lone brace) make str.format raise
+    # ValueError — which used to escape validation and 500 /flashcards/generate.
+    # Must be rejected as a normal validation error, never raised.
+    card = {"type": "exercise",
+            "template": "Answer is } for a set of {n} items",   # lone '}' → ValueError
+            "params": {"n": {"kind": "int", "min": 1, "max": 3}},
+            "solver": "def solve(n):\n    return n",
+            "answer_kind": "numeric", "difficulty": 1}
+    errors = validate.validate_card(card)        # must NOT raise
+    assert any("template render failed" in e for e in errors)
+
+
+def test_validate_cards_never_raises_on_bad_card():
+    # Safety net: a single pathological card must not crash the whole batch —
+    # good cards still come back valid.
+    valid, errors = validate.validate_cards([_mcq(), {"type": "exercise"}])
+    assert len(valid) == 1 and errors
+
+
 def test_card_hash_stable_and_distinct():
     a, b = _mcq(), _mcq()
     assert validate.card_hash(a) == validate.card_hash(b)

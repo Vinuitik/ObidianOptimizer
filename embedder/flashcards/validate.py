@@ -102,7 +102,12 @@ def _validate_exercise(card: dict) -> list[str]:
     for params in trials:
         try:
             template.format(**params)
-        except (KeyError, IndexError) as e:
+        except Exception as e:
+            # LLM exercise templates routinely contain UNescaped literal braces —
+            # LaTeX (\binom{n}{k}), code, set notation {0,1} — which str.format
+            # reads as fields and rejects with ValueError/KeyError/IndexError. Any
+            # render failure means the card is malformed: reject it (the generate.py
+            # re-prompt loop feeds this back to the model), never let it escape.
             errors.append(f"exercise: template render failed for {params} — {e}")
             break
         try:
@@ -135,7 +140,12 @@ def validate_cards(cards: list) -> tuple[list[dict], list[str]]:
     if not isinstance(cards, list):
         return [], ["top-level output must be a JSON array of cards"]
     for i, card in enumerate(cards):
-        card_errors = validate_card(card)
+        # Safety net: validation must NEVER crash the generation endpoint. A single
+        # malformed card (or a future bug in a validator) gets rejected, not raised.
+        try:
+            card_errors = validate_card(card)
+        except Exception as e:
+            card_errors = [f"validation crashed — {e}"]
         if card_errors:
             errors.extend(f"card[{i}]: {e}" for e in card_errors)
         else:
