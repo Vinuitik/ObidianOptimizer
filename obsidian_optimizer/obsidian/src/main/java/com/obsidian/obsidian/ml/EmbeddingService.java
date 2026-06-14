@@ -127,48 +127,65 @@ public class EmbeddingService {
         if (texts.isEmpty()) {
             return List.of();
         }
+        final String body;
         try {
-            String body = objectMapper.writeValueAsString(Map.of("texts", texts));
+            body = objectMapper.writeValueAsString(Map.of("texts", texts));
+        } catch (Exception e) {
+            log.warn("[EmbeddingService] embed serialize error: {}", e.getMessage());
+            return null;
+        }
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(embedderUrl + "/embed"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build();
 
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(embedderUrl + "/embed"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        // The JDK client pools keep-alive connections; if uvicorn closed one
+        // between requests the first send fails ("header parser received no
+        // bytes"). Retry the SEND once (fresh connection). We never retry after a
+        // response is received, so a 200 is parsed exactly once — no double embed.
+        IOException lastSendError = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            HttpResponse<String> response;
+            try {
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("[EmbeddingService] batch embed interrupted");
+                return null;
+            } catch (IOException e) {
+                lastSendError = e;   // likely a stale pooled connection — retry
+                continue;
+            }
 
             if (response.statusCode() != 200) {
                 log.warn("[EmbeddingService] embedder returned HTTP {}: {}", response.statusCode(), response.body());
                 return null;
             }
-
-            JsonNode root = objectMapper.readTree(response.body());
-            JsonNode embeddingsNode = root.path("embeddings");
-            if (!embeddingsNode.isArray() || embeddingsNode.size() != texts.size()) {
-                log.warn("[EmbeddingService] unexpected embedder response (wanted {} vectors): {}",
-                    texts.size(), response.body());
+            try {
+                JsonNode embeddingsNode = objectMapper.readTree(response.body()).path("embeddings");
+                if (!embeddingsNode.isArray() || embeddingsNode.size() != texts.size()) {
+                    log.warn("[EmbeddingService] unexpected embedder response (wanted {} vectors): {}",
+                        texts.size(), response.body());
+                    return null;
+                }
+                List<float[]> out = new ArrayList<>(embeddingsNode.size());
+                for (JsonNode vecNode : embeddingsNode) {
+                    float[] vec = new float[vecNode.size()];
+                    for (int i = 0; i < vec.length; i++) {
+                        vec[i] = (float) vecNode.get(i).asDouble();
+                    }
+                    out.add(vec);
+                }
+                return out;
+            } catch (Exception e) {
+                log.warn("[EmbeddingService] embed parse error: {}", e.getMessage());
                 return null;
             }
-
-            List<float[]> out = new ArrayList<>(embeddingsNode.size());
-            for (JsonNode vecNode : embeddingsNode) {
-                float[] vec = new float[vecNode.size()];
-                for (int i = 0; i < vec.length; i++) {
-                    vec[i] = (float) vecNode.get(i).asDouble();
-                }
-                out.add(vec);
-            }
-            return out;
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("[EmbeddingService] batch embed interrupted");
-            return null;
-        } catch (Exception e) {
-            log.warn("[EmbeddingService] batch embed error: {}", e.getMessage());
-            return null;
         }
+        log.warn("[EmbeddingService] batch embed failed after retry: {}",
+            lastSendError == null ? "unknown" : lastSendError.getMessage());
+        return null;
     }
 
     /** Embeds a query string for search. */
