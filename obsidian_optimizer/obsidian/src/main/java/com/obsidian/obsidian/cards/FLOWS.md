@@ -62,6 +62,9 @@ CardJobWorker @Scheduled (default every 30min, 2min after startup)
       body_hash = SHA-256 of the frontmatter-stripped note. Keying on it (not
       content_hash) means the sr-due rewrite on every review and chrono's date
       fixes — frontmatter-only changes — do NOT re-trigger generation.
+        AND no PENDING pending_image_jobs row for the note — cards wait for image
+        captioning to finish (SKIPPED/DONE don't block) because generation now
+        injects the image text; this also enforces images-before-cards ordering.
   → per note: CardGenerationService.generateFor(), then recordAttempt(path, hash)
       ONLY if the embedder answered — zero-yield generations don't retry
       (credits), but transport failures (wrapper down) retry next cycle
