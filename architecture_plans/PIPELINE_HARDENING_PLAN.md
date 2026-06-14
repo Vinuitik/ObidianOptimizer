@@ -135,6 +135,34 @@ machine, so stay with additive boolean flags, not a status enum.
 ONCE on the final merged note. The gate is what keeps that whole chain single-pass and
 credit-safe.
 
+## Phase 5 — Card credit efficiency (DONE)
+
+Two credit fixes landed (commits 1704480, 8a59de7):
+
+- **body_hash work-list key (DONE).** `notes.body_hash = sha256(frontmatter-stripped
+  body)`, set at the `registerImages` chokepoint; `findNotesNeedingCards` keys on it
+  instead of `content_hash`. The sr-due rewrite on every review + chrono date fixes are
+  frontmatter-only → no longer re-trigger flashcard generation. content_hash stays
+  full-file for Drive sync. (Embedding still keys on content_hash — already chunk-skip
+  protected, frontmatter edits cost 0 GPU there.)
+- **Never auto-archive cards (DONE).** Removed the archive UPDATE in `generate.py _store`.
+  Edits are additive; old cards stay ACTIVE in the review draw pool. Removal is user-only.
+
+## Phase 6 — Card delete UI (TODO, feature)
+
+The "removal is user-only" contract needs the user-facing half: a delete control on a
+card + `DELETE /api/cards/{id}` handler (soft-delete to ARCHIVED or hard delete — decide).
+No LLM cost. Pairs with Phase 5's never-auto-archive.
+
+## Phase 7 — Content-keyed chunk matching (TODO, GPU efficiency)
+
+Today `note_chunks` identity is positional `(note_path, source, chunk_index)`, so inserting
+a paragraph shifts every downstream index → cascade re-embed. Match new chunks to existing
+ones by content-hash SET instead, so only genuinely-changed chunks re-embed. Localizes a
+body edit's cost to the edited region. Lower priority than Phase 5 (this is local GPU, not
+credits). Don't store byte offsets — they're fragile across edits; the content-hash set diff
+achieves "detect just the changed chunk" without them.
+
 ## Phase 2 — Embed batching (efficiency, pipeline #3)
 
 **Problem:** `EmbeddingService.indexNote` calls `embed(chunk.text)` per chunk = one HTTP POST +

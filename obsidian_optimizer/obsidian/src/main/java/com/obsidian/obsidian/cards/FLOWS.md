@@ -57,8 +57,11 @@ default weights) — matching py-fsrs exactly.
 CardJobWorker @Scheduled (default every 30min, 2min after startup)
   → CardRepository.findNotesNeedingCards(batchLimit)
       SQL diff: notes WHERE sr_due IS NOT NULL
-        AND no ACTIVE cards with source_hash == notes.content_hash
-        AND no card_gen_attempts row for that (path, hash)
+        AND no ACTIVE cards with source_hash == notes.body_hash
+        AND no card_gen_attempts row for that (path, body_hash)
+      body_hash = SHA-256 of the frontmatter-stripped note. Keying on it (not
+      content_hash) means the sr-due rewrite on every review and chrono's date
+      fixes — frontmatter-only changes — do NOT re-trigger generation.
   → per note: CardGenerationService.generateFor(), then recordAttempt(path, hash)
       ONLY if the embedder answered — zero-yield generations don't retry
       (credits), but transport failures (wrapper down) retry next cycle
@@ -72,13 +75,14 @@ CardJobWorker @Scheduled (default every 30min, 2min after startup)
                   questions without seeing answers; mismatches dropped
           validate.py: schema + solver sandbox checks; failures re-prompted,
                   MAX_RETRIES=2, survivors stored
-      → upsert into cards (note_path + card_hash dedupe); older-source cards
-        ARCHIVED (attempt history preserved, never deleted)
+      → upsert into cards (note_path + card_hash dedupe); cards from older note
+        versions are KEPT ACTIVE (never auto-archived) — they stay in the review
+        draw pool. Removal is user-only (explicit delete).
 ```
 
 No queue table (deviation from FLASHCARDS_ARCH's pending_card_jobs): the
-notes.content_hash ↔ cards.source_hash diff IS the work list — covers app
-edits, sync downloads, chrono rewrites, and external Obsidian edits with zero
+notes.body_hash ↔ cards.source_hash diff IS the work list — covers app edits,
+sync downloads, chrono rewrites, and external Obsidian edits with zero
 call-site hooks. The attempt ledger (card_gen_attempts) bounds retries.
 
 ## Assignment Flow (sessions)
@@ -147,6 +151,8 @@ POST /api/assignments/{id}/complete
 | Sandbox limits | `solver_sandbox.py → TIMEOUT_S / MEM_MB / ALLOWED_* / DENIED_NAMES` |
 | Random validation samples | `validate.py → K_SAMPLES` |
 | Eligibility rule | `CardRepository.findNotesNeedingCards()` WHERE clause |
+| Card diff key (body_hash) | set: `ImageScanService.registerImages` via `MarkdownPreprocessor.stripFrontmatter`; read: `findNotesNeedingCards` |
+| Card archiving | none — never auto-archived (`generate.py _store`); removal is user-only (delete) |
 | Desired retention | `fsrs.desired-retention` property (default 0.9) |
 | FSRS weights | `FsrsService.W` (FSRS-6 defaults — regenerate test refs if changed) |
 | Bandit arms | `BanditService.ARMS` |
