@@ -38,6 +38,10 @@ public class ImageProcessingWorker {
     @Value("${wrapper.url:http://host.docker.internal:5001}")
     private String wrapperUrl;
 
+    // Quiet mode: false → no image captioning runs (boot the app light for testing).
+    @Value("${images.enabled:true}")
+    private boolean enabled;
+
     @Value("${image.worker.parallelism:4}")
     private int parallelism;
 
@@ -76,6 +80,7 @@ public class ImageProcessingWorker {
 
     @Scheduled(fixedDelay = 30_000)
     public void processPendingImages() {
+        if (!enabled) return;
         List<PendingImageJob> batch = jobRepo.findPending(BATCH_SIZE);
         if (batch.isEmpty()) return;
 

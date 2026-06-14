@@ -9,6 +9,7 @@ import com.obsidian.obsidian.sync.SyncQueueRepository;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -22,6 +23,11 @@ import java.util.List;
 public class ChronoService {
 
     private static final Logger log = LoggerFactory.getLogger(ChronoService.class);
+
+    // Quiet mode: when false, the auto-triggers (startup + 2am) skip. Manual
+    // POST /api/chrono/run still works. Lets you boot the app light for testing.
+    @Value("${chrono.enabled:true}")
+    private boolean chronoEnabled;
 
     private final FileMoverService   fileMover;
     private final FileCheckerService fileChecker;
@@ -59,6 +65,10 @@ public class ChronoService {
 
     @PostConstruct
     public void onStartup() {
+        if (!chronoEnabled) {
+            log.info("[ChronoService] chrono.enabled=false — skipping startup run (quiet mode).");
+            return;
+        }
         String lastRun = settingsRepo.getChronoLastRunDate();
         boolean neverRun = lastRun.isBlank();
         boolean stale    = !neverRun && LocalDate.parse(lastRun).isBefore(LocalDate.now());
@@ -72,6 +82,7 @@ public class ChronoService {
 
     @Scheduled(cron = "0 0 2 * * *")
     public void scheduledRun() {
+        if (!chronoEnabled) return;
         log.info("[ChronoService] Scheduled 2am run triggered.");
         runAllJobs();
     }

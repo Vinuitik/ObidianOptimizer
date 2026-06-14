@@ -3,6 +3,7 @@ package com.obsidian.obsidian.ml;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -19,7 +20,15 @@ import java.util.Map;
 public class NoteEmbeddingWorker {
 
     private static final Logger log = LoggerFactory.getLogger(NoteEmbeddingWorker.class);
-    private static final int BATCH_SIZE = 20;
+
+    // Quiet mode: false → no note embedding runs (boot the app light for testing).
+    @Value("${embedding.enabled:true}")
+    private boolean enabled;
+
+    // Gentle defaults (was hardcoded 20 / 30s): tunable without a rebuild so the
+    // backlog can trickle instead of hammering a memory-tight host.
+    @Value("${embedding.batch-limit:8}")
+    private int batchSize;
 
     private final NoteIndexRepository noteIndexRepo;
     private final EmbeddingService embeddingService;
@@ -33,9 +42,11 @@ public class NoteEmbeddingWorker {
         this.chunkRepo        = chunkRepo;
     }
 
-    @Scheduled(fixedDelay = 30_000, initialDelay = 20_000)
+    @Scheduled(fixedDelayString = "${embedding.scan.delay-ms:60000}",
+               initialDelayString = "${embedding.scan.initial-delay-ms:30000}")
     public void embedPendingNotes() {
-        Map<String, String> pending = noteIndexRepo.findNotesNeedingEmbedding(BATCH_SIZE);
+        if (!enabled) return;
+        Map<String, String> pending = noteIndexRepo.findNotesNeedingEmbedding(batchSize);
         if (pending.isEmpty()) return;
 
         log.info("[NoteEmbeddingWorker] embedding {} note(s)", pending.size());
