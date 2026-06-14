@@ -14,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -22,6 +23,10 @@ public class EmbeddingService {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddingService.class);
     private static final int SEARCH_LIMIT = 60;
+    // Max chunks per /embed round-trip. The GPU embeds a batch almost as fast as a
+    // single text, so batching collapses N per-chunk calls into ⌈N/64⌉. Bound keeps
+    // the request body + GPU memory sane on notes with very many chunks.
+    private static final int EMBED_BATCH = 64;
 
     @Value("${embedder.url:http://localhost:8000}")
     private String embedderUrl;
@@ -57,37 +62,73 @@ public class EmbeddingService {
         }
 
         List<NoteChunk> chunks = preprocessor.chunkNote(path, content);
-        boolean allOk = true;
 
+        // Pass 1: collect only the chunks whose text changed since last embed —
+        // those are the ones we actually pay the GPU for. Unchanged chunks skip.
+        List<NoteChunk> changed = new ArrayList<>();
+        List<String> changedHashes = new ArrayList<>();
         for (NoteChunk chunk : chunks) {
             String newHash = ImageScanService.sha256(chunk.getText());
             String storedHash = chunkRepo.getContentHash(path, "text", chunk.getChunkIndex());
             if (newHash.equals(storedHash)) {
                 continue;
             }
+            changed.add(chunk);
+            changedHashes.add(newHash);
+        }
 
-            float[] embedding = embed(chunk.getText());
-            if (embedding == null) {
-                log.warn("[EmbeddingService] embed failed for {}#{} — will retry", path, chunk.getChunkIndex());
-                allOk = false;
-                continue;
+        // Pass 2: embed the changed chunks in batches — one HTTP/GPU round-trip per
+        // EMBED_BATCH chunks instead of one per chunk. The embedder preserves order.
+        boolean allOk = true;
+        for (int start = 0; start < changed.size(); start += EMBED_BATCH) {
+            int end = Math.min(start + EMBED_BATCH, changed.size());
+            List<NoteChunk> slice = changed.subList(start, end);
+            List<String> texts = new ArrayList<>(slice.size());
+            for (NoteChunk c : slice) {
+                texts.add(c.getText());
             }
 
-            chunkRepo.upsertChunk(path, chunk.getChunkIndex(), "text", chunk.getText(), embedding, newHash);
+            List<float[]> vectors = embedBatch(texts);
+            if (vectors == null || vectors.size() != slice.size()) {
+                log.warn("[EmbeddingService] batch embed failed for {} (chunks {}..{}) — will retry",
+                    path, start, end);
+                allOk = false;
+                continue;   // leave this slice unembedded; the note stays in the diff
+            }
+            for (int i = 0; i < slice.size(); i++) {
+                NoteChunk c = slice.get(i);
+                chunkRepo.upsertChunk(path, c.getChunkIndex(), "text", c.getText(),
+                    vectors.get(i), changedHashes.get(start + i));
+            }
         }
 
         chunkRepo.deleteStaleChunks(path, "text", chunks.size() - 1);
-        log.debug("[EmbeddingService] indexed {} text chunk(s) for {}", chunks.size(), path);
+        log.debug("[EmbeddingService] indexed {} text chunk(s) for {} ({} changed)",
+            chunks.size(), path, changed.size());
         return allOk;
     }
 
     /**
-     * Embeds a single text string via the embedder service.
+     * Embeds a single text string. Thin delegate over {@link #embedBatch} so the
+     * query path and any single-chunk caller share one transport implementation.
      * Returns null if the service is unreachable or returns an error.
      */
     public float[] embed(String text) {
+        List<float[]> vectors = embedBatch(List.of(text));
+        return (vectors == null || vectors.isEmpty()) ? null : vectors.get(0);
+    }
+
+    /**
+     * Embeds a batch of texts in ONE request. Returns vectors in input order, or
+     * null if the service is unreachable, errors, or the returned count doesn't
+     * match the input (so the caller can leave the whole slice for a later retry).
+     */
+    public List<float[]> embedBatch(List<String> texts) {
+        if (texts.isEmpty()) {
+            return List.of();
+        }
         try {
-            String body = objectMapper.writeValueAsString(Map.of("texts", List.of(text)));
+            String body = objectMapper.writeValueAsString(Map.of("texts", texts));
 
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(embedderUrl + "/embed"))
@@ -104,24 +145,28 @@ public class EmbeddingService {
 
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode embeddingsNode = root.path("embeddings");
-            if (embeddingsNode.isMissingNode() || !embeddingsNode.isArray() || embeddingsNode.isEmpty()) {
-                log.warn("[EmbeddingService] unexpected embedder response: {}", response.body());
+            if (!embeddingsNode.isArray() || embeddingsNode.size() != texts.size()) {
+                log.warn("[EmbeddingService] unexpected embedder response (wanted {} vectors): {}",
+                    texts.size(), response.body());
                 return null;
             }
 
-            JsonNode firstVec = embeddingsNode.get(0);
-            float[] vec = new float[firstVec.size()];
-            for (int i = 0; i < vec.length; i++) {
-                vec[i] = (float) firstVec.get(i).asDouble();
+            List<float[]> out = new ArrayList<>(embeddingsNode.size());
+            for (JsonNode vecNode : embeddingsNode) {
+                float[] vec = new float[vecNode.size()];
+                for (int i = 0; i < vec.length; i++) {
+                    vec[i] = (float) vecNode.get(i).asDouble();
+                }
+                out.add(vec);
             }
-            return vec;
+            return out;
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.warn("[EmbeddingService] embed interrupted");
+            log.warn("[EmbeddingService] batch embed interrupted");
             return null;
         } catch (Exception e) {
-            log.warn("[EmbeddingService] embed error: {}", e.getMessage());
+            log.warn("[EmbeddingService] batch embed error: {}", e.getMessage());
             return null;
         }
     }
