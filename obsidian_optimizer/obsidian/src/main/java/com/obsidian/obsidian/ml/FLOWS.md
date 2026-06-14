@@ -78,19 +78,27 @@ philosophy as the cards worker). Covers note creation, app edits, sync downloads
 chrono rewrites, external Obsidian edits (hash loop), and first-boot backfill
 (embedded_hash starts NULL for every note).
 
+**Readiness gate**: the worklist also requires `notes.ingest_pending = false`, so a
+note with an un-ingested A/V/PDF embed is NOT embedded against its pre-transcript
+content (it would only be redone after the ingest agent injects the synthesized
+text). `ResourceScanService.scan` maintains the flag at the `registerImages`
+chokepoint. Same flag gates the card worklist — see Resource Ingest + Cards FLOWS.
+
 ```
 NoteEmbeddingWorker.embedPendingNotes():
   NoteIndexRepository.findNotesNeedingEmbedding(20)   — (path, content_hash) pairs
+                                                        (WHERE … AND ingest_pending = false)
   → per note: EmbeddingService.indexNote(path):
       rawContent
         → MarkdownPreprocessor.chunkNote(path, rawContent) → List<NoteChunk>
-        → for each chunk:
-            SHA-256(chunk.text) vs note_chunks.content_hash (source='text') → skip if unchanged
-            POST http://embedder:8000/embed {"texts": [chunk.text]}
-            → parse embeddings[0] → float[1024]
-            → NoteChunkRepository.upsertChunk(path, index, 'text', text, embedding, hash)
+        → pass 1: keep only chunks whose SHA-256 differs from note_chunks.content_hash
+                  (source='text') — the changed set
+        → pass 2: embed the changed set in slices of EMBED_BATCH (64) —
+            POST http://embedder:8000/embed {"texts": [...slice...]}  (ONE call per slice)
+            → embeddings[] parsed in order → float[1024] each
+            → NoteChunkRepository.upsertChunk(path, index, 'text', text, embedding, hash) per chunk
         → deleteStaleChunks(path, 'text', newCount)
-        → returns false on any embed failure
+        → returns false on any slice failure (note stays in the diff, retried)
   → success: markEmbedded(path, hash) — guarded UPDATE (path AND content_hash=hash)
     so a note edited mid-index stays in the work list
   → failure (embedder down): stays in diff, retried next cycle
@@ -212,6 +220,11 @@ marker it POSTs the embedder `/ingest {ref, note_path}` off-thread (best-effort)
 The embedder synthesizes a note and injects it below the embed; the next write-back
 carries the marker, so re-scans skip it. Pipeline detail: embedder/ingest/FLOWS.md.
 
+`scan` also sets `notes.ingest_pending` (synchronously, before the off-thread POSTs):
+true while any resource embed still lacks its marker, cleared once all do. This is the
+readiness gate read by the embedding AND card worklists — downstream processing waits
+until the note's content is finalized (avoids rework + double LLM card spend).
+
 To change which embeds trigger ingest: `ResourceScanService.RESOURCE_EMBED`
 To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 
@@ -256,5 +269,7 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 | Image processing prompt | `host-wrapper/main.py → IMAGE_PROMPT` |
 | Image worker schedule | `ImageProcessingWorker @Scheduled` |
 | Note embedding batch/schedule | `NoteEmbeddingWorker.BATCH_SIZE / @Scheduled` |
+| Chunks per embed request | `EmbeddingService.EMBED_BATCH` (64) |
 | Embedding work list rule | `NoteIndexRepository.findNotesNeedingEmbedding()` |
+| Readiness gate flag | set: `ResourceScanService.scan` → `NoteIndexRepository.setIngestPending`; gates: `findNotesNeedingEmbedding` + `CardRepository.findNotesNeedingCards` |
 | Orphan chunk cleanup | `NoteEmbeddingWorker.purgeOrphanChunks()` (daily) |

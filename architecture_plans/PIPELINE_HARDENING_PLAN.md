@@ -1,6 +1,12 @@
 # Pipeline Hardening Plan — readiness gates, embed batching, launch testing
 
-Status: **PLAN ONLY — nothing implemented.** Written 2026-06-13 to survive session loss.
+Status: **Phase 1 (gates) + Phase 2a (per-note batching) DONE** on branch
+`fix/http1-and-cudnn9` (commits 7e31d8c, 8b93938) with ReadinessGateIT +
+EmbeddingServiceBatchTest green; full unit suite 246 pass. Remaining: Phase 3 docs
+(ml/FLOWS.md updated; root integration-map doc still TODO), Phase 4 launch testing
+(canary + staged launch), Phase 1b (merge_pending gate — blocked on sync merge being
+built), Phase 2b (cross-note batching — only if backfill is slow). Originally written
+2026-06-13 to survive session loss.
 Prereq: the in-flight fix branch `fix/http1-and-cudnn9` (HTTP/1.1, cuDNN9, regex,
 requests dep, host-wrapper in start.ps1, embedder healthcheck start_period=600s)
 must be rebuilt + verified working FIRST. Do not build on a broken base.
