@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -40,11 +42,49 @@ IMAGE_BATCH_PROMPT = (
 )
 
 
+# Obsidian wiki-embeds (![[Pasted image 20250122.png]]) reference an image by BARE
+# filename and resolve it vault-wide — pasted attachments usually live in a
+# 'resources'/'attachments' folder, NOT next to the note. A literal /vault→host
+# path replace therefore can't find them (they read as not_found). We keep a
+# basename→path index of every image in the vault and fall back to it. Rebuilt
+# lazily and at most once per TTL so newly-added images resolve within minutes.
+_IMAGE_INDEX_TTL = 300.0
+_image_index: dict = {}
+_image_index_built_at = 0.0
+_image_index_lock = threading.Lock()
+
+
+def _build_image_index() -> dict:
+    index: dict = {}
+    root = Path(VAULT_HOST_PATH)
+    if not root.exists():
+        return index
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in MEDIA_TYPES:
+            index.setdefault(p.name.lower(), p)  # first match wins (shortest-ish path)
+    return index
+
+
+def _lookup_image_by_name(name: str):
+    global _image_index, _image_index_built_at
+    with _image_index_lock:
+        now = time.monotonic()
+        if not _image_index or (now - _image_index_built_at) > _IMAGE_INDEX_TTL:
+            _image_index = _build_image_index()
+            _image_index_built_at = now
+        return _image_index.get(name.lower())
+
+
 def _resolve_vault_image(container_path):
+    # 1. Direct path — covers ![alt](folder/img.png) and already-resolved /vault paths.
     host_path = Path(container_path.replace("/vault", VAULT_HOST_PATH, 1))
-    if not host_path.exists():
-        return None, None
-    return host_path, MEDIA_TYPES.get(host_path.suffix.lower(), "image/png")
+    if host_path.exists():
+        return host_path, MEDIA_TYPES.get(host_path.suffix.lower(), "image/png")
+    # 2. Bare Obsidian ref — resolve by basename, vault-wide (e.g. into resources/).
+    found = _lookup_image_by_name(Path(container_path).name)
+    if found is not None and found.exists():
+        return found, MEDIA_TYPES.get(found.suffix.lower(), "image/png")
+    return None, None
 
 
 @app.route("/health")
@@ -61,13 +101,11 @@ def providers():
 @app.route("/process-image", methods=["POST"])
 def process_image():
     data = request.json
-    # container path: /vault/folder/image.png → host path
-    host_path = Path(data["image_path"].replace("/vault", VAULT_HOST_PATH, 1))
+    # Resolve bare refs vault-wide (resources/ etc.), same as the batch endpoint.
+    host_path, media_type = _resolve_vault_image(data["image_path"])
 
-    if not host_path.exists():
-        return jsonify({"error": f"not found: {host_path}"}), 404
-
-    media_type = MEDIA_TYPES.get(host_path.suffix.lower(), "image/png")
+    if host_path is None:
+        return jsonify({"error": f"not found: {data['image_path']}"}), 404
 
     try:
         text, provider = router.complete_vision(
