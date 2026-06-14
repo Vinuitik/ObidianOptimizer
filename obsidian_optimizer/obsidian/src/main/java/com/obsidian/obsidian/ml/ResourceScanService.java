@@ -1,6 +1,7 @@
 package com.obsidian.obsidian.ml;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +50,7 @@ public class ResourceScanService {
         Pattern.CASE_INSENSITIVE);
 
     private final SettingsRepository settingsRepo;
+    private final NoteIndexRepository noteIndexRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
     // HTTP_1_1 is mandatory: the embedder is uvicorn, which doesn't support the
     // h2c cleartext upgrade the JDK client attempts by default — that handshake
@@ -66,8 +68,9 @@ public class ResourceScanService {
     @Value("${embedder.url:http://localhost:8000}")
     private String embedderUrl;
 
-    public ResourceScanService(SettingsRepository settingsRepo) {
+    public ResourceScanService(SettingsRepository settingsRepo, NoteIndexRepository noteIndexRepo) {
         this.settingsRepo = settingsRepo;
+        this.noteIndexRepo = noteIndexRepo;
     }
 
     /**
@@ -77,6 +80,10 @@ public class ResourceScanService {
      */
     public void scan(String absNotePath, String content) {
         List<String> embeds = embedsNeedingIngest(content);
+        // Readiness gate (synchronous, before any early return): the flag must be
+        // CLEARED for clean notes too, not only set for pending ones — otherwise a
+        // note never loses its pending status once its ingest marker lands.
+        noteIndexRepo.setIngestPending(absNotePath, !embeds.isEmpty());
         if (embeds.isEmpty()) return;
         String relPath = toRelative(absNotePath);
         if (relPath == null) return;           // note is outside the vault

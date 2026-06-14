@@ -58,6 +58,7 @@ public class CardRepository {
             FROM notes n
             WHERE n.sr_due IS NOT NULL
               AND n.content_hash IS NOT NULL
+              AND n.ingest_pending = false
               AND NOT EXISTS (
                   SELECT 1 FROM cards c
                   WHERE c.note_path = n.path

@@ -50,6 +50,12 @@ public class NoteIndexRepository {
         // the diff against content_hash IS the embedding work list (NoteEmbeddingWorker)
         jdbc.execute(
             "ALTER TABLE notes ADD COLUMN IF NOT EXISTS embedded_hash TEXT");
+        // Readiness gate: true while the note still has an un-ingested A/V/PDF embed
+        // (ResourceScanService maintains it at the registerImages chokepoint). The
+        // embedding and card worklists skip pending notes so they aren't processed
+        // against pre-transcript content — avoids rework and double LLM card spend.
+        jdbc.execute(
+            "ALTER TABLE notes ADD COLUMN IF NOT EXISTS ingest_pending BOOLEAN NOT NULL DEFAULT false");
     }
 
     /** Notes whose text changed since they were last embedded (or never were).
@@ -60,6 +66,7 @@ public class NoteIndexRepository {
             SELECT path, content_hash FROM notes
             WHERE content_hash IS NOT NULL
               AND content_hash IS DISTINCT FROM embedded_hash
+              AND ingest_pending = false
             ORDER BY modified_at DESC
             LIMIT ?
             """, rs -> { out.put(rs.getString("path"), rs.getString("content_hash")); }, limit);
@@ -171,6 +178,13 @@ public class NoteIndexRepository {
 
     public void updateContentHash(String path, String hash) {
         jdbc.update("UPDATE notes SET content_hash = ? WHERE path = ?", hash, path);
+    }
+
+    /** Readiness gate flag — true while the note has an un-ingested resource embed.
+     *  Maintained by ResourceScanService on every write; read by the embedding and
+     *  card worklists to skip notes whose content isn't finalized yet. */
+    public void setIngestPending(String path, boolean pending) {
+        jdbc.update("UPDATE notes SET ingest_pending = ? WHERE path = ?", pending, path);
     }
 
     public String getContentHash(String path) {
