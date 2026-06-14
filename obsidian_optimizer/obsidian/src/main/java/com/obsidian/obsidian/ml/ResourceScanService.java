@@ -6,6 +6,8 @@ import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -80,6 +82,17 @@ public class ResourceScanService {
     @Value("${ingest.retry.batch-limit:50}")
     private int retryBatchLimit;
 
+    // The embedder publishes synthesized notes BACK to the backend (:8084). During
+    // the ~7-min boot (sync + image scan + chrono) Tomcat isn't bound yet, so firing
+    // ingest then = the job finishes and the publish-back gets Connection refused.
+    // Hold firing until ApplicationReadyEvent; the retry worker fires the backlog.
+    private volatile boolean appReady = false;
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void onAppReady() {
+        appReady = true;
+    }
+
     public ResourceScanService(SettingsRepository settingsRepo, NoteIndexRepository noteIndexRepo) {
         this.settingsRepo = settingsRepo;
         this.noteIndexRepo = noteIndexRepo;
@@ -103,6 +116,7 @@ public class ResourceScanService {
         // note never loses its pending status once its ingest marker lands.
         noteIndexRepo.setIngestPending(absNotePath, !embeds.isEmpty());
         if (embeds.isEmpty()) return;
+        if (!appReady) return;   // backend web server not up yet — retry worker fires once ready
         String relPath = toRelative(absNotePath);
         if (relPath == null) return;           // note is outside the vault
         for (String embed : embeds) {
