@@ -173,9 +173,43 @@ def _store(note_path: str, source_hash: str, cards: list[dict]) -> dict:
     return {"stored": inserted, "archived": archived}
 
 
+# ── Image-aware preprocessing ─────────────────────────────────────────────────
+
+def _format_with_descriptions(content: str, descriptions: list[str]) -> str:
+    """Append the note's image descriptions as a labelled block. Pure (no I/O) so
+    the formatting is unit-testable; the DB fetch lives in _with_image_descriptions."""
+    descriptions = [d.strip() for d in descriptions if d and d.strip()]
+    if not descriptions:
+        return content
+    block = "\n\n".join(f"- {d}" for d in descriptions)
+    return (f"{content}\n\n"
+            "## Image contents (auto-extracted from this note's images)\n"
+            f"{block}\n")
+
+
+def _with_image_descriptions(note_path: str, content: str) -> str:
+    """The card generator reads the raw note, which only has ![[image]] refs — not
+    what the images SAY. The image worker has already OCR/VLM-extracted each image
+    into note_chunks(source='image'); pull those and append them so cards can be
+    written about diagrams/screenshots. The card work-list waits for the note's
+    image jobs to finish (CardRepository.findNotesNeedingCards), so by the time we
+    run here the descriptions exist. Best-effort: any DB error → content unchanged."""
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            rows = conn.execute(
+                "SELECT text FROM note_chunks WHERE note_path = %s AND source = 'image' "
+                "ORDER BY chunk_index",
+                (note_path,)).fetchall()
+    except Exception as e:  # noqa: BLE001 — never fail generation over enrichment
+        log.warning("[flashcards] image-description lookup failed for %s: %s", note_path, e)
+        return content
+    return _format_with_descriptions(content, [r[0] for r in rows])
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def generate_for_note(note_path: str, content: str, source_hash: str) -> dict:
+    content = _with_image_descriptions(note_path, content)
     prompt = GEN_PROMPT.format(n_mcq=N_MCQ, n_open=N_OPEN, n_ex=N_EX, content=content)
     valid: list[dict] = []
     errors: list[str] = []

@@ -11,6 +11,14 @@ from flashcards import validate
 from flashcards.solver_sandbox import SandboxError, check_solver, run_solver
 
 
+@pytest.fixture(autouse=True)
+def _no_image_db(monkeypatch):
+    """generate_for_note enriches with image descriptions from the DB; in unit
+    tests there's no DB, so default it to a no-op. Tests that exercise the
+    formatting call _format_with_descriptions directly (pure, no I/O)."""
+    monkeypatch.setattr(gen, "_with_image_descriptions", lambda note_path, content: content)
+
+
 # ── Sandbox: what must pass ───────────────────────────────────────────────────
 
 def test_sandbox_runs_simple_solver():
@@ -182,6 +190,22 @@ def test_generate_gives_up_after_retry_budget(monkeypatch):
     result = gen.generate_for_note("/vault/n.md", "content", "h")
     assert result["stored"] == 0
     assert result["errors"]
+
+
+# ── Image-description enrichment (pure formatter) ─────────────────────────────
+
+def test_format_with_descriptions_appends_labelled_block():
+    out = gen._format_with_descriptions("Note body.", ["A flowchart of the FSRS loop",
+                                                       "Screenshot: error 422"])
+    assert "Note body." in out
+    assert "A flowchart of the FSRS loop" in out
+    assert "Screenshot: error 422" in out
+    assert "Image contents" in out
+
+
+def test_format_with_descriptions_empty_or_blank_leaves_content_unchanged():
+    assert gen._format_with_descriptions("Body.", []) == "Body."
+    assert gen._format_with_descriptions("Body.", ["  ", ""]) == "Body."
 
 
 def test_extract_json_handles_code_fences():

@@ -63,6 +63,10 @@ public class CardRepository {
               AND n.body_hash IS NOT NULL
               AND n.ingest_pending = false
               AND NOT EXISTS (
+                  SELECT 1 FROM pending_image_jobs j
+                  WHERE j.note_path = n.path
+                    AND j.status = 'PENDING')
+              AND NOT EXISTS (
                   SELECT 1 FROM cards c
                   WHERE c.note_path = n.path
                     AND c.source_hash = n.body_hash

@@ -66,6 +66,7 @@ class ReadinessGateIT {
         // CASCADE: cards is referenced by FKs (assignments/attempts) — truncate the
         // whole graph so each test starts empty.
         jdbc.execute("TRUNCATE notes, cards, card_gen_attempts CASCADE");
+        jdbc.execute("TRUNCATE pending_image_jobs");
     }
 
     /** Insert a note with body_hash = content_hash (the common case). */
@@ -87,6 +88,12 @@ class ReadinessGateIT {
             "INSERT INTO cards(note_path, type, payload, difficulty, card_hash, source_hash, status) " +
             "VALUES (?,?,?::jsonb,?,?,?,?)",
             path, "mcq", "{}", 1, "card-" + sourceHash, sourceHash, "ACTIVE");
+    }
+
+    private void insertImageJob(String notePath, String imagePath, String status) {
+        jdbc.update(
+            "INSERT INTO pending_image_jobs(note_path, image_path, status) VALUES (?,?,?)",
+            notePath, imagePath, status);
     }
 
     private List<String> cardWorklistPaths() {
@@ -152,5 +159,27 @@ class ReadinessGateIT {
         // Real body edit: body_hash changes → no ACTIVE card matches → eligible again.
         jdbc.update("UPDATE notes SET body_hash = ? WHERE path = ?", "b2", "/vault/note.md");
         assertThat(cardWorklistPaths()).contains("/vault/note.md");
+    }
+
+    @Test
+    void cardWorklist_waitsForNoteImagesToFinish() {
+        insertNote("/vault/diagram.md", "h", LocalDate.now(), false);
+
+        // An image is still being captioned → cards wait (they now consume image text).
+        insertImageJob("/vault/diagram.md", "fig1.png", "PENDING");
+        assertThat(cardWorklistPaths()).doesNotContain("/vault/diagram.md");
+
+        // Image finished → descriptions exist → cards eligible.
+        jdbc.update("UPDATE pending_image_jobs SET status = 'DONE' WHERE note_path = ? AND image_path = ?",
+            "/vault/diagram.md", "fig1.png");
+        assertThat(cardWorklistPaths()).contains("/vault/diagram.md");
+    }
+
+    @Test
+    void cardWorklist_skippedImageDoesNotBlockForever() {
+        insertNote("/vault/broken-img.md", "h", LocalDate.now(), false);
+        insertImageJob("/vault/broken-img.md", "missing.png", "SKIPPED");
+        // SKIPPED (image gone / permanently failed) must not gate cards.
+        assertThat(cardWorklistPaths()).contains("/vault/broken-img.md");
     }
 }
