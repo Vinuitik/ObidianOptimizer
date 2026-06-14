@@ -176,6 +176,17 @@ class ReadinessGateIT {
     }
 
     @Test
+    void findIngestPending_returnsOnlyPendingNotes() {
+        insertNote("/vault/waiting.md", "h1", null, true);    // ingest_pending = true
+        insertNote("/vault/done.md",    "h2", null, false);   // not pending
+
+        List<String> pending = noteIndex.findIngestPending(10);
+
+        assertThat(pending).contains("/vault/waiting.md");
+        assertThat(pending).doesNotContain("/vault/done.md");
+    }
+
+    @Test
     void cardWorklist_skippedImageDoesNotBlockForever() {
         insertNote("/vault/broken-img.md", "h", LocalDate.now(), false);
         insertImageJob("/vault/broken-img.md", "missing.png", "SKIPPED");

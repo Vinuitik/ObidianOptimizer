@@ -197,6 +197,15 @@ public class NoteIndexRepository {
         jdbc.update("UPDATE notes SET ingest_pending = ? WHERE path = ?", pending, path);
     }
 
+    /** Notes still waiting on ingest (the retry worker re-fires these). Random order
+     *  so a large backlog rotates fairly instead of starving the tail; the embedder
+     *  de-dups, so re-firing an already-queued note is harmless. */
+    public List<String> findIngestPending(int limit) {
+        return jdbc.queryForList(
+            "SELECT path FROM notes WHERE ingest_pending = true ORDER BY random() LIMIT ?",
+            String.class, limit);
+    }
+
     public String getContentHash(String path) {
         List<String> rows = jdbc.queryForList(
             "SELECT content_hash FROM notes WHERE path = ?", String.class, path);

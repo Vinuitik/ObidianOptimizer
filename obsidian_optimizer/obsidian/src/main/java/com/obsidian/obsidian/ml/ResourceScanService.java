@@ -6,12 +6,14 @@ import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -68,6 +70,16 @@ public class ResourceScanService {
     @Value("${embedder.url:http://localhost:8000}")
     private String embedderUrl;
 
+    // Master switch for the whole ingest pipeline. false → notes are NOT gated on a
+    // transcript (they embed/card from their text) and no ingest is fired.
+    @Value("${ingest.enabled:true}")
+    private boolean ingestEnabled;
+
+    // Notes re-fired per retry cycle. The embedder de-dups + paces actual work, so
+    // this just bounds how many we re-POST at once.
+    @Value("${ingest.retry.batch-limit:50}")
+    private int retryBatchLimit;
+
     public ResourceScanService(SettingsRepository settingsRepo, NoteIndexRepository noteIndexRepo) {
         this.settingsRepo = settingsRepo;
         this.noteIndexRepo = noteIndexRepo;
@@ -79,6 +91,12 @@ public class ResourceScanService {
      * @param content     the note's current markdown
      */
     public void scan(String absNotePath, String content) {
+        if (!ingestEnabled) {
+            // Pipeline disabled: clear the gate so the note isn't held back waiting
+            // for a transcript that will never come — it embeds/cards from its text.
+            noteIndexRepo.setIngestPending(absNotePath, false);
+            return;
+        }
         List<String> embeds = embedsNeedingIngest(content);
         // Readiness gate (synchronous, before any early return): the flag must be
         // CLEARED for clean notes too, not only set for pending ones — otherwise a
@@ -89,6 +107,30 @@ public class ResourceScanService {
         if (relPath == null) return;           // note is outside the vault
         for (String embed : embeds) {
             trigger(relPath, embed);
+        }
+    }
+
+    /**
+     * Re-fires ingest for notes still flagged {@code ingest_pending}. The original
+     * trigger is best-effort + fire-once, so a startup race (embedder not yet up) or
+     * a transient failure would otherwise leave those notes waiting on the gate
+     * FOREVER. This is the un-sticking the gate depends on. Paced: a capped random
+     * batch per cycle; the embedder de-dups and drains its own queue at GPU/credit
+     * speed, so the backlog clears over days. Disabled when ingest.enabled = false.
+     */
+    @Scheduled(fixedDelayString = "${ingest.retry.delay-ms:300000}",
+               initialDelayString = "${ingest.retry.initial-delay-ms:180000}")
+    public void retryPendingIngests() {
+        if (!ingestEnabled) return;
+        List<String> pending = noteIndexRepo.findIngestPending(retryBatchLimit);
+        if (pending.isEmpty()) return;
+        log.info("[ResourceScanService] re-firing ingest for {} pending note(s)", pending.size());
+        for (String absPath : pending) {
+            try {
+                scan(absPath, Files.readString(Paths.get(absPath)));
+            } catch (Exception e) {
+                log.debug("[ResourceScanService] ingest retry read failed for {}: {}", absPath, e.getMessage());
+            }
         }
     }
 
