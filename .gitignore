@@ -9,6 +9,7 @@ certs/
 # Python
 __pycache__/
 .pytest_cache/
+.venv/
 
 # Node
 node_modules/

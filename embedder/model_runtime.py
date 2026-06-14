@@ -60,10 +60,29 @@ def init() -> None:
                  if provider == "CUDAExecutionProvider" else ["CPUExecutionProvider"])
     log.info("Loading model '%s' (cache: %s, provider: %s) …", EMBED_MODEL, MODEL_CACHE, provider)
 
-    tokenizer = AutoTokenizer.from_pretrained(EMBED_MODEL, cache_dir=MODEL_CACHE)
-    onnx_path = hf_hub_download(EMBED_MODEL, EMBED_ONNX_FILE, cache_dir=MODEL_CACHE)
+    def _resolve(local_only: bool):
+        # local_only=True reads the /models volume with ZERO network — no HF Hub
+        # round-trips, no rate-limit, no stall. The three calls below are exactly
+        # the ones that phoned home on every boot before this change.
+        tokenizer = AutoTokenizer.from_pretrained(
+            EMBED_MODEL, cache_dir=MODEL_CACHE, local_files_only=local_only)
+        onnx_path = hf_hub_download(
+            EMBED_MODEL, EMBED_ONNX_FILE, cache_dir=MODEL_CACHE, local_files_only=local_only)
+        dim = AutoConfig.from_pretrained(
+            EMBED_MODEL, cache_dir=MODEL_CACHE, local_files_only=local_only).hidden_size
+        return tokenizer, onnx_path, dim
+
+    try:
+        # Fast path: everything already in the volume — load it, never touch HF.
+        tokenizer, onnx_path, dim = _resolve(local_only=True)
+        log.info("Loaded from local cache — no HF Hub requests.")
+    except Exception as e:
+        # Cache miss (first run on an empty volume / new model) — download once.
+        log.info("Model not fully cached (%s) — downloading from HF Hub (one-time) …",
+                 type(e).__name__)
+        tokenizer, onnx_path, dim = _resolve(local_only=False)
+
     session = ort.InferenceSession(onnx_path, providers=providers)
-    dim = AutoConfig.from_pretrained(EMBED_MODEL, cache_dir=MODEL_CACHE).hidden_size
 
     active = session.get_providers()[0]
     # Verify the GPU actually engaged. onnxruntime falls back to CPU silently when

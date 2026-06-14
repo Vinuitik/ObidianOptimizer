@@ -76,6 +76,9 @@ services:
       - GOOGLE_SERVICE_ACCOUNT_JSON=${GOOGLE_SERVICE_ACCOUNT_JSON:-placeholder}
       - SYNC_UPLOAD_CRON=${SYNC_UPLOAD_CRON:-0 0 */6 * * *}
       - MCP_API_TOKEN=${MCP_API_TOKEN:-}   # internal agent API token (embedder → backend)
+      # Memory-tight host: G1 periodic GC uncommits idle heap back to the OS
+      # (no hard -Xmx cap — caps risk OOM-kills; this just stops the JVM hoarding).
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=60 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:G1PeriodicGCInterval=300000 -XX:+G1PeriodicGCInvokesConcurrent
     volumes:
       - ${HOST_VAULT_PATH}:/vault
     depends_on:

@@ -210,9 +210,16 @@ def _resolve_embed(ref: str):
     except (ValueError, OSError):
         pass
     base = ref.rsplit("/", 1)[-1]
-    for hit in VAULT_DIR.rglob(base):
-        if hit.is_file():
-            return hit
+    # Walk the vault pruning hidden dirs (.git, .obsidian, …) and _trash IN PLACE
+    # so we never descend into them. rglob() did, which walked Git's huge object
+    # store — wasted work AND triggered ENOMEM ([Errno 12]) on memory-tight hosts.
+    from pathlib import Path
+    for dirpath, dirnames, filenames in os.walk(VAULT_DIR):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "_trash"]
+        if base in filenames:
+            candidate = Path(dirpath) / base
+            if candidate.is_file():
+                return candidate
     return None
 
 

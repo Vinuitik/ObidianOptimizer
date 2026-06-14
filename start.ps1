@@ -36,13 +36,43 @@ if (Select-String -Path $envFile -Pattern '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S'
 # Without it, image captioning + note synthesis silently skip ("host wrapper
 # unreachable"). Launches in its own window so its logs are visible; killed below.
 $wrapperDir = "$PSScriptRoot\host-wrapper"
-$wrapper = $null
-Write-Host "Installing host-wrapper deps and starting it on :5001 ..."
-& python -m pip install -q -r "$wrapperDir\requirements.txt"
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "host-wrapper pip install failed — is 'python' on PATH? Continuing without it (LLM features will skip)."
-} else {
-    $wrapper = Start-Process -FilePath python -ArgumentList "main.py" -WorkingDirectory $wrapperDir -PassThru
+$venvDir    = "$wrapperDir\.venv"
+$venvPython = "$venvDir\Scripts\python.exe"
+$reqFile    = "$wrapperDir\requirements.txt"
+$reqStamp   = "$venvDir\.req-hash"   # records which requirements.txt was last installed
+$wrapper    = $null
+
+# Create the host-wrapper venv ONCE (gitignored, reused on every later start).
+if (-not (Test-Path $venvPython)) {
+    Write-Host "Creating host-wrapper venv (one-time) ..."
+    & python -m venv $venvDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "venv creation failed — is 'python' on PATH? Continuing without host-wrapper (LLM features will skip)."
+        $venvPython = $null
+    }
+}
+
+# Only (re)install deps when requirements.txt has changed since the last install.
+if ($venvPython) {
+    $reqHash = (Get-FileHash $reqFile -Algorithm SHA256).Hash
+    $needInstall = (-not (Test-Path $reqStamp)) -or ((Get-Content $reqStamp -Raw).Trim() -ne $reqHash)
+    if ($needInstall) {
+        Write-Host "Installing host-wrapper deps (first run or requirements changed) ..."
+        & $venvPython -m pip install -q -r $reqFile
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "host-wrapper pip install failed. Continuing without it (LLM features will skip)."
+            $venvPython = $null
+        } else {
+            Set-Content -Path $reqStamp -Value $reqHash
+        }
+    } else {
+        Write-Host "host-wrapper deps already installed — skipping pip."
+    }
+}
+
+# Start the wrapper from the venv's interpreter.
+if ($venvPython) {
+    $wrapper = Start-Process -FilePath $venvPython -ArgumentList "main.py" -WorkingDirectory $wrapperDir -PassThru
     Write-Host "host-wrapper started (PID $($wrapper.Id))."
 }
 

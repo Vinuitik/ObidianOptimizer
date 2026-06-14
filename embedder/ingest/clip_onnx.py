@@ -52,6 +52,20 @@ def _load() -> dict:
     return _state
 
 
+def unload() -> None:
+    """Release the CLIP sessions (~1.2GB VRAM/RAM). Safe to call whenever no
+    ingest job is running — the next encode_*() call lazily reloads from the
+    on-disk cache (a few seconds). The text embedder (model_runtime) stays hot;
+    only this bursty, ingest-only model is evicted. Called by the ingest worker
+    once its queue drains. Whisper already frees itself per job (extract_av)."""
+    if not _state:
+        return
+    import gc
+    _state.clear()
+    gc.collect()
+    log.info("CLIP ONNX unloaded — VRAM/RAM released until next ingest.")
+
+
 def _l2(x: np.ndarray) -> np.ndarray:
     return x / np.clip(np.linalg.norm(x, axis=-1, keepdims=True), 1e-9, None)
 

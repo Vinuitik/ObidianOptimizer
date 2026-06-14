@@ -93,6 +93,23 @@ def _worker_loop():
             log.exception("ingest job %s failed", job_id)
             job["status"] = "FAILED"
             job["error"] = str(e)[:500]
+        finally:
+            # Once the burst drains, release the bursty ingest models so VRAM/RAM
+            # returns to the rest of the stack. Deferred until the queue is empty
+            # so a batch of jobs doesn't reload CLIP between each one.
+            if _queue.empty():
+                _evict_models()
+
+
+def _evict_models():
+    """Free ingest-only models when no work remains (iceberg policy). CLIP is the
+    one that lingered; whisper already frees itself per transcription. The text
+    embedder (search path) is owned by model_runtime and deliberately untouched."""
+    try:
+        from ingest import clip_onnx
+        clip_onnx.unload()
+    except Exception as e:
+        log.warning("model eviction skipped: %s", e)
 
 
 def _run(job: dict):
