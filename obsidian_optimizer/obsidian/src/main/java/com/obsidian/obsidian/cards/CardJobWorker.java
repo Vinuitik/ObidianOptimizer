@@ -49,7 +49,9 @@ public class CardJobWorker {
         log.info("[CardJobWorker] {} note(s) need cards (batch limit {})", pending.size(), batchLimit);
         for (Map<String, Object> row : pending) {
             String path = (String) row.get("path");
-            String hash = (String) row.get("content_hash");
+            // body_hash (frontmatter-stripped) is the card identity/diff key — see
+            // CardRepository.findNotesNeedingCards. Stored embedder-side as source_hash.
+            String hash = (String) row.get("body_hash");
             var result = generationService.generateFor(path, hash);
             // Record the attempt only when the embedder actually answered:
             // a zero-yield generation must not retry every cycle (credits),

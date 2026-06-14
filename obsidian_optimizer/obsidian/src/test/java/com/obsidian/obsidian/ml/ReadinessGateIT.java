@@ -68,12 +68,29 @@ class ReadinessGateIT {
         jdbc.execute("TRUNCATE notes, cards, card_gen_attempts CASCADE");
     }
 
-    /** Insert a note row directly with the fields the worklists key on. */
+    /** Insert a note with body_hash = content_hash (the common case). */
     private void insertNote(String path, String hash, LocalDate srDue, boolean pending) {
+        insertNote(path, hash, hash, srDue, pending);
+    }
+
+    /** Insert a note with distinct content_hash and body_hash. */
+    private void insertNote(String path, String contentHash, String bodyHash, LocalDate srDue, boolean pending) {
         jdbc.update(
-            "INSERT INTO notes(path, title, modified_at, content_hash, sr_due, ingest_pending) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO notes(path, title, modified_at, content_hash, body_hash, sr_due, ingest_pending) VALUES (?,?,?,?,?,?,?)",
             path, path.substring(path.lastIndexOf('/') + 1), System.currentTimeMillis(),
-            hash, srDue == null ? null : Date.valueOf(srDue), pending);
+            contentHash, bodyHash, srDue == null ? null : Date.valueOf(srDue), pending);
+    }
+
+    /** Simulate a generated, ACTIVE card whose source_hash is the note's body_hash. */
+    private void insertCard(String path, String sourceHash) {
+        jdbc.update(
+            "INSERT INTO cards(note_path, type, payload, difficulty, card_hash, source_hash, status) " +
+            "VALUES (?,?,?::jsonb,?,?,?,?)",
+            path, "mcq", "{}", 1, "card-" + sourceHash, sourceHash, "ACTIVE");
+    }
+
+    private List<String> cardWorklistPaths() {
+        return cardRepo.findNotesNeedingCards(10).stream().map(m -> (String) m.get("path")).toList();
     }
 
     private boolean ingestPending(String path) {
@@ -118,5 +135,22 @@ class ReadinessGateIT {
             "intro\n![[clip.mp4]]\n<!-- ingest:clip.mp4 2026-06-14 -->\ntranscript text");
         assertThat(ingestPending("/vault/lecture.md")).isFalse();
         assertThat(noteIndex.findNotesNeedingEmbedding(10)).containsKey("/vault/lecture.md");
+    }
+
+    @Test
+    void cardWorklist_keysOnBodyHash_frontmatterEditDoesNotRetrigger() {
+        // A note with body=b1 that already has an ACTIVE card generated from b1.
+        insertNote("/vault/note.md", "c1", "b1", LocalDate.now(), false);
+        insertCard("/vault/note.md", "b1");
+        assertThat(cardWorklistPaths()).doesNotContain("/vault/note.md");   // already covered
+
+        // Frontmatter-only edit (e.g. sr-due rewrite on review): content_hash changes,
+        // body_hash unchanged → must NOT re-enter the worklist (this is the credit fix).
+        jdbc.update("UPDATE notes SET content_hash = ? WHERE path = ?", "c2", "/vault/note.md");
+        assertThat(cardWorklistPaths()).doesNotContain("/vault/note.md");
+
+        // Real body edit: body_hash changes → no ACTIVE card matches → eligible again.
+        jdbc.update("UPDATE notes SET body_hash = ? WHERE path = ?", "b2", "/vault/note.md");
+        assertThat(cardWorklistPaths()).contains("/vault/note.md");
     }
 }

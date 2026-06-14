@@ -53,21 +53,24 @@ public class CardRepository {
      * content has no ACTIVE cards AND hasn't already been attempted.
      */
     public List<Map<String, Object>> findNotesNeedingCards(int limit) {
+        // Keys on body_hash (frontmatter stripped), NOT content_hash: the sr-due
+        // rewrite on every review and chrono's frontmatter edits change content_hash
+        // but not body_hash, so cards are no longer regenerated (LLM spend) for them.
         return jdbc.queryForList("""
-            SELECT n.path, n.content_hash
+            SELECT n.path, n.body_hash
             FROM notes n
             WHERE n.sr_due IS NOT NULL
-              AND n.content_hash IS NOT NULL
+              AND n.body_hash IS NOT NULL
               AND n.ingest_pending = false
               AND NOT EXISTS (
                   SELECT 1 FROM cards c
                   WHERE c.note_path = n.path
-                    AND c.source_hash = n.content_hash
+                    AND c.source_hash = n.body_hash
                     AND c.status = 'ACTIVE')
               AND NOT EXISTS (
                   SELECT 1 FROM card_gen_attempts a
                   WHERE a.note_path = n.path
-                    AND a.source_hash = n.content_hash)
+                    AND a.source_hash = n.body_hash)
             ORDER BY n.path
             LIMIT ?
             """, limit);

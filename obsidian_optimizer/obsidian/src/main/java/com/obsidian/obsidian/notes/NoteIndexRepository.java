@@ -56,6 +56,12 @@ public class NoteIndexRepository {
         // against pre-transcript content — avoids rework and double LLM card spend.
         jdbc.execute(
             "ALTER TABLE notes ADD COLUMN IF NOT EXISTS ingest_pending BOOLEAN NOT NULL DEFAULT false");
+        // body_hash = SHA-256 of the note with YAML frontmatter stripped. The card
+        // work-list diffs on THIS, not content_hash, so the frontmatter rewrites that
+        // happen on every review (sr-due) and chrono run don't re-trigger flashcard
+        // generation (expensive LLM). content_hash stays full-file for Drive sync.
+        jdbc.execute(
+            "ALTER TABLE notes ADD COLUMN IF NOT EXISTS body_hash TEXT");
     }
 
     /** Notes whose text changed since they were last embedded (or never were).
@@ -176,8 +182,12 @@ public class NoteIndexRepository {
         jdbc.update("DELETE FROM notes WHERE path = ?", path);
     }
 
-    public void updateContentHash(String path, String hash) {
-        jdbc.update("UPDATE notes SET content_hash = ? WHERE path = ?", hash, path);
+    /** Updates both hashes in one write at the registerImages chokepoint.
+     *  content_hash = full file (Drive sync); body_hash = frontmatter-stripped
+     *  (card work-list key, so sr-due/chrono frontmatter edits don't re-card). */
+    public void updateContentHash(String path, String contentHash, String bodyHash) {
+        jdbc.update("UPDATE notes SET content_hash = ?, body_hash = ? WHERE path = ?",
+            contentHash, bodyHash, path);
     }
 
     /** Readiness gate flag — true while the note has an un-ingested resource embed.

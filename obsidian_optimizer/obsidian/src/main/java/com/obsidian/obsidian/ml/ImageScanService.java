@@ -64,7 +64,8 @@ public class ImageScanService {
             jobRepo.upsertPending(notePath, ref);
         }
         String hash = sha256(content);
-        noteIndexRepo.updateContentHash(notePath, hash);
+        String bodyHash = sha256(MarkdownPreprocessor.stripFrontmatter(content));
+        noteIndexRepo.updateContentHash(notePath, hash, bodyHash);
         // Same chokepoint, second job: trigger in-place ingest of any A/V or
         // PDF embeds in this note (best-effort, off-thread — never blocks).
         resourceScanService.scan(notePath, content);

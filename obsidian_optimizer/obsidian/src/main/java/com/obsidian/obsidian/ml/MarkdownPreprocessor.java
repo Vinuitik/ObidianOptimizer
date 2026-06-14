@@ -32,6 +32,18 @@ public class MarkdownPreprocessor {
     }
 
     /**
+     * Removes the leading YAML frontmatter block (--- … ---). Static and reusable
+     * so the card work-list can key on a BODY-only hash: frontmatter changes (the
+     * sr-due/sr-interval rewrite that happens on every single review, plus chrono
+     * date fixes) then no longer look like content changes and don't re-trigger
+     * expensive flashcard regeneration.
+     */
+    public static String stripFrontmatter(String markdown) {
+        if (markdown == null) return "";
+        return markdown.replaceAll("(?s)^---\\s*\\n.*?\\n---\\s*\\n?", "");
+    }
+
+    /**
      * Cleans raw markdown (strips yaml frontmatter, html comments, etc) and extracts image references.
      */
     public PreprocessedNote process(String rawMarkdown) {
@@ -43,7 +55,7 @@ public class MarkdownPreprocessor {
         String text = rawMarkdown;
 
         // 1. Strip YAML Frontmatter
-        text = text.replaceAll("(?s)^---\\s*\\n.*?\\n---\\s*\\n?", "");
+        text = stripFrontmatter(text);
 
         // 2. Strip HTML comments
         text = text.replaceAll("(?s)<!--.*?-->", "");
