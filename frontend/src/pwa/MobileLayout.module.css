@@ -1,0 +1,26 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--color-bg, #0f1115);
+  color: var(--color-text, #e6e8ee);
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* leave room for the fixed bottom nav (~58px + safe area) */
+  padding-bottom: calc(64px + env(safe-area-inset-bottom, 0));
+}
+
+.offlineBar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  padding: 6px 12px;
+  font-size: 12px;
+  text-align: center;
+  background: var(--color-warn, #6b4a00);
+  color: #ffe8b0;
+}

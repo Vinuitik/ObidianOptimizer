@@ -1,0 +1,106 @@
+.page {
+  padding: 16px 14px;
+}
+
+.pageTitle {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: 22px;
+  margin: 4px 0 14px;
+}
+
+.gate {
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--color-muted, #8a90a0);
+}
+
+.hint {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--color-muted, #8a90a0);
+}
+
+.tree {
+  margin: 0 -6px;
+}
+
+/* ── Capture ────────────────────────────────────────────────────────────── */
+.captureForm {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.captureInput {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 12px;
+  font-size: 16px; /* >=16px stops iOS/Android zoom-on-focus */
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #262a35);
+  background: var(--color-surface, #161922);
+  color: var(--color-text, #e6e8ee);
+}
+
+.captureBtn {
+  padding: 0 16px;
+  border-radius: 10px;
+  border: none;
+  background: var(--color-accent, #7c5cff);
+  color: #fff;
+  font-weight: 600;
+}
+
+.captureBtn:disabled {
+  opacity: 0.5;
+}
+
+.ok   { color: #7ee0a0; }
+.warn { color: #ffd27a; }
+.err  { color: #ff8a8a; }
+
+/* ── Reader ─────────────────────────────────────────────────────────────── */
+.reader {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.readerBar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--color-bg, #0f1115);
+  border-bottom: 1px solid var(--color-border, #262a35);
+}
+
+.back {
+  background: none;
+  border: none;
+  color: var(--color-accent, #7c5cff);
+  font-size: 15px;
+  padding: 4px 2px;
+}
+
+.readerTitle {
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.readerBody {
+  padding: 14px 16px 40px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+.readerBody img {
+  max-width: 100%;
+  height: auto;
+}
