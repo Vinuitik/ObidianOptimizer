@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="head">
+    <span class="logo">◆</span>
+    <span class="title">Obsidian Optimizer</span>
+    <button id="tab-settings-btn" class="gear" title="Settings">⚙</button>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="note">New note</button>
+    <button class="tab" data-tab="download">Download</button>
+  </nav>
+
+  <!-- New note ------------------------------------------------------------- -->
+  <section class="panel active" data-panel="note">
+    <label class="lbl">Title</label>
+    <input id="note-title" class="in" type="text" placeholder="Note title" />
+
+    <label class="lbl">Folder</label>
+    <select id="note-folder" class="in"></select>
+
+    <label class="lbl">Body</label>
+    <textarea id="note-body" class="in area" rows="6" placeholder="Type your note… (selected text is pre-filled)"></textarea>
+
+    <button id="note-save" class="btn">Save to vault</button>
+    <p id="note-status" class="status"></p>
+  </section>
+
+  <!-- Download ------------------------------------------------------------- -->
+  <section class="panel" data-panel="download">
+    <label class="lbl">Resource URL</label>
+    <input id="dl-url" class="in" type="text" placeholder="YouTube / playlist / lecture URL" />
+    <button id="dl-start" class="btn">Download for offline</button>
+
+    <div id="dl-progress" class="progress-wrap hidden">
+      <div class="bar"><div id="dl-bar" class="bar-fill"></div></div>
+      <div class="progress-meta">
+        <span id="dl-state" class="badge">queued</span>
+        <span id="dl-speed"></span>
+        <span id="dl-pct">0%</span>
+      </div>
+    </div>
+    <p id="dl-status" class="status"></p>
+  </section>
+
+  <!-- Settings ------------------------------------------------------------- -->
+  <section class="panel" data-panel="settings">
+    <label class="lbl">ObsidianOptimizer API base</label>
+    <input id="cfg-obsidian" class="in" type="text" placeholder="https://obsidianoptimizer.uk/api" />
+
+    <label class="lbl">VideoManager (lite) base</label>
+    <input id="cfg-video" class="in" type="text" placeholder="http://localhost:8001" />
+
+    <button id="cfg-save" class="btn ghost">Save endpoints</button>
+
+    <hr class="sep" />
+
+    <p class="lbl" id="auth-line">Sign in to ObsidianOptimizer</p>
+    <input id="login-user" class="in" type="text" placeholder="Username" autocomplete="username" />
+    <input id="login-pass" class="in" type="password" placeholder="Password" autocomplete="current-password" />
+    <button id="login-btn" class="btn">Sign in</button>
+    <p id="settings-status" class="status"></p>
+  </section>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
