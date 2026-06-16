@@ -22,6 +22,9 @@ services:
     volumes:
       - embedder_models:/models
       - ${HOST_VAULT_PATH}:/vault:ro
+      # Offline downloads (yt-dlp) land here — bind-mounted so files are reachable
+      # on the host for offline viewing. Salvaged from the former VideoManager app.
+      - ${HOST_DOWNLOAD_PATH:-./downloads}:/downloads
     environment:
       - EMBED_MODEL=${EMBED_MODEL:-mixedbread-ai/mxbai-embed-large-v1}
       - MODEL_CACHE=/models
@@ -32,7 +35,7 @@ services:
       - WRAPPER_URL=${WRAPPER_URL:-http://host.docker.internal:5001}
       - SYNTH_MODEL=${SYNTH_MODEL:-haiku}
       - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
-      - VIDEOMANAGER_URL=${VIDEOMANAGER_URL:-}
+      - DOWNLOAD_DIR=/downloads
       - BACKEND_URL=${BACKEND_URL:-http://backend:8084}
     depends_on:
       postgres:

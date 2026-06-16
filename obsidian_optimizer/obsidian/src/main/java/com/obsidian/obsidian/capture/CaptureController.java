@@ -94,6 +94,66 @@ public class CaptureController {
         }
     }
 
+    // ── Offline media download (yt-dlp, proxied to the embedder) ──────────────────
+    // The embedder is loopback-only, so the browser extension can't hit it directly.
+    // These thin proxies forward to the embedder's /download endpoints (the yt-dlp
+    // code salvaged from the former VideoManager app).
+
+    @PostMapping("download")
+    public ResponseEntity<String> download(@RequestBody DownloadRequest body) {
+        String url = body == null ? null : body.url();
+        if (url == null || url.isBlank()) {
+            return jsonError(400, "url required");
+        }
+        try {
+            String payload = objectMapper.writeValueAsString(Map.of("url", url.trim()));
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(embedderUrl + "/download"))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload))
+                .build();
+            HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            return jsonPassthrough(r);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return jsonError(503, "interrupted");
+        } catch (Exception e) {
+            log.warn("[Download] start failed for {}: {}", url, e.toString());
+            return jsonError(502, "downloader unreachable");
+        }
+    }
+
+    @GetMapping("download/{jobId}")
+    public ResponseEntity<String> downloadStatus(@PathVariable String jobId) {
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(embedderUrl + "/download/" + jobId))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+            HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            return jsonPassthrough(r);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return jsonError(503, "interrupted");
+        } catch (Exception e) {
+            return jsonError(502, "downloader unreachable");
+        }
+    }
+
+    private static ResponseEntity<String> jsonPassthrough(HttpResponse<String> r) {
+        return ResponseEntity.status(r.statusCode())
+            .header("Content-Type", "application/json")
+            .body(r.body());
+    }
+
+    private static ResponseEntity<String> jsonError(int status, String msg) {
+        return ResponseEntity.status(status)
+            .header("Content-Type", "application/json")
+            .body("{\"error\":\"" + msg + "\"}");
+    }
+
     // ── Offline review bundle ────────────────────────────────────────────────────
 
     @GetMapping("review/bundle")
@@ -128,4 +188,6 @@ public class CaptureController {
     }
 
     public record CaptureRequest(String url) {}
+
+    public record DownloadRequest(String url) {}
 }
