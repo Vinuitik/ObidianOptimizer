@@ -5,15 +5,17 @@
 //   same paths the web app uses). Default is the Cloudflare tunnel domain because
 //   the local :8443 cert is self-signed and the extension can't bypass cert errors.
 //   For same-machine dev against the Vite proxy, set it to http://localhost:8082.
-// videoApi: the VideoManager LITE downloader (docker-compose.lite.yml → :8001).
+//
+// Both features (clip note AND download) go through this one backend: the yt-dlp
+// downloader now lives in the embedder and is proxied at /download (the embedder
+// is loopback-only, so the extension can't call it directly).
 
 export const DEFAULTS = {
   obsidianApi: 'https://obsidianoptimizer.uk/api',
-  videoApi: 'http://localhost:8001',
 };
 
 export async function getConfig() {
-  const stored = await chrome.storage.local.get(['obsidianApi', 'videoApi']);
+  const stored = await chrome.storage.local.get(['obsidianApi']);
   return { ...DEFAULTS, ...stored };
 }
 

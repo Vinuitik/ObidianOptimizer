@@ -9,9 +9,9 @@
 //   POST /notes   {folder, name}      create note → { path }
 //   GET  /text?noteName=path          read note (to keep the sr-due frontmatter)
 //   PUT  /notes   {path, content}     write note body
-// And the VideoManager LITE downloader:
-//   POST /api/v1/download {url}       → { job_id }
-//   GET  /api/v1/jobs/{id}            → progress
+// And the offline downloader (yt-dlp in the embedder, proxied by the backend):
+//   POST /download {url}              → { id, status, … }
+//   GET  /download/{id}               → progress
 import { getConfig, setConfig } from './config.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -115,15 +115,14 @@ async function createNote({ title, body, folder, sourceUrl }) {
 
 async function startDownload({ url }) {
   try {
-    const { videoApi } = await getConfig();
-    const res = await fetch(`${videoApi}/api/v1/download`, {
+    const res = await obsidian('/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
     if (!res.ok) return { ok: false, status: res.status };
-    const { job_id } = await res.json();
-    return { ok: true, jobId: job_id };
+    const job = await res.json();           // embedder job: { id, status, … }
+    return { ok: true, jobId: job.id };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
@@ -131,8 +130,7 @@ async function startDownload({ url }) {
 
 async function downloadStatus({ jobId }) {
   try {
-    const { videoApi } = await getConfig();
-    const res = await fetch(`${videoApi}/api/v1/jobs/${jobId}`);
+    const res = await obsidian(`/download/${jobId}`);
     if (!res.ok) return { ok: false, status: res.status };
     return { ok: true, job: await res.json() };
   } catch (e) {

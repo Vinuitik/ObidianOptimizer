@@ -5,22 +5,19 @@ A tiny Manifest V3 extension with two buttons:
 1. **New note** — clip the current page (title + your selection) straight into the
    vault as a note that enters FSRS review, without opening the app.
 2. **Download** — queue a YouTube video / MIT OCW playlist / uni lecture for offline
-   viewing via the VideoManager *lite* downloader (yt-dlp).
+   viewing. yt-dlp runs inside the embedder; the backend proxies it.
 
 ## Install (unpacked)
 1. `chrome://extensions` → enable **Developer mode**.
 2. **Load unpacked** → select this `extension/` folder.
 3. Click the toolbar icon → **⚙ Settings**:
    - Set **ObsidianOptimizer API base** (default: the tunnel domain — see note below).
-   - Set **VideoManager (lite) base** (default `http://localhost:8001`).
    - **Sign in** with your app credentials.
 
-## Run the downloader it talks to
-```
-cd ../VideoManager
-docker compose -f docker-compose.lite.yml up --build   # serves on http://localhost:8001
-```
-This is the lightweight half of VideoManager — yt-dlp only, no Ollama/Chroma/agent.
+Both features talk to this one backend. Downloads are handled by yt-dlp **inside the
+embedder** (`embedder/download/`), reached through the backend's `/download` proxy —
+no separate downloader service to run. Files land in the embedder's `DOWNLOAD_DIR`
+(host `${HOST_DOWNLOAD_PATH:-./downloads}`).
 
 ## Why the tunnel domain by default
 Service workers / extension fetches can't accept the local stack's **self-signed**

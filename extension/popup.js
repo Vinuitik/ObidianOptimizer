@@ -131,16 +131,12 @@ function setBar(pct, state, speed) {
 async function loadSettings() {
   const cfg = await getConfig();
   $('cfg-obsidian').value = cfg.obsidianApi;
-  $('cfg-video').value = cfg.videoApi;
   refreshAuthLine();
 }
 
 $('cfg-save').addEventListener('click', async () => {
-  await send('setConfig', {
-    obsidianApi: $('cfg-obsidian').value.trim(),
-    videoApi: $('cfg-video').value.trim(),
-  });
-  setStatus($('settings-status'), 'Endpoints saved.', 'ok');
+  await send('setConfig', { obsidianApi: $('cfg-obsidian').value.trim() });
+  setStatus($('settings-status'), 'Endpoint saved.', 'ok');
   loadFolders();
 });
 
