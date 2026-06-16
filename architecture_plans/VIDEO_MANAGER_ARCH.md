@@ -1,5 +1,13 @@
 # Video & Audio Manager Architecture
 
+> **SUPERSEDED (salvaged).** The standalone VideoManager app has been removed from
+> this repo. Its only piece we used — the yt-dlp core (captions + download) — was
+> moved in-process into `embedder/download/` (see `embedder/download/FLOWS.md`).
+> The heavy half (Ollama/Chroma RAG + Playwright auth agent + MCP) was deliberately
+> NOT brought over. Downloads are exposed at the embedder `/download` endpoints and
+> proxied to the browser by the Java `CaptureController` (`/api/download`). The text
+> below is kept as historical design context only.
+
 ## Overview
 A pipeline to capture, pre-download, AI-process, and sync video/audio content to the mobile app for offline learning (e.g., during runs or commutes). This removes the friction of consuming educational content and ensures it integrates directly into the note-taking and spaced repetition system.
 
