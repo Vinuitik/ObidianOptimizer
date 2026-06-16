@@ -1,0 +1,13 @@
+{
+  "runs": [
+    {
+      "date": "2026-06-16T21:44:54.897457+00:00",
+      "input_tokens": 292211,
+      "output_tokens": 0,
+      "files": 267,
+      "note": "tokens = measured subagent usage (extraction one-time cost)"
+    }
+  ],
+  "total_input_tokens": 292211,
+  "total_output_tokens": 0
+}
