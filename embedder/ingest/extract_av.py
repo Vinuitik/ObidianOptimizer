@@ -1,9 +1,12 @@
 """A/V extraction — transcript acquisition, cheapest source first.
 
 Local files:   ffmpeg → 16kHz mono wav → faster-whisper → timestamped segments.
-YouTube URLs:  captions via VideoManager subs endpoint (no download), parsed
-               from VTT with rolling-window dedupe. Whisper fallback for
-               YouTube requires the download path [NOT IMPLEMENTED in stage 1].
+YouTube URLs:  captions via the in-process yt-dlp downloader (no download), parsed
+               from VTT with rolling-window dedupe. force_whisper downloads the
+               audio with yt-dlp and runs whisper (more accurate, slower).
+
+The downloader was salvaged from the former VideoManager sister app into
+download/downloader.py, so this no longer makes an HTTP hop to a separate service.
 
 The whisper model loads lazily per job and is released afterwards — sequential,
 one-model-at-a-time resource policy (INGEST_AGENT_ARCH deployment notes).
@@ -16,15 +19,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import requests
-
 from ingest import router as ingest_router
 
 log = logging.getLogger("embedder.ingest.av")
 
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "distil-large-v3")
 MODEL_CACHE = os.environ.get("MODEL_CACHE", "/models")
-VIDEOMANAGER_URL = os.environ.get("VIDEOMANAGER_URL", "").rstrip("/")
 FFMPEG_TIMEOUT_S = int(os.environ.get("FFMPEG_TIMEOUT_S", "1800"))
 
 
@@ -33,10 +33,9 @@ def extract(ref: str, resolved_path: Path | None, force_whisper: bool = False) -
     kind = ingest_router.route(ref)
     if kind == "youtube":
         if force_whisper:
-            raise NotImplementedError(
-                "FORCE_WHISPER for YouTube needs the VideoManager download path "
-                "(stage 1 is captions-only for YouTube)")
-        segments, title, duration = _youtube_captions(ref)
+            segments, title, duration = _youtube_whisper(ref)
+        else:
+            segments, title, duration = _youtube_captions(ref)
         source_type = "video"
     else:
         if resolved_path is None or not resolved_path.exists():
@@ -104,23 +103,40 @@ def _to_wav(path: Path) -> Path:
     return out
 
 
-# ── YouTube captions path (VideoManager, no download) ────────────────────
+# ── YouTube captions path (in-process yt-dlp, no download) ────────────────
 
 def _youtube_captions(url: str):
-    if not VIDEOMANAGER_URL:
+    from download import downloader
+
+    try:
+        body = downloader.fetch_subs(url)
+    except Exception as e:
         raise RuntimeError(
-            "VIDEOMANAGER_URL not configured — YouTube captions path needs the "
-            "VideoManager container (INGEST_AGENT_ARCH decision 3)")
-    res = requests.post(f"{VIDEOMANAGER_URL}/api/v1/subs",
-                        json={"url": url}, timeout=120)
-    if res.status_code != 200:
-        raise RuntimeError(f"VideoManager /subs {res.status_code}: {res.text[:300]}")
-    body = res.json()
+            f"caption fetch failed ({e}); re-run with force_whisper for the "
+            f"download+whisper path") from e
     segments = parse_vtt(body["vtt"])
     if not segments:
-        raise RuntimeError("no usable captions — re-run with the download+whisper "
-                           "path once implemented")
+        raise RuntimeError("no usable captions — re-run with force_whisper "
+                           "for the download+whisper path")
     return segments, body.get("title", url), body.get("duration_s", 0)
+
+
+# ── YouTube whisper path (yt-dlp audio download → faster-whisper) ─────────
+
+def _youtube_whisper(url: str):
+    """More accurate than captions: download bestaudio with yt-dlp, transcribe.
+    The temp audio file is removed after transcription."""
+    from download import downloader
+
+    audio = downloader.fetch_audio(url)
+    try:
+        segments, duration = _whisper_transcribe(audio)
+    finally:
+        try:
+            audio.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return segments, audio.stem, duration
 
 
 # ── VTT parsing ──────────────────────────────────────────────────────────

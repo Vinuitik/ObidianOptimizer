@@ -74,7 +74,7 @@ one bad note never sinks its siblings; all-fail raises.
 ## Extractors (deterministic, zero LLM)
 
 ```
-extract_av : ffmpeg -vn 16kHz wav → faster-whisper (WHISPER_MODEL int8); YouTube → VideoManager /subs VTT
+extract_av : ffmpeg -vn 16kHz wav → faster-whisper (WHISPER_MODEL int8); YouTube → download/downloader.fetch_subs() VTT (in-process yt-dlp); force_whisper → fetch_audio → whisper
 extract_pdf: PyMuPDF text blocks; <20 words/page → Tesseract OCR; images >200px → _keep_diagrams()
 extract_web: trafilatura markdown, per-heading segments; <200 chars → loud fail (SPA)
 keyframes  : scene-cut + 1/15s + transcript-cue candidates → CLIP keep/drop → CLIP dedupe → ≤MAX_FRAMES
@@ -166,4 +166,4 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 | Chunk window size | `bundle.py → WINDOW_TOKENS` (`INGEST_WINDOW_TOKENS` env) |
 | Default standalone folder | `INGEST_DEFAULT_FOLDER` env |
 | Synthesis model (claude-cli only) | `SYNTH_MODEL` env |
-| VideoManager URL / subs endpoint | `VIDEOMANAGER_URL` env / `VideoManager …/subs` |
+| YouTube captions / download | `download/downloader.py` (`fetch_subs` / `download_sync`); see `download/FLOWS.md` |

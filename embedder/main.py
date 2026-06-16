@@ -73,6 +73,15 @@ class SplitNoteRequest(BaseModel):
     note_path: str                  # vault-relative .md path
 
 
+class DownloadRequest(BaseModel):
+    url: str                        # video / playlist URL for offline download
+
+
+class SubsRequest(BaseModel):
+    url: str                        # YouTube URL
+    lang: str = "en"
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -255,6 +264,52 @@ def ingest_list():
     from ingest import jobs as ingest_jobs
 
     return {"jobs": ingest_jobs.list_jobs()}
+
+
+# ---------------------------------------------------------------------------
+# Download — offline media (yt-dlp), salvaged from the former VideoManager app.
+# Async: a download/playlist is minutes-long. The browser extension reaches these
+# via the Java backend proxy (CaptureController /download), since the embedder is
+# loopback-only.
+# ---------------------------------------------------------------------------
+
+@app.post("/download")
+def download_submit(req: DownloadRequest):
+    from download import jobs as download_jobs
+
+    url = (req.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=422, detail="url cannot be empty")
+    return download_jobs.submit(url)
+
+
+@app.get("/download/{job_id}")
+def download_status(job_id: str):
+    from download import jobs as download_jobs
+
+    job = download_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown job id")
+    return job
+
+
+@app.get("/download")
+def download_list():
+    from download import jobs as download_jobs
+
+    return {"jobs": download_jobs.list_jobs()}
+
+
+@app.post("/subs")
+def subs_fetch(req: SubsRequest):
+    """Captions only, no download — the ingest captions-fast-path, also exposed
+    for parity/testing. Synchronous (a few seconds)."""
+    from download import downloader
+
+    try:
+        return downloader.fetch_subs(req.url, req.lang)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"subs unavailable: {e}")
 
 
 # ---------------------------------------------------------------------------
