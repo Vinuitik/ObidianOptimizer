@@ -178,4 +178,81 @@ class FrontmatterRewriterTest {
             "---\r\nsr-due: Invalid date\r\nsr-interval: 3\r\n---\r\n");
         assertThat(FrontmatterRewriter.hasInvalidDate(f)).isTrue();
     }
+
+    // ── FSRS mirror ─────────────────────────────────────────────────────────
+
+    @Test
+    void readFsrs_returnsNull_whenOnlyLegacyFieldsPresent() throws IOException {
+        Path f = writeFile("legacy.md", "---\nsr-due: 2026-06-01\nsr-interval: 3\nsr-ease: 200\n---\n");
+        assertThat(FrontmatterRewriter.readFsrs(f)).isNull();  // no fsrs-s → start fresh
+    }
+
+    @Test
+    void writeFsrs_insertsMissingKeys_andPreservesLegacyEase() throws IOException {
+        Path f = writeFile("seed.md",
+            "---\ntitle: x\nsr-due: 2026-06-01\nsr-interval: 3\nsr-ease: 250\n---\n\nBody.");
+        FrontmatterRewriter.writeFsrs(f, new FrontmatterRewriter.FsrsFields(
+            LocalDate.of(2026, 6, 26), 14, 13.8269, 2.1112, LocalDate.of(2026, 6, 12), 1.2, "dEasy:sMid"));
+        String result = Files.readString(f);
+        assertThat(result).contains("fsrs-s: 13.826900");
+        assertThat(result).contains("fsrs-d: 2.111200");
+        assertThat(result).contains("fsrs-last: 2026-06-12");
+        assertThat(result).contains("fsrs-arm: 1.200000");
+        assertThat(result).contains("fsrs-bucket: dEasy:sMid");
+        assertThat(result).contains("sr-due: 2026-06-26");   // existing key overwritten
+        assertThat(result).contains("sr-ease: 250");          // legacy field untouched
+        assertThat(result).contains("title: x");
+        assertThat(result).contains("Body.");
+    }
+
+    @Test
+    void writeFsrs_roundTrips_throughReadFsrs() throws IOException {
+        Path f = writeFile("rt.md", "---\nsr-due: 2026-06-01\nsr-interval: 3\n---\n");
+        var fields = new FrontmatterRewriter.FsrsFields(
+            LocalDate.of(2026, 7, 1), 20, 39.174976, 2.104331, LocalDate.of(2026, 6, 11), 0.85, "dMid:sLong");
+        FrontmatterRewriter.writeFsrs(f, fields);
+        var back = FrontmatterRewriter.readFsrs(f);
+        assertThat(back).isNotNull();
+        assertThat(back.due()).isEqualTo(fields.due());
+        assertThat(back.interval()).isEqualTo(20);
+        assertThat(back.stability()).isEqualTo(39.174976);
+        assertThat(back.difficulty()).isEqualTo(2.104331);
+        assertThat(back.lastReview()).isEqualTo(fields.lastReview());
+        assertThat(back.arm()).isEqualTo(0.85);
+        assertThat(back.bucket()).isEqualTo("dMid:sLong");
+    }
+
+    @Test
+    void writeFsrs_overwritesExistingFsrsKeys_withoutDuplicating() throws IOException {
+        Path f = writeFile("upd.md",
+            "---\nsr-due: 2026-06-01\nsr-interval: 3\nfsrs-s: 1.000000\nfsrs-d: 5.000000\n"
+            + "fsrs-arm: 1.000000\nfsrs-bucket: dEasy:sShort\n---\n");
+        FrontmatterRewriter.writeFsrs(f, new FrontmatterRewriter.FsrsFields(
+            LocalDate.of(2026, 6, 20), 19, 18.5, 3.2, LocalDate.of(2026, 6, 12), 1.5, "dMid:sMid"));
+        String result = Files.readString(f);
+        assertThat(result.split("fsrs-s:", -1)).hasSize(2);     // exactly one fsrs-s line
+        assertThat(result).contains("fsrs-s: 18.500000");
+        assertThat(result).contains("fsrs-bucket: dMid:sMid");
+        assertThat(result).doesNotContain("dEasy:sShort");
+    }
+
+    @Test
+    void writeFsrs_crlfPreserved() throws IOException {
+        Path f = writeFile("crlf-fsrs.md", "---\r\nsr-due: 2026-06-01\r\nsr-interval: 3\r\n---\r\n");
+        FrontmatterRewriter.writeFsrs(f, new FrontmatterRewriter.FsrsFields(
+            LocalDate.of(2026, 6, 20), 19, 18.5, 3.2, LocalDate.of(2026, 6, 12), 1.5, "dMid:sMid"));
+        String result = Files.readString(f);
+        assertThat(result).contains("\r\n");
+        assertThat(result).contains("fsrs-s: 18.500000");
+    }
+
+    @Test
+    void writeFsrs_fileWithoutFrontmatter_isLeftUnchanged() throws IOException {
+        String content = "No frontmatter.\n";
+        Path f = writeFile("no-fm-fsrs.md", content);
+        boolean wrote = FrontmatterRewriter.writeFsrs(f, new FrontmatterRewriter.FsrsFields(
+            LocalDate.of(2026, 6, 20), 19, 18.5, 3.2, null, null, null));
+        assertThat(wrote).isFalse();
+        assertThat(Files.readString(f)).isEqualTo(content);
+    }
 }

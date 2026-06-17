@@ -28,8 +28,7 @@ import static org.mockito.Mockito.*;
 class ReviewServiceTest {
 
     @Mock BanditService bandit;
-    @Mock NoteReviewRepository reviewRepo;
-    @Mock com.obsidian.obsidian.notes.FileRepository fileRepo;
+    @Mock FsrsStateWriter stateWriter;
 
     ReviewService service;
     final Instant now = Instant.parse("2026-06-12T10:00:00Z");
@@ -40,20 +39,21 @@ class ReviewServiceTest {
         ReflectionTestUtils.setField(fsrs, "desiredRetention", 0.9);
         when(bandit.bucket(anyDouble(), anyDouble())).thenReturn("dEasy:sShort");
         when(bandit.chooseArm(anyString())).thenReturn(1.0);
-        service = new ReviewService(fsrs, bandit, reviewRepo, fileRepo);
+        service = new ReviewService(fsrs, bandit, stateWriter);
     }
 
     @Test
     void firstGrade_createsInitialFsrsState_noRewardYet() {
-        when(reviewRepo.find("/vault/n.md")).thenReturn(null);
+        when(stateWriter.read("/vault/n.md")).thenReturn(null);
 
         GradeResult result = service.grade("/vault/n.md", Band.GOOD, now);
 
         assertThat(result.stability()).isCloseTo(2.3065, org.assertj.core.data.Offset.offset(1e-4));
         assertThat(result.baseIntervalDays()).isEqualTo(2);
         verify(bandit, never()).reward(anyString(), anyDouble(), anyBoolean());
-        verify(reviewRepo).upsert(eq("/vault/n.md"), anyDouble(), anyDouble(),
-            any(), any(), eq("dEasy:sShort"), eq(1.0));
+        // Single write path: DB + frontmatter mirror, with the chosen bucket/arm.
+        verify(stateWriter).write(eq("/vault/n.md"), any(), any(), any(),
+            anyInt(), eq("dEasy:sShort"), eq(1.0));
     }
 
     @Test
@@ -61,7 +61,7 @@ class ReviewServiceTest {
         ReviewRow prev = new ReviewRow("/vault/n.md", 2.3065, 2.118104, 1,
             Timestamp.from(now.minus(3, ChronoUnit.DAYS)),
             Timestamp.from(now), "dEasy:sShort", 1.2);
-        when(reviewRepo.find("/vault/n.md")).thenReturn(prev);
+        when(stateWriter.read("/vault/n.md")).thenReturn(prev);
 
         service.grade("/vault/n.md", Band.GOOD, now);
 
@@ -73,7 +73,7 @@ class ReviewServiceTest {
         ReviewRow prev = new ReviewRow("/vault/n.md", 2.3065, 2.118104, 1,
             Timestamp.from(now.minus(3, ChronoUnit.DAYS)),
             Timestamp.from(now), "dEasy:sShort", 1.5);
-        when(reviewRepo.find("/vault/n.md")).thenReturn(prev);
+        when(stateWriter.read("/vault/n.md")).thenReturn(prev);
 
         service.grade("/vault/n.md", Band.HARD, now);
 
@@ -82,7 +82,7 @@ class ReviewServiceTest {
 
     @Test
     void banditArmScalesTheScheduledDate_butNotTheStoredState() {
-        when(reviewRepo.find("/vault/n.md")).thenReturn(null);
+        when(stateWriter.read("/vault/n.md")).thenReturn(null);
         when(bandit.chooseArm(anyString())).thenReturn(1.5);
 
         GradeResult result = service.grade("/vault/n.md", Band.EASY, now);
@@ -97,7 +97,7 @@ class ReviewServiceTest {
 
     @Test
     void veryEasyMapsToFsrsEasy_butIsItsOwnBandLabel() {
-        when(reviewRepo.find("/vault/n.md")).thenReturn(null);
+        when(stateWriter.read("/vault/n.md")).thenReturn(null);
         GradeResult veryEasy = service.grade("/vault/n.md", Band.VERY_EASY, now);
         GradeResult easy     = service.grade("/vault/n.md", Band.EASY, now);
         assertThat(veryEasy.stability()).isEqualTo(easy.stability());

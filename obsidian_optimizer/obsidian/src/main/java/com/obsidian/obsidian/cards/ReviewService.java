@@ -2,17 +2,12 @@ package com.obsidian.obsidian.cards;
 
 import com.obsidian.obsidian.cards.FsrsService.FsrsState;
 import com.obsidian.obsidian.cards.NoteReviewRepository.ReviewRow;
-import com.obsidian.obsidian.chrono.FrontmatterRewriter;
-import com.obsidian.obsidian.notes.FileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.nio.file.Paths;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 
 /**
@@ -51,15 +46,12 @@ public class ReviewService {
 
     private final FsrsService fsrs;
     private final BanditService bandit;
-    private final NoteReviewRepository reviewRepo;
-    private final FileRepository fileRepo;
+    private final FsrsStateWriter stateWriter;
 
-    public ReviewService(FsrsService fsrs, BanditService bandit,
-                         NoteReviewRepository reviewRepo, FileRepository fileRepo) {
+    public ReviewService(FsrsService fsrs, BanditService bandit, FsrsStateWriter stateWriter) {
         this.fsrs = fsrs;
         this.bandit = bandit;
-        this.reviewRepo = reviewRepo;
-        this.fileRepo = fileRepo;
+        this.stateWriter = stateWriter;
     }
 
     public GradeResult grade(String notePath, Band band) {
@@ -67,7 +59,7 @@ public class ReviewService {
     }
 
     GradeResult grade(String notePath, Band band, Instant now) {
-        ReviewRow existing = reviewRepo.find(notePath);
+        ReviewRow existing = stateWriter.read(notePath);
 
         // 1. Delayed reward for the arm that scheduled THIS review:
         //    recalled = Good or better at the interval that arm produced.
@@ -95,34 +87,13 @@ public class ReviewService {
         long scheduledDays = Math.max(1, Math.round(baseInterval * arm));
 
         Timestamp due = Timestamp.from(now.plus(scheduledDays, ChronoUnit.DAYS));
-        reviewRepo.upsert(notePath, state.stability(), state.difficulty(),
-            Timestamp.from(now), due, bucket, arm);
-        writeSrFrontmatter(notePath, due, (int) scheduledDays);
+        // Single write path: DB + frontmatter mirror together (FsrsStateWriter).
+        stateWriter.write(notePath, state, now, due, (int) scheduledDays, bucket, arm);
 
         log.info("[Review] {} band={} S={} D={} base={}d arm={} due={}",
             notePath, band, String.format("%.2f", state.stability()),
             String.format("%.2f", state.difficulty()), baseInterval, arm, due);
         return new GradeResult(notePath, band.name(), state.stability(), state.difficulty(),
             baseInterval, arm, due);
-    }
-
-    /**
-     * Bridge to the legacy sr-due world: the review queue, chrono jobs, and the
-     * Obsidian SR plugin all read frontmatter. Without this write-back a graded
-     * note would stay "due" in the queue forever. Ease is preserved untouched
-     * (it belongs to the legacy system); notes without frontmatter are skipped.
-     */
-    private void writeSrFrontmatter(String notePath, Timestamp due, int intervalDays) {
-        try {
-            var path = Paths.get(notePath);
-            FrontmatterRewriter.SrFields current = FrontmatterRewriter.read(path);
-            if (current == null) return;
-            LocalDate dueDate = due.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
-            FrontmatterRewriter.write(path,
-                new FrontmatterRewriter.SrFields(dueDate, intervalDays, current.ease()));
-            fileRepo.reindexAfterExternalWrite(notePath);
-        } catch (Exception e) {
-            log.warn("[Review] sr-due write-back failed for {}: {}", notePath, e.getMessage());
-        }
     }
 }
