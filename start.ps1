@@ -18,6 +18,38 @@ if (Select-String -Path $envFile -Pattern '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S'
     Write-Host "No CLOUDFLARE_TUNNEL_TOKEN in .env — starting without the Cloudflare tunnel."
 }
 
+# The host-wrapper listens here (host-wrapper/main.py: PORT env, default 5001). A
+# crashed previous run can leave a stale wrapper holding this port, which makes the
+# new wrapper fail to bind and silently keep serving old code — so we free it.
+$wrapperPort = 5001
+$portLine = Select-String -Path $envFile -Pattern '^\s*PORT\s*=\s*(\d+)' | Select-Object -First 1
+if ($portLine) { $wrapperPort = [int]$portLine.Matches[0].Groups[1].Value }
+
+# Shared cleanup — run at startup (clear a crashed previous run) AND on exit, so
+# state is identical every launch: no orphaned containers, nothing on the port.
+function Invoke-Cleanup {
+    param([string]$Phase)
+    Write-Host "[$Phase] Removing old containers..."
+    docker compose @composeArgs down --remove-orphans 2>$null
+
+    # Kill whatever still holds the wrapper port (a stale host-wrapper). $PID is the
+    # current shell — never kill ourselves. (Avoid the reserved name $pid for the loop.)
+    try {
+        $conns = Get-NetTCPConnection -LocalPort $wrapperPort -State Listen -ErrorAction SilentlyContinue
+        foreach ($procId in ($conns.OwningProcess | Select-Object -Unique)) {
+            if ($procId -and $procId -ne 0 -and $procId -ne $PID) {
+                Write-Host "[$Phase] Stopping stale process on port $wrapperPort (PID $procId)..."
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {
+        # Get-NetTCPConnection unavailable — skip port cleanup, containers still cleaned.
+    }
+}
+
+# Cleanup BEFORE we start, in case a previous run was killed without its finally block.
+Invoke-Cleanup -Phase "startup"
+
 # Start the host-wrapper (the LLM bridge) on the host — it runs OUTSIDE docker on
 # :5001, reachable from the containers via host.docker.internal:5001. It's not a
 # compose service because it needs host-side access to local LLM tooling/creds.
@@ -67,10 +99,11 @@ if ($venvPython) {
 try {
     docker compose @composeArgs up --build
 } finally {
-    Write-Host "Shutting down containers..."
-    docker compose @composeArgs down
+    # Stop the wrapper we launched first (its own window), then run the shared
+    # cleanup to remove containers and free the port — same end state as startup.
     if ($wrapper -and -not $wrapper.HasExited) {
         Write-Host "Stopping host-wrapper (PID $($wrapper.Id))..."
         Stop-Process -Id $wrapper.Id -Force -ErrorAction SilentlyContinue
     }
+    Invoke-Cleanup -Phase "shutdown"
 }
