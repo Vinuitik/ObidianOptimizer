@@ -178,12 +178,14 @@ export async function saveVaultHostPath(path) {
   return res.json();
 }
 
-// Liveness probe used while the backend is being recreated. /settings is public
-// and cheap, so a 200 means the backend has finished coming back up.
+// Liveness probe used while the backend is being recreated. "Up" means the
+// backend itself answered — a 401/403 (session lost on container recreate) still
+// counts, but a network error or nginx 502/503/504 (backend not yet listening)
+// means it's still down.
 export async function pingHealth() {
   try {
     const res = await fetch(`${BASE}/settings`, { cache: 'no-store' });
-    return res.ok;
+    return res.ok || res.status === 401 || res.status === 403;
   } catch {
     return false;
   }

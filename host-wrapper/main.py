@@ -1,4 +1,6 @@
 import os
+import string
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -90,6 +92,113 @@ def _resolve_vault_image(container_path):
 @app.route("/health")
 def health():
     return {"status": "ok"}
+
+
+# ── Vault folder picker ──────────────────────────────────────────────────────
+# The wrapper is the only component that sees the host's real filesystem, so the
+# settings UI browses drives through here and switches the mounted vault. Changing
+# the vault rewrites the repo-root .env and recreates the bind-mounted containers.
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_COMPOSE_FILE = _REPO_ROOT / "docker-compose.yml"
+
+
+def _norm(p) -> str:
+    return str(p).replace("\\", "/")
+
+
+def _list_drives():
+    drives = []
+    for letter in string.ascii_uppercase:
+        root = f"{letter}:/"
+        if os.path.exists(root):
+            drives.append({"path": root, "name": f"{letter}:"})
+    return drives
+
+
+@app.route("/fs/list")
+def fs_list():
+    """List the sub-directories of a folder so the UI can browse to a vault.
+
+    Response: {"path": str, "parent": str | null, "dirs": [{"path", "name"}]}
+    An empty path lists drive roots on Windows / "/" elsewhere. parent==null means
+    there is nowhere further up.
+    """
+    is_windows = os.name == "nt"
+    raw = (request.args.get("path") or "").strip()
+
+    if not raw:
+        if is_windows:
+            return jsonify({"path": "", "parent": None, "dirs": _list_drives()})
+        raw = "/"
+
+    path = Path(raw)
+    try:
+        dirs = []
+        for child in sorted(path.iterdir(), key=lambda c: c.name.lower()):
+            try:
+                if child.is_dir():
+                    dirs.append({"path": _norm(child), "name": child.name})
+            except OSError:
+                continue  # unreadable child (permissions) — skip it
+    except (OSError, PermissionError) as e:
+        return jsonify({"error": str(e)}), 400
+
+    parent = path.parent
+    if parent == path:               # at a drive root ("C:/") or posix "/"
+        parent_out = "" if is_windows else None
+    else:
+        parent_out = _norm(parent)
+    return jsonify({"path": _norm(path), "parent": parent_out, "dirs": dirs})
+
+
+@app.route("/vault-path", methods=["GET"])
+def get_vault_path():
+    return jsonify({"path": _norm(VAULT_HOST_PATH)})
+
+
+@app.route("/vault-path", methods=["PUT"])
+def put_vault_path():
+    data = request.json or {}
+    new_path = (data.get("path") or "").strip()
+    if not new_path:
+        return jsonify({"error": "path required"}), 422
+    if not Path(new_path).is_dir():
+        return jsonify({"error": f"not a directory: {new_path}"}), 400
+
+    norm = _norm(new_path)
+    _write_env_vault(norm)
+    _trigger_recreate()
+    return jsonify({"path": norm, "recreating": True})
+
+
+def _write_env_vault(path: str):
+    """Rewrite HOST_VAULT_PATH in the repo-root .env, preserving every other line."""
+    global VAULT_HOST_PATH
+    lines = _ROOT_ENV.read_text(encoding="utf-8").splitlines() if _ROOT_ENV.exists() else []
+    found = False
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("HOST_VAULT_PATH=") and not stripped.startswith("#"):
+            lines[i] = f"HOST_VAULT_PATH={path}"
+            found = True
+            break
+    if not found:
+        lines.append(f"HOST_VAULT_PATH={path}")
+    _ROOT_ENV.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    VAULT_HOST_PATH = path
+
+
+def _trigger_recreate():
+    """Recreate the bind-mounted containers so the new vault is mounted. Detached:
+    `up -d` recreates THIS request's backend, so we must not wait on it."""
+    try:
+        subprocess.Popen(
+            ["docker", "compose", "-f", str(_COMPOSE_FILE), "up", "-d"],
+            cwd=str(_REPO_ROOT),
+        )
+    except Exception as e:  # docker missing / Desktop not running
+        app.logger.warning("vault recreate failed to launch: %s", e)
 
 
 @app.route("/providers")

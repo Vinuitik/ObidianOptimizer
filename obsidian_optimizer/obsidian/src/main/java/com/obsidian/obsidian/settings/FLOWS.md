@@ -47,6 +47,12 @@ Field validation:
 
 `vaultPath` change → `FileRepository.updateVaultPath()` → validates dir exists → saves to DB → sets `ROOT_FILE` → `NoteIndexRepository.forceResync()` (TRUNCATE notes + note_links → full delta sync)
 
+> **Note (settings UI):** the settings page no longer edits `vaultPath` via this endpoint.
+> The in-container `vaultPath` stays `/vault`; the user-facing "vault folder" is the host
+> path in `.env` (`HOST_VAULT_PATH`), switched through the host picker which recreates the
+> containers. `resourcePath` is still a normal PUT /settings field, now with a browse button.
+> See [../hostfs/FLOWS.md](../hostfs/FLOWS.md). This PUT path still exists for the agent/internal API.
+
 ---
 
 ## Technology Notes
