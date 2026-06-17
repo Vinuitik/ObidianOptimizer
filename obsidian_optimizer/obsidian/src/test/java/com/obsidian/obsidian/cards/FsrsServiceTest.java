@@ -120,6 +120,48 @@ class FsrsServiceTest {
         assertThat(fsrs.intervalDays(s.stability())).isEqualTo(39);
     }
 
+    // ── Forget / lapse path (py-fsrs Rating.Again reference) ──────────────────
+
+    @Test
+    void forget_afterGood_elapsed3() {
+        FsrsState s = fsrs.forget(fsrs.initialState(GRADE_GOOD), 3);
+        assertThat(s.stability()).isCloseTo(0.636851, within(TOL));
+        assertThat(s.difficulty()).isCloseTo(7.394503, within(TOL));
+        assertThat(fsrs.intervalDays(s.stability())).isEqualTo(1);
+    }
+
+    @Test
+    void forget_afterGood_elapsed10_latReviewRaisesStabilitySlightly() {
+        FsrsState s = fsrs.forget(fsrs.initialState(GRADE_GOOD), 10);
+        assertThat(s.stability()).isCloseTo(0.759160, within(TOL));
+        assertThat(s.difficulty()).isCloseTo(7.394503, within(TOL));
+    }
+
+    @Test
+    void forget_afterEasy_elapsed15() {
+        FsrsState s = fsrs.forget(fsrs.initialState(GRADE_EASY), 15);
+        assertThat(s.stability()).isCloseTo(1.502927, within(TOL));
+        assertThat(s.difficulty()).isCloseTo(7.026990, within(TOL));
+        assertThat(fsrs.intervalDays(s.stability())).isEqualTo(2);
+    }
+
+    @Test
+    void forget_afterHard_elapsed2() {
+        FsrsState s = fsrs.forget(fsrs.initialState(GRADE_HARD), 2);
+        assertThat(s.stability()).isCloseTo(0.407175, within(TOL));
+        assertThat(s.difficulty()).isCloseTo(8.378632, within(TOL));
+    }
+
+    @Test
+    void forget_collapsesStability_belowPriorAndRaisesDifficulty() {
+        FsrsState prior = fsrs.review(fsrs.initialState(GRADE_GOOD), GRADE_GOOD, 3);
+        FsrsState lapsed = fsrs.forget(prior, 7);
+        assertThat(lapsed.stability()).isCloseTo(1.614598, within(TOL));
+        assertThat(lapsed.difficulty()).isCloseTo(7.392238, within(TOL));
+        assertThat(lapsed.stability()).isLessThan(prior.stability());   // memory dropped
+        assertThat(lapsed.difficulty()).isGreaterThan(prior.difficulty()); // harder now
+    }
+
     // ── Properties / guards ───────────────────────────────────────────────────
 
     @Test

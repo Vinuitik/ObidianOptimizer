@@ -28,6 +28,8 @@ public class FsrsService {
     private static final double DECAY  = -W[20];
     private static final double FACTOR = Math.pow(0.9, 1.0 / DECAY) - 1.0;
 
+    /** Lapse grade — never user-pressable; reached only via {@link #forget} (7-day rule, bankruptcy). */
+    public static final int GRADE_AGAIN = 1;
     public static final int GRADE_HARD = 2;
     public static final int GRADE_GOOD = 3;
     public static final int GRADE_EASY = 4;
@@ -55,6 +57,22 @@ public class FsrsService {
         double newStability  = recallStability(state.difficulty(), state.stability(), r, grade);
         double newDifficulty = nextDifficulty(state.difficulty(), grade);
         return new FsrsState(clampStability(newStability), newDifficulty);
+    }
+
+    /**
+     * Lapse / forget path (py-fsrs {@code _next_forget_stability} + Again-grade
+     * difficulty). Reached only when a note is reviewed >7 days late or swept by
+     * a bankruptcy declaration — never from a user-pressed band. Stability
+     * collapses toward a short post-lapse value; difficulty jumps (grade Again).
+     */
+    public FsrsState forget(FsrsState state, double elapsedDays) {
+        double r = retrievability(elapsedDays, state.stability());
+        double sf = W[11]
+            * Math.pow(state.difficulty(), -W[12])
+            * (Math.pow(state.stability() + 1.0, W[13]) - 1.0)
+            * Math.exp(W[14] * (1.0 - r));
+        double newDifficulty = nextDifficulty(state.difficulty(), GRADE_AGAIN);
+        return new FsrsState(clampStability(sf), newDifficulty);
     }
 
     /** Probability of recall after elapsedDays at the given stability. */

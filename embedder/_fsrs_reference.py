@@ -44,3 +44,22 @@ c = first_review(Rating.Good)
 c, _ = scheduler.review_card(c, Rating.Good, review_datetime=t0 + timedelta(days=3))
 c, _ = scheduler.review_card(c, Rating.Good, review_datetime=t0 + timedelta(days=10))
 print(f"S={c.stability:.6f} D={c.difficulty:.6f} interval_days={(c.due - (t0 + timedelta(days=10))).days}")
+
+print("\n-- forget / lapse path (Rating.Again on a subsequent review) --")
+for first, elapsed in [
+    (Rating.Good, 3),
+    (Rating.Good, 10),
+    (Rating.Easy, 15),
+    (Rating.Hard, 2),
+]:
+    c = first_review(first)
+    t1 = t0 + timedelta(days=elapsed)
+    c, _ = scheduler.review_card(c, Rating.Again, review_datetime=t1)
+    print(f"{first.name}->Again elapsed={elapsed}: "
+          f"S={c.stability:.6f} D={c.difficulty:.6f} interval_days={(c.due - t1).days}")
+
+print("\n-- lapse after a Good,Good chain (elapsed 3, then Again at +7) --")
+c = first_review(Rating.Good)
+c, _ = scheduler.review_card(c, Rating.Good, review_datetime=t0 + timedelta(days=3))
+c, _ = scheduler.review_card(c, Rating.Again, review_datetime=t0 + timedelta(days=10))
+print(f"S={c.stability:.6f} D={c.difficulty:.6f} interval_days={(c.due - (t0 + timedelta(days=10))).days}")

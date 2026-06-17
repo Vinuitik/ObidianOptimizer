@@ -81,6 +81,37 @@ class ReviewServiceTest {
     }
 
     @Test
+    void reviewingMoreThan7DaysLate_forcesLapse_evenOnGoodBand() {
+        ReviewRow prev = new ReviewRow("/vault/n.md", 13.826904, 2.111214, 2,
+            Timestamp.from(now.minus(20, ChronoUnit.DAYS)),   // lastReview
+            Timestamp.from(now.minus(8, ChronoUnit.DAYS)),    // due — 8 days overdue
+            "dEasy:sShort", 1.2);
+        when(stateWriter.read("/vault/n.md")).thenReturn(prev);
+
+        GradeResult result = service.grade("/vault/n.md", Band.GOOD, now);
+
+        assertThat(result.lapsed()).isTrue();
+        verify(bandit).reward("dEasy:sShort", 1.2, false);    // lapse → not recalled
+        assertThat(result.stability()).isLessThan(prev.stability());  // memory collapsed
+        assertThat(result.difficulty()).isGreaterThan(prev.difficulty());
+    }
+
+    @Test
+    void reviewingWithin7DaysLate_staysOnRecallPath_noLapse() {
+        ReviewRow prev = new ReviewRow("/vault/n.md", 13.826904, 2.111214, 2,
+            Timestamp.from(now.minus(9, ChronoUnit.DAYS)),
+            Timestamp.from(now.minus(6, ChronoUnit.DAYS)),    // only 6 days overdue
+            "dEasy:sShort", 1.2);
+        when(stateWriter.read("/vault/n.md")).thenReturn(prev);
+
+        GradeResult result = service.grade("/vault/n.md", Band.GOOD, now);
+
+        assertThat(result.lapsed()).isFalse();
+        verify(bandit).reward("dEasy:sShort", 1.2, true);     // recalled, on the recall path
+        assertThat(result.stability()).isGreaterThan(prev.stability());  // grew, not collapsed
+    }
+
+    @Test
     void banditArmScalesTheScheduledDate_butNotTheStoredState() {
         when(stateWriter.read("/vault/n.md")).thenReturn(null);
         when(bandit.chooseArm(anyString())).thenReturn(1.5);

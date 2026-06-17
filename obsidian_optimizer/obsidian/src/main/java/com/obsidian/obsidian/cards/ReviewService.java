@@ -41,8 +41,11 @@ public class ReviewService {
         }
     }
 
+    /** Reviewing a note more than this many days after its due date is a forced lapse. */
+    static final int LATE_LAPSE_DAYS = 7;
+
     public record GradeResult(String notePath, String band, double stability, double difficulty,
-                              int baseIntervalDays, double banditArm, Timestamp due) {}
+                              int baseIntervalDays, double banditArm, Timestamp due, boolean lapsed) {}
 
     private final FsrsService fsrs;
     private final BanditService bandit;
@@ -61,10 +64,15 @@ public class ReviewService {
     GradeResult grade(String notePath, Band band, Instant now) {
         ReviewRow existing = stateWriter.read(notePath);
 
+        // Reviewing >7 days after the due date is a forced lapse regardless of
+        // the band pressed — the note was effectively forgotten in the gap.
+        boolean lapsed = existing != null
+            && now.isAfter(existing.due().toInstant().plus(LATE_LAPSE_DAYS, ChronoUnit.DAYS));
+
         // 1. Delayed reward for the arm that scheduled THIS review:
-        //    recalled = Good or better at the interval that arm produced.
+        //    recalled = Good or better, on time. A lapse always counts as failed.
         if (existing != null && existing.pendingArm() != null) {
-            boolean recalled = band != Band.HARD;
+            boolean recalled = !lapsed && band != Band.HARD;
             bandit.reward(existing.pendingBucket(), existing.pendingArm(), recalled);
         }
 
@@ -73,10 +81,12 @@ public class ReviewService {
         if (existing == null) {
             state = fsrs.initialState(band.fsrsGrade);
         } else {
-            double elapsedDays = ChronoUnit.SECONDS.between(
-                existing.lastReview().toInstant(), now) / 86400.0;
-            state = fsrs.review(new FsrsState(existing.stability(), existing.difficulty()),
-                band.fsrsGrade, Math.max(elapsedDays, 0));
+            double elapsedDays = Math.max(0, ChronoUnit.SECONDS.between(
+                existing.lastReview().toInstant(), now) / 86400.0);
+            FsrsState prior = new FsrsState(existing.stability(), existing.difficulty());
+            state = lapsed
+                ? fsrs.forget(prior, elapsedDays)
+                : fsrs.review(prior, band.fsrsGrade, elapsedDays);
         }
 
         // 3. Bandit picks the multiplier for the NEXT interval (Option A:
@@ -90,10 +100,10 @@ public class ReviewService {
         // Single write path: DB + frontmatter mirror together (FsrsStateWriter).
         stateWriter.write(notePath, state, now, due, (int) scheduledDays, bucket, arm);
 
-        log.info("[Review] {} band={} S={} D={} base={}d arm={} due={}",
-            notePath, band, String.format("%.2f", state.stability()),
+        log.info("[Review] {} band={}{} S={} D={} base={}d arm={} due={}",
+            notePath, band, lapsed ? " LAPSED(>7d late)" : "", String.format("%.2f", state.stability()),
             String.format("%.2f", state.difficulty()), baseInterval, arm, due);
         return new GradeResult(notePath, band.name(), state.stability(), state.difficulty(),
-            baseInterval, arm, due);
+            baseInterval, arm, due, lapsed);
     }
 }
