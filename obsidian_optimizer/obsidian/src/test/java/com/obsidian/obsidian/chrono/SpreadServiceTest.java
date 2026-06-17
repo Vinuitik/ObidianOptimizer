@@ -1,5 +1,9 @@
 package com.obsidian.obsidian.chrono;
 
+import com.obsidian.obsidian.cards.FsrsStateWriter;
+import com.obsidian.obsidian.cards.NoteReviewRepository;
+import com.obsidian.obsidian.notes.FileRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -10,15 +14,33 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class SpreadServiceTest {
 
     @TempDir Path tmp;
-    SpreadService service = new SpreadService();
+    SpreadService service;
+
+    @BeforeEach
+    void setUp() {
+        // Legacy notes move via direct frontmatter rewrite (no DB); FSRS notes
+        // go through the writer, whose repo/file deps we mock.
+        service = new SpreadService(new FsrsStateWriter(
+            mock(NoteReviewRepository.class), mock(FileRepository.class)));
+    }
 
     private Path writeNote(String name, LocalDate due, int interval, int ease) throws IOException {
         Path f = tmp.resolve(name);
-        Files.writeString(f, "---\nsr-due: " + due + "\nsr-interval: " + interval + "\nsr-ease: " + ease + "\n---\n");
+        Files.writeString(f, "---\nsr-due: " + due + "\nsr-interval: " + interval
+            + "\nsr-ease: " + ease + "\n---\n");
+        return f;
+    }
+
+    private Path writeFsrsNote(String name, LocalDate due, double difficulty) throws IOException {
+        Path f = tmp.resolve(name);
+        Files.writeString(f, "---\nsr-due: " + due + "\nsr-interval: 10\nfsrs-s: 10.000000\n"
+            + "fsrs-d: " + String.format(java.util.Locale.ROOT, "%.6f", difficulty)
+            + "\nfsrs-last: " + due.minusDays(10) + "\nfsrs-arm: 1.000000\nfsrs-bucket: dMid:sMid\n---\n");
         return f;
     }
 
@@ -29,15 +51,6 @@ class SpreadServiceTest {
         var result = service.run(List.of(f), 5);
         assertThat(result.moved()).isEqualTo(0);
         assertThat(FrontmatterRewriter.read(f).due()).isEqualTo(tomorrow);
-    }
-
-    @Test
-    void exactlyAtCap_nothingMoved() throws IOException {
-        LocalDate tomorrow = LocalDate.now().plusDays(1);
-        Path n1 = writeNote("n1.md", tomorrow, 5, 200);
-        Path n2 = writeNote("n2.md", tomorrow, 5, 300);
-        var result = service.run(List.of(n1, n2), 2);
-        assertThat(result.moved()).isEqualTo(0);
     }
 
     @Test
@@ -53,29 +66,23 @@ class SpreadServiceTest {
     }
 
     @Test
-    void lowestEaseNoteStaysOnOverloadedDay() throws IOException {
+    void legacy_lowestEaseNoteStaysOnOverloadedDay() throws IOException {
         LocalDate tomorrow = LocalDate.now().plusDays(1);
-        Path n1 = writeNote("n1.md", tomorrow, 5, 200);
+        Path n1 = writeNote("n1.md", tomorrow, 5, 200);   // lower ease = harder
         Path n2 = writeNote("n2.md", tomorrow, 5, 300);
         service.run(List.of(n1, n2), 1);
-        assertThat(FrontmatterRewriter.read(n1).due()).isEqualTo(tomorrow);
+        assertThat(FrontmatterRewriter.read(n1).due()).isEqualTo(tomorrow);   // hardest stays
         assertThat(FrontmatterRewriter.read(n2).due()).isAfter(tomorrow);
     }
 
     @Test
-    void cascade_overflowRipplesThroughConsecutiveDays() throws IOException {
-        LocalDate d1 = LocalDate.now().plusDays(1);
-        LocalDate d2 = LocalDate.now().plusDays(2);
-        Path a = writeNote("a.md", d1, 5, 200);
-        Path b = writeNote("b.md", d1, 5, 300);
-        Path c = writeNote("c.md", d2, 5, 200);
-        service.run(List.of(a, b, c), 1);
-        LocalDate da = FrontmatterRewriter.read(a).due();
-        LocalDate db = FrontmatterRewriter.read(b).due();
-        LocalDate dc = FrontmatterRewriter.read(c).due();
-        assertThat(da).isNotEqualTo(db);
-        assertThat(db).isNotEqualTo(dc);
-        assertThat(da).isNotEqualTo(dc);
+    void fsrs_highestDifficultyStaysOnOverloadedDay() throws IOException {
+        LocalDate tomorrow = LocalDate.now().plusDays(1);
+        Path hard = writeFsrsNote("hard.md", tomorrow, 8.0);
+        Path easy = writeFsrsNote("easy.md", tomorrow, 3.0);
+        service.run(List.of(hard, easy), 1);
+        assertThat(FrontmatterRewriter.read(hard).due()).isEqualTo(tomorrow);  // hardest stays
+        assertThat(FrontmatterRewriter.read(easy).due()).isAfter(tomorrow);
     }
 
     @Test

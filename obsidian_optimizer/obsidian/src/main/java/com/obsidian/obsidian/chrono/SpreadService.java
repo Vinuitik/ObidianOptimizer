@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.chrono;
 
+import com.obsidian.obsidian.cards.FsrsStateWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -10,10 +11,24 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
+/**
+ * Caps reviews per day by cascading overflow forward. Pure calendar work — it
+ * never touches FSRS memory state (stability/difficulty), only the due date,
+ * the same Option-A separation the bandit uses. On an overloaded day the
+ * HARDEST notes (highest FSRS difficulty) stay put; the easiest spill to the
+ * next day. FSRS notes move via {@link FsrsStateWriter#reschedule} (DB +
+ * frontmatter); legacy notes just have their sr-due rewritten in place.
+ */
 @Component
 public class SpreadService {
 
     private static final Logger log = LoggerFactory.getLogger(SpreadService.class);
+
+    private final FsrsStateWriter stateWriter;
+
+    public SpreadService(FsrsStateWriter stateWriter) {
+        this.stateWriter = stateWriter;
+    }
 
     public record SpreadResult(int total, int moved) {}
 
@@ -22,11 +37,13 @@ public class SpreadService {
         TreeMap<Integer, List<NoteInfo>> byDay = new TreeMap<>();
 
         for (Path file : mdFiles) {
-            FrontmatterRewriter.SrFields fields = FrontmatterRewriter.read(file);
-            if (fields == null) continue;
-            int delta = (int) ChronoUnit.DAYS.between(today, fields.due());
+            FrontmatterRewriter.SrFields legacy = FrontmatterRewriter.read(file);
+            if (legacy == null) continue;
+            FrontmatterRewriter.FsrsFields fsrs = FrontmatterRewriter.readFsrs(file);
+            double hardness = fsrs != null ? fsrs.difficulty() : easeToDifficulty(legacy.ease());
+            int delta = (int) ChronoUnit.DAYS.between(today, legacy.due());
             byDay.computeIfAbsent(delta, k -> new ArrayList<>())
-                 .add(new NoteInfo(file, fields.ease(), fields.due()));
+                 .add(new NoteInfo(file, hardness, legacy.due(), fsrs != null, legacy));
         }
 
         if (byDay.isEmpty()) {
@@ -41,8 +58,8 @@ public class SpreadService {
         for (int delta = byDay.firstKey(); delta <= maxDay; delta++) {
             List<NoteInfo> notes = byDay.get(delta);
             if (notes == null || notes.size() <= maxDailyReviews) continue;
-
-            notes.sort(Comparator.comparingInt(n -> n.ease));
+            // Hardest first → the top maxDailyReviews stay; the easiest overflow.
+            notes.sort(Comparator.comparingDouble((NoteInfo n) -> n.hardness).reversed());
             List<NoteInfo> overflow = new ArrayList<>(notes.subList(maxDailyReviews, notes.size()));
             notes.subList(maxDailyReviews, notes.size()).clear();
             byDay.computeIfAbsent(delta + 1, k -> new ArrayList<>()).addAll(overflow);
@@ -53,18 +70,8 @@ public class SpreadService {
         for (Map.Entry<Integer, List<NoteInfo>> entry : byDay.entrySet()) {
             LocalDate assignedDate = today.plusDays(entry.getKey());
             for (NoteInfo note : entry.getValue()) {
-                if (!assignedDate.equals(note.originalDue)) {
-                    try {
-                        FrontmatterRewriter.SrFields current = FrontmatterRewriter.read(note.file);
-                        if (current != null) {
-                            FrontmatterRewriter.write(note.file,
-                                new FrontmatterRewriter.SrFields(assignedDate, current.interval(), current.ease()));
-                            moved++;
-                        }
-                    } catch (IOException e) {
-                        log.warn("[SpreadCheck] Failed to update {}: {}", note.file.getFileName(), e.getMessage());
-                    }
-                }
+                if (assignedDate.equals(note.originalDue)) continue;
+                if (moveDate(note, assignedDate)) moved++;
             }
         }
 
@@ -72,5 +79,26 @@ public class SpreadService {
         return new SpreadResult(total, moved);
     }
 
-    private record NoteInfo(Path file, int ease, LocalDate originalDue) {}
+    private boolean moveDate(NoteInfo note, LocalDate newDue) {
+        try {
+            if (note.isFsrs) {
+                stateWriter.reschedule(note.file.toAbsolutePath().toString(), newDue);
+            } else {
+                FrontmatterRewriter.write(note.file, new FrontmatterRewriter.SrFields(
+                    newDue, note.legacy.interval(), note.legacy.ease()));
+            }
+            return true;
+        } catch (IOException e) {
+            log.warn("[SpreadCheck] Failed to update {}: {}", note.file.getFileName(), e.getMessage());
+            return false;
+        }
+    }
+
+    /** Legacy ordering proxy: lower ease = harder, so map it to a higher difficulty. */
+    static double easeToDifficulty(int ease) {
+        return Math.min(10.0, Math.max(1.0, 11.0 - ease / 50.0));
+    }
+
+    private record NoteInfo(Path file, double hardness, LocalDate originalDue,
+                            boolean isFsrs, FrontmatterRewriter.SrFields legacy) {}
 }

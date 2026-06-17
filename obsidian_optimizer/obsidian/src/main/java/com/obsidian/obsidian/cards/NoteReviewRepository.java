@@ -56,7 +56,7 @@ public class NoteReviewRepository {
     }
 
     public void upsert(String notePath, double stability, double difficulty,
-                       Timestamp lastReview, Timestamp due, String pendingBucket, double pendingArm) {
+                       Timestamp lastReview, Timestamp due, String pendingBucket, Double pendingArm) {
         jdbc.update("""
             INSERT INTO note_reviews(note_path, stability, difficulty, reps, last_review, due,
                                      pending_bucket, pending_arm)

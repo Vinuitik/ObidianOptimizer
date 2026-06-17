@@ -75,12 +75,29 @@ public class FsrsStateWriter {
         if (row == null) return;
         Timestamp due = Timestamp.from(newDue.atStartOfDay(ZoneId.systemDefault()).toInstant());
         reviewRepo.upsert(notePath, row.stability(), row.difficulty(), row.lastReview(), due,
-            row.pendingBucket(), row.pendingArm() == null ? 1.0 : row.pendingArm());
+            row.pendingBucket(), row.pendingArm());
         FsrsFields f = FrontmatterRewriter.readFsrs(Paths.get(notePath));
         if (f != null) {
             mirror(notePath, new FsrsFields(newDue, f.interval(), f.stability(), f.difficulty(),
                 f.lastReview(), f.arm(), f.bucket()));
         }
+    }
+
+    /**
+     * Chrono write (Bankruptcy): replace memory state + due, preserving any
+     * pending bandit decision — no review happened, so the reward link is left
+     * untouched. lastReview becomes the chrono run instant.
+     */
+    public void writeState(String notePath, FsrsState state, Instant lastReview,
+                           LocalDate due, int intervalDays) {
+        ReviewRow prev = reviewRepo.find(notePath);
+        String bucket = prev != null ? prev.pendingBucket() : null;
+        Double arm    = prev != null ? prev.pendingArm() : null;
+        Timestamp dueTs = Timestamp.from(due.atStartOfDay(ZoneId.systemDefault()).toInstant());
+        reviewRepo.upsert(notePath, state.stability(), state.difficulty(),
+            Timestamp.from(lastReview), dueTs, bucket, arm);
+        mirror(notePath, new FsrsFields(due, intervalDays, state.stability(), state.difficulty(),
+            toLocalDate(lastReview), arm, bucket));
     }
 
     private void mirror(String notePath, FsrsFields fields) {

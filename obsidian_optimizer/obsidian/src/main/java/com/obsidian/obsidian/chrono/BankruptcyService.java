@@ -1,117 +1,114 @@
 package com.obsidian.obsidian.chrono;
 
+import com.obsidian.obsidian.cards.FsrsService;
+import com.obsidian.obsidian.cards.FsrsService.FsrsState;
+import com.obsidian.obsidian.cards.FsrsStateWriter;
+import com.obsidian.obsidian.cards.NoteReviewRepository.ReviewRow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDate;
-import java.util.*;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
 
+/**
+ * Relief valve: when too many notes pile up overdue, declare bankruptcy and
+ * relearn the backlog. Under FSRS this is the mass-lapse — each overdue note
+ * goes through {@link FsrsService#forget} (stability collapses, difficulty
+ * rises), then is rescheduled by its new FSRS interval, load-balanced across
+ * the available days. Legacy notes (sr-due but no FSRS state) are seeded into
+ * FSRS first (stability ≈ sr-interval, neutral difficulty) so the whole vault
+ * participates. Writes go through {@link FsrsStateWriter} (DB + frontmatter).
+ */
 @Component
 public class BankruptcyService {
 
     private static final Logger log = LoggerFactory.getLogger(BankruptcyService.class);
 
-    private static final int MIN_INTERVAL            = 2;
-    private static final int MIN_EASE                = 215;
-    private static final int TIER_SHORT_MAX          = 7;
-    private static final int TIER_MEDIUM_MAX         = 30;
-    private static final int TIER_LONG_MAX           = 90;
-    private static final int TIER_LONG_INTERVAL      = 21;
-    private static final int TIER_VERY_LONG_INTERVAL = 45;
+    /** Neutral difficulty for a legacy note with no FSRS history (1–10 scale). */
+    static final double SEED_DIFFICULTY = 5.0;
 
     private static final Random RANDOM = new Random();
+
+    private final FsrsService fsrs;
+    private final FsrsStateWriter stateWriter;
+
+    public BankruptcyService(FsrsService fsrs, FsrsStateWriter stateWriter) {
+        this.fsrs = fsrs;
+        this.stateWriter = stateWriter;
+    }
 
     public record BankruptcyResult(int overdueCount, boolean declared, int rescheduled) {}
 
     public BankruptcyResult run(List<Path> mdFiles, int bankruptcyLimit) {
         LocalDate today = LocalDate.now();
         List<Path> overdue = new ArrayList<>();
-
         for (Path file : mdFiles) {
             FrontmatterRewriter.SrFields fields = FrontmatterRewriter.read(file);
-            if (fields != null && fields.due().isBefore(today)) {
-                overdue.add(file);
-            }
+            if (fields != null && fields.due().isBefore(today)) overdue.add(file);
         }
 
         log.info("[BankruptcyCheck] {} overdue note(s) found.", overdue.size());
-
         if (overdue.size() < bankruptcyLimit) {
             log.info("[BankruptcyCheck] No bankruptcy — below threshold of {}.", bankruptcyLimit);
             return new BankruptcyResult(overdue.size(), false, 0);
         }
 
-        log.info("[BankruptcyCheck] BANKRUPTCY DECLARED. Spreading relief across {} files.", overdue.size());
-        PriorityQueue<int[]> heapLong     = buildHeap(TIER_LONG_INTERVAL);
-        PriorityQueue<int[]> heapVeryLong = buildHeap(TIER_VERY_LONG_INTERVAL);
-        Map<LocalDate, Integer> dayLoad   = new HashMap<>();
+        log.info("[BankruptcyCheck] BANKRUPTCY DECLARED. Lapsing + spreading {} note(s).", overdue.size());
+        Map<LocalDate, Integer> dayLoad = new HashMap<>();
+        Instant now = Instant.now();
         int rescheduled = 0;
-
         for (Path file : overdue) {
             try {
-                applyBankruptcy(file, today, heapLong, heapVeryLong, dayLoad);
+                lapseAndReschedule(file, today, now, dayLoad);
                 rescheduled++;
-            } catch (IOException e) {
+            } catch (Exception e) {
                 log.warn("[BankruptcyCheck] Failed to process {}: {}", file.getFileName(), e.getMessage());
             }
         }
-
         return new BankruptcyResult(overdue.size(), true, rescheduled);
     }
 
-    private void applyBankruptcy(Path file, LocalDate today,
-            PriorityQueue<int[]> heapLong, PriorityQueue<int[]> heapVeryLong,
-            Map<LocalDate, Integer> dayLoad) throws IOException {
-        FrontmatterRewriter.SrFields current = FrontmatterRewriter.read(file);
-        if (current == null) return;
+    private void lapseAndReschedule(Path file, LocalDate today, Instant now,
+                                    Map<LocalDate, Integer> dayLoad) {
+        FrontmatterRewriter.SrFields legacy = FrontmatterRewriter.read(file);
+        if (legacy == null) return;  // not a review note
+        String notePath = file.toAbsolutePath().toString();
 
-        int newInterval = tieredInterval(current.interval());
-        int newEase     = Math.max(MIN_EASE, current.ease() / 2);
-
-        LocalDate newDue;
-        if (newInterval == TIER_LONG_INTERVAL) {
-            newDue = pickFromHeap(today, heapLong);
-        } else if (newInterval == TIER_VERY_LONG_INTERVAL) {
-            newDue = pickFromHeap(today, heapVeryLong);
+        ReviewRow row = stateWriter.read(notePath);
+        FsrsState prior;
+        Instant lastReview;
+        if (row != null) {
+            prior = new FsrsState(row.stability(), row.difficulty());
+            lastReview = row.lastReview().toInstant();
         } else {
-            newDue = pickDate(today, newInterval, dayLoad);
+            // Seed the legacy note into FSRS: at 0.9 retention interval ≈ stability.
+            prior = new FsrsState(Math.max(1, legacy.interval()), SEED_DIFFICULTY);
+            lastReview = legacy.due().minusDays(legacy.interval())
+                .atStartOfDay(ZoneId.systemDefault()).toInstant();
         }
 
-        FrontmatterRewriter.write(file, new FrontmatterRewriter.SrFields(newDue, newInterval, newEase));
+        double elapsedDays = Math.max(0, ChronoUnit.SECONDS.between(lastReview, now) / 86400.0);
+        FsrsState lapsed = fsrs.forget(prior, elapsedDays);
+        int newInterval = fsrs.intervalDays(lapsed.stability());
+        LocalDate newDue = leastLoadedDate(today, newInterval, dayLoad);
+
+        stateWriter.writeState(notePath, lapsed, now, newDue, newInterval);
     }
 
-    private static int tieredInterval(int current) {
-        if (current <= TIER_SHORT_MAX)  return MIN_INTERVAL;
-        if (current <= TIER_MEDIUM_MAX) return Math.max(MIN_INTERVAL, current / 2);
-        if (current <= TIER_LONG_MAX)   return TIER_LONG_INTERVAL;
-        return TIER_VERY_LONG_INTERVAL;
-    }
-
-    private static PriorityQueue<int[]> buildHeap(int slots) {
-        PriorityQueue<int[]> heap = new PriorityQueue<>(
-            (a, b) -> a[0] != b[0] ? a[0] - b[0] : a[1] - b[1]
-        );
-        for (int d = 1; d <= slots; d++) {
-            heap.offer(new int[]{0, RANDOM.nextInt(Integer.MAX_VALUE), d});
-        }
-        return heap;
-    }
-
-    private static LocalDate pickFromHeap(LocalDate today, PriorityQueue<int[]> heap) {
-        int[] slot = heap.poll();
-        slot[0]++;
-        slot[1] = RANDOM.nextInt(Integer.MAX_VALUE);
-        heap.offer(slot);
-        return today.plusDays(slot[2]);
-    }
-
-    private static LocalDate pickDate(LocalDate today, int interval, Map<LocalDate, Integer> dayLoad) {
+    /** Pick the least-loaded day within [today+1, today+interval]; ties broken randomly. */
+    private static LocalDate leastLoadedDate(LocalDate today, int interval, Map<LocalDate, Integer> dayLoad) {
         int minLoad = Integer.MAX_VALUE;
         List<LocalDate> candidates = new ArrayList<>();
-        for (int d = 1; d <= interval; d++) {
+        for (int d = 1; d <= Math.max(1, interval); d++) {
             LocalDate candidate = today.plusDays(d);
             int load = dayLoad.getOrDefault(candidate, 0);
             if (load < minLoad) {
