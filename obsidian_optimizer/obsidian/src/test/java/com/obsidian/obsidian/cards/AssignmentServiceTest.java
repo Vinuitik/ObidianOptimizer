@@ -30,13 +30,14 @@ class AssignmentServiceTest {
 
     @Mock AssignmentRepository repo;
     @Mock ReviewService reviewService;
+    @Mock ReviewPreparationService reviewPrep;
 
     AssignmentService service;
     static final String NOTE = "/vault/n.md";
 
     @BeforeEach
     void setUp() {
-        service = new AssignmentService(repo, reviewService);
+        service = new AssignmentService(repo, reviewService, reviewPrep);
         when(repo.notesInScope(NOTE)).thenReturn(List.of(NOTE));
         when(repo.currentCycle(anyString(), anyString())).thenReturn(1);
         when(repo.insertAssignment(any(), anyInt(), anyInt(), any(), any()))
@@ -116,10 +117,23 @@ class AssignmentServiceTest {
     }
 
     @Test
+    void preparesTheNoteOnDemand_beforeDrawing() {
+        tier(1, 2, mcq(1));
+        tier(3, 3, mcq(3));
+        tier(4, 5, mcq(5));
+
+        service.build(NOTE, 10);
+
+        // On-demand normalize + card-gen + embed runs before the bag draw.
+        verify(reviewPrep).prepare(NOTE);
+    }
+
+    @Test
     void throwsWhenScopeHasNoCards() {
         when(repo.notesInScope("/vault/empty.md")).thenReturn(List.of());
         assertThatThrownBy(() -> service.build("/vault/empty.md", 10))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("no active cards");
+        verify(reviewPrep).prepare("/vault/empty.md");   // prep attempted even when empty
     }
 }

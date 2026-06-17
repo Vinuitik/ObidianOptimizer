@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.chrono;
 
+import com.obsidian.obsidian.cards.FsrsService;
 import com.obsidian.obsidian.cards.FsrsStateWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +41,7 @@ public class SpreadService {
             FrontmatterRewriter.SrFields legacy = FrontmatterRewriter.read(file);
             if (legacy == null) continue;
             FrontmatterRewriter.FsrsFields fsrs = FrontmatterRewriter.readFsrs(file);
-            double hardness = fsrs != null ? fsrs.difficulty() : easeToDifficulty(legacy.ease());
+            double hardness = fsrs != null ? fsrs.difficulty() : FsrsService.easeToDifficulty(legacy.ease());
             int delta = (int) ChronoUnit.DAYS.between(today, legacy.due());
             byDay.computeIfAbsent(delta, k -> new ArrayList<>())
                  .add(new NoteInfo(file, hardness, legacy.due(), fsrs != null, legacy));
@@ -92,11 +93,6 @@ public class SpreadService {
             log.warn("[SpreadCheck] Failed to update {}: {}", note.file.getFileName(), e.getMessage());
             return false;
         }
-    }
-
-    /** Legacy ordering proxy: lower ease = harder, so map it to a higher difficulty. */
-    static double easeToDifficulty(int ease) {
-        return Math.min(10.0, Math.max(1.0, 11.0 - ease / 50.0));
     }
 
     private record NoteInfo(Path file, double hardness, LocalDate originalDue,

@@ -33,9 +33,6 @@ public class BankruptcyService {
 
     private static final Logger log = LoggerFactory.getLogger(BankruptcyService.class);
 
-    /** Neutral difficulty for a legacy note with no FSRS history (1–10 scale). */
-    static final double SEED_DIFFICULTY = 5.0;
-
     private static final Random RANDOM = new Random();
 
     private final FsrsService fsrs;
@@ -90,9 +87,10 @@ public class BankruptcyService {
             prior = new FsrsState(row.stability(), row.difficulty());
             lastReview = row.lastReview().toInstant();
         } else {
-            // Seed the legacy note into FSRS: at 0.9 retention interval ≈ stability.
-            prior = new FsrsState(Math.max(1, legacy.interval()), SEED_DIFFICULTY);
-            lastReview = legacy.due().minusDays(legacy.interval())
+            // Seed the legacy note into FSRS (same policy as on-demand normalize):
+            // stability ≈ sr-interval, difficulty from ease — timeline preserved.
+            prior = FsrsStateWriter.seedFromLegacy(legacy);
+            lastReview = legacy.due().minusDays(Math.max(1, legacy.interval()))
                 .atStartOfDay(ZoneId.systemDefault()).toInstant();
         }
 

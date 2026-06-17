@@ -117,6 +117,16 @@ public class FsrsService {
         return Math.min(Math.max(d, 1.0), 10.0);
     }
 
+    /**
+     * Legacy migration helper: map an Obsidian-SR ease (≈130–400+) onto an FSRS
+     * difficulty (1–10), inverted — lower ease means the note was harder. Used to
+     * seed FSRS difficulty from legacy state so a migrated note keeps its rough
+     * timeline instead of resetting to neutral.
+     */
+    public static double easeToDifficulty(int ease) {
+        return clampDifficulty(11.0 - ease / 50.0);
+    }
+
     private static double clampStability(double s) {
         return Math.min(Math.max(s, STABILITY_MIN), MAX_INTERVAL_DAYS);
     }

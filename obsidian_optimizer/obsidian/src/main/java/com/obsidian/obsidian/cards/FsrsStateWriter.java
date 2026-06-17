@@ -38,6 +38,34 @@ public class FsrsStateWriter {
         this.fileRepo = fileRepo;
     }
 
+    /**
+     * Seed FSRS state from legacy Obsidian-SR fields without resetting progress:
+     * stability ≈ sr-interval (at 0.9 retention interval ≈ stability), difficulty
+     * mapped from ease. Pure — callers decide whether/how to persist it.
+     */
+    public static FsrsState seedFromLegacy(FrontmatterRewriter.SrFields legacy) {
+        return new FsrsState(Math.max(1, legacy.interval()),
+            FsrsService.easeToDifficulty(legacy.ease()));
+    }
+
+    /**
+     * On-demand legacy → FSRS migration for one note, schedule preserved (no
+     * reschedule, no reset). No-op if the note already has FSRS state; returns
+     * null if it has no sr-frontmatter to migrate. Writes DB + frontmatter so the
+     * nightly chrono run treats the note as already-current.
+     */
+    public ReviewRow normalizeLegacy(String notePath) {
+        ReviewRow existing = read(notePath);
+        if (existing != null) return existing;  // already FSRS
+        FrontmatterRewriter.SrFields legacy = FrontmatterRewriter.read(Paths.get(notePath));
+        if (legacy == null) return null;         // not a review note
+        FsrsState seeded = seedFromLegacy(legacy);
+        Instant lastReview = legacy.due().minusDays(Math.max(1, legacy.interval()))
+            .atStartOfDay(ZoneId.systemDefault()).toInstant();
+        writeState(notePath, seeded, lastReview, legacy.due(), legacy.interval());
+        return read(notePath);
+    }
+
     /** DB first; hydrate from the frontmatter mirror (and backfill the DB) on a miss. */
     public ReviewRow read(String notePath) {
         ReviewRow row = reviewRepo.find(notePath);

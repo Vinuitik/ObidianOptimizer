@@ -102,7 +102,8 @@ class BankruptcyServiceTest {
         assertThat(fsrs).isNotNull();                          // joined the FSRS world
         assertThat(fsrs.stability()).isLessThan(20.0);         // forget collapsed memory
         assertThat(fsrs.interval()).isLessThanOrEqualTo(20);   // shorter next interval
-        assertThat(fsrs.difficulty()).isGreaterThan(BankruptcyService.SEED_DIFFICULTY); // harder now
+        // seeded difficulty from ease 250 is 6.0; the lapse raises it further
+        assertThat(fsrs.difficulty()).isGreaterThan(6.0);
         assertThat(FrontmatterRewriter.read(f).ease()).isEqualTo(250);  // legacy ease untouched
     }
 

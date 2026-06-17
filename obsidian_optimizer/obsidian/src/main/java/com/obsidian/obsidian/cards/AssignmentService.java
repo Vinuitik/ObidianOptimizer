@@ -53,20 +53,28 @@ public class AssignmentService {
 
     private final AssignmentRepository repo;
     private final ReviewService reviewService;
+    private final ReviewPreparationService reviewPrep;
     private final ObjectMapper mapper = new ObjectMapper();
     // HTTP_1_1: uvicorn embedder can't do the JDK client's default h2c upgrade,
     // which drops POST bodies (422). See ResourceScanService for the full detail.
     private final HttpClient http = HttpClient.newBuilder()
         .version(HttpClient.Version.HTTP_1_1).build();
 
-    public AssignmentService(AssignmentRepository repo, ReviewService reviewService) {
+    public AssignmentService(AssignmentRepository repo, ReviewService reviewService,
+                             ReviewPreparationService reviewPrep) {
         this.repo = repo;
         this.reviewService = reviewService;
+        this.reviewPrep = reviewPrep;
     }
 
     // ── Build ─────────────────────────────────────────────────────────────────
 
     public Map<String, Object> build(String scope, int requestedCap) {
+        // On-demand: if this is a single note the background jobs haven't reached
+        // yet (legacy state / no cards / not embedded), bring it up to date now so
+        // the session has cards to draw. No-op for folders and prepared notes.
+        reviewPrep.prepare(scope);
+
         List<String> notes = repo.notesInScope(scope);
         if (notes.isEmpty()) {
             throw new IllegalArgumentException("no active cards in scope: " + scope);

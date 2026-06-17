@@ -212,6 +212,13 @@ public class NoteIndexRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    /** Frontmatter-stripped hash — the key the card worker diffs on (see findNotesNeedingCards). */
+    public String getBodyHash(String path) {
+        List<String> rows = jdbc.queryForList(
+            "SELECT body_hash FROM notes WHERE path = ?", String.class, path);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     public List<Map<String, Object>> getAllPathsWithHash() {
         return jdbc.queryForList("SELECT path, content_hash FROM notes WHERE content_hash IS NOT NULL");
     }
