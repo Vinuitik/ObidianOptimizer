@@ -95,6 +95,36 @@ public class AssignmentRepository {
             """, String.class, scope, scope + "/%");
     }
 
+    /** Distinct notes with active cards under a scope (single note path or folder prefix). */
+    public List<String> notesInScope(String scope) {
+        return jdbc.queryForList("""
+            SELECT DISTINCT note_path FROM cards
+            WHERE status = 'ACTIVE' AND (note_path = ? OR note_path LIKE ?)
+            ORDER BY note_path
+            """, String.class, scope, scope + "/%");
+    }
+
+    /**
+     * Bag draw within one difficulty tier of one note: a random not-yet-drawn
+     * card whose difficulty is in [minDiff, maxDiff], excluding ids already
+     * picked this session (so a mid-session bag refill can't repeat a card).
+     * Marks it drawn. Null if the tier bag is empty at this cycle.
+     */
+    public Map<String, Object> drawCardInTier(String notePath, int minDiff, int maxDiff,
+                                               int cycle, UUID[] excludeIds) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+            SELECT id, note_path, type, payload, difficulty FROM cards
+            WHERE status = 'ACTIVE' AND note_path = ?
+              AND difficulty BETWEEN ? AND ?
+              AND drawn_cycle < ?
+              AND NOT (id = ANY (?))
+            ORDER BY random() LIMIT 1
+            """, notePath, minDiff, maxDiff, cycle, excludeIds);
+        if (rows.isEmpty()) return null;
+        jdbc.update("UPDATE cards SET drawn_cycle = ? WHERE id = ?", cycle, rows.get(0).get("id"));
+        return rows.get(0);
+    }
+
     // ── Assignments / attempts ────────────────────────────────────────────────
 
     public UUID insertAssignment(String scope, int target, int actual,

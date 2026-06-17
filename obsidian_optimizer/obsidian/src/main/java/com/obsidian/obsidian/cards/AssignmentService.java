@@ -19,17 +19,34 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Deterministic session layer: point-budget assignments over bag draws,
- * answer verification, and completion → per-note scores → ReviewService.
+ * Deterministic session layer: per-note tiered-knapsack assignments over bag
+ * draws, answer verification, and completion → per-note scores → ReviewService.
  *
- * Points per card = its difficulty (1-5). Fixed budget + bag coverage keep
- * scores comparable across sessions on the same scope — that comparability
- * is what makes the FSRS grade bands meaningful.
+ * Selection guarantees difficulty coverage — basic / mid / advanced — per note,
+ * capped so a test stays short. Because every note's score is computed over a
+ * representative spread (not a random budget-greedy sample), the per-note
+ * fraction maps cleanly onto an FSRS band. Points per card still = difficulty
+ * (1-5), so advanced cards naturally weigh more in the score.
  */
 @Service
 public class AssignmentService {
 
     private static final Logger log = LoggerFactory.getLogger(AssignmentService.class);
+
+    /** Difficulty tiers (inclusive). A note's test covers each tier it has cards in. */
+    enum Tier {
+        BASIC("basic", 1, 2), MID("mid", 3, 3), ADVANCED("advanced", 4, 5);
+        final String label; final int min, max;
+        Tier(String label, int min, int max) { this.label = label; this.min = min; this.max = max; }
+        static Tier of(int difficulty) {
+            for (Tier t : values()) if (difficulty >= t.min && difficulty <= t.max) return t;
+            return ADVANCED;  // difficulty > 5 shouldn't happen; clamp into advanced
+        }
+    }
+
+    static final int MAX_PER_TIER       = 2;   // at most this many cards per tier per note
+    static final int MAX_CARDS_PER_NOTE = 6;   // hard cap so a single-note test stays short
+    static final int SESSION_MAX_CARDS  = 30;  // folder-scope safety cap across all notes
 
     @Value("${embedder.url:http://localhost:8000}")
     private String embedderUrl;
@@ -49,54 +66,27 @@ public class AssignmentService {
 
     // ── Build ─────────────────────────────────────────────────────────────────
 
-    public Map<String, Object> build(String scope, int targetPoints) {
-        List<String> types = repo.typesInScope(scope);
-        if (types.isEmpty()) {
+    public Map<String, Object> build(String scope, int requestedCap) {
+        List<String> notes = repo.notesInScope(scope);
+        if (notes.isEmpty()) {
             throw new IllegalArgumentException("no active cards in scope: " + scope);
         }
+        int sessionCap = requestedCap > 0 ? requestedCap : SESSION_MAX_CARDS;
 
         List<Map<String, Object>> picked = new ArrayList<>();
         ObjectNode variants = mapper.createObjectNode();
-        int budget = targetPoints;
-
-        // Greedy round-robin across types; each (scope,type) bag refills via cycle bump.
-        int typeIdx = 0, exhaustedStreak = 0;
-        while (budget >= 1 && exhaustedStreak < types.size() * 2) {
-            String type = types.get(typeIdx % types.size());
-            typeIdx++;
-            int cycle = repo.currentCycle(scope, type);
-            // final slot: try to land exactly on the remaining budget
-            Integer exact = budget <= 5 ? budget : null;
-            Map<String, Object> card = repo.drawCard(scope, type, cycle, exact);
-            if (card == null && exact != null) {
-                card = repo.drawCard(scope, type, cycle, null);   // closest available
-            }
-            if (card == null) {
-                repo.advanceCycle(scope, type);                    // bag refilled
-                card = repo.drawCard(scope, type, repo.currentCycle(scope, type), null);
-            }
-            if (card == null) {                                    // type truly empty
-                exhaustedStreak++;
-                continue;
-            }
-            exhaustedStreak = 0;
-            int difficulty = ((Number) card.get("difficulty")).intValue();
-            if (difficulty > budget && !picked.isEmpty()) {
-                continue;  // overshoot guard — try another type for the remainder
-            }
-            if ("exercise".equals(card.get("type")) && !rollExercise(card, variants)) {
-                continue;  // unrollable exercise (embedder down / bad card) — skip it
-            }
-            picked.add(card);
-            budget -= difficulty;
+        for (String note : notes) {
+            if (picked.size() >= sessionCap) break;
+            int noteCap = Math.min(MAX_CARDS_PER_NOTE, sessionCap - picked.size());
+            pickForNote(note, noteCap, picked, variants);
         }
 
         if (picked.isEmpty()) {
             throw new IllegalArgumentException("could not fill assignment for scope: " + scope);
         }
-        int actual = targetPoints - budget;
+        int actual = picked.stream().mapToInt(c -> ((Number) c.get("difficulty")).intValue()).sum();
         UUID[] ids = picked.stream().map(c -> (UUID) c.get("id")).toArray(UUID[]::new);
-        UUID id = repo.insertAssignment(scope, targetPoints, actual, ids, variants.toString());
+        UUID id = repo.insertAssignment(scope, requestedCap, actual, ids, variants.toString());
         // payload arrives as PGobject — hand the frontend parsed JSON, not a JDBC wrapper
         for (Map<String, Object> c : picked) {
             try {
@@ -105,10 +95,54 @@ public class AssignmentService {
                 log.warn("[Assignment] unparseable payload on card {}", c.get("id"));
             }
         }
-        log.info("[Assignment] built {} scope={} cards={} points={}/{}",
-            id, scope, picked.size(), actual, targetPoints);
-        return Map.of("id", id, "scope", scope, "targetPoints", targetPoints,
+        log.info("[Assignment] built {} scope={} notes={} cards={} points={}",
+            id, scope, notes.size(), picked.size(), actual);
+        return Map.of("id", id, "scope", scope, "targetPoints", requestedCap,
             "actualPoints", actual, "cards", picked, "variants", variants);
+    }
+
+    /**
+     * Tiered knapsack for one note: first one card from each tier it has
+     * (coverage), then fill round-robin up to MAX_PER_TIER / the note cap.
+     */
+    private void pickForNote(String note, int cap, List<Map<String, Object>> picked, ObjectNode variants) {
+        List<Map<String, Object>> noteCards = new ArrayList<>();
+
+        // Pass 1 — coverage: one card from each tier present.
+        for (Tier t : Tier.values()) {
+            if (noteCards.size() >= cap) break;
+            drawOne(note, t, picked, noteCards, variants);
+        }
+        // Pass 2 — fill: round-robin tiers up to MAX_PER_TIER until the cap or no progress.
+        boolean progress = true;
+        while (noteCards.size() < cap && progress) {
+            progress = false;
+            for (Tier t : Tier.values()) {
+                if (noteCards.size() >= cap) break;
+                long inTier = noteCards.stream()
+                    .filter(c -> Tier.of(((Number) c.get("difficulty")).intValue()) == t).count();
+                if (inTier >= MAX_PER_TIER) continue;
+                if (drawOne(note, t, picked, noteCards, variants)) progress = true;
+            }
+        }
+        picked.addAll(noteCards);
+    }
+
+    /** Draw one card from a note's tier bag (refilling once if exhausted), roll exercises. */
+    private boolean drawOne(String note, Tier tier, List<Map<String, Object>> sessionPicked,
+                            List<Map<String, Object>> noteCards, ObjectNode variants) {
+        UUID[] exclude = java.util.stream.Stream.concat(sessionPicked.stream(), noteCards.stream())
+            .map(c -> (UUID) c.get("id")).toArray(UUID[]::new);
+        int cycle = repo.currentCycle(note, tier.label);
+        Map<String, Object> card = repo.drawCardInTier(note, tier.min, tier.max, cycle, exclude);
+        if (card == null) {                                  // bag exhausted — refill once
+            repo.advanceCycle(note, tier.label);
+            card = repo.drawCardInTier(note, tier.min, tier.max, repo.currentCycle(note, tier.label), exclude);
+        }
+        if (card == null) return false;                      // tier truly empty for this note
+        if ("exercise".equals(card.get("type")) && !rollExercise(card, variants)) return false;
+        noteCards.add(card);
+        return true;
     }
 
     /** Roll the variant NOW and freeze params + expected answer into the assignment. */
