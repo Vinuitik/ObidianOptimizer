@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.notes;
 
+import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.sync.SyncQueueRepository;
@@ -195,7 +196,7 @@ public class FileRepository {
         noteIndex.upsert(path, name.replace(".md", ""), meta, noteFile.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(initialContent));
         imageScanService.registerImages(path, initialContent);
-        syncQueueRepo.markPending(toRelative(path), ImageScanService.sha256(initialContent));
+        syncQueueRepo.markPending(toRelative(path), ContentHashing.sha256(initialContent));
         return path;
     }
 
@@ -210,7 +211,7 @@ public class FileRepository {
         noteIndex.upsert(path, title, meta, file.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
         imageScanService.registerImages(path, content);
-        syncQueueRepo.markPending(toRelative(path), ImageScanService.sha256(content));
+        syncQueueRepo.markPending(toRelative(path), ContentHashing.sha256(content));
     }
 
     public void patchNote(String path, List<PatchHunk> hunks) throws IOException {
@@ -250,7 +251,7 @@ public class FileRepository {
         noteIndex.upsert(path, title, meta, file.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(newContent));
         imageScanService.registerImages(path, newContent);
-        syncQueueRepo.markPending(toRelative(path), ImageScanService.sha256(newContent));
+        syncQueueRepo.markPending(toRelative(path), ContentHashing.sha256(newContent));
     }
 
     public String renameNote(String oldPath, String newName) throws IOException {
@@ -287,7 +288,7 @@ public class FileRepository {
                     // hash current and queue them for Drive sync, or the Drive copy
                     // stays stale until the next unrelated edit.
                     imageScanService.registerImages(sourcePath, updated);
-                    syncQueueRepo.markPending(toRelative(sourcePath), ImageScanService.sha256(updated));
+                    syncQueueRepo.markPending(toRelative(sourcePath), ContentHashing.sha256(updated));
                 }
             } catch (IOException e) {
                 log.warn("[renameNote] failed to rewrite links in {}: {}", sourcePath, e.getMessage());
@@ -300,7 +301,7 @@ public class FileRepository {
         syncQueueRepo.delete(toRelative(oldPath));
         try {
             String content = Files.readString(Paths.get(newPath));
-            syncQueueRepo.markPending(toRelative(newPath), ImageScanService.sha256(content));
+            syncQueueRepo.markPending(toRelative(newPath), ContentHashing.sha256(content));
         } catch (IOException e) {
             log.warn("[renameNote] sync queue update failed for {}: {}", newPath, e.getMessage());
         }
@@ -335,7 +336,7 @@ public class FileRepository {
         syncQueueRepo.delete(toRelative(sourcePath));
         try {
             String content = Files.readString(newPath);
-            syncQueueRepo.markPending(toRelative(newAbsPath), ImageScanService.sha256(content));
+            syncQueueRepo.markPending(toRelative(newAbsPath), ContentHashing.sha256(content));
         } catch (IOException e) {
             log.warn("[moveNote] sync queue update failed for {}: {}", newAbsPath, e.getMessage());
         }
@@ -381,7 +382,7 @@ public class FileRepository {
             FrontmatterParser.parse(content), file.lastModified());
         noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
         imageScanService.registerImages(path, content);
-        syncQueueRepo.markPending(toRelative(path), ImageScanService.sha256(content));
+        syncQueueRepo.markPending(toRelative(path), ContentHashing.sha256(content));
     }
 
     // ── Path guards ───────────────────────────────────────────────────────────

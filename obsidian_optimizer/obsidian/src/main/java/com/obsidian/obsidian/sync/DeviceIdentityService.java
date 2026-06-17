@@ -1,6 +1,6 @@
 package com.obsidian.obsidian.sync;
 
-import com.obsidian.obsidian.ml.ImageScanService;
+import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,16 +45,16 @@ public class DeviceIdentityService {
                 if (ni.isLoopback() || !ni.isUp()) continue;
                 byte[] mac = ni.getHardwareAddress();
                 if (mac != null && mac.length > 0) {
-                    return ImageScanService.sha256(HexFormat.of().formatHex(mac)).substring(0, 16);
+                    return ContentHashing.sha256(HexFormat.of().formatHex(mac)).substring(0, 16);
                 }
             }
         } catch (Exception e) {
             log.warn("[DeviceIdentityService] MAC lookup failed, falling back to hostname: {}", e.getMessage());
         }
         try {
-            return ImageScanService.sha256(InetAddress.getLocalHost().getHostName()).substring(0, 16);
+            return ContentHashing.sha256(InetAddress.getLocalHost().getHostName()).substring(0, 16);
         } catch (Exception e) {
-            return ImageScanService.sha256("unknown-device").substring(0, 16);
+            return ContentHashing.sha256("unknown-device").substring(0, 16);
         }
     }
 }

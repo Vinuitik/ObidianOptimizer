@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.chrono;
 
+import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
@@ -114,7 +115,7 @@ public class ChronoService {
             String absPath = mdPath.toAbsolutePath().toString();
             try {
                 String content = Files.readString(mdPath);
-                String newHash = ImageScanService.sha256(content);
+                String newHash = ContentHashing.sha256(content);
                 String storedHash = noteIndex.getContentHash(absPath);
                 if (!newHash.equals(storedHash)) {
                     imageScanService.registerImages(absPath, content);

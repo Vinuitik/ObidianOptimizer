@@ -2,6 +2,7 @@ package com.obsidian.obsidian.ml;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.obsidian.obsidian.common.ContentHashing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -68,7 +69,7 @@ public class EmbeddingService {
         List<NoteChunk> changed = new ArrayList<>();
         List<String> changedHashes = new ArrayList<>();
         for (NoteChunk chunk : chunks) {
-            String newHash = ImageScanService.sha256(chunk.getText());
+            String newHash = ContentHashing.sha256(chunk.getText());
             String storedHash = chunkRepo.getContentHash(path, "text", chunk.getChunkIndex());
             if (newHash.equals(storedHash)) {
                 continue;

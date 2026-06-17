@@ -1,6 +1,6 @@
 package com.obsidian.obsidian.media;
 
-import com.obsidian.obsidian.ml.ImageScanService;
+import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.sync.SyncQueueRepository;
 
@@ -93,7 +93,7 @@ public class MediaController {
         Files.createDirectories(targetDir);
         Files.write(targetDir.resolve(filename), bytes);
         String relPath = "resources/" + subdir + "/" + filename;
-        syncQueueRepo.markPending(relPath, ImageScanService.sha256(bytes));
+        syncQueueRepo.markPending(relPath, ContentHashing.sha256(bytes));
         log.info("[storeResourceBytes] saved {} ({} bytes)", relPath, bytes.length);
         return relPath;
     }
@@ -108,7 +108,7 @@ public class MediaController {
         try {
             byte[] bytes = Files.readAllBytes(targetDir.resolve(filename));
             String relPath = "resources/" + subdir + "/" + filename;
-            syncQueueRepo.markPending(relPath, ImageScanService.sha256(bytes));
+            syncQueueRepo.markPending(relPath, ContentHashing.sha256(bytes));
         } catch (Exception e) {
             log.warn("[upload] sync queue update failed for {}: {}", filename, e.getMessage());
         }

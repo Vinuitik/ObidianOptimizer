@@ -2,6 +2,7 @@ package com.obsidian.obsidian.ml;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.obsidian.obsidian.common.ContentHashing;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -190,7 +191,7 @@ public class ImageProcessingWorker {
         List<String> textChunks = splitImageText(extractedText);
         for (int i = 0; i < textChunks.size(); i++) {
             String chunk = textChunks.get(i);
-            String hash = ImageScanService.sha256(chunk);
+            String hash = ContentHashing.sha256(chunk);
             float[] embedding = embeddingService.embed(chunk);
 
             if (embedding != null) {

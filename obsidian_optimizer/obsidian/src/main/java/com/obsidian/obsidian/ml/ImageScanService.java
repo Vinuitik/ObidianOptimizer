@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.ml;
 
+import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,9 +9,6 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -63,8 +61,8 @@ public class ImageScanService {
         for (String ref : refs) {
             jobRepo.upsertPending(notePath, ref);
         }
-        String hash = sha256(content);
-        String bodyHash = sha256(MarkdownPreprocessor.stripFrontmatter(content));
+        String hash = ContentHashing.sha256(content);
+        String bodyHash = ContentHashing.sha256(MarkdownPreprocessor.stripFrontmatter(content));
         noteIndexRepo.updateContentHash(notePath, hash, bodyHash);
         // Same chokepoint, second job: trigger in-place ingest of any A/V or
         // PDF embeds in this note (best-effort, off-thread — never blocks).
@@ -81,16 +79,4 @@ public class ImageScanService {
         return refs;
     }
 
-    public static String sha256(String content) {
-        return sha256(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-    }
-
-    public static String sha256(byte[] bytes) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(bytes));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
-    }
 }

@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.sync;
 
+import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.notes.NoteLinkRepository;
@@ -87,7 +88,7 @@ class SyncServiceTest {
     void uploadsPendingNoteAndMarksDoneWithQueueTimeHash() throws Exception {
         String content = "# hello sync";
         writeVaultFile("folder/note.md", content);
-        String actualHash = ImageScanService.sha256(
+        String actualHash = ContentHashing.sha256(
             content.getBytes(StandardCharsets.UTF_8));
         when(queueRepo.findByStatus("PENDING"))
             .thenReturn(List.of(pending("folder/note.md", actualHash)));
@@ -109,7 +110,7 @@ class SyncServiceTest {
         // note edited after it was queued: file content no longer matches queue hash
         writeVaultFile("note.md", "edited content");
         String staleQueueHash  = "stale-hash";
-        String actualHash = ImageScanService.sha256(
+        String actualHash = ContentHashing.sha256(
             "edited content".getBytes(StandardCharsets.UTF_8));
         when(queueRepo.findByStatus("PENDING"))
             .thenReturn(List.of(pending("note.md", staleQueueHash)));
@@ -175,7 +176,7 @@ class SyncServiceTest {
     @Test
     void downloadWritesNewNoteAndUpdatesIndex() throws Exception {
         String content = "# from another device\n[[Linked Note]]";
-        String hash = ImageScanService.sha256(content);
+        String hash = ContentHashing.sha256(content);
         when(drive.listAllFiles()).thenReturn(List.of(driveFile("new.md", hash)));
         when(drive.downloadFile("fid-new.md"))
             .thenReturn(content.getBytes(StandardCharsets.UTF_8));
@@ -195,7 +196,7 @@ class SyncServiceTest {
         String content = "identical";
         writeVaultFile("same.md", content);
         when(drive.listAllFiles())
-            .thenReturn(List.of(driveFile("same.md", ImageScanService.sha256(content))));
+            .thenReturn(List.of(driveFile("same.md", ContentHashing.sha256(content))));
 
         service.downloadAll();
 
@@ -233,7 +234,7 @@ class SyncServiceTest {
     @Test
     void downloadWritesResourceBytesWithoutIndexing() throws Exception {
         byte[] png = {(byte) 0x89, 'P', 'N', 'G'};
-        String hash = ImageScanService.sha256(png);
+        String hash = ContentHashing.sha256(png);
         when(drive.listAllFiles())
             .thenReturn(List.of(driveFile("resources/images/pic.png", hash)));
         when(drive.downloadFile("fid-resources/images/pic.png")).thenReturn(png);
@@ -249,7 +250,7 @@ class SyncServiceTest {
     @Test
     void downloadFailureOnOneFileDoesNotStopTheBatch() throws Exception {
         String good = "good content";
-        String goodHash = ImageScanService.sha256(good);
+        String goodHash = ContentHashing.sha256(good);
         when(drive.listAllFiles()).thenReturn(List.of(
             driveFile("broken.md", "h-broken"),
             driveFile("good.md", goodHash)));
@@ -302,7 +303,7 @@ class SyncServiceTest {
         service.initialScan();
 
         verify(queueRepo).markPending("resources/images/x.png",
-            ImageScanService.sha256(bytes));
+            ContentHashing.sha256(bytes));
     }
 
     // ── toRelative ────────────────────────────────────────────────────────

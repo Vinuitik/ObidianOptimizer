@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.sync;
 
+import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.notes.FrontmatterParser;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
@@ -95,7 +96,7 @@ public class SyncService {
                     .forEach(p -> {
                         try {
                             byte[] bytes = Files.readAllBytes(p);
-                            String hash  = ImageScanService.sha256(bytes);
+                            String hash  = ContentHashing.sha256(bytes);
                             String rel   = toRelative(vaultRoot, p.toString());
                             SyncEntry existing = syncQueueRepo.findByPath(rel);
                             if (existing == null || !hash.equals(existing.contentHash()) || !"DONE".equals(existing.status())) {
@@ -143,7 +144,7 @@ public class SyncService {
 
                 // Hash what was actually read — Drive metadata must describe the
                 // uploaded bytes, not the (possibly stale) hash from queue time.
-                String actualHash = ImageScanService.sha256(plaintext);
+                String actualHash = ContentHashing.sha256(plaintext);
                 String driveFileId = driveService.uploadFile(
                     entry.path(), encrypted, actualHash, deviceId, entry.driveFileId());
 
@@ -233,9 +234,9 @@ public class SyncService {
     private String computeLocalHash(String absPath, String relativePath) {
         try {
             if (relativePath.endsWith(".md")) {
-                return ImageScanService.sha256(Files.readString(Paths.get(absPath)));
+                return ContentHashing.sha256(Files.readString(Paths.get(absPath)));
             }
-            return ImageScanService.sha256(Files.readAllBytes(Paths.get(absPath)));
+            return ContentHashing.sha256(Files.readAllBytes(Paths.get(absPath)));
         } catch (IOException e) {
             return ""; // file doesn't exist locally yet
         }
