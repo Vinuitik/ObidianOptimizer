@@ -1,7 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
-import { fetchChronoStatus, runChronoNow } from '../api/notes';
+import {
+  fetchChronoStatus, runChronoNow,
+  fetchChildren, fetchHostChildren, fetchVaultHostPath, saveVaultHostPath, pingHealth,
+} from '../api/notes';
+import FolderPicker from '../components/organisms/FolderPicker';
 import styles from './SettingsPage.module.css';
+
+const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
+const dirName  = p => p.replace(/[/\\]+$/, '').replace(/[/\\][^/\\]*$/, '');
 
 // ── Section config ────────────────────────────────────────────────────────────
 // To add a new setting: add an entry to the relevant section's `fields` array,
@@ -9,22 +16,16 @@ import styles from './SettingsPage.module.css';
 
 const SECTIONS = [
   {
-    id: 'vault',
-    title: 'Vault',
-    description: 'Paths to your Obsidian vault and attachments. Changing the vault path will re-index all note links.',
+    id: 'paths',
+    title: 'Resources',
+    description: 'Where attachments live inside your vault. Browse to pick a folder instead of typing the path.',
     fields: [
-      {
-        key: 'vaultPath',
-        label: 'Vault folder',
-        type: 'path',
-        placeholder: 'C:/Users/you/MyVault',
-        hint: 'Root directory of your Obsidian vault.',
-      },
       {
         key: 'resourcePath',
         label: 'Resources folder',
         type: 'path',
-        placeholder: 'C:/Users/you/MyVault/resources/images',
+        browse: 'vault',
+        placeholder: '/vault/resources/images',
         hint: 'Where images and other attachments are stored.',
       },
     ],
@@ -128,6 +129,13 @@ export default function SettingsPage() {
   const [chronoResult,  setChronoResult]  = useState(null);
   const [chronoError,   setChronoError]   = useState(null);
 
+  // Folder picker + vault-switch (host filesystem)
+  const [picker, setPicker]         = useState(null); // props passed straight to <FolderPicker>
+  const [vaultRoot, setVaultRoot]   = useState(null); // container root, caps the in-vault picker
+  const [hostPath, setHostPath]     = useState(null); // HOST_VAULT_PATH from .env
+  const [hostError, setHostError]   = useState(false);
+  const [recreating, setRecreating] = useState(false);
+
   // Initialise drafts from store once settings load
   useEffect(() => {
     if (!settings.vaultPath) return;
@@ -148,6 +156,65 @@ export default function SettingsPage() {
       .then(setChronoStatus)
       .catch(() => {});
   }, []);
+
+  // Learn the vault root (caps the in-vault picker) and the real host path.
+  useEffect(() => {
+    fetchChildren(null).then(r => setVaultRoot(r.parentPath)).catch(() => {});
+    fetchVaultHostPath()
+      .then(r => setHostPath(r.path))
+      .catch(() => setHostError(true));
+  }, []);
+
+  // ── Folder pickers ──────────────────────────────────────────────────────────
+
+  // Browse inside the mounted vault (for the resources folder). Never climbs
+  // above the vault root.
+  const loadVaultDir = useCallback(async (path) => {
+    const r = await fetchChildren(path);
+    const current = r.parentPath;
+    const parent  = (!vaultRoot || current === vaultRoot) ? null : dirName(current);
+    return { current, parent, dirs: r.folderPaths.map(p => ({ path: p, name: baseName(p) })) };
+  }, [vaultRoot]);
+
+  // Browse the real host filesystem (for the vault root) via the host-wrapper.
+  const loadHostDir = useCallback(async (path) => {
+    const r = await fetchHostChildren(path);
+    return { current: r.path, parent: r.parent ?? null, dirs: r.dirs };
+  }, []);
+
+  function openResourcePicker(sectionId, key, value) {
+    setPicker({
+      title: 'Select resources folder',
+      loadPath: loadVaultDir,
+      initialPath: value || null,
+      onSelect: (p) => { setField(sectionId, key, p); setPicker(null); },
+      onClose: () => setPicker(null),
+    });
+  }
+
+  function openVaultPicker() {
+    setPicker({
+      title: 'Select your vault folder',
+      loadPath: loadHostDir,
+      initialPath: hostPath || null,
+      confirmLabel: 'Switch vault & restart',
+      note: 'Switching the vault recreates the backend containers so the new folder can be mounted. The app will be unavailable for a few seconds and then reload.',
+      onSelect: switchVault,
+      onClose: () => setPicker(null),
+    });
+  }
+
+  async function switchVault(path) {
+    setPicker(null);
+    setRecreating(true);
+    try {
+      await saveVaultHostPath(path);
+      setHostPath(path);
+    } catch {
+      // The recreate may tear the backend down before it answers — that's fine,
+      // the overlay polls health and reloads once it returns.
+    }
+  }
 
   function setField(sectionId, key, value) {
     setDrafts(prev => ({
@@ -230,6 +297,46 @@ export default function SettingsPage() {
       </div>
 
       <div className={styles.sections}>
+        {/* Vault root — lives in .env / the Docker mount, switched via the host
+            picker which recreates the backend. Not a normal saveable field. */}
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>Vault</h2>
+            <p className={styles.sectionDesc}>
+              The folder on your computer the app reads and writes. Switching it remounts and
+              restarts the backend automatically.
+            </p>
+          </div>
+          <div className={styles.fields}>
+            <div className={styles.field}>
+              <div className={styles.fieldMeta}>
+                <label className={styles.label}>Vault folder</label>
+                <span className={styles.hint}>
+                  {hostError
+                    ? 'Folder picker unavailable — the host helper (started by start.ps1) is not reachable.'
+                    : 'The location on your machine mounted into the app.'}
+                </span>
+              </div>
+              <div className={styles.pathRow}>
+                <input
+                  className={`${styles.input} ${styles.inputPath}`}
+                  value={hostPath ?? ''}
+                  readOnly
+                  placeholder={hostError ? 'unavailable' : 'Loading…'}
+                />
+                <button
+                  type="button"
+                  className={styles.browseBtn}
+                  disabled={hostError || hostPath == null}
+                  onClick={openVaultPicker}
+                >
+                  Browse…
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {SECTIONS.map(section => {
 
           const st   = status[section.id] ?? 'idle';
@@ -259,6 +366,7 @@ export default function SettingsPage() {
                       disabled={!loaded}
                       onChange={val => setField(section.id, field.key, val)}
                       onEnter={() => saveSection(section)}
+                      onBrowse={() => openResourcePicker(section.id, field.key, drafts[section.id]?.[field.key] ?? '')}
                     />
                   </div>
                 ))}
@@ -352,13 +460,49 @@ export default function SettingsPage() {
         </div>
 
       </div>
+
+      {picker && <FolderPicker {...picker} />}
+      {recreating && <RecreatingOverlay />}
+    </div>
+  );
+}
+
+// ── Vault recreation overlay ────────────────────────────────────────────────────
+// Blocks the UI while `docker compose up -d` recreates the backend, polling until
+// it returns, then reloads. Falls back to reloading after a grace period in case
+// the down-window was missed (or no recreate was needed).
+
+function RecreatingOverlay() {
+  useEffect(() => {
+    let cancelled = false;
+    let sawDown = false;
+    let ticks = 0;
+    const id = setInterval(async () => {
+      ticks += 1;
+      const ok = await pingHealth();
+      if (cancelled) return;
+      if (!ok) { sawDown = true; return; }
+      if (sawDown || ticks >= 15) { clearInterval(id); window.location.reload(); }
+    }, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  return (
+    <div className={styles.recreateOverlay}>
+      <div className={styles.recreateBox}>
+        <div className={styles.spinner} />
+        <p className={styles.recreateText}>Switching vault &amp; restarting…</p>
+        <p className={styles.recreateSub}>
+          Reconnecting once the backend is back. This page reloads automatically.
+        </p>
+      </div>
     </div>
   );
 }
 
 // ── Field input ───────────────────────────────────────────────────────────────
 
-function FieldInput({ id, field, value, disabled, onChange, onEnter }) {
+function FieldInput({ id, field, value, disabled, onChange, onEnter, onBrowse }) {
   function handleKey(e) {
     if (e.key === 'Enter') onEnter();
   }
@@ -395,7 +539,7 @@ function FieldInput({ id, field, value, disabled, onChange, onEnter }) {
     );
   }
 
-  return (
+  const input = (
     <input
       id={id}
       type="text"
@@ -406,5 +550,21 @@ function FieldInput({ id, field, value, disabled, onChange, onEnter }) {
       onChange={e => onChange(e.target.value)}
       onKeyDown={handleKey}
     />
+  );
+
+  if (!field.browse) return input;
+
+  return (
+    <div className={styles.pathRow}>
+      {input}
+      <button
+        type="button"
+        className={styles.browseBtn}
+        disabled={disabled}
+        onClick={onBrowse}
+      >
+        Browse…
+      </button>
+    </div>
   );
 }

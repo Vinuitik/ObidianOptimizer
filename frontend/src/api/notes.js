@@ -146,6 +146,49 @@ export async function saveSettings(patch) {
   return res.json();
 }
 
+// ── Host filesystem (for the vault folder picker) ────────────────────────────
+// These proxy the host-wrapper (runs outside Docker) so the UI can browse the
+// real machine's drives and switch which folder is mounted as the vault.
+
+// Returns { path, parent, dirs: [{ path, name }] }. path=null/'' lists drive roots.
+export async function fetchHostChildren(path) {
+  const url = path
+    ? `${BASE}/host/fs?path=${encodeURIComponent(path)}`
+    : `${BASE}/host/fs`;
+  const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+  if (!res.ok) throw new ApiError(res.status);
+  return res.json();
+}
+
+// Returns { path } — the current HOST_VAULT_PATH from .env.
+export async function fetchVaultHostPath() {
+  const res = await fetch(`${BASE}/host/vault`, { cache: 'no-store' });
+  if (!res.ok) throw new ApiError(res.status);
+  return res.json();
+}
+
+// Writes HOST_VAULT_PATH to .env and triggers a detached `docker compose up -d`
+// to recreate the mounted services. Returns { path, recreating }.
+export async function saveVaultHostPath(path) {
+  const res = await req(`${BASE}/host/vault`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  return res.json();
+}
+
+// Liveness probe used while the backend is being recreated. /settings is public
+// and cheap, so a 200 means the backend has finished coming back up.
+export async function pingHealth() {
+  try {
+    const res = await fetch(`${BASE}/settings`, { cache: 'no-store' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ── Upload ───────────────────────────────────────────────────────────────────
 
 // Returns { filename, url }.

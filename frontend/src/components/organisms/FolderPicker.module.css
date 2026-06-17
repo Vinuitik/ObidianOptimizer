@@ -1,0 +1,146 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: var(--sp-4);
+}
+
+.modal {
+  background: var(--color-card);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.title {
+  font-family: var(--font-heading);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-text);
+}
+
+.close {
+  background: none;
+  border: none;
+  color: var(--color-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 var(--sp-1);
+}
+.close:hover { color: var(--color-text); }
+
+.note {
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--color-text-2);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.up {
+  flex-shrink: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm2);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  padding: 4px var(--sp-3);
+  cursor: pointer;
+}
+.up:hover:not(:disabled) { border-color: var(--color-border-hover); }
+.up:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.current {
+  min-width: 0;
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;     /* keep the tail (the folder you're in) visible */
+  text-align: left;
+}
+
+.list {
+  max-height: 320px;
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-5);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.row:hover { background: var(--color-surface); }
+
+.folderIcon { font-size: var(--text-sm); flex-shrink: 0; }
+
+.name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chev { color: var(--color-muted); flex-shrink: 0; }
+
+.empty, .error {
+  padding: var(--sp-5);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  text-align: center;
+}
+.error { color: var(--color-danger); }
+
+.actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.disabled { opacity: 0.4; pointer-events: none; }

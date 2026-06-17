@@ -105,12 +105,9 @@ services:
 
   frontend:
     build: ./frontend
-    ports:
-      - "8083:80"     # redirects to https
-      - "8443:443"    # TLS edge
-      # 8081 (tunnel ingress) is deliberately NOT mapped — docker-network only
-    volumes:
-      - ./certs:/etc/nginx/certs:ro
+    # No host ports, no certs: the app is reachable ONLY through the Cloudflare
+    # tunnel (cloudflared container → frontend:8081 over the docker network).
+    # Cloudflare terminates real TLS at its edge. Nothing on localhost or the LAN.
     depends_on:
       - backend
 
