@@ -32,7 +32,7 @@ public class FileRepository {
 
     private static final Logger log = LoggerFactory.getLogger(FileRepository.class);
 
-    private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources");
+    private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources", "_workspace");
 
     private String ROOT_FILE;
 
