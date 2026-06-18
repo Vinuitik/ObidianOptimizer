@@ -120,6 +120,21 @@ function visit(tree, type, visitor) {
 
 export const obsidianImageRemark$ = $remark('obsidianImage', () => obsidianImageRemarkPlugin);
 
+// ── URL builder: resolves filename → nginx-served path (range requests work) ──
+
+function subdirFor(filename) {
+  const type = fileTypeFor(filename);
+  if (type === 'image') return 'images';
+  if (type === 'video') return 'videos';
+  if (type === 'audio') return 'audio';
+  if (type === 'pdf')   return 'pdf';
+  return 'files';
+}
+
+function mediaUrl(filename) {
+  return `/vault-media/${subdirFor(filename)}/${encodeURIComponent(filename)}`;
+}
+
 // ── $node: renders as appropriate element, serializes back to ![[...]] ────────
 
 export const obsidianImageNode$ = $node('obsidian_image', () => ({
@@ -131,7 +146,7 @@ export const obsidianImageNode$ = $node('obsidian_image', () => ({
   },
   toDOM(node) {
     const { filename } = node.attrs;
-    const src = pendingBlobRegistry.get(filename) ?? `/api/images/${encodeURIComponent(filename)}`;
+    const src = pendingBlobRegistry.get(filename) ?? mediaUrl(filename);
     const type = fileTypeFor(filename);
 
     if (type === 'video') {

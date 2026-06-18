@@ -6,69 +6,152 @@
   overflow: hidden;
 }
 
-.header {
+/* ── Type tabs ───────────────────────────────────────────────────────────── */
+
+.tabs {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  min-height: 48px;
 }
 
-.headerTitle {
-  font-family: var(--font-heading);
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.typeSelect {
-  font-family: var(--font-mono);
+.tab {
+  padding: 3px var(--sp-3);
+  font-family: var(--font-body);
   font-size: var(--text-xs);
   color: var(--color-text-2);
-  background: var(--color-card);
+  background: transparent;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  padding: var(--sp-1) var(--sp-2);
   cursor: pointer;
-  outline: none;
-  transition: border-color var(--ease-fast);
+  transition: background var(--ease-fast), color var(--ease-fast), border-color var(--ease-fast);
 }
 
-.typeSelect:hover,
-.typeSelect:focus { border-color: var(--color-accent-border); }
+.tab:hover { color: var(--color-text); border-color: var(--color-border-hover); }
 
-.placeholder {
+.tabActive {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+  border-color: var(--color-accent-border);
+}
+
+.tabActive:hover { background: var(--color-accent-dim); }
+
+/* ── Body: file list + viewer side by side ───────────────────────────────── */
+
+.body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ── File list (left strip) ──────────────────────────────────────────────── */
+
+.fileList {
+  width: 180px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+  overflow-y: auto;
+  padding: var(--sp-1) 0;
+}
+
+.status {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  padding: var(--sp-3) var(--sp-3);
+  line-height: var(--leading-normal);
+}
+
+.statusError {
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+  padding: var(--sp-3) var(--sp-3);
+}
+
+.fileRow {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  color: var(--color-text-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background var(--ease-fast), color var(--ease-fast);
+}
+
+.fileRow:hover { background: var(--color-card); color: var(--color-text); }
+
+.fileRowActive {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+}
+
+.fileRowActive:hover { background: var(--color-accent-dim); }
+
+/* ── Viewer (right pane) ─────────────────────────────────────────────────── */
+
+.viewer {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+}
+
+.emptyText {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  text-align: center;
+  max-width: 260px;
+  line-height: var(--leading-normal);
+}
+
+.videoViewer {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.audioViewer {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-3);
-  padding: var(--sp-7);
-  text-align: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
 }
 
-.placeholderIcon {
-  font-size: 48px;
-  line-height: 1;
-  opacity: 0.5;
-}
-
-.placeholderText {
-  font-family: var(--font-body);
+.audioName {
   font-size: var(--text-sm);
-  color: var(--color-muted);
+  color: var(--color-text);
+  text-align: center;
+  word-break: break-all;
 }
 
-.badge {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--color-accent-soft);
-  background: var(--color-accent-dim);
-  border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-sm);
-  padding: 2px var(--sp-2);
-  letter-spacing: 0.08em;
+.audioEl {
+  width: 100%;
+  max-width: 480px;
+}
+
+.pdfViewer {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
 }
