@@ -147,11 +147,39 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUns
       }
     }
 
+    function htmlLinksToMarkdown(html) {
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      div.querySelectorAll('a[href]').forEach(a => {
+        const href = a.getAttribute('href');
+        const text = a.textContent.trim();
+        if (href && text && !href.startsWith('#')) {
+          a.replaceWith(`[${text}](${href})`);
+        }
+      });
+      return div.textContent ?? '';
+    }
+
     function handlePaste(e) {
       const files = Array.from(e.clipboardData?.files ?? []);
-      if (!files.length) return;
+      if (files.length) {
+        e.preventDefault();
+        insertFiles(files);
+        return;
+      }
+
+      // Convert HTML hyperlinks to markdown [text](url) before ProseMirror sees the paste
+      const html = e.clipboardData?.getData('text/html');
+      if (!html || !html.includes('<a ')) return;
+      const converted = htmlLinksToMarkdown(html);
+      if (!converted) return;
       e.preventDefault();
-      insertFiles(files);
+      getInstance()?.action(ctx => {
+        const v = ctx.get(editorViewCtx);
+        if (!v) return;
+        const { state } = v;
+        v.dispatch(state.tr.replaceSelectionWith(state.schema.text(converted), false));
+      });
     }
 
     function handleDragOver(e) {
@@ -286,7 +314,7 @@ function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUns
             title="Attach file"
             onClick={() => fileInputRef.current?.click()}
           >
-            📎
+            📎 Attach
           </button>
         </>
       )}
@@ -332,13 +360,25 @@ export default function MilkdownEditor() {
 
   const handleClick = useCallback((e) => {
     if (isMutable) return;
-    const anchor = e.target.closest('[data-wiki-link]');
-    if (!anchor) return;
-    e.preventDefault();
-    const target = anchor.getAttribute('data-wiki-link');
-    const basename = target.split(/[/\\]/).pop().toLowerCase();
-    const fullPath = noteIndex.get(target.toLowerCase()) ?? noteIndex.get(basename);
-    if (fullPath) openTab(fullPath);
+
+    const wikiAnchor = e.target.closest('[data-wiki-link]');
+    if (wikiAnchor) {
+      e.preventDefault();
+      const target = wikiAnchor.getAttribute('data-wiki-link');
+      const basename = target.split(/[/\\]/).pop().toLowerCase();
+      const fullPath = noteIndex.get(target.toLowerCase()) ?? noteIndex.get(basename);
+      if (fullPath) openTab(fullPath);
+      return;
+    }
+
+    const link = e.target.closest('a[href]');
+    if (link) {
+      const href = link.getAttribute('href');
+      if (href && !href.startsWith('#')) {
+        e.preventDefault();
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
+    }
   }, [isMutable, noteIndex, openTab]);
 
   if (!currentNotePath) {

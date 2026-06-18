@@ -162,7 +162,7 @@ export async function fetchHostChildren(path) {
 
 // Returns { path } — the current HOST_VAULT_PATH from .env.
 export async function fetchVaultHostPath() {
-  const res = await fetch(`${BASE}/host/vault`, { cache: 'no-store' });
+  const res = await fetch(`${BASE}/host/vault`, { credentials: 'same-origin', cache: 'no-store' });
   if (!res.ok) throw new ApiError(res.status);
   return res.json();
 }

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import useStore from '../store/useStore';
-import { gradeNote } from '../api/notes';
+import { gradeNote, fetchNoteContent } from '../api/notes';
 import FlashcardSession from '../components/organisms/FlashcardSession';
 import cardStyles from '../components/organisms/FlashcardSession.module.css';
 import styles from './ReviewPage.module.css';
@@ -13,11 +12,10 @@ export default function ReviewPage() {
   const loadMoreReview    = useStore(s => s.loadMoreReview);
   const isAuthenticated   = useStore(s => s.isAuthenticated);
   const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
-  const openTab           = useStore(s => s.openTab);
-  const navigate          = useNavigate();
 
   const [activeNote, setActiveNote] = useState(null); // { shortName, fullPath }
   const [sessionKey, setSessionKey] = useState(0);    // bumped to reset session
+  const [inlineNote, setInlineNote] = useState(null); // { title, raw } while showing note inline
 
   useEffect(() => {
     if (isAuthenticated) initReviewSession();
@@ -25,16 +23,23 @@ export default function ReviewPage() {
 
   function startSession(note) {
     setActiveNote(note);
+    setInlineNote(null);
     setSessionKey(k => k + 1);
   }
 
-  function handleReviewNote(fullPath) {
-    openTab(fullPath);
-    navigate('/');
+  async function handleReviewNote(fullPath) {
+    try {
+      const raw = await fetchNoteContent(fullPath);
+      const title = fullPath.split(/[/\\]/).pop().replace(/\.md$/, '');
+      setInlineNote({ title, raw });
+    } catch {
+      // fallback: if fetch fails just stay on current view
+    }
   }
 
   function handleClose() {
     setActiveNote(null);
+    setInlineNote(null);
   }
 
   if (!isAuthenticated) {
@@ -77,9 +82,19 @@ export default function ReviewPage() {
       {/* Divider */}
       <div className={styles.divider} />
 
-      {/* Right — flashcard test OR self-rated slideshow, per settings toggle */}
+      {/* Right — inline note view, flashcard test, or slideshow */}
       <div className={styles.sessionPane}>
-        {activeNote ? (
+        {inlineNote ? (
+          <div className={styles.inlineNote}>
+            <div className={styles.inlineNoteHeader}>
+              <button className={styles.inlineNoteBack} onClick={() => setInlineNote(null)}>
+                ← Back
+              </button>
+              <span className={styles.inlineNoteTitle}>{inlineNote.title}</span>
+            </div>
+            <pre className={styles.inlineNoteBody}>{inlineNote.raw}</pre>
+          </div>
+        ) : activeNote ? (
           flashcardsEnabled ? (
             <FlashcardSession
               key={sessionKey}

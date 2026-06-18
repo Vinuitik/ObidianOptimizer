@@ -162,7 +162,7 @@ export default function SettingsPage() {
     fetchChildren(null).then(r => setVaultRoot(r.parentPath)).catch(() => {});
     fetchVaultHostPath()
       .then(r => setHostPath(r.path))
-      .catch(() => setHostError(true));
+      .catch(e => { if (e?.status !== 401 && e?.status !== 403) setHostError(true); });
   }, []);
 
   // ── Folder pickers ──────────────────────────────────────────────────────────
@@ -313,7 +313,7 @@ export default function SettingsPage() {
                 <label className={styles.label}>Vault folder</label>
                 <span className={styles.hint}>
                   {hostError
-                    ? 'Folder picker unavailable — the host helper (started by start.ps1) is not reachable.'
+                    ? 'Folder picker unavailable — the host helper is not running.'
                     : 'The location on your machine mounted into the app.'}
                 </span>
               </div>

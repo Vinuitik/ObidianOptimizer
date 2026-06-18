@@ -8,15 +8,23 @@ export default function NoteViewer() {
   const openNote = useStore(s => s.openNote);
 
   const handleClick = useCallback((e) => {
-    const anchor = e.target.closest('[data-wiki-link]');
-    if (!anchor) return;
-    e.preventDefault();
-    const target = anchor.getAttribute('data-wiki-link');
-    // try full target first (e.g. "Books/LikeSwitcher"), then fall back to basename ("LikeSwitcher")
-    const basename = target.split(/[/\\]/).pop().toLowerCase();
-    const fullPath = noteIndex.get(target.toLowerCase()) ?? noteIndex.get(basename);
-    if (fullPath) {
-      openNote(fullPath);
+    const wikiAnchor = e.target.closest('[data-wiki-link]');
+    if (wikiAnchor) {
+      e.preventDefault();
+      const target = wikiAnchor.getAttribute('data-wiki-link');
+      const basename = target.split(/[/\\]/).pop().toLowerCase();
+      const fullPath = noteIndex.get(target.toLowerCase()) ?? noteIndex.get(basename);
+      if (fullPath) openNote(fullPath);
+      return;
+    }
+
+    const link = e.target.closest('a[href]');
+    if (link) {
+      const href = link.getAttribute('href');
+      if (href && !href.startsWith('#')) {
+        e.preventDefault();
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
     }
   }, [noteIndex, openNote]);
 

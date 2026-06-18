@@ -136,21 +136,26 @@ export default function SplitLayout() {
           {/* Center — title, always visually centered */}
           <div className={styles.headerCenter}>
             {centerMode === 'new' ? (
-              <input
+              <textarea
                 className={styles.headerTitleInput}
                 placeholder="Note name"
                 value={newNoteName}
+                rows={1}
                 onChange={e => setNewNoteName(e.target.value)}
                 onKeyDown={e => {
-                  if (e.key === 'Enter' && newNoteName.trim()) createNote(newNoteFolder, newNoteName.trim());
+                  if (e.key === 'Enter' && !e.shiftKey && newNoteName.trim()) {
+                    e.preventDefault();
+                    createNote(newNoteFolder, newNoteName.trim());
+                  }
                   if (e.key === 'Escape') cancelNewNote();
                 }}
                 autoFocus
               />
             ) : isMutable ? (
-              <input
+              <textarea
                 className={styles.headerTitleInput}
                 value={pendingTitle}
+                rows={1}
                 onChange={e => setPendingTitle(e.target.value)}
                 placeholder="Note name"
               />

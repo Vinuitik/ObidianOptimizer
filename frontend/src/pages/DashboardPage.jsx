@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { fetchStats } from '../api/stats';
+import useStore from '../store/useStore';
 import styles from './DashboardPage.module.css';
 
 const POLL_MS = 3000;
@@ -63,15 +64,16 @@ function pct(part, total) {
 }
 
 export default function DashboardPage() {
+  const isAuthenticated = useStore(s => s.isAuthenticated);
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
   const timerRef = useRef(null);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     let cancelled = false;
     async function poll() {
-      // skip work while the tab is hidden — counters resume on focus
       if (!document.hidden) {
         try {
           const data = await fetchStats();
@@ -91,7 +93,16 @@ export default function DashboardPage() {
       cancelled = true;
       clearTimeout(timerRef.current);
     };
-  }, []);
+  }, [isAuthenticated]);
+
+  if (!isAuthenticated) {
+    return (
+      <div className={styles.page}>
+        <h1 className={styles.title}>Processing Dashboard</h1>
+        <p className={styles.muted}>Sign in to view the dashboard.</p>
+      </div>
+    );
+  }
 
   if (!stats) {
     return (

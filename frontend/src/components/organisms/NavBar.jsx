@@ -1,7 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import ObsidianMark from '../atoms/ObsidianMark';
-import Icon from '../atoms/Icon';
 import styles from './NavBar.module.css';
 
 const NAV_ITEMS = [
@@ -42,10 +41,6 @@ export default function NavBar() {
       </div>
 
       <div className={styles.right}>
-        <div className={styles.streak}>
-          <Icon name="flame" size={15} color="var(--color-amber)" />
-          <span>12-day streak</span>
-        </div>
         <span className={styles.avatar}>V</span>
         {isAuthenticated ? (
           <button className={styles.authBtn} onClick={logout}>Sign out</button>

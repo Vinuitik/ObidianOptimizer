@@ -284,16 +284,18 @@
   background: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm2);
-  padding: 4px 8px;
-  font-size: 15px;
-  line-height: 1;
+  padding: 4px 10px;
+  font-size: 13px;
+  line-height: 1.4;
   cursor: pointer;
-  opacity: 0.55;
-  transition: opacity var(--ease-fast), border-color var(--ease-fast);
+  color: var(--color-muted);
+  opacity: 0.75;
+  transition: opacity var(--ease-fast), border-color var(--ease-fast), color var(--ease-fast);
 }
 
 .uploadBtn:hover {
   opacity: 1;
+  color: var(--color-text);
   border-color: var(--color-accent-border);
 }
 

@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import MainPage from './pages/MainPage';
 import SettingsPage from './pages/SettingsPage';
@@ -6,6 +7,9 @@ import ReviewPage from './pages/ReviewPage';
 import LearnPage from './pages/LearnPage';
 import DashboardPage from './pages/DashboardPage';
 import NavBar from './components/organisms/NavBar';
+import LoginModal from './components/organisms/LoginModal';
+import Toast from './components/atoms/Toast';
+import useStore from './store/useStore';
 import styles from './App.module.css';
 
 const pageVariants = {
@@ -39,11 +43,18 @@ function AnimatedRoutes() {
 }
 
 export default function App() {
+  const checkAuth  = useStore(s => s.checkAuth);
+  const showLogin  = useStore(s => s.showLogin);
+
+  useEffect(() => { checkAuth(); }, []);
+
   return (
     <BrowserRouter>
       <div className={styles.shell}>
         <NavBar />
         <AnimatedRoutes />
+        {showLogin && <LoginModal />}
+        <Toast />
       </div>
     </BrowserRouter>
   );
