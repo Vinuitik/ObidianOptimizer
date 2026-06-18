@@ -195,7 +195,8 @@ public class ImageProcessingWorker {
             float[] embedding = embeddingService.embed(chunk);
 
             if (embedding != null) {
-                chunkRepo.upsertChunk(job.getNotePath(), imageChunkStartIndex + i, "image", chunk, embedding, hash);
+                chunkRepo.upsertChunk(job.getNotePath(), imageChunkStartIndex + i, "image", chunk,
+                    embedding, hash, job.getImagePath(), provider);
             }
         }
 

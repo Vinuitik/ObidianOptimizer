@@ -44,21 +44,36 @@ public class NoteChunkRepository {
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_note_chunks_path_source_idx ON note_chunks(note_path, source, chunk_index)");
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_chunks_fts ON note_chunks USING GIN(fts_vector)");
+        // Provenance: for source='image' rows, which image file produced this chunk and
+        // which LLM provider transcribed it. Lets the flashcard trace attribute a bad
+        // description back to a specific image + provider. NULL for text chunks.
+        jdbc.execute("ALTER TABLE note_chunks ADD COLUMN IF NOT EXISTS image_path TEXT");
+        jdbc.execute("ALTER TABLE note_chunks ADD COLUMN IF NOT EXISTS provider TEXT");
         // ivfflat index requires rows to exist first; created lazily by EmbeddingService after bulk insert
     }
 
+    /** Text chunks (or any chunk without image provenance). */
     public void upsertChunk(String notePath, int chunkIndex, String source, String text,
                             float[] embedding, String contentHash) {
+        upsertChunk(notePath, chunkIndex, source, text, embedding, contentHash, null, null);
+    }
+
+    /** Image chunks: also records the source image file and the provider that transcribed it. */
+    public void upsertChunk(String notePath, int chunkIndex, String source, String text,
+                            float[] embedding, String contentHash, String imagePath, String provider) {
         jdbc.update("""
-            INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector)
-            VALUES (?, ?, ?, ?, ?::vector, ?, to_tsvector('english', ?))
+            INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector, image_path, provider)
+            VALUES (?, ?, ?, ?, ?::vector, ?, to_tsvector('english', ?), ?, ?)
             ON CONFLICT (note_path, source, chunk_index) DO UPDATE SET
               text         = EXCLUDED.text,
               embedding    = EXCLUDED.embedding,
               content_hash = EXCLUDED.content_hash,
-              fts_vector   = EXCLUDED.fts_vector
+              fts_vector   = EXCLUDED.fts_vector,
+              image_path   = EXCLUDED.image_path,
+              provider     = EXCLUDED.provider
             """,
-            notePath, chunkIndex, source, text, floatArrayToString(embedding), contentHash, text);
+            notePath, chunkIndex, source, text, floatArrayToString(embedding), contentHash, text,
+            imagePath, provider);
     }
 
     /** Removes chunks of one source beyond newMaxIndex to handle note shrinkage. */
