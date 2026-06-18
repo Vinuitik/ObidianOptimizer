@@ -1,3 +1,8 @@
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 .panel {
   display: flex;
   flex-direction: column;
@@ -6,108 +11,191 @@
   overflow: hidden;
 }
 
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  min-height: 48px;
+  min-height: 44px;
 }
 
-.headerTitle {
-  font-family: var(--font-heading);
-  font-size: var(--text-base);
-  font-weight: 600;
+.upBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--ease-fast), border-color var(--ease-fast);
+}
+
+.upBtn:hover:not(:disabled) {
   color: var(--color-text);
+  border-color: var(--color-border-hover);
 }
 
-.headerActions {
-  display: flex;
-  gap: var(--sp-2);
-}
+.upBtn:disabled { opacity: 0.28; cursor: default; }
 
-.createForm {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  padding: var(--sp-5);
-  max-width: 480px;
-}
-
-.label {
+.crumb {
+  flex: 1;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--color-text-2);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.input {
+.newBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-accent-soft);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--ease-fast);
+}
+
+.newBtn:hover:not(:disabled) { background: var(--color-accent-dim); }
+.newBtn:disabled { opacity: 0.28; cursor: default; }
+
+/* ── List ───────────────────────────────────────────────────────────────── */
+
+.list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-1) 0;
+  animation: slideIn 0.14s ease-out;
+}
+
+.statusLine {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  padding: var(--sp-3) var(--sp-4);
+  margin: 0;
+}
+
+/* ── Create row ─────────────────────────────────────────────────────────── */
+
+.createRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--sp-1);
+}
+
+.createInput {
+  flex: 1;
   font-family: var(--font-body);
   font-size: var(--text-sm);
   color: var(--color-text);
   background: var(--color-card);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
-  padding: var(--sp-2) var(--sp-3);
+  padding: 3px var(--sp-2);
   outline: none;
-  transition: border-color var(--ease-fast);
 }
 
-.input:focus { border-color: var(--color-accent-border); }
-
-.editor {
-  flex: 1;
-  resize: none;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: var(--leading-normal);
-  color: var(--color-text);
-  background: var(--color-page);
-  border: none;
-  padding: var(--sp-5);
-  outline: none;
-  overflow-y: auto;
-}
-
-.editor[readonly] { color: var(--color-text-2); }
-
-.primaryBtn {
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  padding: var(--sp-2) var(--sp-4);
+.createConfirm,
+.createCancel {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
   border: none;
-  background: var(--color-accent);
-  color: #fff;
+  font-size: 12px;
   cursor: pointer;
-  transition: opacity var(--ease-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
 }
 
-.primaryBtn:disabled { opacity: 0.4; cursor: default; }
-.primaryBtn:hover:not(:disabled) { opacity: 0.85; }
+.createConfirm {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+}
 
-.ghostBtn {
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
+.createConfirm:disabled { opacity: 0.35; cursor: default; }
+
+.createCancel {
   background: transparent;
-  color: var(--color-text-2);
+  color: var(--color-muted);
+}
+
+.createCancel:hover { color: var(--color-text); }
+
+/* ── Folder rows (clickable) ────────────────────────────────────────────── */
+
+.folderRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: transparent;
+  border: none;
+  text-align: left;
   cursor: pointer;
-  transition: border-color var(--ease-fast), color var(--ease-fast);
-}
-
-.ghostBtn:hover {
-  border-color: var(--color-border-hover);
   color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  transition: background var(--ease-fast);
 }
 
-.error {
-  font-size: var(--text-xs);
-  color: var(--color-danger);
+.folderRow:hover { background: var(--color-card); }
+
+/* ── File rows (display only) ───────────────────────────────────────────── */
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.6;
+}
+
+/* ── Shared row parts ───────────────────────────────────────────────────── */
+
+.icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.rowName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  color: var(--color-muted);
+  font-size: 14px;
+  flex-shrink: 0;
 }
