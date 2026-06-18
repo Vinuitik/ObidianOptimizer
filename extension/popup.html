@@ -13,6 +13,7 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="note">New note</button>
+    <button class="tab" data-tab="workspace">Workspace</button>
     <button class="tab" data-tab="download">Download</button>
   </nav>
 
@@ -29,6 +30,17 @@
 
     <button id="note-save" class="btn">Save to vault</button>
     <p id="note-status" class="status"></p>
+  </section>
+
+  <!-- Workspace ------------------------------------------------------------ -->
+  <section class="panel" data-panel="workspace">
+    <label class="lbl">File URL</label>
+    <input id="ws-url" class="in" type="text" placeholder="https://…/paper.pdf" />
+    <p class="lbl" style="color:var(--color-muted);margin-top:4px">
+      PDF, video, or audio — saved to your vault's _workspace/ folder and shown in the Learn page.
+    </p>
+    <button id="ws-save" class="btn">Save to workspace</button>
+    <p id="ws-status" class="status"></p>
   </section>
 
   <!-- Download ------------------------------------------------------------- -->

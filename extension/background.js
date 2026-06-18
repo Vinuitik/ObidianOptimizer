@@ -138,6 +138,23 @@ async function downloadStatus({ jobId }) {
   }
 }
 
+async function saveToWorkspace({ url }) {
+  try {
+    const res = await obsidian('/workspace/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return { ok: false, status: res.status, error: text };
+    }
+    return { ok: true, ...(await res.json()) };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
 // ── Message router ────────────────────────────────────────────────────────────
 const HANDLERS = {
   checkAuth: () => checkAuth(),
@@ -146,6 +163,7 @@ const HANDLERS = {
   createNote,
   startDownload,
   downloadStatus,
+  saveToWorkspace,
   getConfig: () => getConfig(),
   setConfig: (patch) => setConfig(patch).then(() => ({ ok: true })),
 };

@@ -28,6 +28,7 @@ async function loadPageContext() {
     if (!tab) return;
     $('note-title').value = tab.title || '';
     $('dl-url').value = tab.url || '';
+    $('ws-url').value = tab.url || '';
 
     // Pull any selected text from the page to pre-fill the note body.
     if (tab.id != null) {
@@ -79,6 +80,26 @@ $('note-save').addEventListener('click', async () => {
     setStatus($('note-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
   } else {
     setStatus($('note-status'), `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
+  }
+});
+
+// ── Workspace ──────────────────────────────────────────────────────────────────
+$('ws-save').addEventListener('click', async () => {
+  const url = $('ws-url').value.trim();
+  if (!url) return setStatus($('ws-status'), 'Paste a URL first.', 'err');
+
+  $('ws-save').disabled = true;
+  setStatus($('ws-status'), 'Downloading…', 'info');
+
+  const res = await send('saveToWorkspace', { url });
+  $('ws-save').disabled = false;
+
+  if (res?.ok) {
+    setStatus($('ws-status'), `Saved: ${res.filename} ✓`, 'ok');
+  } else if (res?.status === 401) {
+    setStatus($('ws-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
+  } else {
+    setStatus($('ws-status'), `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
   }
 });
 
