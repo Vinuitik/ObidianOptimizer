@@ -108,6 +108,11 @@ services:
     # No host ports, no certs: the app is reachable ONLY through the Cloudflare
     # tunnel (cloudflared container → frontend:8081 over the docker network).
     # Cloudflare terminates real TLS at its edge. Nothing on localhost or the LAN.
+    volumes:
+      # nginx serves these directly (range-request support, zero JVM involvement).
+      # Set both vars in .env to subdirs of your vault.
+      - ${VAULT_RESOURCES_PATH}:/vault-resources:ro
+      - ${WORKSPACE_HOST_PATH}:/workspace:ro
     depends_on:
       - backend
 
