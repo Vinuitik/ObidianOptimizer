@@ -1,8 +1,8 @@
 // Popup controller. UI only — every network call is delegated to background.js
 // via chrome.runtime.sendMessage so it runs with the extension's host permissions.
-import { getConfig } from './config.js';
+import { getConfig, api } from './config.js';
 
-const send = (type, payload) => chrome.runtime.sendMessage({ type, payload });
+const send = (type, payload) => api.runtime.sendMessage({ type, payload });
 const $ = (id) => document.getElementById(id);
 
 function setStatus(el, msg, kind = 'info') {
@@ -24,7 +24,7 @@ $('tab-settings-btn').addEventListener('click', () => {
 // ── Active-tab context (prefill) ───────────────────────────────────────────────
 async function loadPageContext() {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
     if (!tab) return;
     $('note-title').value = tab.title || '';
     $('dl-url').value = tab.url || '';
@@ -32,7 +32,7 @@ async function loadPageContext() {
     // Pull any selected text from the page to pre-fill the note body.
     if (tab.id != null) {
       try {
-        const [res] = await chrome.scripting.executeScript({
+        const [res] = await api.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => window.getSelection().toString(),
         });
@@ -62,7 +62,7 @@ $('note-save').addEventListener('click', async () => {
   const title = $('note-title').value.trim();
   if (!title) return setStatus($('note-status'), 'Give the note a title.', 'err');
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [null]);
+  const [tab] = await api.tabs.query({ active: true, currentWindow: true }).catch(() => [null]);
   btn.disabled = true;
   setStatus($('note-status'), 'Saving…', 'info');
   const res = await send('createNote', {

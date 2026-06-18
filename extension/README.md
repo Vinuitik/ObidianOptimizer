@@ -8,11 +8,25 @@ A tiny Manifest V3 extension with two buttons:
    viewing. yt-dlp runs inside the embedder; the backend proxies it.
 
 ## Install (unpacked)
+
+**Chrome / Edge / Brave** (Chromium, uses `manifest.json` with a service-worker background):
 1. `chrome://extensions` → enable **Developer mode**.
 2. **Load unpacked** → select this `extension/` folder.
-3. Click the toolbar icon → **⚙ Settings**:
-   - Set **ObsidianOptimizer API base** (default: the tunnel domain — see note below).
-   - **Sign in** with your app credentials.
+3. Reload the extension (↻ on its card) after editing files.
+
+**Firefox** (MV3 uses an event-page background, so it needs a different manifest):
+1. From the repo root run `pwsh ./build-firefox-extension.ps1` → generates `extension-firefox/`.
+2. `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → select
+   `extension-firefox/manifest.json`. (Temporary = removed on Firefox restart; re-run
+   the script + reload after edits.) Needs Firefox 121+.
+
+The JavaScript is identical for both — it uses a `browser ?? chrome` shim
+(`config.js`) so the promise-based APIs work in either engine. Only the manifest's
+background declaration differs.
+
+Then in either browser, click the toolbar icon → **⚙ Settings**:
+- Set **ObsidianOptimizer API base** (default: the tunnel domain — see note below).
+- **Sign in** with your app credentials.
 
 Both features talk to this one backend. Downloads are handled by yt-dlp **inside the
 embedder** (`embedder/download/`), reached through the backend's `/download` proxy —

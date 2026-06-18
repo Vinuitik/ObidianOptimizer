@@ -1,5 +1,5 @@
 # Browser Extension — FLOWS
-Files: manifest.json, background.js, popup.html, popup.css, popup.js, config.js
+Files: manifest.json, manifest.firefox.json, background.js, popup.html, popup.css, popup.js, config.js, ../build-firefox-extension.ps1
 
 > MV3 extension with two jobs: (1) clip a note to the vault from any page, (2) queue
 > a video/playlist for offline download. Deliberately **vanilla** (no React build) so
@@ -8,12 +8,27 @@ Files: manifest.json, background.js, popup.html, popup.css, popup.js, config.js
 > shared-component approach is in `architecture_plans/EXTENSION_ARCH.md` (@crxjs).
 
 ## Load it
-`chrome://extensions` → Developer mode → **Load unpacked** → select this `extension/` folder.
+- **Chromium** (Chrome/Edge/Brave): `chrome://extensions` → Developer mode → **Load
+  unpacked** → select this `extension/` folder.
+- **Firefox**: `pwsh ../build-firefox-extension.ps1` → `about:debugging` → **Load
+  Temporary Add-on** → `extension-firefox/manifest.json` (FF 121+).
+
 Then open the popup → ⚙ Settings → set endpoints + sign in.
+
+## Cross-browser (Chromium + Firefox)
+One codebase, one diverging file: the **background declaration**. Chrome MV3 requires
+`background.service_worker` (`manifest.json`); Firefox MV3 uses an event page
+`background.scripts` (`manifest.firefox.json`). `build-firefox-extension.ps1` copies
+`extension/` → `extension-firefox/` with the Firefox manifest dropped in as
+`manifest.json` (Firefox's "Load Temporary Add-on" always reads `manifest.json`).
+The JS is shared verbatim: `config.js` exports `api = browser ?? chrome`, so every
+`await api.*` call is promise-based in both engines (Firefox only promisifies
+`browser.*`, not `chrome.*`) — no webextension-polyfill needed. To add a WebExtension
+API call, use `api.*` (imported from `config.js`), never `chrome.*` directly.
 
 ## Architecture (why a background worker)
 ```
-popup.js (UI)  ──chrome.runtime.sendMessage──▶  background.js (service worker)  ──fetch──▶  backend
+popup.js (UI)  ──api.runtime.sendMessage──▶  background.js (worker / event page)  ──fetch──▶  backend
 ```
 All `fetch` lives in `background.js`: it runs with the extension's `host_permissions`,
 so the page's CORS/CSP/mixed-content rules don't apply, and the ObsidianOptimizer

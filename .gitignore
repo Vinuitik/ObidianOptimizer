@@ -17,3 +17,6 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
+
+# Generated Firefox extension build (see build-firefox-extension.ps1)
+extension-firefox/

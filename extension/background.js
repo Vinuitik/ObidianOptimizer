@@ -12,7 +12,7 @@
 // And the offline downloader (yt-dlp in the embedder, proxied by the backend):
 //   POST /download {url}              → { id, status, … }
 //   GET  /download/{id}               → progress
-import { getConfig, setConfig } from './config.js';
+import { getConfig, setConfig, api } from './config.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 async function obsidian(path, opts = {}) {
@@ -150,7 +150,7 @@ const HANDLERS = {
   setConfig: (patch) => setConfig(patch).then(() => ({ ok: true })),
 };
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   const handler = HANDLERS[msg?.type];
   if (!handler) {
     sendResponse({ ok: false, error: `unknown message: ${msg?.type}` });

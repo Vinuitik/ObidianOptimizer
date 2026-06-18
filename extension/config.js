@@ -10,15 +10,21 @@
 // downloader now lives in the embedder and is proxied at /download (the embedder
 // is loopback-only, so the extension can't call it directly).
 
+// Cross-browser WebExtension API handle. Firefox exposes the promise-based
+// `browser.*` namespace; Chrome/Edge/Brave expose `chrome.*` (also promise-based
+// under MV3). Picking `browser ?? chrome` means every `await api.*` call below
+// returns a real promise in BOTH engines — no polyfill needed.
+export const api = globalThis.browser ?? globalThis.chrome;
+
 export const DEFAULTS = {
   obsidianApi: 'https://obsidianoptimizer.uk/api',
 };
 
 export async function getConfig() {
-  const stored = await chrome.storage.local.get(['obsidianApi']);
+  const stored = await api.storage.local.get(['obsidianApi']);
   return { ...DEFAULTS, ...stored };
 }
 
 export async function setConfig(patch) {
-  await chrome.storage.local.set(patch);
+  await api.storage.local.set(patch);
 }
