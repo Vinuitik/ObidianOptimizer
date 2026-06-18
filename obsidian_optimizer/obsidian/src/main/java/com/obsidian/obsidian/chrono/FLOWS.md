@@ -58,33 +58,49 @@ To change the check: pass a different `FrontmatterChecker` lambda to `FileChecke
 
 ---
 
-## BankruptcyService
+## BankruptcyService  *(the FSRS mass-lapse)*
 
-Collects notes where `sr-due < today`. If count ≥ `bankruptcyLimit` → bankruptcy declared.  
-Tiered interval reduction:
-- `≤7d → 2`
-- `≤30d → interval/2`
-- `≤90d → 21`
-- `>90d → 45`
+Collects notes where `sr-due < today`. If count ≥ `bankruptcyLimit` → bankruptcy
+declared. Then per overdue note (`FsrsService` + `FsrsStateWriter` injected):
+- get FSRS state via `FsrsStateWriter.read`; if the note is still legacy, seed it
+  (`FsrsStateWriter.seedFromLegacy`: S ≈ sr-interval, D from ease — timeline kept).
+- apply `FsrsService.forget()` — the lapse (stability collapses, difficulty rises).
+- `newInterval = intervalDays(newS)`; load-balance a due date in `[today+1,
+  today+newInterval]` (`leastLoadedDate`).
+- write via `FsrsStateWriter.writeState` → DB + frontmatter, pending bandit
+  decision preserved (no review happened).
 
-Ease: `max(215, ease/2)`. Load-balanced scheduling: heap for long/very-long tiers, `pickDate` for short/medium.  
-`MIN_INTERVAL=2`, `MIN_EASE=215` — hardcoded constants, not in settings.
+This replaces the old interval-tier / `ease/2` reduction. The per-review 7-day
+rule (`ReviewService`) and this batch job share the same `forget` lapse.
 
 ---
 
-## SpreadService
+## SpreadService  *(calendar only — never touches FSRS memory)*
 
-Groups notes by day-delta from today. Cascades overflow forward until no day exceeds `maxDailyReviews`. Within overloaded day: lowest-ease notes stay (hardest first), overflow → day+1.  
-Works for both future and overdue (negative delta) notes.
+Groups notes by day-delta from today. Cascades overflow forward until no day
+exceeds `maxDailyReviews`. On an overloaded day the **hardest stay** (highest
+FSRS difficulty; legacy notes via `FsrsService.easeToDifficulty`), easiest spill
+to day+1. Moves the date only: FSRS notes via `FsrsStateWriter.reschedule` (DB +
+frontmatter), legacy notes via direct `FrontmatterRewriter.write`. Works for both
+future and overdue (negative delta) notes.
 
 ---
 
 ## FrontmatterRewriter
 
-Shared utility used by `FileCheckerService` and `BankruptcyService`.
+Shared utility used by `FileCheckerService`, `BankruptcyService`, `SpreadService`
+and (FSRS mirror) `FsrsStateWriter`.
 
+Legacy sr-fields:
 `read(Path)` → `SrFields(due, interval, ease)` or null if no valid sr-due  
-`write(Path, SrFields)` → rewrites `sr-due/sr-interval/sr-ease` in place, preserves line endings  
+`write(Path, SrFields)` → rewrites `sr-due/sr-interval/sr-ease` in place
+
+FSRS mirror (the new state carrier):
+`readFsrs(Path)` → `FsrsFields(due, interval, stability, difficulty, lastReview,
+arm, bucket)`, or null if no `fsrs-s` yet (legacy-only note)  
+`writeFsrs(Path, FsrsFields)` → **upserts** `fsrs-*` + `sr-due`/`sr-interval`
+(inserts missing keys before the closing `---`), preserves `sr-ease` and line
+endings; returns false (no-op) when the note has no frontmatter block  
 `hasInvalidDate(Path)` → true if line 2 ends with `"Invalid date"`
 
 **Frontmatter-scoped**: read/write only touch lines strictly between the opening and
@@ -117,8 +133,8 @@ Files without a frontmatter block are skipped entirely.
 | Thing to change | Where |
 |---|---|
 | Cron schedule | `ChronoService` `@Scheduled(cron = ...)` |
-| Bankruptcy tiers | `BankruptcyService` interval constants |
-| Ease floor | `BankruptcyService.MIN_EASE` |
+| Bankruptcy lapse | `BankruptcyService` → `FsrsService.forget` (seeds legacy via `FsrsStateWriter.seedFromLegacy`) |
+| Spread hardness order | `SpreadService` (FSRS difficulty / `FsrsService.easeToDifficulty`) |
 | Max daily reviews | Settings UI → `SettingsRepository.getMaxDailyReviews()` |
 | Bankruptcy limit | Settings UI → `SettingsRepository.getBankruptcyLimit()` |
 | Invalid date detection | `FrontmatterRewriter.hasInvalidDate()` |

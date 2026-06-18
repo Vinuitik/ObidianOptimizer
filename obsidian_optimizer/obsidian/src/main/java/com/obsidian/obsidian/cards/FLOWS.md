@@ -1,8 +1,8 @@
 # Cards Domain Flows
 
-Files: CardRepository.java, CardGenerationService.java, CardJobWorker.java, CardController.java, FsrsService.java, BanditService.java, ReviewService.java, ReviewController.java, NoteReviewRepository.java
+Files: CardRepository.java, CardGenerationService.java, CardJobWorker.java, CardController.java, FsrsService.java, BanditService.java, ReviewService.java, ReviewController.java, NoteReviewRepository.java, FsrsStateWriter.java, ReviewPreparationService.java
 Python agent: embedder/flashcards/generate.py, validate.py, solver_sandbox.py
-Architecture: architecture_plans/FLASHCARDS_ARCH.md
+Architecture: architecture_plans/FLASHCARDS_ARCH.md, architecture_plans/FSRS_REWORK_PLAN.md
 
 ---
 
@@ -11,32 +11,45 @@ Architecture: architecture_plans/FLASHCARDS_ARCH.md
 ```
 POST /api/reviews/grade {notePath, band}     band ∈ HARD/GOOD/EASY/VERY_EASY
   → ReviewService.grade():
-    1. delayed bandit reward: previous pending (bucket, arm) on the note_reviews
-       row gets α+1 if band ≥ GOOD else β+1   (BanditService.reward)
-    2. pure FSRS-6 update (FsrsService — recall path only, NO Again/lapse grade;
-       VERY_EASY maps to FSRS Easy, the distinction exists for band labels/rewards)
+    0. lapsed? = existing.due + 7d < now → reviewing >7 days late is a FORCED
+       lapse regardless of band (LATE_LAPSE_DAYS).
+    1. delayed bandit reward: previous pending (bucket, arm) gets α+1 if recalled
+       (Good+ and NOT lapsed) else β+1   (BanditService.reward)
+    2. FSRS-6 state update (FsrsService):
+         lapsed → FsrsService.forget() (w11-w14: stability collapses, D rises)
+         else   → FsrsService.review() (recall path; VERY_EASY == FSRS Easy)
     3. bandit (Thompson Sampling, Beta per bucket×arm) samples arm
        m ∈ {0.7, 0.85, 1.0, 1.2, 1.5}; due = now + round(fsrsInterval × m)
        — Option A: the arm scales the SCHEDULED DATE only, never stored S/D
-  → upsert note_reviews (stability, difficulty, due, pending_bucket, pending_arm)
+  → FsrsStateWriter.write(): DB note_reviews upsert + frontmatter mirror together
 
 GET /api/reviews/due?limit=50 → notes due now, most overdue first
 ```
 
-Both UI modes converge here: slideshow posts the pressed button's band;
-flashcards mode computes the band from the assignment score via
-`ReviewService.Band.fromScore()` (GRADE_BANDS 40/70/90).
+To change the late-lapse window: `ReviewService.LATE_LAPSE_DAYS`.
+To change the lapse math: `FsrsService.forget()` (regenerate refs).
 
-**sr-due write-back bridge**: after every grade, `ReviewService.writeSrFrontmatter`
-rewrites the note's `sr-due`/`sr-interval` (ease preserved untouched) and
-`FileRepository.reindexAfterExternalWrite` keeps the index + Drive sync queue
-current. Without this, graded notes would never leave the sr_due-driven review
-queue, and chrono/Obsidian-SR would diverge from FSRS. Notes without
-frontmatter are skipped (they aren't in the legacy queue anyway).
+**State lives in BOTH Postgres and frontmatter** — `FsrsStateWriter` is the ONLY
+writer and writes both together so they can't drift (D1/D2 in FSRS_REWORK_PLAN).
+- Postgres `note_reviews` = the query source (the `/due` index).
+- Note frontmatter (`fsrs-s`, `fsrs-d`, `fsrs-last`, `fsrs-arm`, `fsrs-bucket`,
+  plus legacy `sr-due`/`sr-interval`) = the offline / volume-reset mirror.
+- `FsrsStateWriter.read()` is DB-first; on a miss (fresh machine, nuked volume,
+  external Obsidian edit) it **hydrates from the frontmatter mirror** and
+  backfills the DB. This is what makes a volume reset recoverable.
+- `sr-ease` is preserved untouched (legacy Obsidian-SR field, no longer used).
+
+**On-demand prep** (`ReviewPreparationService.prepare`, called at the top of
+`AssignmentService.build`): when you open a note to review in flashcards mode and
+the background jobs haven't reached it, it (1) migrates legacy → FSRS preserving
+the timeline (`FsrsStateWriter.normalizeLegacy`: S ≈ sr-interval, D from ease, no
+reschedule), (2) generates cards if none exist — recorded against **body_hash**
+so `CardJobWorker` skips it, (3) chunk+embeds (`EmbeddingService.indexNote`).
+Idempotent + best-effort; a re-review of a prepared note is a no-op.
 
 **UI modes** (`flashcardsEnabled` setting, toggle in Settings → Review):
-- ON: ReviewPage → FlashcardSession.jsx — builds a 10-point assignment for the
-  note, verifies each answer server-side, completes → band + next due shown.
+- ON: ReviewPage → FlashcardSession.jsx — builds a tiered-knapsack assignment for
+  the note, verifies each answer server-side, completes → band + next due shown.
 - OFF: ReviewPage → SlideshowReview (in ReviewPage.jsx) — four band buttons →
   POST /reviews/grade. ReviewRating.jsx (list dropdown) posts the same.
 
@@ -44,10 +57,10 @@ Context buckets: difficulty {<4, 4-7, >7} × stability {<7d, 7-30d, >30d} —
 9 buckets × 5 arms. Historical recall rate as context: deferred until attempt
 history accumulates.
 
-FsrsService is pinned against py-fsrs outputs (FsrsServiceTest); reference
-values regenerate via `embedder/_fsrs_reference.py`. Subtlety: difficulty
-mean-reversion uses the UNCLAMPED Easy initial difficulty (negative with
-default weights) — matching py-fsrs exactly.
+FsrsService (recall AND forget paths) is pinned against py-fsrs outputs
+(FsrsServiceTest); reference values regenerate via `embedder/_fsrs_reference.py`.
+Subtlety: difficulty mean-reversion uses the UNCLAMPED Easy initial difficulty
+(negative with default weights) — matching py-fsrs exactly.
 
 ---
 
@@ -92,11 +105,16 @@ call-site hooks. The attempt ledger (card_gen_attempts) bounds retries.
 
 ```
 POST /api/assignments {scope, points}        scope = note path or folder prefix
-  → AssignmentService.build(): greedy round-robin bag draws per (scope, type)
-    (AssignmentRepository.drawCard — drawn_cycle < current_cycle, refill bumps
-    the cycle), final slot tries difficulty == remaining budget;
-    exercises rolled NOW via embedder /flashcards/roll → params + rendered +
-    expected answer frozen into assignments.variants
+  → AssignmentService.build():
+      reviewPrep.prepare(scope)                  on-demand normalize+cards+embed
+      per-note TIERED KNAPSACK (Tier: basic 1-2 / mid 3 / advanced 4-5):
+        pass 1 covers each tier the note has; pass 2 fills round-robin up to
+        MAX_PER_TIER (2) and MAX_CARDS_PER_NOTE (6); folder scope capped at
+        SESSION_MAX_CARDS (30). Draws via AssignmentRepository.drawCardInTier
+        (per-(note,tier) bag: drawn_cycle < cycle, refill bumps cycle, excludes
+        ids already picked this session). `points` is now an optional cap.
+      exercises rolled NOW via embedder /flashcards/roll → params + rendered +
+      expected answer frozen into assignments.variants
 POST /api/attempts {assignmentId, cardId, answer}
   → mcq: index compare · exercise: frozen expected (numeric tolerance /
     normalized string) · open: embedder /flashcards/judge (cosine bands
@@ -158,7 +176,16 @@ POST /api/assignments/{id}/complete
 | Card archiving | none — never auto-archived (`generate.py _store`); removal is user-only (delete) |
 | Desired retention | `fsrs.desired-retention` property (default 0.9) |
 | FSRS weights | `FsrsService.W` (FSRS-6 defaults — regenerate test refs if changed) |
+| Lapse / forget math | `FsrsService.forget()` (w11-w14) |
+| Late-lapse window | `ReviewService.LATE_LAPSE_DAYS` (7) |
 | Bandit arms | `BanditService.ARMS` |
 | Context bucketing | `BanditService.bucket()` |
 | Score→band thresholds | `ReviewService.Band.fromScore()` (40/70/90) |
-| Reward rule (recalled) | `ReviewService.grade()` — `band != HARD` |
+| Reward rule (recalled) | `ReviewService.grade()` — `!lapsed && band != HARD` |
+| Single state write path | `FsrsStateWriter` (DB + frontmatter; never write `note_reviews` directly) |
+| Frontmatter FSRS fields | `FrontmatterRewriter.FsrsFields` / `writeFsrs` |
+| Legacy → FSRS seed policy | `FsrsStateWriter.seedFromLegacy` (+ `FsrsService.easeToDifficulty`) |
+| On-demand review prep | `ReviewPreparationService.prepare` |
+| Card tiers / session caps | `AssignmentService.Tier` / `MAX_PER_TIER` / `MAX_CARDS_PER_NOTE` / `SESSION_MAX_CARDS` |
+| Tier bag draw | `AssignmentRepository.drawCardInTier` |
+| Content hashing | `common/ContentHashing.sha256` (single hash fn for all pipelines) |
