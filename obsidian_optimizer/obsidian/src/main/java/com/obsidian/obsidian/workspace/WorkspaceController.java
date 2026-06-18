@@ -1,27 +1,53 @@
 package com.obsidian.obsidian.workspace;
 
 import com.obsidian.obsidian.settings.SettingsRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
+import java.nio.file.StandardCopyOption;
+import java.time.Duration;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/workspace")
 public class WorkspaceController {
 
-    private static final Set<String> VIDEO_EXTS = Set.of(".mp4", ".mov", ".mkv", ".webm", ".avi");
-    private static final Set<String> AUDIO_EXTS = Set.of(".mp3", ".wav", ".ogg", ".m4a", ".flac");
-    private static final Set<String> PDF_EXTS   = Set.of(".pdf");
+    private static final Logger log = LoggerFactory.getLogger(WorkspaceController.class);
+
+    private static final Set<String> VIDEO_EXTS   = Set.of(".mp4", ".mov", ".mkv", ".webm", ".avi");
+    private static final Set<String> AUDIO_EXTS   = Set.of(".mp3", ".wav", ".ogg", ".m4a", ".flac");
+    private static final Set<String> PDF_EXTS     = Set.of(".pdf");
+    private static final Set<String> ALLOWED_EXTS;
+
+    static {
+        Set<String> all = new HashSet<>();
+        all.addAll(VIDEO_EXTS);
+        all.addAll(AUDIO_EXTS);
+        all.addAll(PDF_EXTS);
+        ALLOWED_EXTS = Collections.unmodifiableSet(all);
+    }
+
+    private static final long MAX_BYTES = 512L * 1024 * 1024; // 512 MB
+
+    private static final Pattern CD_FILENAME = Pattern.compile(
+        "filename[^;=\n]*=\\s*['\"]?([^'\";\n]+)['\"]?", Pattern.CASE_INSENSITIVE);
 
     private final SettingsRepository settingsRepo;
 
@@ -30,6 +56,8 @@ public class WorkspaceController {
     }
 
     record WorkspaceFile(String name, String type) {}
+
+    // ── List ─────────────────────────────────────────────────────────────────────
 
     @GetMapping("/files")
     public ResponseEntity<List<WorkspaceFile>> listFiles() {
@@ -51,6 +79,120 @@ public class WorkspaceController {
         } catch (IOException e) {
             return ResponseEntity.ok(Collections.emptyList());
         }
+    }
+
+    // ── Save from URL ─────────────────────────────────────────────────────────────
+
+    @PostMapping("/save")
+    public ResponseEntity<?> saveToWorkspace(@RequestBody Map<String, String> body) {
+        String rawUrl = body.get("url");
+        if (rawUrl == null || rawUrl.isBlank()) {
+            return ResponseEntity.badRequest().body("url required");
+        }
+
+        URI uri;
+        try {
+            uri = URI.create(rawUrl.trim());
+            String scheme = uri.getScheme();
+            if (scheme == null || (!scheme.equals("http") && !scheme.equals("https"))) {
+                return ResponseEntity.badRequest().body("Only http/https URLs are supported");
+            }
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Invalid URL");
+        }
+
+        try {
+            Path workspaceDir = Paths.get(settingsRepo.getVaultPath()).resolve("_workspace");
+            Files.createDirectories(workspaceDir);
+
+            HttpClient client = HttpClient.newBuilder()
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .connectTimeout(Duration.ofSeconds(15))
+                    .build();
+
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .GET()
+                    .header("User-Agent", "ObsidianOptimizer/1.0")
+                    .build();
+
+            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+
+            if (response.statusCode() >= 400) {
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                        .body("Remote server returned " + response.statusCode());
+            }
+
+            // Reject oversized files if Content-Length is declared
+            long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
+            if (contentLength > MAX_BYTES) {
+                return ResponseEntity.badRequest().body("File too large (> 512 MB)");
+            }
+
+            String filename = resolveFilename(uri, response.headers());
+
+            int dot = filename.lastIndexOf('.');
+            String ext = dot >= 0 ? filename.substring(dot).toLowerCase() : "";
+            if (!ALLOWED_EXTS.contains(ext)) {
+                return ResponseEntity.badRequest()
+                        .body("Unsupported type '" + ext + "'. Accepted: pdf, mp4, mov, mkv, webm, avi, mp3, m4a, wav, ogg, flac");
+            }
+
+            // Sanitize — no path components, no shell-special chars
+            filename = filename.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
+            if (filename.isBlank()) filename = "download-" + System.currentTimeMillis() + ext;
+
+            Path target = workspaceDir.resolve(filename).normalize();
+            if (!target.startsWith(workspaceDir)) {
+                return ResponseEntity.badRequest().body("Invalid filename");
+            }
+
+            try (InputStream stream = response.body()) {
+                Files.copy(stream, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            log.info("[workspace] saved {} ({} bytes) from {}", filename, Files.size(target), uri.getHost());
+            return ResponseEntity.ok(Map.of("filename", filename));
+
+        } catch (Exception e) {
+            log.error("[workspace] save failed for {}: {}", rawUrl, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────
+
+    private static String resolveFilename(URI uri, java.net.http.HttpHeaders headers) {
+        // 1. Content-Disposition header
+        String cd = headers.firstValue("Content-Disposition").orElse("");
+        if (!cd.isBlank()) {
+            Matcher m = CD_FILENAME.matcher(cd);
+            if (m.find()) {
+                String name = m.group(1).trim();
+                if (!name.isBlank()) return name;
+            }
+        }
+
+        // 2. Last meaningful path segment
+        String path = uri.getPath();
+        if (path != null && !path.isBlank()) {
+            String[] parts = path.split("/");
+            for (int i = parts.length - 1; i >= 0; i--) {
+                String seg = URLDecoder.decode(parts[i], StandardCharsets.UTF_8).trim();
+                if (!seg.isBlank() && seg.contains(".")) return seg;
+            }
+        }
+
+        // 3. Fallback: infer extension from Content-Type
+        String ct = headers.firstValue("Content-Type").orElse("").split(";")[0].trim().toLowerCase();
+        String fallbackExt = switch (ct) {
+            case "application/pdf" -> ".pdf";
+            case "video/mp4"       -> ".mp4";
+            case "video/webm"      -> ".webm";
+            case "audio/mpeg"      -> ".mp3";
+            case "audio/ogg"       -> ".ogg";
+            default                -> ".bin";
+        };
+        return "download-" + System.currentTimeMillis() + fallbackExt;
     }
 
     private static String typeFor(String filename) {
