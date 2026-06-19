@@ -183,7 +183,7 @@ def _store(note_path: str, source_hash: str, cards: list[dict]) -> dict:
 
 def _format_with_descriptions(content: str, descriptions: list[str]) -> str:
     """Append the note's image descriptions as a labelled block. Pure (no I/O) so
-    the formatting is unit-testable; the DB fetch lives in _with_image_descriptions."""
+    the formatting is unit-testable; the DB fetch lives in _fetch_image_rows."""
     descriptions = [d.strip() for d in descriptions if d and d.strip()]
     if not descriptions:
         return content
