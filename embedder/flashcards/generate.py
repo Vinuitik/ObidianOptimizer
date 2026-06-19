@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 
 import httpx
 import psycopg
@@ -32,6 +33,11 @@ WRAPPER_URL = os.environ.get("WRAPPER_URL", "http://host.docker.internal:5001")
 SYNTH_MODEL = os.environ.get("SYNTH_MODEL", "haiku")
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://obsidian:obsidian@postgres:5432/obsidian")
+
+# Debug traces are written into the (read-only-to-us) vault via the Java backend's
+# internal API — same shared secret as the ingest publisher (publish.py).
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://backend:8084")
+INTERNAL_TOKEN = os.environ.get("MCP_API_TOKEN", "")
 
 MAX_RETRIES = 2
 N_MCQ, N_OPEN, N_EX = 3, 2, 2
@@ -187,44 +193,112 @@ def _format_with_descriptions(content: str, descriptions: list[str]) -> str:
             f"{block}\n")
 
 
-def _with_image_descriptions(note_path: str, content: str) -> str:
+def _fetch_image_rows(note_path: str) -> list[dict]:
     """The card generator reads the raw note, which only has ![[image]] refs — not
     what the images SAY. The image worker has already OCR/VLM-extracted each image
-    into note_chunks(source='image'); pull those and append them so cards can be
-    written about diagrams/screenshots. The card work-list waits for the note's
-    image jobs to finish (CardRepository.findNotesNeedingCards), so by the time we
-    run here the descriptions exist. Best-effort: any DB error → content unchanged."""
+    into note_chunks(source='image'), now WITH provenance (image_path, provider);
+    pull those so cards can be written about diagrams/screenshots AND the trace can
+    attribute a bad description to a specific image + provider. The card work-list
+    waits for the note's image jobs to finish (CardRepository.findNotesNeedingCards),
+    so by the time we run here the descriptions exist. Best-effort: any DB error → []."""
     try:
         with psycopg.connect(DATABASE_URL) as conn:
             rows = conn.execute(
-                "SELECT text FROM note_chunks WHERE note_path = %s AND source = 'image' "
-                "ORDER BY chunk_index",
+                "SELECT text, image_path, provider FROM note_chunks "
+                "WHERE note_path = %s AND source = 'image' ORDER BY chunk_index",
                 (note_path,)).fetchall()
     except Exception as e:  # noqa: BLE001 — never fail generation over enrichment
         log.warning("[flashcards] image-description lookup failed for %s: %s", note_path, e)
-        return content
-    return _format_with_descriptions(content, [r[0] for r in rows])
+        return []
+    return [{"text": r[0], "image_path": r[1], "provider": r[2]} for r in rows]
+
+
+# ── Debug trace (what the agent actually saw) ────────────────────────────────
+
+def _slug(note_path: str) -> str:
+    base = note_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    base = base[:-3] if base.endswith(".md") else base
+    return re.sub(r"[^\w.-]+", "_", base) or "note"
+
+
+def _build_trace_md(note_path, assembled_input, image_rows, attempts,
+                    self_check_dropped, result) -> str:
+    """Human-readable record of one generation run, for eyeballing in Obsidian.
+    Shows the EXACT input the model saw, each image's transcription labelled with
+    its source file + provider, every raw LLM reply, and why cards were dropped."""
+    out = [f"# Flashcard generation trace — `{note_path}`",
+           f"_generated {datetime.now(timezone.utc).isoformat(timespec='seconds')}_", ""]
+
+    out.append("## Images as transcribed (source → text → provider)")
+    if image_rows:
+        for r in image_rows:
+            out += [f"### `{r['image_path'] or '?'}`  · provider: {r['provider'] or '?'}",
+                    "```", (r["text"] or "").strip(), "```", ""]
+    else:
+        out += ["_none — note had no image chunks (or DB lookup failed)._", ""]
+
+    out += ["## Assembled input (verbatim, as sent inside the generation prompt)",
+            "```markdown", assembled_input.strip(), "```", ""]
+
+    out.append("## Generation attempts")
+    for a in attempts:
+        out.append(f"### Attempt {a['attempt']}")
+        if a.get("parse_error"):
+            out += [f"- parse error: {a['parse_error']}"]
+        out += [f"- valid cards: {a.get('valid', 0)}",
+                f"- validation errors: {len(a.get('errors', []))}"]
+        for e in a.get("errors", [])[:20]:
+            out.append(f"  - {e}")
+        out += ["", "Raw LLM output:", "```", (a.get("raw") or "").strip(), "```", ""]
+
+    out += ["## Outcome",
+            f"- self-check dropped: {self_check_dropped}",
+            f"- stored: {result.get('stored', 0)}",
+            f"- rejected: {result.get('rejected', 0)}", ""]
+    return "\n".join(out)
+
+
+def _write_trace(note_path: str, markdown: str) -> None:
+    """Best-effort write to vault/_debug/flashcards/<slug>.md via the Java backend
+    (the embedder mounts the vault read-only). Never fails generation."""
+    if not INTERNAL_TOKEN:
+        return  # internal API is fail-closed; nothing to do (e.g. unit tests)
+    try:
+        httpx.post(f"{BACKEND_URL}/api/internal/debug-trace",
+                   headers={"X-Internal-Token": INTERNAL_TOKEN},
+                   json={"relPath": f"flashcards/{_slug(note_path)}.md",
+                         "content": markdown}, timeout=30)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[flashcards] trace write failed for %s: %s", note_path, e)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def generate_for_note(note_path: str, content: str, source_hash: str) -> dict:
-    content = _with_image_descriptions(note_path, content)
+    image_rows = _fetch_image_rows(note_path)
+    content = _format_with_descriptions(content, [r["text"] for r in image_rows])
     prompt = GEN_PROMPT.format(n_mcq=N_MCQ, n_open=N_OPEN, n_ex=N_EX, content=content)
     valid: list[dict] = []
     errors: list[str] = []
+    attempts: list[dict] = []  # one entry per LLM call, for the trace
 
     for attempt in range(1 + MAX_RETRIES):
+        rec = {"attempt": attempt, "raw": None, "valid": 0, "errors": []}
+        attempts.append(rec)
         try:
             raw = _complete(prompt if attempt == 0 else
                             prompt + "\n\nYour previous output had these validation errors — fix them:\n"
                             + "\n".join(errors[:20]))
+            rec["raw"] = raw
             cards = _extract_json(raw)
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
             errors = [f"output was not parseable JSON: {e}"]
+            rec["parse_error"] = str(e)
+            rec["errors"] = errors
             log.warning("[flashcards] %s attempt %d: %s", note_path, attempt, errors[0])
             continue
         valid, errors = validate.validate_cards(cards)
+        rec["valid"], rec["errors"] = len(valid), errors
         if valid and not errors:
             break
         log.info("[flashcards] %s attempt %d: %d valid, %d errors",
@@ -233,13 +307,19 @@ def generate_for_note(note_path: str, content: str, source_hash: str) -> dict:
             break  # store what survived, log the rejects
 
     if not valid:
-        return {"note_path": note_path, "stored": 0, "archived": 0,
-                "rejected": len(errors), "errors": errors[:10]}
+        result = {"note_path": note_path, "stored": 0, "archived": 0,
+                  "rejected": len(errors), "errors": errors[:10]}
+        _write_trace(note_path, _build_trace_md(
+            note_path, content, image_rows, attempts, 0, result))
+        return result
 
     before = len(valid)
     valid = _self_check(valid)
+    dropped = before - len(valid)
     result = _store(note_path, source_hash, valid)
     result.update({"note_path": note_path,
-                   "self_check_dropped": before - len(valid),
+                   "self_check_dropped": dropped,
                    "rejected": len(errors)})
+    _write_trace(note_path, _build_trace_md(
+        note_path, content, image_rows, attempts, dropped, result))
     return result

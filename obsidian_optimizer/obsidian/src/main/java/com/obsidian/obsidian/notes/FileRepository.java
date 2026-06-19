@@ -32,7 +32,9 @@ public class FileRepository {
 
     private static final Logger log = LoggerFactory.getLogger(FileRepository.class);
 
-    private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources", "_workspace");
+    // _debug holds agent debug traces (e.g. flashcard generation) — never indexed,
+    // embedded, or turned into cards. Written directly via /api/internal/debug-trace.
+    private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources", "_workspace", "_debug");
 
     private String ROOT_FILE;
 

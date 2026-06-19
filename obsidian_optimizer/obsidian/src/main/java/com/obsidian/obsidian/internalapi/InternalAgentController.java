@@ -133,6 +133,33 @@ public class InternalAgentController {
         }
     }
 
+    /**
+     * Write a debug trace artifact under _debug/ (e.g. flashcard generation traces).
+     * Deliberately writes the file DIRECTLY to disk — NOT through FileRepository —
+     * so it never enters the notes index, embedding, image, or ingest pipelines.
+     * _debug is also in FileRepository.EXCLUDED_DIRS, so the bulk scan skips it too.
+     * relPath is confined under _debug/; traversal is rejected by resolveUnderVault.
+     */
+    @PostMapping("/debug-trace")
+    public ResponseEntity<?> writeDebugTrace(@RequestHeader(value = "X-Internal-Token", required = false) String token,
+                                             @RequestBody DebugTraceRequest req) {
+        if (badToken(token)) return unauthorized();
+        String rel = req.relPath();
+        if (rel == null || rel.isBlank() || rel.contains("..")
+                || rel.startsWith("/") || rel.startsWith("\\")) {
+            return ResponseEntity.badRequest().body("invalid relPath");
+        }
+        try {
+            Path target = resolveUnderVault("_debug/" + rel);
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, req.content() == null ? "" : req.content(),
+                StandardCharsets.UTF_8);
+            return ResponseEntity.ok(Map.of("path", target.toString()));
+        } catch (IOException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     private String resolveFolder(String relFolder) throws IOException {
         Path abs = resolveUnderVault(relFolder == null ? "" : relFolder);
         Files.createDirectories(abs);
@@ -152,4 +179,5 @@ public class InternalAgentController {
     record UpdateNoteRequest(String path, String content) {}
     record EnsureFolderRequest(String path) {}
     record StoreMediaRequest(String filename, String dataB64) {}
+    record DebugTraceRequest(String relPath, String content) {}
 }

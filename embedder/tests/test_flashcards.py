@@ -14,9 +14,11 @@ from flashcards.solver_sandbox import SandboxError, check_solver, run_solver
 @pytest.fixture(autouse=True)
 def _no_image_db(monkeypatch):
     """generate_for_note enriches with image descriptions from the DB; in unit
-    tests there's no DB, so default it to a no-op. Tests that exercise the
+    tests there's no DB, so default it to no rows. Tests that exercise the
     formatting call _format_with_descriptions directly (pure, no I/O)."""
-    monkeypatch.setattr(gen, "_with_image_descriptions", lambda note_path, content: content)
+    monkeypatch.setattr(gen, "_fetch_image_rows", lambda note_path: [])
+    # Trace writing posts to the Java backend; keep unit tests off the network.
+    monkeypatch.setattr(gen, "_write_trace", lambda note_path, markdown: None)
 
 
 # ── Sandbox: what must pass ───────────────────────────────────────────────────
@@ -233,3 +235,46 @@ def test_extract_json_handles_code_fences():
     fenced = "```json\n[{\"a\": 1}]\n```"
     assert gen._extract_json(fenced) == [{"a": 1}]
     assert gen._extract_json("Sure! Here you go: [1, 2]") == [1, 2]
+
+
+# ── Generation trace (observability) ──────────────────────────────────────────
+
+def test_build_trace_md_shows_input_images_and_raw_output():
+    md = gen._build_trace_md(
+        "/vault/ml/FSRS.md",
+        assembled_input="The note body the model saw.",
+        image_rows=[{"text": "A flowchart of the FSRS loop",
+                     "image_path": "resources/images/fsrs.png", "provider": "gemini"}],
+        attempts=[{"attempt": 0, "raw": "[{\"type\":\"mcq\"}]", "valid": 1, "errors": []}],
+        self_check_dropped=2,
+        result={"stored": 1, "rejected": 0})
+    # the exact input the model saw
+    assert "The note body the model saw." in md
+    # image attributed to its source file + provider (the downstream-error trail)
+    assert "resources/images/fsrs.png" in md and "gemini" in md
+    assert "A flowchart of the FSRS loop" in md
+    # raw reply + outcome
+    assert "[{\"type\":\"mcq\"}]" in md
+    assert "self-check dropped: 2" in md
+
+
+def test_generate_writes_trace_with_image_provenance(monkeypatch):
+    monkeypatch.setattr(gen, "_fetch_image_rows", lambda note_path: [
+        {"text": "Bad OCR mush æø", "image_path": "img/diagram.png", "provider": "groq"}])
+
+    def fake_complete(prompt):
+        # assembled input must carry the image text into the prompt
+        assert "Bad OCR mush" in prompt or prompt.startswith("Answer these quiz")
+        if prompt.startswith("Answer these quiz"):
+            return json.dumps({"0": 0})
+        return json.dumps(GOOD_CARDS)
+
+    captured = {}
+    monkeypatch.setattr(gen, "_complete", fake_complete)
+    monkeypatch.setattr(gen, "_store", lambda p, sh, c: {"stored": len(c), "archived": 0})
+    monkeypatch.setattr(gen, "_write_trace",
+                        lambda note_path, markdown: captured.update(md=markdown))
+
+    gen.generate_for_note("/vault/n.md", "content", "h")
+    assert "img/diagram.png" in captured["md"] and "groq" in captured["md"]
+    assert "Bad OCR mush" in captured["md"]
