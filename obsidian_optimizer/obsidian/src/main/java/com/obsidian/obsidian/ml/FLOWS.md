@@ -203,6 +203,12 @@ per job: POST http://host.docker.internal:5001/process-image {image_path}
 SKIPPED rows get one retry per day: ImageProcessingWorker.requeueSkipped()
 ```
 
+**Provenance**: image chunks carry `note_chunks.image_path` + `note_chunks.provider`
+(the source file and the LLM that transcribed it). `ImageProcessingWorker.handleResult`
+passes both into the 8-arg `NoteChunkRepository.upsertChunk` overload; text chunks use
+the 6-arg overload (both NULL). This is what lets the flashcard trace attribute a bad
+description back to a specific image + provider — see `embedder/flashcards/FLOWS.md`.
+
 To change image prompt: `host-wrapper/main.py → IMAGE_PROMPT`  
 To change schedule: `ImageProcessingWorker @Scheduled(fixedDelay = ...)`  
 To change parallelism: `.env → IMAGE_WORKER_PARALLELISM` (≈ number of configured vision providers)  
@@ -273,3 +279,6 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 | Embedding work list rule | `NoteIndexRepository.findNotesNeedingEmbedding()` |
 | Readiness gate flag | set: `ResourceScanService.scan` → `NoteIndexRepository.setIngestPending`; gates: `findNotesNeedingEmbedding` + `CardRepository.findNotesNeedingCards` |
 | Orphan chunk cleanup | `NoteEmbeddingWorker.purgeOrphanChunks()` (daily) |
+| Image chunk provenance | `NoteChunkRepository.upsertChunk` (8-arg) ← `ImageProcessingWorker.handleResult` |
+| Debug-trace write endpoint | `InternalAgentController.writeDebugTrace` (`POST /api/internal/debug-trace`) |
+| Dirs skipped by scan (incl. `_debug`) | `FileRepository.EXCLUDED_DIRS` |
