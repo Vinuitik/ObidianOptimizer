@@ -14,6 +14,8 @@ import os
 
 import numpy as np
 
+import gpu_slot
+
 log = logging.getLogger("embedder.ingest.clip_onnx")
 
 MODEL_CACHE = os.environ.get("MODEL_CACHE", "/models")
@@ -34,7 +36,12 @@ def _providers() -> list[str]:
 
 
 def _load() -> dict:
-    """Lazy-load processor + the two ONNX sessions once; cached for reuse."""
+    """Lazy-load processor + the two ONNX sessions once; cached for reuse.
+
+    Resolves files outside the GPU slot (network/CPU), then builds the CUDA
+    sessions inside gpu_slot.exclusive('clip') so the text embedder is evicted
+    first and CLIP has the VRAM. Freed when the ingest queue drains
+    (jobs._evict_models → gpu_slot.release_ingest)."""
     if _state:
         return _state
     import onnxruntime as ort
@@ -45,8 +52,9 @@ def _load() -> dict:
     processor = CLIPProcessor.from_pretrained(CLIP_HF_MODEL, cache_dir=MODEL_CACHE)
     vision_path = hf_hub_download(CLIP_ONNX_REPO, "onnx/vision_model.onnx", cache_dir=MODEL_CACHE)
     text_path = hf_hub_download(CLIP_ONNX_REPO, "onnx/text_model.onnx", cache_dir=MODEL_CACHE)
-    vision = ort.InferenceSession(vision_path, providers=providers)
-    text = ort.InferenceSession(text_path, providers=providers)
+    with gpu_slot.exclusive("clip"):
+        vision = ort.InferenceSession(vision_path, providers=providers)
+        text = ort.InferenceSession(text_path, providers=providers)
     log.info("CLIP ONNX loaded (providers=%s)", vision.get_providers())
     _state.update(processor=processor, vision=vision, text=text)
     return _state
@@ -64,6 +72,9 @@ def unload() -> None:
     _state.clear()
     gc.collect()
     log.info("CLIP ONNX unloaded — VRAM/RAM released until next ingest.")
+
+
+gpu_slot.set_evictor("clip", unload)
 
 
 def _l2(x: np.ndarray) -> np.ndarray:

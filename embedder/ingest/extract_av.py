@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import gpu_slot
 from ingest import router as ingest_router
 
 log = logging.getLogger("embedder.ingest.av")
@@ -26,6 +27,43 @@ log = logging.getLogger("embedder.ingest.av")
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "distil-large-v3")
 MODEL_CACHE = os.environ.get("MODEL_CACHE", "/models")
 FFMPEG_TIMEOUT_S = int(os.environ.get("FFMPEG_TIMEOUT_S", "1800"))
+
+# Whisper is cached across jobs (not reloaded per file) so an ingest burst doesn't
+# thrash the embedder in and out of the GPU between transcriptions. It's freed when
+# the ingest queue drains (jobs._evict_models → gpu_slot.release_ingest).
+_whisper: dict = {}   # {"model": WhisperModel, "device": "cuda"|"cpu"}
+
+
+def unload_whisper() -> None:
+    """Free the whisper model's VRAM/RAM. Registered as the gpu_slot 'whisper'
+    evictor so the embedder (or CLIP) can reclaim the card."""
+    if _whisper.get("model") is not None:
+        _whisper.clear()
+        gc.collect()
+        log.info("whisper unloaded — VRAM/RAM released until next transcription.")
+
+
+gpu_slot.set_evictor("whisper", unload_whisper)
+
+
+def _load_whisper(device: str, compute: str):
+    """(Re)build the whisper model on `device`, reusing the cached one if it already
+    matches. Call inside gpu_slot.exclusive('whisper') so the embedder is evicted
+    first and the load has the VRAM it needs."""
+    if _whisper.get("model") is not None and _whisper.get("device") == device:
+        return _whisper["model"]
+    unload_whisper()
+    from faster_whisper import WhisperModel
+    log.info("loading whisper %s on %s/%s", WHISPER_MODEL, device, compute)
+    model = WhisperModel(WHISPER_MODEL, device=device, compute_type=compute,
+                         download_root=MODEL_CACHE)
+    _whisper.update(model=model, device=device)
+    return model
+
+
+def _is_cuda_oom(e: Exception) -> bool:
+    msg = str(e).lower()
+    return "out of memory" in msg or "cuda failed" in msg
 
 
 def extract(ref: str, resolved_path: Path | None, force_whisper: bool = False) -> dict:
@@ -58,25 +96,41 @@ def extract(ref: str, resolved_path: Path | None, force_whisper: bool = False) -
 
 # ── local file path: ffmpeg + faster-whisper ─────────────────────────────
 
+def _run_transcribe(model, wav: Path):
+    seg_iter, info = model.transcribe(str(wav), vad_filter=True)
+    segments = [{"start": s.start, "end": s.end, "text": s.text} for s in seg_iter]
+    return segments, round(info.duration, 1)
+
+
 def _whisper_transcribe(path: Path):
+    """Transcribe via the single-occupant GPU slot: claim the GPU (evicting the
+    text embedder), load whisper, transcribe. On a CUDA OOM (load OR transcribe) —
+    a safety net, since whisper fits alone on 4GB — retry the whole thing on CPU.
+    The slot is held only across the model LOAD; transcription runs without it, so
+    the embedder keeps serving on its CPU floor meanwhile."""
     wav = _to_wav(path)
     try:
-        from faster_whisper import WhisperModel
-        device, compute = _pick_device()
-        log.info("loading whisper %s on %s/%s", WHISPER_MODEL, device, compute)
-        model = WhisperModel(WHISPER_MODEL, device=device, compute_type=compute,
-                             download_root=MODEL_CACHE)
-        try:
-            seg_iter, info = model.transcribe(str(wav), vad_filter=True)
-            segments = [{"start": s.start, "end": s.end, "text": s.text}
-                        for s in seg_iter]
-            return segments, round(info.duration, 1)
-        finally:
-            # sequential resource policy: free VRAM before the next stage runs
-            del model
-            gc.collect()
+        for device, compute in _device_plan():
+            try:
+                with gpu_slot.exclusive("whisper"):
+                    model = _load_whisper(device, compute)
+                return _run_transcribe(model, wav)
+            except RuntimeError as e:
+                if device == "cuda" and _is_cuda_oom(e):
+                    log.warning("whisper CUDA OOM (%s) — retrying on CPU", str(e)[:80])
+                    unload_whisper()
+                    continue
+                raise
+        raise RuntimeError("whisper transcription failed on all devices")
     finally:
         wav.unlink(missing_ok=True)
+
+
+def _device_plan() -> list[tuple[str, str]]:
+    """Devices to try in order. CUDA first (whisper has the card to itself once the
+    slot evicts the embedder), CPU as the OOM fallback."""
+    device, compute = _pick_device()
+    return [(device, compute), ("cpu", "int8")] if device == "cuda" else [("cpu", "int8")]
 
 
 def _pick_device():

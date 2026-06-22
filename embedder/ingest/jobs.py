@@ -102,12 +102,13 @@ def _worker_loop():
 
 
 def _evict_models():
-    """Free ingest-only models when no work remains (iceberg policy). CLIP is the
-    one that lingered; whisper already frees itself per transcription. The text
-    embedder (search path) is owned by model_runtime and deliberately untouched."""
+    """Free whichever ingest model holds the GPU when no work remains (iceberg
+    policy), via the single-occupant slot. release_ingest evicts whisper OR CLIP
+    (whichever is the occupant) and frees the card for the text embedder to reclaim;
+    it never touches the embedder itself."""
     try:
-        from ingest import clip_onnx
-        clip_onnx.unload()
+        import gpu_slot
+        gpu_slot.release_ingest()
     except Exception as e:
         log.warning("model eviction skipped: %s", e)
 
