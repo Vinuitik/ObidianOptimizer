@@ -141,9 +141,13 @@ public class NoteIndexRepository {
     }
 
     public FileRepository.ReviewPage getReviewNotesPaged(int offset, int limit) {
+        // Exclude the ingest staging folder (_inbox): those notes are awaiting
+        // triage in the Learn Inbox and must not enter the FSRS review queue until
+        // the user files them to a real folder.
         List<String> rows = jdbc.queryForList("""
             SELECT path FROM notes
             WHERE sr_due <= CURRENT_DATE
+              AND path NOT LIKE '%/_inbox/%'
             ORDER BY sr_due ASC, path ASC
             LIMIT ? OFFSET ?
             """, String.class, limit + 1, offset);

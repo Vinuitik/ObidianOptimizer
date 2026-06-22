@@ -15,6 +15,10 @@ log = logging.getLogger("embedder.ingest.publish")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://backend:8084")
 INTERNAL_TOKEN = os.environ.get("MCP_API_TOKEN", "")
 DEFAULT_FOLDER = os.environ.get("INGEST_DEFAULT_FOLDER", "ingest")
+# Standalone ingest notes land here as a staging area (the Learn "Inbox"): the user
+# reviews each generated note, edits it, and files it to a real folder. find_home()
+# is demoted to a SUGGESTED destination stamped into the frontmatter, not acted on.
+INBOX_FOLDER = os.environ.get("INGEST_INBOX_FOLDER", "_inbox")
 
 _EMBED_RE = re.compile(r"!\[\[([^\]]+)\]\]")
 
@@ -81,6 +85,28 @@ def find_home(title: str) -> str:
     except Exception as e:
         log.warning("find_home failed for %r: %s", title, e)
     return DEFAULT_FOLDER
+
+
+def stamp_inbox(content: str, source: str, suggested_folder: str) -> str:
+    """Inject the inbox-triage frontmatter into a standalone note's `---` block so
+    the Learn Inbox can list it, show where it came from, and pre-pick a destination.
+    Stripped again by the backend when the note is filed (POST /inbox/file)."""
+    extra = (f"ingest-inbox: true\n"
+             f"ingest-source: {source}\n"
+             f"ingest-suggested-folder: {suggested_folder}\n")
+    if content.startswith("---\n"):
+        end = content.index("\n---\n", 4)          # close of the frontmatter block
+        return content[:end + 1] + extra + content[end + 1:]
+    # No frontmatter (shouldn't happen for standalone notes) → prepend a block.
+    return f"---\n{extra}---\n\n{content}"
+
+
+def ensure_folder(folder: str) -> None:
+    """Make sure a vault-relative folder exists before create_note targets it."""
+    res = httpx.post(f"{BACKEND_URL}/api/internal/folders", headers=_headers(),
+                     json={"path": folder}, timeout=30)
+    if res.status_code != 200:
+        raise PublishError(f"ensure_folder {res.status_code}: {res.text[:300]}")
 
 
 def _headers():

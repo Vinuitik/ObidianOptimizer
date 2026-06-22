@@ -222,7 +222,11 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     job["planned_notes"] = [p["title"] for p in plans]
     numbered = bundle_util.number_segments(bundle)
 
-    folder = publish.find_home(bundle["source"].get("title", ""))
+    # Notes land in the Inbox staging folder; find_home is only a SUGGESTED
+    # destination stamped into each note for the triage UI to pre-pick.
+    suggested = publish.find_home(bundle["source"].get("title", ""))
+    source_ref = bundle["source"].get("ref", "")
+    publish.ensure_folder(publish.INBOX_FOLDER)
     created, failures = [], []
     for plan in plans:
         try:
@@ -230,8 +234,9 @@ def _synthesize_and_publish(job: dict, bundle: dict):
             problems = publish.validate_note(note_md, stored_names)
             if problems:
                 raise publish.PublishError("; ".join(problems))
-            path = publish.create_note(folder, synthesize.slugify(plan["title"]),
-                                       note_md)
+            note_md = publish.stamp_inbox(note_md, source_ref, suggested)
+            path = publish.create_note(publish.INBOX_FOLDER,
+                                       synthesize.slugify(plan["title"]), note_md)
             created.append(path)
         except Exception as e:  # one bad note must not sink its siblings
             log.warning("note %r failed: %s", plan["title"], e)
