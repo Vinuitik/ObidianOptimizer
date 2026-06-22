@@ -45,6 +45,7 @@ public class SettingsRepository {
         insertDefault("ollamaEmbedModel", "mixedbread-ai/mxbai-embed-large-v1");
         insertDefault("sync.device_id", "");
         insertDefault("flashcardsEnabled", "true");
+        insertDefault("chronicNeglectDays", "7");
     }
 
     private void insertDefault(String key, String value) {
@@ -104,5 +105,9 @@ public class SettingsRepository {
 
     public boolean isFlashcardsEnabled() {
         return Boolean.parseBoolean(getOrDefault("flashcardsEnabled", "true"));
+    }
+
+    public int getChronicNeglectDays() {
+        return Integer.parseInt(getOrDefault("chronicNeglectDays", "7"));
     }
 }

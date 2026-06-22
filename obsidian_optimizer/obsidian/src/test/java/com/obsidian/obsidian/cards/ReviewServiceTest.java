@@ -19,6 +19,7 @@ import java.time.temporal.ChronoUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -51,7 +52,6 @@ class ReviewServiceTest {
         assertThat(result.stability()).isCloseTo(2.3065, org.assertj.core.data.Offset.offset(1e-4));
         assertThat(result.baseIntervalDays()).isEqualTo(2);
         verify(bandit, never()).reward(anyString(), anyDouble(), anyBoolean());
-        // Single write path: DB + frontmatter mirror, with the chosen bucket/arm.
         verify(stateWriter).write(eq("/vault/n.md"), any(), any(), any(),
             anyInt(), eq("dEasy:sShort"), eq(1.0));
     }
@@ -81,34 +81,21 @@ class ReviewServiceTest {
     }
 
     @Test
-    void reviewingMoreThan7DaysLate_forcesLapse_evenOnGoodBand() {
+    void lateReview_goesThrough_normalRecallPath() {
+        // Lapse detection moved to nightly BankruptcyService. A note reviewed
+        // very late here just updates FSRS normally with the real elapsed days —
+        // the nightly job already lapsed it before the user opened it.
         ReviewRow prev = new ReviewRow("/vault/n.md", 13.826904, 2.111214, 2,
-            Timestamp.from(now.minus(20, ChronoUnit.DAYS)),   // lastReview
-            Timestamp.from(now.minus(8, ChronoUnit.DAYS)),    // due — 8 days overdue
+            Timestamp.from(now.minus(40, ChronoUnit.DAYS)),
+            Timestamp.from(now.minus(30, ChronoUnit.DAYS)),  // 30 days overdue
             "dEasy:sShort", 1.2);
         when(stateWriter.read("/vault/n.md")).thenReturn(prev);
 
         GradeResult result = service.grade("/vault/n.md", Band.GOOD, now);
 
-        assertThat(result.lapsed()).isTrue();
-        verify(bandit).reward("dEasy:sShort", 1.2, false);    // lapse → not recalled
-        assertThat(result.stability()).isLessThan(prev.stability());  // memory collapsed
-        assertThat(result.difficulty()).isGreaterThan(prev.difficulty());
-    }
-
-    @Test
-    void reviewingWithin7DaysLate_staysOnRecallPath_noLapse() {
-        ReviewRow prev = new ReviewRow("/vault/n.md", 13.826904, 2.111214, 2,
-            Timestamp.from(now.minus(9, ChronoUnit.DAYS)),
-            Timestamp.from(now.minus(6, ChronoUnit.DAYS)),    // only 6 days overdue
-            "dEasy:sShort", 1.2);
-        when(stateWriter.read("/vault/n.md")).thenReturn(prev);
-
-        GradeResult result = service.grade("/vault/n.md", Band.GOOD, now);
-
-        assertThat(result.lapsed()).isFalse();
-        verify(bandit).reward("dEasy:sShort", 1.2, true);     // recalled, on the recall path
-        assertThat(result.stability()).isGreaterThan(prev.stability());  // grew, not collapsed
+        // No forced lapse in ReviewService — FSRS computes normally from elapsed time.
+        verify(bandit).reward("dEasy:sShort", 1.2, true);   // Good band → recalled
+        assertThat(result.stability()).isGreaterThan(0);
     }
 
     @Test

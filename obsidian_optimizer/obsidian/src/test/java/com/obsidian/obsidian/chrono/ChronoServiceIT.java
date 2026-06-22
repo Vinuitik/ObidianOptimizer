@@ -96,32 +96,6 @@ class ChronoServiceIT {
     }
 
     @Test
-    void runAllJobs_noteWithInvalidDate_frontmatterFixed() throws IOException {
-        String badContent = "---\nsr-due: Invalid date\nsr-interval: 3\nsr-ease: 200\n---\n\n# Note\n";
-        Path note = VAULT.resolve("Broken.md");
-        Files.writeString(note, badContent);
-
-        ChronoService.ChronoResult result = chronoService.runAllJobs();
-
-        assertThat(result.filesFixed()).isEqualTo(1);
-        String fixed = Files.readString(note);
-        assertThat(fixed).doesNotContain("Invalid date");
-        assertThat(fixed).contains("sr-due: " + LocalDate.now().plusDays(3));
-    }
-
-    @Test
-    void runAllJobs_noteWithValidDate_notFixed() throws IOException {
-        LocalDate future = LocalDate.now().plusDays(5);
-        Path note = VAULT.resolve("Good.md");
-        Files.writeString(note, "---\nsr-due: " + future + "\nsr-interval: 3\nsr-ease: 200\n---\n");
-
-        ChronoService.ChronoResult result = chronoService.runAllJobs();
-
-        assertThat(result.filesFixed()).isEqualTo(0);
-        assertThat(Files.readString(note)).contains("sr-due: " + future);
-    }
-
-    @Test
     void runAllJobs_overCapNotes_spreadToFutureDays() throws IOException {
         settingsRepo.set("maxDailyReviews", "1");
         LocalDate yesterday = LocalDate.now().minusDays(1);

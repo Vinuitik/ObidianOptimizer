@@ -16,6 +16,14 @@ import java.time.temporal.ChronoUnit;
  *   flashcards mode → AssignmentService computes the band from the test score
  * Either way: band → FSRS grade → state update → bandit arm → due date,
  * plus the delayed reward for the PREVIOUS scheduling decision.
+ *
+ * Lapses are no longer detected here. The nightly BankruptcyService pass handles
+ * them before the user ever opens the note — by the time grade() is called the
+ * note's FSRS state is already current.
+ *
+ * TODO (bandit rework): account for spread-offset stored in fsrs-spread-offset
+ *   frontmatter field when computing the delayed reward, so SpreadService
+ *   adjustments don't skew the arm's recall signal.
  */
 @Service
 public class ReviewService {
@@ -41,11 +49,8 @@ public class ReviewService {
         }
     }
 
-    /** Reviewing a note more than this many days after its due date is a forced lapse. */
-    static final int LATE_LAPSE_DAYS = 7;
-
     public record GradeResult(String notePath, String band, double stability, double difficulty,
-                              int baseIntervalDays, double banditArm, Timestamp due, boolean lapsed) {}
+                              int baseIntervalDays, double banditArm, Timestamp due) {}
 
     private final FsrsService fsrs;
     private final BanditService bandit;
@@ -64,15 +69,10 @@ public class ReviewService {
     GradeResult grade(String notePath, Band band, Instant now) {
         ReviewRow existing = stateWriter.read(notePath);
 
-        // Reviewing >7 days after the due date is a forced lapse regardless of
-        // the band pressed — the note was effectively forgotten in the gap.
-        boolean lapsed = existing != null
-            && now.isAfter(existing.due().toInstant().plus(LATE_LAPSE_DAYS, ChronoUnit.DAYS));
-
-        // 1. Delayed reward for the arm that scheduled THIS review:
-        //    recalled = Good or better, on time. A lapse always counts as failed.
+        // 1. Delayed reward for the arm that scheduled THIS review.
+        //    recalled = Good or better (Hard = didn't really know it).
         if (existing != null && existing.pendingArm() != null) {
-            boolean recalled = !lapsed && band != Band.HARD;
+            boolean recalled = band != Band.HARD;
             bandit.reward(existing.pendingBucket(), existing.pendingArm(), recalled);
         }
 
@@ -83,27 +83,24 @@ public class ReviewService {
         } else {
             double elapsedDays = Math.max(0, ChronoUnit.SECONDS.between(
                 existing.lastReview().toInstant(), now) / 86400.0);
-            FsrsState prior = new FsrsState(existing.stability(), existing.difficulty());
-            state = lapsed
-                ? fsrs.forget(prior, elapsedDays)
-                : fsrs.review(prior, band.fsrsGrade, elapsedDays);
+            state = fsrs.review(new FsrsState(existing.stability(), existing.difficulty()),
+                band.fsrsGrade, elapsedDays);
         }
 
         // 3. Bandit picks the multiplier for the NEXT interval (Option A:
-        //    applied to the scheduled date only).
+        //    applied to the scheduled date only, never stored FSRS state).
         int baseInterval = fsrs.intervalDays(state.stability());
         String bucket = bandit.bucket(state.difficulty(), state.stability());
         double arm = bandit.chooseArm(bucket);
         long scheduledDays = Math.max(1, Math.round(baseInterval * arm));
 
         Timestamp due = Timestamp.from(now.plus(scheduledDays, ChronoUnit.DAYS));
-        // Single write path: DB + frontmatter mirror together (FsrsStateWriter).
         stateWriter.write(notePath, state, now, due, (int) scheduledDays, bucket, arm);
 
-        log.info("[Review] {} band={}{} S={} D={} base={}d arm={} due={}",
-            notePath, band, lapsed ? " LAPSED(>7d late)" : "", String.format("%.2f", state.stability()),
+        log.info("[Review] {} band={} S={} D={} base={}d arm={} due={}",
+            notePath, band, String.format("%.2f", state.stability()),
             String.format("%.2f", state.difficulty()), baseInterval, arm, due);
         return new GradeResult(notePath, band.name(), state.stability(), state.difficulty(),
-            baseInterval, arm, due, lapsed);
+            baseInterval, arm, due);
     }
 }

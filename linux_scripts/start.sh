@@ -29,6 +29,16 @@ if [[ -n "$PORT_VAL" ]]; then
     WRAPPER_PORT="$PORT_VAL"
 fi
 
+# Derive VAULT_RESOURCES_PATH and WORKSPACE_HOST_PATH from HOST_VAULT_PATH if not set.
+# Both are just subfolders of the vault; no reason to force the user to spell them out.
+HOST_VAULT_PATH=$(get_env_value HOST_VAULT_PATH)
+if [[ -z "$HOST_VAULT_PATH" ]]; then
+    echo "Error: HOST_VAULT_PATH is not set in .env." >&2
+    exit 1
+fi
+
+mkdir -p "$HOST_VAULT_PATH/resources" "$HOST_VAULT_PATH/_workspace"
+
 cleanup() {
     local phase="$1"
     echo "[$phase] Removing old containers..."

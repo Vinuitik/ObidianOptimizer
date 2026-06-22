@@ -152,33 +152,6 @@ class FrontmatterRewriterTest {
         assertThat(Files.readString(f)).isEqualTo(content);
     }
 
-    @Test
-    void hasInvalidDate_detectsCorruptionOnLine2() throws IOException {
-        Path f = writeFile("corrupt.md",
-            "---\nsr-due: Invalid date\nsr-interval: 3\nsr-ease: 200\n---\n\nBody.");
-        assertThat(FrontmatterRewriter.hasInvalidDate(f)).isTrue();
-    }
-
-    @Test
-    void hasInvalidDate_cleanFileReturnsFalse() throws IOException {
-        Path f = writeFile("clean.md",
-            "---\nsr-due: 2025-01-01\nsr-interval: 3\nsr-ease: 200\n---\n");
-        assertThat(FrontmatterRewriter.hasInvalidDate(f)).isFalse();
-    }
-
-    @Test
-    void hasInvalidDate_singleLineFileReturnsFalse() throws IOException {
-        Path f = writeFile("short.md", "---");
-        assertThat(FrontmatterRewriter.hasInvalidDate(f)).isFalse();
-    }
-
-    @Test
-    void hasInvalidDate_invalidDateOnLine2WithCrlf() throws IOException {
-        Path f = writeFile("crlf-corrupt.md",
-            "---\r\nsr-due: Invalid date\r\nsr-interval: 3\r\n---\r\n");
-        assertThat(FrontmatterRewriter.hasInvalidDate(f)).isTrue();
-    }
-
     // ── FSRS mirror ─────────────────────────────────────────────────────────
 
     @Test

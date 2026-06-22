@@ -136,6 +136,17 @@ if ($currentVault -and $currentVault -notmatch '^\\\\wsl[\$\.]' -and -not (Test-
 # Enable the Cloudflare tunnel only when a token is present in .env. The
 # cloudflared service is behind the "tunnel" compose profile; starting it
 # without a token would crash-loop (restart: unless-stopped), so we detect it.
+# Derive VAULT_RESOURCES_PATH and WORKSPACE_HOST_PATH from HOST_VAULT_PATH if not set.
+# Both are just subfolders of the vault; no reason to force the user to spell them out.
+$vaultPath = Get-DotEnvValue -Path $envFile -Key 'HOST_VAULT_PATH'
+if (-not $vaultPath) {
+    Write-Error "HOST_VAULT_PATH is not set in .env."
+    exit 1
+}
+
+New-Item -ItemType Directory -Force "$vaultPath\resources"   | Out-Null
+New-Item -ItemType Directory -Force "$vaultPath\_workspace"  | Out-Null
+
 $composeArgs = @("-f", "$rootDir\docker-compose.yml")
 if (Select-String -Path $envFile -Pattern '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S' -Quiet) {
     Write-Host "Cloudflare tunnel token found in .env — starting with the 'tunnel' profile."

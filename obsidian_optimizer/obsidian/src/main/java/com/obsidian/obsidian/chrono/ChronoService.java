@@ -31,7 +31,6 @@ public class ChronoService {
     private boolean chronoEnabled;
 
     private final FileMoverService   fileMover;
-    private final FileCheckerService fileChecker;
     private final BankruptcyService  bankruptcy;
     private final SpreadService      spread;
     private final SettingsRepository settingsRepo;
@@ -40,13 +39,12 @@ public class ChronoService {
     private final ImageScanService   imageScanService;
     private final SyncQueueRepository syncQueueRepo;
 
-    public ChronoService(FileMoverService fileMover, FileCheckerService fileChecker,
+    public ChronoService(FileMoverService fileMover,
                          BankruptcyService bankruptcy, SpreadService spread,
                          SettingsRepository settingsRepo, FileRepository fileRepo,
                          NoteIndexRepository noteIndex, ImageScanService imageScanService,
                          SyncQueueRepository syncQueueRepo) {
         this.fileMover        = fileMover;
-        this.fileChecker      = fileChecker;
         this.bankruptcy       = bankruptcy;
         this.spread           = spread;
         this.settingsRepo     = settingsRepo;
@@ -59,7 +57,6 @@ public class ChronoService {
     public record ChronoResult(
         String date,
         int filesMoved,
-        int filesFixed,
         BankruptcyService.BankruptcyResult bankruptcy,
         SpreadService.SpreadResult spread
     ) {}
@@ -89,14 +86,14 @@ public class ChronoService {
     }
 
     public ChronoResult runAllJobs() {
-        String vaultRoot    = settingsRepo.getVaultPath();
-        List<Path> mdFiles  = fileRepo.listMdPaths();
+        String vaultRoot   = settingsRepo.getVaultPath();
+        List<Path> mdFiles = fileRepo.listMdPaths();
 
         int filesMoved = fileMover.run(vaultRoot);
-        int filesFixed = fileChecker.run(mdFiles, FrontmatterRewriter::hasInvalidDate);
 
         BankruptcyService.BankruptcyResult bankruptcyResult =
-            bankruptcy.run(mdFiles, settingsRepo.getBankruptcyLimit());
+            bankruptcy.run(mdFiles, settingsRepo.getBankruptcyLimit(),
+                           settingsRepo.getChronicNeglectDays());
 
         SpreadService.SpreadResult spreadResult =
             spread.run(mdFiles, settingsRepo.getMaxDailyReviews());
@@ -105,10 +102,9 @@ public class ChronoService {
 
         // Detect changed files by comparing SHA-256 hashes. This catches both
         // external Obsidian edits AND the frontmatter rewrites the chrono jobs
-        // above just made (spread/bankruptcy/checker write directly to disk).
+        // above just made (spread/bankruptcy write directly to disk).
         // Each changed file gets its images re-queued AND is marked PENDING for
-        // Drive sync — without the markPending, the scheduled 2am run's changes
-        // never reached Drive until the next app restart.
+        // Drive sync.
         java.nio.file.Path vaultRootPath = java.nio.file.Paths.get(vaultRoot).toAbsolutePath().normalize();
         int changed = 0;
         for (Path mdPath : mdFiles) {
@@ -134,10 +130,11 @@ public class ChronoService {
 
         String today = LocalDate.now().toString();
         settingsRepo.set("chronoLastRunDate", today);
-        log.info("[ChronoService] Complete for {}. moved={} fixed={} overdue={} shifted={}",
-            today, filesMoved, filesFixed, bankruptcyResult.overdueCount(), spreadResult.moved());
+        log.info("[ChronoService] Complete for {}. moved={} chronic={} bankrupt={} shifted={}",
+            today, filesMoved, bankruptcyResult.chronicNeglected(),
+            bankruptcyResult.declared(), spreadResult.moved());
 
-        return new ChronoResult(today, filesMoved, filesFixed, bankruptcyResult, spreadResult);
+        return new ChronoResult(today, filesMoved, bankruptcyResult, spreadResult);
     }
 
     public String getLastRunDate() {

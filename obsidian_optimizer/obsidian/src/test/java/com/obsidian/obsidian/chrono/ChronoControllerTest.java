@@ -48,15 +48,15 @@ class ChronoControllerTest {
 
     @Test
     void runChrono_success_returns200WithResult() throws Exception {
-        var bankruptcy = new BankruptcyService.BankruptcyResult(5, true, 5);
+        var bankruptcy = new BankruptcyService.BankruptcyResult(5, 2, true, 3);
         var spread = new SpreadService.SpreadResult(20, 3);
-        var result = new ChronoService.ChronoResult("2026-06-10", 2, 1, bankruptcy, spread);
+        var result = new ChronoService.ChronoResult("2026-06-10", 2, bankruptcy, spread);
         when(chronoService.runAllJobs()).thenReturn(result);
         mvc.perform(post("/chrono/run"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.filesMoved").value(2))
-            .andExpect(jsonPath("$.filesFixed").value(1))
             .andExpect(jsonPath("$.bankruptcy.declared").value(true))
+            .andExpect(jsonPath("$.bankruptcy.chronicNeglected").value(2))
             .andExpect(jsonPath("$.spread.moved").value(3));
     }
 

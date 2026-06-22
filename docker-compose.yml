@@ -109,10 +109,10 @@ services:
     # tunnel (cloudflared container → frontend:8081 over the docker network).
     # Cloudflare terminates real TLS at its edge. Nothing on localhost or the LAN.
     volumes:
-      # nginx serves these directly (range-request support, zero JVM involvement).
-      # Set both vars in .env to subdirs of your vault.
-      - ${VAULT_RESOURCES_PATH}:/vault-resources:ro
-      - ${WORKSPACE_HOST_PATH}:/workspace:ro
+      # nginx serves these vault subdirs directly (range-request support, zero JVM involvement).
+      # Derived from HOST_VAULT_PATH — no separate env vars needed.
+      - ${HOST_VAULT_PATH}/resources:/vault-resources:ro
+      - ${HOST_VAULT_PATH}/_workspace:/workspace:ro
     depends_on:
       - backend
 

@@ -20,19 +20,30 @@ import java.util.Map;
 import java.util.Random;
 
 /**
- * Relief valve: when too many notes pile up overdue, declare bankruptcy and
- * relearn the backlog. Under FSRS this is the mass-lapse — each overdue note
- * goes through {@link FsrsService#forget} (stability collapses, difficulty
- * rises), then is rescheduled by its new FSRS interval, load-balanced across
- * the available days. Legacy notes (sr-due but no FSRS state) are seeded into
- * FSRS first (stability ≈ sr-interval, neutral difficulty) so the whole vault
- * participates. Writes go through {@link FsrsStateWriter} (DB + frontmatter).
+ * Two-pass nightly lapse job:
+ *
+ * Pass 1 — Chronic neglect (always runs, per-note, no threshold):
+ *   Notes overdue by more than {@code chronicNeglectDays} are individually lapsed
+ *   via {@link FsrsService#forget}. Prevents notes from drifting forgotten for
+ *   months while the total overdue count stays below the bankruptcy limit.
+ *   Configurable via Settings → "chronicNeglectDays" (default 7).
+ *
+ * Pass 2 — Mass bankruptcy (threshold gate):
+ *   If the total overdue count (chronic + standard) meets or exceeds
+ *   {@code bankruptcyLimit}, ALL remaining overdue notes (those not already
+ *   lapsed in pass 1) get the same forget+reschedule treatment in one sweep.
+ *
+ * Both passes write through {@link FsrsStateWriter} (DB + frontmatter mirror).
+ * Legacy notes are seeded into FSRS first (S ≈ sr-interval, D from ease).
+ *
+ * TODO: feed bandit.reward(bucket, arm, false) for each lapsed note so the arm
+ *       that scheduled it into neglect gets a negative signal. Requires injecting
+ *       BanditService here — deferred until the full bandit rework (see plan).
  */
 @Component
 public class BankruptcyService {
 
     private static final Logger log = LoggerFactory.getLogger(BankruptcyService.class);
-
     private static final Random RANDOM = new Random();
 
     private final FsrsService fsrs;
@@ -43,41 +54,74 @@ public class BankruptcyService {
         this.stateWriter = stateWriter;
     }
 
-    public record BankruptcyResult(int overdueCount, boolean declared, int rescheduled) {}
+    public record BankruptcyResult(
+        int overdueCount,
+        int chronicNeglected,
+        boolean declared,
+        int rescheduled
+    ) {}
 
-    public BankruptcyResult run(List<Path> mdFiles, int bankruptcyLimit) {
+    public BankruptcyResult run(List<Path> mdFiles, int bankruptcyLimit, int chronicNeglectDays) {
         LocalDate today = LocalDate.now();
-        List<Path> overdue = new ArrayList<>();
+        Instant now = Instant.now();
+
+        List<Path> chronic  = new ArrayList<>();  // overdue > chronicNeglectDays
+        List<Path> standard = new ArrayList<>();  // overdue but ≤ chronicNeglectDays
+
         for (Path file : mdFiles) {
             FrontmatterRewriter.SrFields fields = FrontmatterRewriter.read(file);
-            if (fields != null && fields.due().isBefore(today)) overdue.add(file);
+            if (fields == null || !fields.due().isBefore(today)) continue;
+            long daysOverdue = ChronoUnit.DAYS.between(fields.due(), today);
+            if (daysOverdue > chronicNeglectDays) {
+                chronic.add(file);
+            } else {
+                standard.add(file);
+            }
         }
 
-        log.info("[BankruptcyCheck] {} overdue note(s) found.", overdue.size());
-        if (overdue.size() < bankruptcyLimit) {
-            log.info("[BankruptcyCheck] No bankruptcy — below threshold of {}.", bankruptcyLimit);
-            return new BankruptcyResult(overdue.size(), false, 0);
-        }
+        int totalOverdue = chronic.size() + standard.size();
+        log.info("[BankruptcyCheck] {} overdue note(s): {} chronic (>{} days), {} standard.",
+            totalOverdue, chronic.size(), chronicNeglectDays, standard.size());
 
-        log.info("[BankruptcyCheck] BANKRUPTCY DECLARED. Lapsing + spreading {} note(s).", overdue.size());
+        // Pass 1: always lapse chronically neglected notes individually.
         Map<LocalDate, Integer> dayLoad = new HashMap<>();
-        Instant now = Instant.now();
+        int chronicNeglected = 0;
+        for (Path file : chronic) {
+            try {
+                lapseAndReschedule(file, today, now, dayLoad);
+                chronicNeglected++;
+            } catch (Exception e) {
+                log.warn("[BankruptcyCheck] Failed chronic lapse of {}: {}", file.getFileName(), e.getMessage());
+            }
+        }
+        if (chronicNeglected > 0) {
+            log.info("[BankruptcyCheck] Lapsed {} chronically neglected note(s).", chronicNeglected);
+        }
+
+        // Pass 2: mass bankruptcy if total overdue meets the threshold.
+        if (totalOverdue < bankruptcyLimit) {
+            log.info("[BankruptcyCheck] No bankruptcy — {} overdue below threshold of {}.",
+                totalOverdue, bankruptcyLimit);
+            return new BankruptcyResult(totalOverdue, chronicNeglected, false, 0);
+        }
+
+        log.info("[BankruptcyCheck] BANKRUPTCY DECLARED. Lapsing {} remaining standard note(s).", standard.size());
         int rescheduled = 0;
-        for (Path file : overdue) {
+        for (Path file : standard) {
             try {
                 lapseAndReschedule(file, today, now, dayLoad);
                 rescheduled++;
             } catch (Exception e) {
-                log.warn("[BankruptcyCheck] Failed to process {}: {}", file.getFileName(), e.getMessage());
+                log.warn("[BankruptcyCheck] Failed mass lapse of {}: {}", file.getFileName(), e.getMessage());
             }
         }
-        return new BankruptcyResult(overdue.size(), true, rescheduled);
+        return new BankruptcyResult(totalOverdue, chronicNeglected, true, rescheduled);
     }
 
     private void lapseAndReschedule(Path file, LocalDate today, Instant now,
                                     Map<LocalDate, Integer> dayLoad) {
         FrontmatterRewriter.SrFields legacy = FrontmatterRewriter.read(file);
-        if (legacy == null) return;  // not a review note
+        if (legacy == null) return;
         String notePath = file.toAbsolutePath().toString();
 
         ReviewRow row = stateWriter.read(notePath);
@@ -87,8 +131,6 @@ public class BankruptcyService {
             prior = new FsrsState(row.stability(), row.difficulty());
             lastReview = row.lastReview().toInstant();
         } else {
-            // Seed the legacy note into FSRS (same policy as on-demand normalize):
-            // stability ≈ sr-interval, difficulty from ease — timeline preserved.
             prior = FsrsStateWriter.seedFromLegacy(legacy);
             lastReview = legacy.due().minusDays(Math.max(1, legacy.interval()))
                 .atStartOfDay(ZoneId.systemDefault()).toInstant();

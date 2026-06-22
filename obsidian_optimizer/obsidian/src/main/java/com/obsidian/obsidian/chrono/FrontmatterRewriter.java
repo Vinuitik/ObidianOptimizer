@@ -164,13 +164,4 @@ public class FrontmatterRewriter {
     private static Double parseDouble(String v) { try { return Double.parseDouble(v); } catch (Exception e) { return null; } }
     private static int parseInt(String v, int def) { try { return Integer.parseInt(v); } catch (Exception e) { return def; } }
 
-    public static boolean hasInvalidDate(Path file) {
-        try {
-            String raw = Files.readString(file);
-            String[] lines = raw.replace("\r\n", "\n").split("\n", -1);
-            return lines.length >= 2 && lines[1].endsWith("Invalid date");
-        } catch (IOException e) {
-            return false;
-        }
-    }
 }
