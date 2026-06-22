@@ -23,6 +23,7 @@ import re
 import httpx
 import psycopg
 
+from agent_reports import AgentReport
 from . import validate
 from .solver_sandbox import SandboxError, run_solver
 
@@ -42,16 +43,21 @@ Generate about {n_mcq} mcq, {n_open} open, {n_ex} exercise cards. Spread difficu
 Only create exercise cards when the note contains computable/parameterizable material;
 otherwise produce more mcq/open instead.
 
+EVERY card MUST include an "explanation": 1-3 sentences saying WHY the answer is
+correct (and, for mcq, why the right option beats the distractors). The student
+sees this only AFTER answering, so make it teach the reasoning, not just restate.
+
 Card schemas:
-mcq:      {{"type":"mcq","question":str,"options":[str,2-6 unique],"correct":int_index,"difficulty":1-5}}
+mcq:      {{"type":"mcq","question":str,"options":[str,2-6 unique],"correct":int_index,"explanation":str,"difficulty":1-5}}
           Distractors must be plausible misconceptions, not noise.
 open:     {{"type":"open","question":str,"reference_answers":[str,str,...>=2 distinct phrasings],
-           "key_points":[str,...],"difficulty":1-5}}
+           "key_points":[str,...],"explanation":str,"difficulty":1-5}}
 exercise: {{"type":"exercise","template":"text with {{param}} placeholders","params":{{"param":{{"kind":"int","min":int,"max":int}} or {{"kind":"choice","values":[...]}}}},
            "solver":"def solve(param): return ...","answer_kind":"numeric"|"string","tolerance":number,
-           "conditions":[{{"name":str,"values":{{...}}}}],"difficulty":1-5}}
+           "conditions":[{{"name":str,"values":{{...}}}}],"explanation":str,"difficulty":1-5}}
           Solver constraints: pure python, only math/itertools and basic builtins,
           no imports, no IO. solve() args must match params keys exactly.
+          The explanation states the method/formula, not a single numeric answer.
 
 NOTE:
 {content}"""
@@ -226,6 +232,9 @@ def _with_image_descriptions(note_path: str, content: str) -> str:
 def generate_for_note(note_path: str, content: str, source_hash: str) -> dict:
     content = _with_image_descriptions(note_path, content)
     prompt = GEN_PROMPT.format(n_mcq=N_MCQ, n_open=N_OPEN, n_ex=N_EX, content=content)
+    rep = AgentReport("flashcards", note_path)
+    rep.input("note_content (post image-enrichment)", content)
+    rep.input("prompt", prompt)
     valid: list[dict] = []
     errors: list[str] = []
 
@@ -234,12 +243,16 @@ def generate_for_note(note_path: str, content: str, source_hash: str) -> dict:
             raw = _complete(prompt if attempt == 0 else
                             prompt + "\n\nYour previous output had these validation errors — fix them:\n"
                             + "\n".join(errors[:20]))
+            rep.said(f"raw output (attempt {attempt})", raw)
             cards = _extract_json(raw)
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
             errors = [f"output was not parseable JSON: {e}"]
             log.warning("[flashcards] %s attempt %d: %s", note_path, attempt, errors[0])
+            rep.add(f"VALIDATION · attempt {attempt}", errors[0])
             continue
         valid, errors = validate.validate_cards(cards)
+        rep.add(f"VALIDATION · attempt {attempt}",
+                {"valid": len(valid), "errors": errors})
         if valid and not errors:
             break
         log.info("[flashcards] %s attempt %d: %d valid, %d errors",
@@ -248,13 +261,19 @@ def generate_for_note(note_path: str, content: str, source_hash: str) -> dict:
             break  # store what survived, log the rejects
 
     if not valid:
+        rep.output("result", {"stored": 0, "rejected": len(errors), "errors": errors[:10]})
+        rep.save(status="empty")
         return {"note_path": note_path, "stored": 0, "archived": 0,
                 "rejected": len(errors), "errors": errors[:10]}
 
     before = len(valid)
     valid = _self_check(valid)
+    rep.add("self-check", {"kept": len(valid), "dropped": before - len(valid)})
     result = _store(note_path, source_hash, valid)
     result.update({"note_path": note_path,
                    "self_check_dropped": before - len(valid),
                    "rejected": len(errors)})
+    rep.output("stored cards", valid)
+    rep.output("result", result)
+    rep.save(status="ok" if result.get("stored") else "empty")
     return result

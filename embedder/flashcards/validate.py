@@ -26,6 +26,14 @@ def _check_difficulty(card: dict, errors: list[str]) -> None:
         errors.append("difficulty must be an int 1-5")
 
 
+def _check_explanation(card: dict, errors: list[str]) -> None:
+    # Shown to the student AFTER answering — required so every card teaches the
+    # reasoning, not just marks right/wrong. Missing/blank → re-prompted.
+    expl = card.get("explanation")
+    if not isinstance(expl, str) or not expl.strip():
+        errors.append("explanation required (non-empty string explaining the answer)")
+
+
 def _validate_mcq(card: dict) -> list[str]:
     errors: list[str] = []
     if not isinstance(card.get("question"), str) or not card["question"].strip():
@@ -40,6 +48,7 @@ def _validate_mcq(card: dict) -> list[str]:
             or not 0 <= correct < len(options or []):
         errors.append("mcq: correct must be a valid option index")
     _check_difficulty(card, errors)
+    _check_explanation(card, errors)
     return errors
 
 
@@ -51,6 +60,7 @@ def _validate_open(card: dict) -> list[str]:
     if not isinstance(refs, list) or len([r for r in refs if isinstance(r, str) and r.strip()]) < 2:
         errors.append("open: at least 2 non-empty reference_answers required")
     _check_difficulty(card, errors)
+    _check_explanation(card, errors)
     return errors
 
 
@@ -77,6 +87,7 @@ def _validate_exercise(card: dict) -> list[str]:
     if not isinstance(domains, dict) or not domains:
         errors.append("exercise: params domains required")
     _check_difficulty(card, errors)
+    _check_explanation(card, errors)
 
     solver = card.get("solver")
     if not isinstance(solver, str):

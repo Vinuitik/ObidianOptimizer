@@ -1,9 +1,6 @@
-# CUDA 12 + cuDNN 9 base — onnxruntime-gpu uses CUDAExecutionProvider when CUDA is
-# available. cuDNN 9 is REQUIRED: onnxruntime-gpu >=1.19 and ctranslate2 >=4.5 both
-# need cuDNN 9. The old cudnn8 base made onnxruntime fail to load libcudnn.so.9 and
-# silently fall back to CPU. If the container starts without --gpus / no
-# nvidia-container-toolkit, the CUDA provider is absent and it falls back to CPU.
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+# CUDA 13 + cuDNN base — matches host driver 580.x which exposes CUDA 13.0.
+# onnxruntime-gpu >=1.21 requires libcudart.so.13; CUDA 12 images don't ship it.
+FROM nvidia/cuda:13.0.0-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 # --no-install-recommends keeps this to the packages we actually use. Without it,

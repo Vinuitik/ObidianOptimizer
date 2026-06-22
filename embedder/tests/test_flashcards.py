@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+import agent_reports
 from flashcards import generate as gen
 from flashcards import validate
 from flashcards.solver_sandbox import SandboxError, check_solver, run_solver
@@ -17,6 +18,8 @@ def _no_image_db(monkeypatch):
     tests there's no DB, so default it to a no-op. Tests that exercise the
     formatting call _format_with_descriptions directly (pure, no I/O)."""
     monkeypatch.setattr(gen, "_with_image_descriptions", lambda note_path, content: content)
+    # Don't write agent debug reports to /reports during unit tests.
+    monkeypatch.setattr(agent_reports, "ENABLED", False)
 
 
 # ── Sandbox: what must pass ───────────────────────────────────────────────────
@@ -63,13 +66,21 @@ def test_sandbox_timeout_kills_infinite_loop():
 
 def _mcq(**overrides):
     card = {"type": "mcq", "question": "2+2?", "options": ["3", "4", "5"],
-            "correct": 1, "difficulty": 2}
+            "correct": 1, "explanation": "2+2 sums to 4; 3 and 5 are off by one.",
+            "difficulty": 2}
     card.update(overrides)
     return card
 
 
 def test_validate_mcq_happy():
     assert validate.validate_card(_mcq()) == []
+
+
+def test_validate_requires_explanation():
+    assert any("explanation required" in e
+               for e in validate.validate_card(_mcq(explanation="")))
+    assert any("explanation required" in e
+               for e in validate.validate_card(_mcq(explanation=None)))
 
 
 @pytest.mark.parametrize("bad", [
@@ -85,7 +96,8 @@ def test_validate_mcq_rejects(bad):
 
 def test_validate_open_requires_two_references():
     card = {"type": "open", "question": "Why?",
-            "reference_answers": ["only one"], "difficulty": 3}
+            "reference_answers": ["only one"],
+            "explanation": "Because the cause precedes the effect.", "difficulty": 3}
     assert validate.validate_card(card)
     card["reference_answers"] = ["one phrasing", "another phrasing"]
     assert validate.validate_card(card) == []
@@ -98,6 +110,7 @@ def test_validate_exercise_runs_conditions_and_samples():
             "solver": "def solve(n):\n    return n * (n - 1) // 2",
             "answer_kind": "numeric", "tolerance": 0,
             "conditions": [{"name": "small", "values": {"n": 5}}],
+            "explanation": "Worst case is n(n-1)/2 pairwise comparisons.",
             "difficulty": 3}
     assert validate.validate_card(card) == []
 
@@ -151,9 +164,11 @@ def test_card_hash_stable_and_distinct():
 
 GOOD_CARDS = [
     {"type": "mcq", "question": "What is FSRS?", "options": ["A scheduler", "A database"],
-     "correct": 0, "difficulty": 2},
+     "correct": 0, "explanation": "FSRS schedules reviews; it is not storage.",
+     "difficulty": 2},
     {"type": "open", "question": "Explain stability.",
      "reference_answers": ["Days until recall drops to 90%", "Memory strength in days"],
+     "explanation": "Stability is the time for recall to decay to the target.",
      "difficulty": 3},
 ]
 

@@ -51,7 +51,7 @@ public class StatsController {
         this.imageJobRepo = imageJobRepo;
     }
 
-    @GetMapping("/api/stats")
+    @GetMapping("/stats")
     public Map<String, Object> stats() {
         Map<String, Object> out = new LinkedHashMap<>();
 

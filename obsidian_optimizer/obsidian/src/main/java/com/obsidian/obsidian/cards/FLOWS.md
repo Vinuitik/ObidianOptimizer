@@ -53,6 +53,13 @@ Idempotent + best-effort; a re-review of a prepared note is a no-op.
 **UI modes** (`flashcardsEnabled` setting, toggle in Settings → Review):
 - ON: ReviewPage → FlashcardSession.jsx — builds a tiered-knapsack assignment for
   the note, verifies each answer server-side, completes → band + next due shown.
+  Exam-style: correctness is NOT revealed per question (no answer leaks to later
+  questions) — the breakdown (your answer + correct answer + judge feedback) shows
+  only in the result phase. Each card has an **"I don't know"** button that submits
+  an empty answer (graded WRONG by every type) so the attempt is still recorded and
+  the card's difficulty stays in the score denominator — a skip would drop it and
+  inflate the score. On complete, FlashcardSession calls `dismissFromReview(notePath)`
+  so the rescheduled note leaves the due list (mirrors SlideshowReview.rate()).
 - OFF: ReviewPage → SlideshowReview (in ReviewPage.jsx) — four band buttons →
   POST /reviews/grade. ReviewRating.jsx (list dropdown) posts the same.
 
@@ -115,6 +122,8 @@ CardJobWorker @Scheduled (default every 30min, 2min after startup)
                   questions without seeing answers; mismatches dropped
           validate.py: schema + solver sandbox checks; failures re-prompted,
                   MAX_RETRIES=2, survivors stored
+          every run writes a debug report (inputs / model said / final output)
+                  via embedder/agent_reports.py → $AGENT_REPORTS_DIR/flashcards/
       → upsert into cards (note_path + card_hash dedupe); cards from older note
         versions are KEPT ACTIVE (never auto-archived) — they stay in the review
         draw pool. Removal is user-only (explicit delete).
@@ -166,6 +175,9 @@ POST /api/assignments/{id}/complete
 
 `mcq` (options + correct index) · `open` (≥2 reference_answers, key_points) ·
 `exercise` (template + param domains + sandboxed solver + named conditions).
+EVERY card also carries a required `explanation` (validated non-empty,
+`validate._check_explanation`) — shown in the FlashcardSession result phase only,
+AFTER answering, so it teaches the reasoning without leaking answers mid-test.
 `code` cards: [NOT IMPLEMENTED] — needs the code-runner container (see ARCH).
 
 ## Technology Notes
@@ -191,6 +203,8 @@ POST /api/assignments/{id}/complete
 | Scan schedule | `cards.scan.delay-ms` / `cards.scan.initial-delay-ms` |
 | Cards-per-note mix | `embedder/flashcards/generate.py → N_MCQ / N_OPEN / N_EX` |
 | Prompts | `generate.py → GEN_PROMPT / CHECK_PROMPT` |
+| Per-card explanation rule | `validate._check_explanation` (required) / `GEN_PROMPT` |
+| Agent debug reports | `embedder/agent_reports.py`; `AGENT_REPORTS_DIR` (`/reports` → vault `_reports/`), `AGENT_REPORTS=off`, `AGENT_REPORTS_KEEP` |
 | Generation model | `SYNTH_MODEL` env (embedder + wrapper, default haiku) |
 | Retry budget | `generate.py → MAX_RETRIES` |
 | Sandbox limits | `solver_sandbox.py → TIMEOUT_S / MEM_MB / ALLOWED_* / DENIED_NAMES` |

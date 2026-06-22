@@ -22,6 +22,7 @@ from datetime import date
 
 import httpx
 
+from agent_reports import AgentReport
 from ingest import bundle as bundle_util
 
 log = logging.getLogger("embedder.ingest.synthesize")
@@ -103,13 +104,24 @@ def _json_object(text: str):
 
 def outline(bundle: dict) -> list[dict]:
     segs = bundle_util.number_segments(bundle)
+    subject = bundle["source"].get("title") or bundle["source"].get("ref", "untitled")
+    rep = AgentReport("ingest-outline", subject)
+    rep.input("source", {k: bundle["source"].get(k) for k in ("type", "title", "ref")})
+    rep.input("segments", bundle_util.render_segments(segs))
     plans = []
-    for window in bundle_util.windows(segs):
-        plans.extend(_outline_window(bundle, window))
+    try:
+        for window in bundle_util.windows(segs):
+            plans.extend(_outline_window(bundle, window, rep))
+        rep.output("planned notes", plans)
+        rep.save(status="ok" if plans else "empty")
+    except SynthesisError as e:
+        rep.output("error", str(e))
+        rep.save(status="error")
+        raise
     return plans
 
 
-def _outline_window(bundle: dict, window: list[dict]) -> list[dict]:
+def _outline_window(bundle: dict, window: list[dict], rep: AgentReport) -> list[dict]:
     prompt = OUTLINE_PROMPT.format(
         title=bundle["source"].get("title", "untitled"),
         source_type=bundle["source"]["type"],
@@ -122,6 +134,8 @@ def _outline_window(bundle: dict, window: list[dict]) -> list[dict]:
         raw = _complete(prompt if attempt == 0
                         else f"{prompt}\n\nYour previous reply was invalid: {last_err}. "
                              f"Return ONLY the corrected JSON.", OUTLINE_SYSTEM)
+        rep.said(f"raw outline (ids {min(valid_ids, default='?')}-"
+                 f"{max(valid_ids, default='?')}, attempt {attempt})", raw)
         try:
             plan = _json_object(raw)
             notes = plan["notes"]

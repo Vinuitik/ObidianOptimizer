@@ -22,6 +22,11 @@ services:
     volumes:
       - embedder_models:/models
       - ${HOST_VAULT_PATH}:/vault:ro
+      # Agent debug reports (flashcards, ingest, …): /vault is read-only, so this
+      # writable bind to the vault's _reports/ subdir is where AgentReport writes.
+      # _reports is in the retrieval ignore lists (FileRepository.EXCLUDED_DIRS +
+      # embedder os.walk prune) so it's never scanned/embedded/carded.
+      - ${HOST_VAULT_PATH}/_reports:/reports
       # Offline downloads (yt-dlp) land here — bind-mounted so files are reachable
       # on the host for offline viewing. Salvaged from the former VideoManager app.
       - ${HOST_DOWNLOAD_PATH:-./downloads}:/downloads
@@ -30,6 +35,7 @@ services:
       - MODEL_CACHE=/models
       - DATABASE_URL=postgresql://obsidian:${POSTGRES_PASSWORD:-obsidian}@postgres:5432/obsidian
       - VAULT_DIR=/vault
+      - AGENT_REPORTS_DIR=/reports
       - MCP_API_TOKEN=${MCP_API_TOKEN:?set MCP_API_TOKEN in .env}
       - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}
       - WRAPPER_URL=${WRAPPER_URL:-http://host.docker.internal:5001}
@@ -85,6 +91,7 @@ services:
       - INGEST_ENABLED=${INGEST_ENABLED:-true}
       - APP_AUTH_PASSWORD=${APP_AUTH_PASSWORD:?set APP_AUTH_PASSWORD in .env}
       - EMBEDDER_URL=http://embedder:8000
+      - WRAPPER_URL=${WRAPPER_URL:-http://host.docker.internal:5001}
       - IMAGE_WORKER_PARALLELISM=${IMAGE_WORKER_PARALLELISM:-4}
       - IMAGE_BATCH_SIZE=${IMAGE_BATCH_SIZE:-4}
       - SYNC_PASSPHRASE=${SYNC_PASSPHRASE:-}

@@ -261,6 +261,24 @@
   color: var(--color-text-2);
 }
 
+.resultCorrectAnswer {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-success);
+}
+
+.resultExplanation {
+  font-size: var(--text-xs);
+  color: var(--color-text);
+  line-height: var(--leading-normal);
+}
+
+.resultFeedback {
+  font-size: var(--text-xs);
+  color: var(--color-text-2);
+  font-style: italic;
+}
+
 .selfMarkRow {
   display: flex;
   align-items: center;

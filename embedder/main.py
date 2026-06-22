@@ -229,7 +229,8 @@ def _resolve_embed(ref: str):
     # store — wasted work AND triggered ENOMEM ([Errno 12]) on memory-tight hosts.
     from pathlib import Path
     for dirpath, dirnames, filenames in os.walk(VAULT_DIR):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "_trash"]
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".") and d not in ("_trash", "_reports")]
         if base in filenames:
             candidate = Path(dirpath) / base
             if candidate.is_file():

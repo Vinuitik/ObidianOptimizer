@@ -54,6 +54,12 @@ _worker_loop (daemon, MAX 1 concurrent — one model in VRAM at a time)
 ```
 Jobs are in-memory — restart loses status (bundle files survive).
 
+`synthesize.outline()` writes a debug report (source + segments in, raw LLM per
+window, planned notes out) via `embedder/agent_reports.py` →
+`$AGENT_REPORTS_DIR/ingest-outline/`. See where a bad split came from without
+re-running. (`AGENT_REPORTS_DIR` defaults to `/reports` = vault `_reports/`,
+which is in the retrieval ignore lists; `AGENT_REPORTS=off` to disable.)
+
 ### _synthesize_and_inject (in-place)
 ```
 _store_media(bundle)                    → keyframes/PDF figures via Java /api/internal/media

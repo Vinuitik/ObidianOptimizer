@@ -69,25 +69,34 @@ describe('FlashcardSession — quiz phase', () => {
     expect(api.submitAttempt).toHaveBeenCalledWith('a1', 'c1', '0');
   });
 
-  it('shows the verdict returned by the server', async () => {
+  it('does NOT reveal correctness during the quiz (exam style)', async () => {
     await renderSession();
     fireEvent.click(screen.getByTestId('option-0'));
-    await waitFor(() => expect(screen.getByTestId('verdict').textContent).toMatch(/Correct.*2\/2/));
+    await waitFor(() => screen.getByTestId('recorded'));
+    // no per-card verdict leak, and the correct option is not highlighted
+    expect(screen.queryByTestId('verdict')).toBeNull();
+    expect(screen.getByTestId('option-0').className).not.toMatch(/correct/i);
+    expect(screen.getByTestId('recorded').textContent).toMatch(/Answer recorded/);
   });
 
-  it('open-ended answers go to the judge and can earn partial credit', async () => {
-    api.submitAttempt
-      .mockResolvedValueOnce({ verdict: 'CORRECT', pointsEarned: 2, maxPoints: 2 })
-      .mockResolvedValueOnce({ verdict: 'PARTIAL', pointsEarned: 1, maxPoints: 3, feedback: 'misses the decay term' });
+  it('"I don\'t know" records a WRONG attempt (empty answer), not a skip', async () => {
+    api.submitAttempt.mockResolvedValue({ verdict: 'WRONG', pointsEarned: 0, maxPoints: 2 });
+    await renderSession();
+    fireEvent.click(screen.getByTestId('idk-btn'));
+    await waitFor(() => expect(screen.getByTestId('next-btn')).not.toBeDisabled());
+    expect(api.submitAttempt).toHaveBeenCalledWith('a1', 'c1', '');
+    expect(screen.getByTestId('recorded').textContent).toMatch(/I don.t know/);
+  });
+
+  it('open-ended answers go to the judge', async () => {
     await renderSession();
     fireEvent.click(screen.getByTestId('option-0'));
-    await waitFor(() => screen.getByTestId('verdict'));
+    await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
 
     fireEvent.change(screen.getByTestId('open-textarea'), { target: { value: 'memory strength' } });
     fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
-    await waitFor(() =>
-      expect(screen.getByTestId('verdict').textContent).toMatch(/Partial.*misses the decay term/));
+    await waitFor(() => screen.getByTestId('recorded'));
     expect(api.submitAttempt).toHaveBeenLastCalledWith('a1', 'c2', 'memory strength');
   });
 });
@@ -96,11 +105,11 @@ describe('FlashcardSession — result phase', () => {
   async function completeSession() {
     await renderSession();
     fireEvent.click(screen.getByTestId('option-0'));
-    await waitFor(() => screen.getByTestId('verdict'));
+    await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
     fireEvent.change(screen.getByTestId('open-textarea'), { target: { value: 'answer' } });
     fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
-    await waitFor(() => screen.getByTestId('verdict'));
+    await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
     await waitFor(() => expect(screen.getByTestId('flashcard-result')).toBeTruthy());
   }
@@ -117,16 +126,30 @@ describe('FlashcardSession — result phase', () => {
     expect(screen.getByTestId('result-card-c2').className).toMatch(/correct/i);
   });
 
+  it('reveals the correct answer at the end for cards answered wrong', async () => {
+    api.submitAttempt.mockResolvedValue({ verdict: 'WRONG', pointsEarned: 0, maxPoints: 2 });
+    await renderSession();
+    fireEvent.click(screen.getByTestId('option-2'));            // wrong (correct is 0)
+    await waitFor(() => screen.getByTestId('recorded'));
+    fireEvent.click(screen.getByTestId('next-btn'));
+    fireEvent.click(screen.getByTestId('idk-btn'));             // open card → "I don't know"
+    await waitFor(() => screen.getByTestId('recorded'));
+    fireEvent.click(screen.getByTestId('next-btn'));
+    await waitFor(() => screen.getByTestId('flashcard-result'));
+    // mcq correct option text is revealed only now
+    expect(screen.getByTestId('result-card-c1').textContent).toMatch(/Correct answer: Scheduler/);
+  });
+
   it('review note button navigates to the note', async () => {
     const onReviewNote = vi.fn();
     render(<FlashcardSession notePath="/vault/note.md" onReviewNote={onReviewNote} onClose={noop} />);
     await waitFor(() => screen.getByTestId('flashcard-session'));
     fireEvent.click(screen.getByTestId('option-0'));
-    await waitFor(() => screen.getByTestId('verdict'));
+    await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
     fireEvent.change(screen.getByTestId('open-textarea'), { target: { value: 'a' } });
     fireEvent.click(screen.getByRole('button', { name: /submit answer/i }));
-    await waitFor(() => screen.getByTestId('verdict'));
+    await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
     await waitFor(() => screen.getByTestId('flashcard-result'));
 
