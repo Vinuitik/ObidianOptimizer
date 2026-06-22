@@ -64,10 +64,25 @@ for mcq the option index (int), for numeric the number, for string the exact sho
 
 # ── LLM via host-wrapper CLI ──────────────────────────────────────────────────
 
+class LLMUnavailable(Exception):
+    """No LLM produced output: the host-wrapper is unreachable, or its router
+    exhausted every provider (free tiers + the claude CLI). Distinct from a
+    content failure (bad/empty JSON) — retrying the prompt won't help, and it
+    must NOT be silently folded into a 'generated 0 cards' result. Surfaces as a
+    503 so the on-demand path screams and the background worker retries later."""
+
+
 def _complete(prompt: str) -> str:
-    resp = httpx.post(f"{WRAPPER_URL}/complete",
-                      json={"prompt": prompt, "model": SYNTH_MODEL},
-                      timeout=240.0)
+    try:
+        resp = httpx.post(f"{WRAPPER_URL}/complete",
+                          json={"prompt": prompt, "model": SYNTH_MODEL},
+                          timeout=240.0)
+    except httpx.TransportError as e:   # wrapper down / DNS / connect / read timeout
+        raise LLMUnavailable(f"host-wrapper unreachable at {WRAPPER_URL}: {e}") from e
+    # 5xx = wrapper up but no provider answered (RouterError → 503). Availability
+    # failure, not a content problem — don't let the retry loop mistake it for one.
+    if resp.status_code >= 500:
+        raise LLMUnavailable(f"host-wrapper {resp.status_code}: {resp.text[:200]}")
     resp.raise_for_status()
     return resp.json()["text"]
 

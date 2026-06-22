@@ -16,10 +16,16 @@ import org.springframework.stereotype.Service;
  *
  *   1. Migrate legacy → FSRS (timeline preserved, schedule untouched) so the
  *      nightly chrono run sees current FSRS state — {@link FsrsStateWriter#normalizeLegacy}.
- *   2. Generate cards if the note has none yet, recording the attempt against
- *      body_hash so {@code CardJobWorker.findNotesNeedingCards} skips it.
+ *   2. Generate cards if the note has none yet AND its preprocessing is done
+ *      (ingest finished + images transcribed — {@link CardRepository#isReadyForCards}),
+ *      recording the attempt against body_hash so {@code CardJobWorker} skips it.
  *   3. Chunk + embed the note ({@link EmbeddingService#indexNote}, hash-gated)
  *      so the embedding worker finds nothing to do.
+ *
+ * Ordering matters: ingest → image transcription → cards. We do NOT JIT-generate
+ * cards for a note still mid-preprocessing — those would be image-blind and,
+ * because image text lives in note_chunks (not the body), never regenerated. The
+ * background worker fills them in once preprocessing lands.
  *
  * Best-effort: any step failing is logged, not fatal — the session still builds
  * from whatever cards exist, and the background jobs remain the safety net.
@@ -60,14 +66,21 @@ public class ReviewPreparationService {
         String bodyHash = noteIndex.getBodyHash(notePath);
         if (bodyHash == null) return;  // not indexed yet — nothing safe to generate against
 
-        try {
-            JsonNode result = generationService.generateFor(notePath, bodyHash);
-            if (result != null) {
-                // Record against body_hash — the exact key the worker diffs on — so it skips this note.
-                cardRepo.recordAttempt(notePath, bodyHash);
+        // Respect the preprocessing order: don't JIT cards from a note whose
+        // ingest/image transcription is still pending — the background worker
+        // will generate them (with image text) once preprocessing lands.
+        if (!cardRepo.isReadyForCards(notePath)) {
+            log.info("[ReviewPrep] {} not ready for cards (ingest/images pending) — deferring to worker", notePath);
+        } else {
+            try {
+                JsonNode result = generationService.generateFor(notePath, bodyHash);
+                if (result != null) {
+                    // Record against body_hash — the exact key the worker diffs on — so it skips this note.
+                    cardRepo.recordAttempt(notePath, bodyHash);
+                }
+            } catch (Exception e) {
+                log.warn("[ReviewPrep] on-demand card generation failed for {}: {}", notePath, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("[ReviewPrep] on-demand card generation failed for {}: {}", notePath, e.getMessage());
         }
 
         try {

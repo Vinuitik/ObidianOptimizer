@@ -125,7 +125,12 @@ def generate_cards(req: GenerateCardsRequest):
             raise HTTPException(status_code=404, detail=f"cannot read note: {e}")
 
     source_hash = req.source_hash or hashlib.sha256(content.encode("utf-8")).hexdigest()
-    return card_gen.generate_for_note(req.note_path, content, source_hash)
+    try:
+        return card_gen.generate_for_note(req.note_path, content, source_hash)
+    except card_gen.LLMUnavailable as e:
+        # No LLM answered (wrapper down or all providers exhausted). Fail loud —
+        # a 200 "0 cards" here would silently hide a missing/unreachable LLM.
+        raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
 
 
 @app.post("/flashcards/roll")

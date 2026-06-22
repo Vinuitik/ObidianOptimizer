@@ -213,6 +213,34 @@ def test_generate_gives_up_after_retry_budget(monkeypatch):
     assert result["errors"]
 
 
+def test_generate_propagates_llm_unavailable_not_silent_zero(monkeypatch):
+    """An unreachable/exhausted LLM must raise LLMUnavailable, NOT be swallowed
+    into a stored:0 result — the on-demand path turns this into a loud 503."""
+    def boom(prompt):
+        raise gen.LLMUnavailable("host-wrapper unreachable")
+    monkeypatch.setattr(gen, "_complete", boom)
+
+    with pytest.raises(gen.LLMUnavailable):
+        gen.generate_for_note("/vault/n.md", "content", "h")
+
+
+def test_complete_raises_llm_unavailable_on_5xx(monkeypatch):
+    class _Resp:
+        status_code = 503
+        text = "all providers exhausted"
+    monkeypatch.setattr(gen.httpx, "post", lambda *a, **k: _Resp())
+    with pytest.raises(gen.LLMUnavailable):
+        gen._complete("prompt")
+
+
+def test_complete_raises_llm_unavailable_on_transport_error(monkeypatch):
+    def boom(*a, **k):
+        raise gen.httpx.ConnectError("connection refused")
+    monkeypatch.setattr(gen.httpx, "post", boom)
+    with pytest.raises(gen.LLMUnavailable):
+        gen._complete("prompt")
+
+
 # ── Image-description enrichment (pure formatter) ─────────────────────────────
 
 def test_format_with_descriptions_appends_labelled_block():

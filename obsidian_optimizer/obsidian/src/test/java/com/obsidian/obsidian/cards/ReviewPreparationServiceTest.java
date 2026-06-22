@@ -49,9 +49,10 @@ class ReviewPreparationServiceTest {
     }
 
     @Test
-    void whenNoCards_generatesAgainstBodyHash_andEmbeds() throws Exception {
+    void whenNoCards_andReady_generatesAgainstBodyHash_andEmbeds() throws Exception {
         when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of());        // no cards yet
         when(noteIndex.getBodyHash(NOTE)).thenReturn("bodyhash123");
+        when(cardRepo.isReadyForCards(NOTE)).thenReturn(true);             // ingest + images done
         when(generationService.generateFor(NOTE, "bodyhash123"))
             .thenReturn(new ObjectMapper().createObjectNode().put("stored", 4));
 
@@ -60,6 +61,21 @@ class ReviewPreparationServiceTest {
         verify(generationService).generateFor(NOTE, "bodyhash123");
         // recordAttempt MUST use body_hash so CardJobWorker.findNotesNeedingCards skips it
         verify(cardRepo).recordAttempt(NOTE, "bodyhash123");
+        verify(embeddingService).indexNote(NOTE);
+    }
+
+    @Test
+    void whenNotReady_defersCardGeneration_butStillEmbeds() {
+        when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of());
+        when(noteIndex.getBodyHash(NOTE)).thenReturn("bh");
+        when(cardRepo.isReadyForCards(NOTE)).thenReturn(false);   // ingest/images still pending
+
+        prep.prepare(NOTE);
+
+        // No image-blind JIT cards — the background worker handles it once ready.
+        verify(generationService, never()).generateFor(any(), any());
+        verify(cardRepo, never()).recordAttempt(any(), any());
+        // Embedding is independent of card readiness and still runs.
         verify(embeddingService).indexNote(NOTE);
     }
 
@@ -75,6 +91,7 @@ class ReviewPreparationServiceTest {
     void whenGenerationYieldsNothing_doesNotRecordAttempt() {
         when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of());
         when(noteIndex.getBodyHash(NOTE)).thenReturn("bh");
+        when(cardRepo.isReadyForCards(NOTE)).thenReturn(true);
         when(generationService.generateFor(NOTE, "bh")).thenReturn(null);   // embedder down / zero yield
 
         prep.prepare(NOTE);

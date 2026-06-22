@@ -75,9 +75,30 @@ public class CardRepository {
                   SELECT 1 FROM card_gen_attempts a
                   WHERE a.note_path = n.path
                     AND a.source_hash = n.body_hash)
-            ORDER BY n.path
+            ORDER BY n.sr_due ASC NULLS LAST, n.path
             LIMIT ?
             """, limit);
+    }
+
+    /**
+     * Is this note ready for card generation right now? Mirrors the readiness
+     * gate inside {@link #findNotesNeedingCards}: ingest finished and no image
+     * jobs still PENDING. Used by the on-demand prep path so JIT generation
+     * doesn't produce image-blind cards from a note whose preprocessing
+     * (ingest → image transcription) hasn't landed — those cards would never be
+     * regenerated (image text lives in note_chunks, not the note body, so
+     * body_hash never changes when it arrives).
+     */
+    public boolean isReadyForCards(String notePath) {
+        Boolean ready = jdbc.queryForObject("""
+            SELECT n.ingest_pending = false
+               AND NOT EXISTS (
+                   SELECT 1 FROM pending_image_jobs j
+                   WHERE j.note_path = n.path AND j.status = 'PENDING')
+            FROM notes n
+            WHERE n.path = ?
+            """, Boolean.class, notePath);
+        return Boolean.TRUE.equals(ready);
     }
 
     public void recordAttempt(String notePath, String sourceHash) {
