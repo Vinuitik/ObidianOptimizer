@@ -1,4 +1,5 @@
-$envFile = "$PSScriptRoot\.env"
+$rootDir  = Split-Path $PSScriptRoot -Parent
+$envFile  = "$rootDir\.env"
 if (-not (Test-Path $envFile)) {
     Write-Error ".env not found. Copy .env.example to .env and set HOST_VAULT_PATH to your vault directory."
     exit 1
@@ -27,7 +28,7 @@ function Set-DotEnvValue([string]$Path, [string]$Key, [string]$Value) {
 }
 
 $currentVault = Get-DotEnvValue -Path $envFile -Key 'HOST_VAULT_PATH'
-$ackFile      = "$PSScriptRoot\.vault-ack"
+$ackFile      = "$rootDir\.vault-ack"
 
 # --rechoose: wipe the saved preference so the prompt appears again this run.
 if ($args -contains '--rechoose' -and (Test-Path $ackFile)) {
@@ -135,7 +136,7 @@ if ($currentVault -and $currentVault -notmatch '^\\\\wsl[\$\.]' -and -not (Test-
 # Enable the Cloudflare tunnel only when a token is present in .env. The
 # cloudflared service is behind the "tunnel" compose profile; starting it
 # without a token would crash-loop (restart: unless-stopped), so we detect it.
-$composeArgs = @("-f", "$PSScriptRoot\docker-compose.yml")
+$composeArgs = @("-f", "$rootDir\docker-compose.yml")
 if (Select-String -Path $envFile -Pattern '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S' -Quiet) {
     Write-Host "Cloudflare tunnel token found in .env — starting with the 'tunnel' profile."
     $composeArgs += @("--profile", "tunnel")
@@ -180,7 +181,7 @@ Invoke-Cleanup -Phase "startup"
 # compose service because it needs host-side access to local LLM tooling/creds.
 # Without it, image captioning + note synthesis silently skip ("host wrapper
 # unreachable"). Launches in its own window so its logs are visible; killed below.
-$wrapperDir = "$PSScriptRoot\host-wrapper"
+$wrapperDir = "$rootDir\host-wrapper"
 $venvDir    = "$wrapperDir\.venv"
 $venvPython = "$venvDir\Scripts\python.exe"
 $reqFile    = "$wrapperDir\requirements.txt"

@@ -37,11 +37,12 @@ param(
     [switch]$Force
 )
 
-$compose = Join-Path $PSScriptRoot "docker-compose.yml"
+$rootDir = Split-Path $PSScriptRoot -Parent
+$compose = Join-Path $rootDir "docker-compose.yml"
 if (-not (Test-Path $compose)) { Write-Error "docker-compose.yml not found next to this script."; exit 1 }
 
 # Project name docker compose derives from the directory (lowercased, sanitized).
-$proj = (Split-Path $PSScriptRoot -Leaf).ToLower() -replace '[^a-z0-9_-]', ''
+$proj = (Split-Path $rootDir -Leaf).ToLower() -replace '[^a-z0-9_-]', ''
 
 Write-Host "`n=== CLEAN SLATE: $proj ===" -ForegroundColor Cyan
 
@@ -77,6 +78,6 @@ foreach ($v in $targets) {
 
 Write-Host "`n=== DONE ===" -ForegroundColor Cyan
 Write-Host "Next launch boots from a clean slate:"
-Write-Host "  .\start.ps1   (or  docker compose up --build)"
+Write-Host "  .\win_scripts\start.ps1   (or  docker compose up --build)"
 Write-Host "  -> fresh DB -> full re-index from vault -> re-embed -> card generation"
 if (-not $IncludeModels) { Write-Host "  -> models reused from cache (fast boot)" -ForegroundColor DarkGray }

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Generates extension-firefox/ — a Firefox-loadable copy of extension/.
 #
 # Why a copy: Chrome MV3 requires `background.service_worker`; Firefox MV3 wants
@@ -12,16 +13,20 @@
 #
 # Chrome/Edge/Brave keep loading the original extension/ folder unchanged.
 
-$ErrorActionPreference = 'Stop'
-$src = Join-Path $PSScriptRoot 'extension'
-$out = Join-Path $PSScriptRoot 'extension-firefox'
+set -euo pipefail
 
-Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force $out | Out-Null
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
-Copy-Item "$src/*" $out -Recurse -Force
-Remove-Item (Join-Path $out 'manifest.firefox.json') -Force -ErrorAction SilentlyContinue
-Copy-Item "$src/manifest.firefox.json" (Join-Path $out 'manifest.json') -Force
+SRC="$ROOT_DIR/extension"
+OUT="$ROOT_DIR/extension-firefox"
 
-Write-Host "Firefox extension ready: $out"
-Write-Host "Load it: about:debugging#/runtime/this-firefox -> Load Temporary Add-on -> select extension-firefox/manifest.json"
+rm -rf "$OUT"
+mkdir -p "$OUT"
+
+cp -r "$SRC/." "$OUT/"
+rm -f "$OUT/manifest.firefox.json"
+cp "$SRC/manifest.firefox.json" "$OUT/manifest.json"
+
+echo "Firefox extension ready: $OUT"
+echo "Load it: about:debugging#/runtime/this-firefox -> Load Temporary Add-on -> select extension-firefox/manifest.json"
