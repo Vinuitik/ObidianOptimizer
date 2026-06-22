@@ -79,6 +79,12 @@ ingest queue empty → gpu_slot.release_ingest()
 - **Two CUDA contexts.** onnxruntime and ctranslate2 each carry their own CUDA
   context (~hundreds of MB). That's why only one heavy model at a time — co-residency
   was rejected, not just unimplemented.
+- **Two CUDA *versions* coexist.** onnxruntime uses the base image's CUDA-13 libs
+  (`libcublas.so.13`); ctranslate2 is a CUDA-12 build needing `libcublas.so.12`, shipped
+  via the `nvidia-cublas-cu12` wheel and found through `LD_LIBRARY_PATH` (Dockerfile).
+  Different soname (`.so.12` vs `.so.13`) = no collision; the one host driver (CUDA-13
+  capable) runs both via backward compat. ~500MB on DISK, not VRAM/RAM. If a
+  `libcudnn.so.9` error appears, add `nvidia-cudnn-cu12` the same way.
 - **OOM→CPU is a safety net, not the plan.** With the embedder evicted, whisper has
   the card to itself and shouldn't OOM; the CPU retry covers fragmentation / a
   bigger `WHISPER_MODEL`.

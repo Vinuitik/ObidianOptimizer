@@ -37,6 +37,16 @@ if [[ -z "$HOST_VAULT_PATH" ]]; then
     exit 1
 fi
 
+# Reject a non-absolute / Windows-style path. Without this guard a leftover Windows
+# value (e.g. C:/Users/...) has no leading '/', so the mkdir below treats it as
+# RELATIVE and silently builds a junk ./C:/Users/... tree under the cwd instead of
+# erroring. On Linux the vault path must be a real absolute path like /home/you/vault.
+if [[ "$HOST_VAULT_PATH" != /* || "$HOST_VAULT_PATH" == *:* || "$HOST_VAULT_PATH" == *\\* ]]; then
+    echo "Error: HOST_VAULT_PATH ('$HOST_VAULT_PATH') is not an absolute Linux path." >&2
+    echo "       It looks like a Windows path. Set it to e.g. /home/$USER/Desktop/NewLife in .env." >&2
+    exit 1
+fi
+
 mkdir -p "$HOST_VAULT_PATH/resources" "$HOST_VAULT_PATH/_workspace"
 
 cleanup() {

@@ -21,6 +21,11 @@ RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
 # in the shared namespace — reinstall the GPU wheel last so CUDA EP survives.
 RUN python3.11 -m pip install --no-cache-dir --force-reinstall --no-deps "onnxruntime-gpu>=1.19.0"
 
+# CUDA-12 cuBLAS (from the nvidia-cublas-cu12 wheel) lands in site-packages, not a
+# standard linker dir — prepend it so ctranslate2 (a CUDA-12 build) finds libcublas.so.12.
+# Prepended, not replaced, so the base image's CUDA-13 paths (used by onnxruntime) survive.
+ENV LD_LIBRARY_PATH=/usr/local/lib/python3.11/dist-packages/nvidia/cublas/lib:${LD_LIBRARY_PATH}
+
 COPY . .
 
 # /models is a Docker volume — model is downloaded here on first start and reused.

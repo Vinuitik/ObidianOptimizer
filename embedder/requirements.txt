@@ -22,6 +22,14 @@ numpy>=1.26.0
 faster-whisper>=1.1.0
 ctranslate2>=4.5
 
+# ctranslate2 4.5 is built against CUDA 12 → it dlopen's libcublas.so.12, but the base
+# image is CUDA 13 (ships libcublas.so.13, for onnxruntime). Ship CUDA-12 cuBLAS side by
+# side: this wheel drops libcublas.so.12 + libcublasLt.so.12 into site-packages, and the
+# Dockerfile adds that dir to LD_LIBRARY_PATH so ctranslate2 finds its .so.12 while
+# onnxruntime keeps using the system .so.13 (different soname = no collision). ~500MB.
+# If a libcudnn.so.9 "not found" error appears next, add nvidia-cudnn-cu12 the same way.
+nvidia-cublas-cu12
+
 # yt-dlp — captions (ingest fast-path) + offline media download. Salvaged in-process
 # from the former VideoManager sister app (download/downloader.py).
 yt-dlp>=2024.5.27

@@ -105,10 +105,11 @@ def _run_transcribe(model, wav: Path):
 
 def _whisper_transcribe(path: Path):
     """Transcribe via the single-occupant GPU slot: claim the GPU (evicting the
-    text embedder), load whisper, transcribe. On a CUDA OOM (load OR transcribe) —
-    a safety net, since whisper fits alone on 4GB — retry the whole thing on CPU.
-    The slot is held only across the model LOAD; transcription runs without it, so
-    the embedder keeps serving on its CPU floor meanwhile."""
+    text embedder), load whisper, transcribe. On ANY CUDA failure (OOM, missing
+    libcublas/cudnn, driver mismatch, load OR transcribe error) retry the whole thing
+    on CPU — resilience over speed — logging a loud WARN banner so the downgrade is
+    visible. The slot is held only across the model LOAD; transcription runs without
+    it, so the embedder keeps serving on its CPU floor meanwhile."""
     wav = _to_wav(path)
     try:
         for device, compute in _device_plan():
@@ -116,12 +117,21 @@ def _whisper_transcribe(path: Path):
                 with gpu_slot.exclusive("whisper"):
                     model = _load_whisper(device, compute)
                 return _run_transcribe(model, wav)
-            except RuntimeError as e:
-                if device == "cuda" and _is_cuda_oom(e):
-                    log.warning("whisper CUDA OOM (%s) — retrying on CPU", str(e)[:80])
+            except Exception as e:  # noqa: BLE001 — resilience: ANY GPU failure → CPU
+                # Degrade to CPU on *every* CUDA failure, not just OOM: missing
+                # libcublas/cudnn, driver mismatch, init errors, etc. all land here.
+                # SCREAM so a silent CPU downgrade is visible in logs and never mistaken
+                # for "GPU is working" — transcription still succeeds, just slower.
+                if device == "cuda":
+                    reason = "OOM" if _is_cuda_oom(e) else "CUDA/library error"
+                    log.warning("=" * 70)
+                    log.warning("WARN: whisper FAILED on GPU (%s): %s", reason, str(e)[:140])
+                    log.warning("WARN: FALLING BACK TO CPU — transcription will be SLOWER.")
+                    log.warning("WARN: fix the GPU path to restore speed; ingest is NOT broken.")
+                    log.warning("=" * 70)
                     unload_whisper()
                     continue
-                raise
+                raise  # CPU itself failed — nothing left to fall back to.
         raise RuntimeError("whisper transcription failed on all devices")
     finally:
         wav.unlink(missing_ok=True)
