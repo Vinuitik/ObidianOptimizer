@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.doubleThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -57,7 +58,10 @@ class ReviewServiceTest {
     }
 
     @Test
-    void secondGrade_paysDelayedRewardToPreviousArm() {
+    void onTimeReview_creditsTheIntendedArm() {
+        // Reviewed exactly when scheduled: effective multiplier == intended arm.
+        // scheduled span = 3d, intended arm 1.2 → base = 2.5d; actual elapsed 3d
+        // → effective = 3 / 2.5 = 1.2.
         ReviewRow prev = new ReviewRow("/vault/n.md", 2.3065, 2.118104, 1,
             Timestamp.from(now.minus(3, ChronoUnit.DAYS)),
             Timestamp.from(now), "dEasy:sShort", 1.2);
@@ -65,36 +69,38 @@ class ReviewServiceTest {
 
         service.grade("/vault/n.md", Band.GOOD, now);
 
-        verify(bandit).reward("dEasy:sShort", 1.2, true);   // recalled
+        verify(bandit).reward(eq("dEasy:sShort"), doubleThat(d -> Math.abs(d - 1.2) < 1e-6), eq(true));
     }
 
     @Test
     void hardBand_countsAsForgotten_forTheBanditReward() {
         ReviewRow prev = new ReviewRow("/vault/n.md", 2.3065, 2.118104, 1,
             Timestamp.from(now.minus(3, ChronoUnit.DAYS)),
-            Timestamp.from(now), "dEasy:sShort", 1.5);
+            Timestamp.from(now), "dEasy:sShort", 1.5);  // base = 3/1.5 = 2d, elapsed 3d → eff 1.5
         when(stateWriter.read("/vault/n.md")).thenReturn(prev);
 
         service.grade("/vault/n.md", Band.HARD, now);
 
-        verify(bandit).reward("dEasy:sShort", 1.5, false);  // not recalled
+        verify(bandit).reward(eq("dEasy:sShort"), doubleThat(d -> Math.abs(d - 1.5) < 1e-6), eq(false));
     }
 
     @Test
-    void lateReview_goesThrough_normalRecallPath() {
-        // Lapse detection moved to nightly BankruptcyService. A note reviewed
-        // very late here just updates FSRS normally with the real elapsed days —
-        // the nightly job already lapsed it before the user opened it.
+    void lateReview_creditsTheEffectiveArm_notTheIntendedOne() {
+        // The reframe: intended arm was 1.2, but the note was reviewed FAR later
+        // than scheduled (spread + procrastination). The reward is credited to the
+        // realised interval, not what we intended.
+        //   scheduled span = (due - lastReview) = 10d ; base = 10/1.2 = 8.33d
+        //   actual elapsed = (now - lastReview)  = 40d ; effective = 40/8.33 ≈ 4.8
+        // (BanditService later snaps 4.8 down to the 2.0 ceiling — tested there.)
         ReviewRow prev = new ReviewRow("/vault/n.md", 13.826904, 2.111214, 2,
             Timestamp.from(now.minus(40, ChronoUnit.DAYS)),
-            Timestamp.from(now.minus(30, ChronoUnit.DAYS)),  // 30 days overdue
+            Timestamp.from(now.minus(30, ChronoUnit.DAYS)),
             "dEasy:sShort", 1.2);
         when(stateWriter.read("/vault/n.md")).thenReturn(prev);
 
         GradeResult result = service.grade("/vault/n.md", Band.GOOD, now);
 
-        // No forced lapse in ReviewService — FSRS computes normally from elapsed time.
-        verify(bandit).reward("dEasy:sShort", 1.2, true);   // Good band → recalled
+        verify(bandit).reward(eq("dEasy:sShort"), doubleThat(d -> Math.abs(d - 4.8) < 0.05), eq(true));
         assertThat(result.stability()).isGreaterThan(0);
     }
 

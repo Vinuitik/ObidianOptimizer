@@ -13,18 +13,47 @@ import java.util.Random;
  * FSRS computes the base interval; the sampled arm multiplies the SCHEDULED
  * date only. FSRS stability/difficulty state is never touched by the bandit.
  *
- * One Beta(α,β) per (context bucket, arm). Reward is delayed — it arrives at
- * the NEXT review of the same note: recalled (Good or better) → α+1, else β+1.
- * Priors α=β=1 (uniform). No weights, no neural nets — just Beta updates.
+ * One Beta(α,β) per (context bucket, arm). Priors α=β=1 (uniform). v1 context =
+ * FSRS difficulty band × stability band (9 buckets × 5 arms = 45 dense cells).
  *
- * v1 context = FSRS difficulty band × stability band (9 buckets × 5 arms).
- * The Trello card also lists historical recall rate as context — deferred
- * until attempt history accumulates; with 45 Beta cells data stays dense.
+ * Three properties make this absorb our non-pure-FSRS system (spread check,
+ * bankruptcy, late/early reviews) instead of being confused by it:
+ *
+ *  1. INTERVAL-WEIGHTED REWARD (not binary recall). A recalled review pays the
+ *     arm a reward scaled by how FAR it stretched: r = arm / MAX_ARM; a forget
+ *     pays 0. argmax over arms of E[recall|arm]·arm lands at the forgetting-curve
+ *     KNEE, not at the shortest arm — this is what kills the old "always 0.7" bias
+ *     (compressing intervals trivially maximised raw recall).
+ *
+ *  2. EFFECTIVE-ARM ATTRIBUTION (done by the caller, ReviewService). The reward
+ *     is credited to the arm matching the interval the note was ACTUALLY reviewed
+ *     at, not the one we intended. Spread shifts + procrastination become free
+ *     exploration data rather than contamination. {@link #reward} snaps the raw
+ *     realised multiplier to the grid, so a huge procrastination can never credit
+ *     an arm above the ceiling (MAX_ARM) — that snap-to-cap is the ratchet clamp.
+ *
+ *  3. DISCOUNTED BETA (non-stationary). Each update first relaxes the cell toward
+ *     the (1,1) prior by {@link #DISCOUNT}, capping effective memory at ~1/(1-γ)
+ *     and letting stale buckets re-open to exploration as habits/memory drift.
+ *
+ * Bankruptcy/chronic-neglect lapses are deliberately NOT fed here — those are
+ * exogenous (the user didn't open the app), not a memory signal.
+ *
+ * Future knobs if overshoot is observed: raise the grid ceiling, or add
+ * feedforward compensation for the systematic late-review offset (subtract the
+ * average effective-minus-intended gap at choose time). Not built — scope.
  */
 @Service
 public class BanditService {
 
-    public static final double[] ARMS = {0.7, 0.85, 1.0, 1.2, 1.5};
+    /** Asymmetric grid: no sub-0.85 compression, expansion room up to a hard 2.0 ceiling. */
+    public static final double[] ARMS = {0.85, 1.0, 1.25, 1.5, 2.0};
+
+    /** Reward normaliser and attribution ceiling — the largest arm. */
+    public static final double MAX_ARM = 2.0;
+
+    /** Beta discount per update (relax toward prior). Effective memory ≈ 1/(1-γ) ≈ 33 obs. */
+    static final double DISCOUNT = 0.97;
 
     private final JdbcTemplate jdbc;
     private Random random = new Random();
@@ -68,15 +97,42 @@ public class BanditService {
         return bestArm;
     }
 
-    /** Delayed reward from the next review: recalled → α+1, forgotten → β+1. */
-    public void reward(String bucket, double arm, boolean recalled) {
+    /** Snap a raw realised multiplier to the nearest arm; clamps above MAX_ARM. */
+    public double snapArm(double rawMultiplier) {
+        double best = ARMS[0];
+        double bestDist = Math.abs(rawMultiplier - best);
+        for (double arm : ARMS) {
+            double dist = Math.abs(rawMultiplier - arm);
+            if (dist < bestDist) { bestDist = dist; best = arm; }
+        }
+        return best;
+    }
+
+    /**
+     * Delayed reward from the next review, credited to the EFFECTIVE arm.
+     *
+     * @param rawEffectiveMultiplier  actualElapsed / baseFsrsInterval — the interval
+     *                                the note was really reviewed at (snapped to grid).
+     * @param recalled                Good or better (Hard = not recalled).
+     *
+     * Reward = recalled ? snappedArm / MAX_ARM : 0  (interval-weighted: stretching
+     * further is worth more). Update is discounted toward the (1,1) prior first.
+     */
+    public void reward(String bucket, double rawEffectiveMultiplier, boolean recalled) {
+        double arm = snapArm(rawEffectiveMultiplier);
+        double r = recalled ? arm / MAX_ARM : 0.0;
+
+        double[] ab = loadParams(bucket).getOrDefault(arm, new double[]{1, 1});
+        // Relax toward the uniform prior, then add the fractional reward.
+        double alpha = 1 + DISCOUNT * (ab[0] - 1) + r;
+        double beta  = 1 + DISCOUNT * (ab[1] - 1) + (1 - r);
+
         jdbc.update("""
             INSERT INTO bandit_arms(context_bucket, arm, alpha, beta)
             VALUES (?, ?, ?, ?)
             ON CONFLICT (context_bucket, arm) DO UPDATE SET
-              alpha = bandit_arms.alpha + EXCLUDED.alpha - 1,
-              beta  = bandit_arms.beta  + EXCLUDED.beta  - 1
-            """, bucket, arm, recalled ? 2.0 : 1.0, recalled ? 1.0 : 2.0);
+              alpha = EXCLUDED.alpha, beta = EXCLUDED.beta
+            """, bucket, arm, alpha, beta);
     }
 
     private Map<Double, double[]> loadParams(String bucket) {

@@ -11,23 +11,26 @@ Architecture: architecture_plans/FLASHCARDS_ARCH.md, architecture_plans/FSRS_REW
 ```
 POST /api/reviews/grade {notePath, band}     band ∈ HARD/GOOD/EASY/VERY_EASY
   → ReviewService.grade():
-    0. lapsed? = existing.due + 7d < now → reviewing >7 days late is a FORCED
-       lapse regardless of band (LATE_LAPSE_DAYS).
-    1. delayed bandit reward: previous pending (bucket, arm) gets α+1 if recalled
-       (Good+ and NOT lapsed) else β+1   (BanditService.reward)
-    2. FSRS-6 state update (FsrsService):
-         lapsed → FsrsService.forget() (w11-w14: stability collapses, D rises)
-         else   → FsrsService.review() (recall path; VERY_EASY == FSRS Easy)
+    1. delayed bandit reward for the previous scheduling decision, credited to the
+       EFFECTIVE arm (the interval the note was ACTUALLY reviewed at, not the one
+       intended): rawEffective = (now − lastReview) / (fsrsInterval at that time).
+       BanditService.reward snaps it to the grid and pays an interval-weighted
+       reward r = recalled ? snappedArm/MAX_ARM : 0, discounted toward the prior.
+       Spread shifts + late/early reviews become free exploration data this way.
+    2. FSRS-6 state update (FsrsService.review): recall path; VERY_EASY == FSRS Easy.
+       (No lapse path here — late-lapse moved to the nightly BankruptcyService.)
     3. bandit (Thompson Sampling, Beta per bucket×arm) samples arm
-       m ∈ {0.7, 0.85, 1.0, 1.2, 1.5}; due = now + round(fsrsInterval × m)
+       m ∈ {0.85, 1.0, 1.25, 1.5, 2.0}; due = now + round(fsrsInterval × m)
        — Option A: the arm scales the SCHEDULED DATE only, never stored S/D
   → FsrsStateWriter.write(): DB note_reviews upsert + frontmatter mirror together
 
 GET /api/reviews/due?limit=50 → notes due now, most overdue first
 ```
 
-To change the late-lapse window: `ReviewService.LATE_LAPSE_DAYS`.
-To change the lapse math: `FsrsService.forget()` (regenerate refs).
+Lapses are no longer detected at review time — the nightly `BankruptcyService`
+handles late/neglected notes before you open them (chronic-neglect pass, default
+7 days, `Settings → chronicNeglectDays`). To change the lapse math:
+`FsrsService.forget()` (regenerate refs).
 
 **State lives in BOTH Postgres and frontmatter** — `FsrsStateWriter` is the ONLY
 writer and writes both together so they can't drift (D1/D2 in FSRS_REWORK_PLAN).
@@ -54,8 +57,29 @@ Idempotent + best-effort; a re-review of a prepared note is a no-op.
   POST /reviews/grade. ReviewRating.jsx (list dropdown) posts the same.
 
 Context buckets: difficulty {<4, 4-7, >7} × stability {<7d, 7-30d, >30d} —
-9 buckets × 5 arms. Historical recall rate as context: deferred until attempt
-history accumulates.
+9 buckets × 5 arms. Review-count is intentionally NOT a bucket axis — FSRS
+stability already encodes review history, so adding it would only add sparsity.
+
+**Bandit reward design** (BanditService) — three pieces make it absorb the
+non-pure-FSRS system (spread, bankruptcy, procrastination) instead of being
+confused by it:
+- *Interval-weighted reward* `r = recalled ? snappedArm/MAX_ARM : 0`. argmax of
+  E[recall|arm]·arm lands at the forgetting-curve knee, not the shortest arm —
+  this is what killed the old "always 0.7" bias (raw recall was trivially
+  maximised by compressing intervals).
+- *Effective-arm attribution* (computed in `ReviewService.grade`, credited in
+  `BanditService.reward`): credit the arm matching the interval the note was
+  REALLY reviewed at, not the intended one. Procrastination/spread become free
+  exploration. `snapArm` clamps a huge late review to MAX_ARM — that snap-to-cap
+  + the recall brake bound the ratchet (no runaway overstretch).
+- *Discounted Beta* (`DISCOUNT` γ=0.97): each update relaxes the cell toward the
+  (1,1) prior first, capping effective memory (~33 obs) and re-opening stale
+  buckets to exploration as habits/memory drift.
+
+Bankruptcy/neglect lapses are deliberately NOT fed to the bandit — exogenous
+(user didn't open the app), not a memory signal. Future knob if overshoot is
+seen: raise the ceiling, or subtract the average effective−intended offset at
+choose-time (feedforward) — not built, scope.
 
 FsrsService (recall AND forget paths) is pinned against py-fsrs outputs
 (FsrsServiceTest); reference values regenerate via `embedder/_fsrs_reference.py`.
@@ -177,11 +201,14 @@ POST /api/assignments/{id}/complete
 | Desired retention | `fsrs.desired-retention` property (default 0.9) |
 | FSRS weights | `FsrsService.W` (FSRS-6 defaults — regenerate test refs if changed) |
 | Lapse / forget math | `FsrsService.forget()` (w11-w14) |
-| Late-lapse window | `ReviewService.LATE_LAPSE_DAYS` (7) |
-| Bandit arms | `BanditService.ARMS` |
+| Chronic-neglect window | `Settings → chronicNeglectDays` (default 7); `BankruptcyService.run` |
+| Bandit arms / ceiling | `BanditService.ARMS` (0.85–2.0) / `MAX_ARM` |
+| Bandit reward shape | `BanditService.reward()` — `recalled ? snappedArm/MAX_ARM : 0` |
+| Bandit non-stationarity | `BanditService.DISCOUNT` (γ=0.97) |
+| Effective-arm attribution | `ReviewService.grade()` — rawEffective = elapsed ÷ baseInterval |
 | Context bucketing | `BanditService.bucket()` |
 | Score→band thresholds | `ReviewService.Band.fromScore()` (40/70/90) |
-| Reward rule (recalled) | `ReviewService.grade()` — `!lapsed && band != HARD` |
+| Reward rule (recalled) | `ReviewService.grade()` — `band != HARD` |
 | Single state write path | `FsrsStateWriter` (DB + frontmatter; never write `note_reviews` directly) |
 | Frontmatter FSRS fields | `FrontmatterRewriter.FsrsFields` / `writeFsrs` |
 | Legacy → FSRS seed policy | `FsrsStateWriter.seedFromLegacy` (+ `FsrsService.easeToDifficulty`) |

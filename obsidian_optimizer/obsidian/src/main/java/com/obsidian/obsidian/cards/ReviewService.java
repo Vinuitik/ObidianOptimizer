@@ -21,9 +21,10 @@ import java.time.temporal.ChronoUnit;
  * them before the user ever opens the note — by the time grade() is called the
  * note's FSRS state is already current.
  *
- * TODO (bandit rework): account for spread-offset stored in fsrs-spread-offset
- *   frontmatter field when computing the delayed reward, so SpreadService
- *   adjustments don't skew the arm's recall signal.
+ * The delayed bandit reward credits the EFFECTIVE arm — the multiplier matching
+ * the interval the note was ACTUALLY reviewed at — not the arm we intended. This
+ * is what turns spread shifts and procrastination into free exploration data for
+ * the bandit instead of noise it has to model. See BanditService.
  */
 @Service
 public class ReviewService {
@@ -69,11 +70,19 @@ public class ReviewService {
     GradeResult grade(String notePath, Band band, Instant now) {
         ReviewRow existing = stateWriter.read(notePath);
 
-        // 1. Delayed reward for the arm that scheduled THIS review.
-        //    recalled = Good or better (Hard = didn't really know it).
+        // 1. Delayed reward for the scheduling decision behind THIS review,
+        //    credited to the EFFECTIVE arm = the interval the note was really
+        //    reviewed at (realised elapsed ÷ the base FSRS interval at that time).
+        //    Spread shifts + late/early reviews flow in here as free signal.
         if (existing != null && existing.pendingArm() != null) {
             boolean recalled = band != Band.HARD;
-            bandit.reward(existing.pendingBucket(), existing.pendingArm(), recalled);
+            double scheduledDays = Math.max(1, ChronoUnit.SECONDS.between(
+                existing.lastReview().toInstant(), existing.due().toInstant()) / 86400.0);
+            double baseInterval = scheduledDays / existing.pendingArm();   // strip the intended arm
+            double actualElapsed = Math.max(0, ChronoUnit.SECONDS.between(
+                existing.lastReview().toInstant(), now) / 86400.0);
+            double rawEffective = actualElapsed / baseInterval;
+            bandit.reward(existing.pendingBucket(), rawEffective, recalled);
         }
 
         // 2. Pure FSRS state update (the bandit never touches this).

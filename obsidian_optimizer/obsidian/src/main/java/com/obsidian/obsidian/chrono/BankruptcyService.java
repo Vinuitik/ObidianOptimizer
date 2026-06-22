@@ -36,9 +36,10 @@ import java.util.Random;
  * Both passes write through {@link FsrsStateWriter} (DB + frontmatter mirror).
  * Legacy notes are seeded into FSRS first (S ≈ sr-interval, D from ease).
  *
- * TODO: feed bandit.reward(bucket, arm, false) for each lapsed note so the arm
- *       that scheduled it into neglect gets a negative signal. Requires injecting
- *       BanditService here — deferred until the full bandit rework (see plan).
+ * Deliberately NO bandit reward here. A bankruptcy/neglect lapse is exogenous —
+ * the user didn't open the app — not evidence that the interval was wrong, so
+ * feeding it to the bandit would punish good long arms for the user's absence.
+ * The bandit only learns from genuine reviews (see BanditService, ReviewService).
  */
 @Component
 public class BankruptcyService {
