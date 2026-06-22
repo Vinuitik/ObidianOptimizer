@@ -9,8 +9,9 @@ Two consumers:
   • ingest/extract_av.py  → fetch_subs()  (YouTube captions, no download)
   • main.py /download     → download_sync() via download/jobs.py (full download)
 
-Output dir: DOWNLOAD_DIR env (default /downloads — bind-mounted in docker-compose so
-the files are reachable on the host for offline viewing).
+Output dir: DOWNLOAD_DIR env (default /workspace — bind-mounted to the vault's
+_workspace/ in docker-compose so downloaded media shows up directly in the Learn
+page, alongside URL-saved and uploaded files).
 """
 import os
 import tempfile
@@ -19,7 +20,7 @@ from typing import Callable
 
 import yt_dlp
 
-DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "/downloads")
+DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "/workspace")
 
 
 def build_ydl_opts(progress_hook: Callable | None) -> dict:

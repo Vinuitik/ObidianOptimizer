@@ -30,7 +30,7 @@ GET /download      → jobs.list_jobs()
 ```
 - One thread per download (no concurrency cap — downloads are I/O-bound, not VRAM-bound like whisper). To cap: add a queue/worker like `ingest/jobs.py`.
 - Playlists: `download_sync` expands them server-side and reports the LAST entry's file (`info["entries"][-1]`).
-- Output dir: `DOWNLOAD_DIR` env (default `/downloads`, bind-mounted in `docker-compose.yml` → host `${HOST_DOWNLOAD_PATH:-./downloads}`).
+- Output dir: `DOWNLOAD_DIR` env (default `/workspace`, bind-mounted in `docker-compose.yml` → host `${HOST_VAULT_PATH}/_workspace`). Downloaded media therefore lands in the vault's `_workspace/` and shows up directly in the Learn page (same dir `WorkspaceController /workspace/files` lists and nginx serves). The old standalone `./downloads` mount was removed.
 - Format/quality: `downloader.build_ydl_opts()` `format` key.
 
 ## Technology Notes (constraints / failure modes)
@@ -38,7 +38,7 @@ GET /download      → jobs.list_jobs()
 - **In-memory jobs.** `jobs._jobs` is a process-local dict — a container restart drops in-flight + finished jobs. Accepted: downloads are idempotent and re-triggerable (same as `ingest/jobs.py`). No persistence.
 - **No auth on the embedder endpoints.** `/download`, `/subs` sit on the loopback-only embedder (port bound to 127.0.0.1 in compose) and are NOT behind the MCP `X-API-Key` (that guards only the `/mcp` mount). The browser-facing trust boundary is the Java `CaptureController` proxy, which IS session-authed. Never expose the embedder port publicly.
 - **ffmpeg dependency.** `download_sync` merges bestvideo+bestaudio → mp4 via ffmpeg; `fetch_audio` + whisper also need it. ffmpeg is installed in the embedder image (already used by `extract_av._to_wav`).
-- **Disk + quota.** `DOWNLOAD_DIR` is unbounded — a big playlist can fill the host disk. No cleanup/rotation. The old `videos` list/delete endpoint was NOT salvaged; manage files on the host.
+- **Disk + quota.** `DOWNLOAD_DIR` is unbounded — a big playlist can fill the host disk. No cleanup/rotation. Unlike the URL-save path (`WorkspaceController /workspace/save`, 512 MB cap), yt-dlp has **no size guard**, and it now writes straight into the vault's `_workspace/` — a big playlist piles into the vault. The old `videos` list/delete endpoint was NOT salvaged; manage files on the host.
 - **yt-dlp staleness.** YouTube breaks extractors periodically; bump `yt-dlp` in `requirements.txt` when downloads start failing site-wide.
 
 ## Change Index
@@ -51,5 +51,5 @@ GET /download      → jobs.list_jobs()
 | Concurrency model | `jobs.submit()` (thread-per-job → swap for a worker queue) |
 | Endpoints | `../main.py` (`/download`, `/download/{id}`, `/subs`) |
 | Browser-facing proxy | Java `capture/CaptureController` (`POST /api/download`, `GET /api/download/{id}`) |
-| Host download folder | `docker-compose.yml` embedder `${HOST_DOWNLOAD_PATH}:/downloads` + `DOWNLOAD_DIR` |
+| Host download folder | `docker-compose.yml` embedder `${HOST_VAULT_PATH}/_workspace:/workspace` + `DOWNLOAD_DIR=/workspace` |
 | yt-dlp version | `requirements.txt` `yt-dlp` |
