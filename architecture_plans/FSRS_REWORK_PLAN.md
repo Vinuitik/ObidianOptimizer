@@ -101,8 +101,8 @@ frontmatter** and backfill the DB. This is what makes a volume reset recoverable
 2. `SpreadService`: read `fsrs-due` + `fsrs-d`. Cap per day; keep
    **highest-difficulty** notes on the crowded day (hardest stay), overflow the
    easiest forward via `FsrsStateWriter.reschedule` (date only).
-3. `FileCheckerService`: invalid-date reset initializes FSRS state instead of
-   `{interval 3, ease 200}`.
+3. ~~`FileCheckerService`: invalid-date reset~~ — SUPERSEDED: FileChecker was
+   later removed entirely (our FSRS date writer can't produce "Invalid date").
 4. Tests: `BankruptcyServiceTest` (overdue → forget + reschedule),
    `SpreadServiceTest` (FSRS-difficulty ordering, date-only moves).
 

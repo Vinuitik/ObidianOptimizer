@@ -145,7 +145,7 @@ Keys: `vaultPath, resourcePath, reviewPageSize(20), startupSyncMode(blocking), m
 `PUT /settings` is partial; changing `vaultPath` triggers `FileRepository.updateVaultPath()` → **full re-index** (TRUNCATE notes + note_links → forceResync). Per-instance, no multi-node sharing.
 
 ### 4.3 `chrono` — the nightly orchestrator (CHRONO JOBS)
-Files: `ChronoService, ChronoController, FileMoverService, FileCheckerService, BankruptcyService, SpreadService, FrontmatterRewriter, FrontmatterChecker`
+Files: `ChronoService, ChronoController, FileMoverService, BankruptcyService, SpreadService, FrontmatterRewriter`
 
 **Triggers**: `@PostConstruct onStartup()` (runs if `chronoLastRunDate != today`), `@Scheduled(cron="0 0 2 * * *")` (2 AM daily), `POST /api/chrono/run` (manual). `@EnableScheduling` is on `ObsidianApplication`.
 
@@ -153,22 +153,22 @@ Files: `ChronoService, ChronoController, FileMoverService, FileCheckerService, B
 ```
 1. FileMoverService.run()      — non-recursive vault-root scan; moves images→resources/images,
                                  pdf→resources/pdf, video→resources/videos (creates subdirs)
-2. FileCheckerService.run()    — per file: FrontmatterChecker.needsFix(); default predicate
-                                 FrontmatterRewriter::hasInvalidDate (Obsidian-SR "Invalid date"
-                                 on line 2) → reset to {today+3d, interval 3, ease 200}
-3. BankruptcyService.run()     — collect notes sr-due < today; if count ≥ bankruptcyLimit →
-                                 declare bankruptcy. Tiered interval reduction (≤7d→2, ≤30d→/2,
-                                 ≤90d→21, >90d→45), ease max(215, ease/2). Heap-based load balancing.
-4. SpreadService.run()         — group notes by day-delta; cascade overflow forward until no day
-                                 exceeds maxDailyReviews; within a day, lowest-ease (hardest) stay,
+2. BankruptcyService.run(mdFiles, bankruptcyLimit, chronicNeglectDays) — two passes:
+                                 Pass 1 (always): notes overdue > chronicNeglectDays → FsrsService.forget
+                                 lapse individually (no threshold). Replaces the old per-review late-lapse.
+                                 Pass 2 (gate): if total overdue ≥ bankruptcyLimit → lapse all remaining
+                                 overdue too. Writes via FsrsStateWriter (DB + frontmatter). NO bandit
+                                 reward — lapses are exogenous, not a memory signal.
+3. SpreadService.run()         — group notes by day-delta; cascade overflow forward until no day
+                                 exceeds maxDailyReviews; within a day, highest FSRS-difficulty stay,
                                  overflow → day+1. Works for future AND overdue (negative delta).
-5. FileRepository.triggerDeltaSync()  — re-sync DB to disk after rewrites
-6. Hash loop: for every file where sha256(file) ≠ notes.content_hash (chrono's own rewrites AND
+4. FileRepository.triggerDeltaSync()  — re-sync DB to disk after rewrites
+5. Hash loop: for every file where sha256(file) ≠ notes.content_hash (chrono's own rewrites AND
    external Obsidian edits): imageScanService.registerImages() + syncQueueRepo.markPending()
    — WITHOUT this, 2 AM changes never reached Drive until restart
-7. SettingsRepository.set("chronoLastRunDate", today)
+6. SettingsRepository.set("chronoLastRunDate", today)
 ```
-`FrontmatterRewriter` is frontmatter-scoped: only touches lines strictly between `---…---`. Files with no frontmatter block are skipped. Constants `MIN_INTERVAL=2, MIN_EASE=215` are hardcoded (not settings).
+`FrontmatterRewriter` is frontmatter-scoped: only touches lines strictly between `---…---`. Files with no frontmatter block are skipped. The old FileChecker step and the tiered interval/ease reduction are gone — lapse math is now `FsrsService.forget()`.
 
 ### 4.4 `cards` — flashcard agent + review engine (FSRS + bandit)
 Files: `CardRepository, CardGenerationService, CardJobWorker, CardController, FsrsService, BanditService, ReviewService, ReviewController, NoteReviewRepository, AssignmentService/Controller/Repository`

@@ -89,7 +89,7 @@ const SECTIONS = [
   {
     id: 'chrono',
     title: 'Daily Jobs',
-    description: 'Hyperparameters for the automatic daily maintenance jobs (FileMover, FileChecker, BankruptcyCheck, SpreadCheck).',
+    description: 'Hyperparameters for the automatic daily maintenance jobs (FileMover, BankruptcyCheck, SpreadCheck).',
     fields: [
       {
         key: 'maxDailyReviews',
@@ -99,11 +99,18 @@ const SECTIONS = [
         hint: 'SpreadCheck redistributes notes so no single day exceeds this count.',
       },
       {
+        key: 'chronicNeglectDays',
+        label: 'Chronic neglect (days)',
+        type: 'number',
+        min: 1,
+        hint: 'A note overdue by more than this many days is lapsed individually each night (FSRS forget), even if the bankruptcy limit is not reached.',
+      },
+      {
         key: 'bankruptcyLimit',
         label: 'Bankruptcy limit',
         type: 'number',
         min: 1,
-        hint: 'If overdue notes reach this count, BankruptcyCheck halves intervals and redistributes them.',
+        hint: 'If the total overdue count reaches this, every overdue note is lapsed (FSRS forget) and rescheduled in one sweep.',
       },
     ],
   },
@@ -423,7 +430,7 @@ export default function SettingsPage() {
           <div className={styles.sectionHeader}>
             <h2 className={styles.sectionTitle}>Chrono Status</h2>
             <p className={styles.sectionDesc}>
-              Daily jobs run automatically at 2am and on startup. FileMover → FileChecker → BankruptcyCheck → SpreadCheck.
+              Daily jobs run automatically at 2am and on startup. FileMover → BankruptcyCheck → SpreadCheck.
             </p>
           </div>
 
@@ -440,8 +447,8 @@ export default function SettingsPage() {
 
           {chronoResult && (
             <p className={styles.hint} style={{ marginTop: '8px' }}>
-              Moved {chronoResult.filesMoved} file(s) · Fixed {chronoResult.filesFixed} note(s) ·
-              Overdue {chronoResult.bankruptcy.overdueCount}
+              Moved {chronoResult.filesMoved} file(s) · Overdue {chronoResult.bankruptcy.overdueCount} ·
+              Neglect-lapsed {chronoResult.bankruptcy.chronicNeglected} note(s)
               {chronoResult.bankruptcy.declared ? ' (bankruptcy declared)' : ''} ·
               Shifted {chronoResult.spread.moved} note(s)
             </p>

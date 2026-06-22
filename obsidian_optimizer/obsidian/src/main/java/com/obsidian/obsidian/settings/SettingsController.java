@@ -29,6 +29,7 @@ public class SettingsController {
             settingsRepo.getStartupSyncMode(),
             settingsRepo.getMaxDailyReviews(),
             settingsRepo.getBankruptcyLimit(),
+            settingsRepo.getChronicNeglectDays(),
             settingsRepo.getEmbedModel(),
             settingsRepo.isFlashcardsEnabled()
         );
@@ -67,6 +68,12 @@ public class SettingsController {
                 }
                 settingsRepo.set("bankruptcyLimit", String.valueOf(req.bankruptcyLimit()));
             }
+            if (req.chronicNeglectDays() != null) {
+                if (req.chronicNeglectDays() < 1) {
+                    return ResponseEntity.badRequest().body("chronicNeglectDays must be a positive integer");
+                }
+                settingsRepo.set("chronicNeglectDays", String.valueOf(req.chronicNeglectDays()));
+            }
             if (req.flashcardsEnabled() != null) {
                 settingsRepo.set("flashcardsEnabled", String.valueOf(req.flashcardsEnabled()));
             }
@@ -88,8 +95,8 @@ public class SettingsController {
 
     public record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize,
                                    String startupSyncMode, int maxDailyReviews, int bankruptcyLimit,
-                                   String embedModel, boolean flashcardsEnabled) {}
+                                   int chronicNeglectDays, String embedModel, boolean flashcardsEnabled) {}
     record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize,
                                  String startupSyncMode, Integer maxDailyReviews, Integer bankruptcyLimit,
-                                 String embedModel, Boolean flashcardsEnabled) {}
+                                 Integer chronicNeglectDays, String embedModel, Boolean flashcardsEnabled) {}
 }

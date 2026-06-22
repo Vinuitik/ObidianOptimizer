@@ -6,7 +6,7 @@ Subsystem docs live next to the code they describe.
 |---|---|---|
 | **notes** | [notes/FLOWS.md](notes/FLOWS.md) | NotesController, FileRepository, NoteIndexRepository, NoteLinkRepository, FrontmatterParser |
 | **settings** | [settings/FLOWS.md](settings/FLOWS.md) | SettingsController, SettingsRepository |
-| **chrono** | [chrono/FLOWS.md](chrono/FLOWS.md) | ChronoService, ChronoController, FileMoverService, FileCheckerService, BankruptcyService, SpreadService, FrontmatterRewriter |
+| **chrono** | [chrono/FLOWS.md](chrono/FLOWS.md) | ChronoService, ChronoController, FileMoverService, BankruptcyService, SpreadService, FrontmatterRewriter |
 | **media** | [media/FLOWS.md](media/FLOWS.md) | MediaController |
 | **config** | [config/FLOWS.md](config/FLOWS.md) | SecurityConfig, WebConfig, ObsidianApplication |
 | **ml** | [ml/FLOWS.md](ml/FLOWS.md) | SearchService, EmbeddingService, NoteEmbeddingWorker, ImageProcessingWorker, MarkdownPreprocessor |

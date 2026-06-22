@@ -46,7 +46,7 @@ State: `chronoStatus` (from `GET /api/chrono/status` on mount), `chronoRunning`,
 "Run now" → `POST /api/chrono/run` → updates result + status.  
 Button disabled when `!isAuthenticated` or `chronoRunning`.
 
-Result fields: `filesMoved`, `filesFixed`, `overdueCount`, `bankruptcy` flag, moved-notes count.
+Result fields: `filesMoved`, `bankruptcy` (`overdueCount`, `chronicNeglected`, `declared`, `rescheduled`), `spread.moved`.
 
 To add more result fields: `ChronoService.ChronoResult` record + update display here.
 
