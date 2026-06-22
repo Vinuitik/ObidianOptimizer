@@ -16,7 +16,7 @@ import model_runtime
 from model_runtime import state
 
 TOKEN = "test-token-123"
-FAKE_DIM = 1024
+FAKE_DIM = 768
 
 MCP_HEADERS = {
     "X-API-Key": TOKEN,

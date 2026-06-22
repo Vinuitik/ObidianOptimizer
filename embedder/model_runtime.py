@@ -27,12 +27,18 @@ import gpu_slot
 
 log = logging.getLogger("embedder")
 
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "mixedbread-ai/mxbai-embed-large-v1")
+# gte-base (768-dim, mean-pooled, standard BERT). Replaced mxbai-embed-large-v1
+# (1024-dim, 335M): mxbai's fp16 ONNX crashed onnxruntime 1.19's SimplifiedLayerNormFusion
+# at load, and mxbai is officially CLS-pooled — our embed path mean-pools, so its vectors
+# were already slightly off. gte-base is mean-trained (so the mean-pool below is now
+# *correct*), needs no query/doc prefix, and at 109M/~220MB fp16 frees ~450MB of VRAM
+# for whisper/CLIP. Xenova/ mirror is used because it's the repo that ships model_fp16.onnx.
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "Xenova/gte-base")
 MODEL_CACHE = os.environ.get("MODEL_CACHE", "/models")
-# fp16 by default: 669MB vs the fp32 model.onnx's 1.34GB — the headroom that lets a
+# fp16 by default: ~220MB vs the fp32 model.onnx's ~440MB — the headroom that lets a
 # 4GB card hold the embedder OR whisper without OOM. fp16 vs fp32 shifts normalised
 # vectors by ~1e-3 cosine (no re-embedding needed). Override to onnx/model.onnx for
-# fp32, or onnx/model_quantized.onnx (337MB int8) for even less VRAM.
+# fp32, or onnx/model_quantized.onnx (int8) for even less VRAM.
 EMBED_ONNX_FILE = os.environ.get("EMBED_ONNX_FILE", "onnx/model_fp16.onnx")
 # Hard ceiling on the onnxruntime CUDA arena so the (otherwise unbounded, grow-only)
 # activation scratch can't creep up and starve whisper. 0 = no cap.
@@ -44,6 +50,27 @@ EMBED_BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "16"))
 # Shared state — populated by init(), read by endpoints and MCP tools.
 # Keys: tokenizer, dim, model_name, provider, onnx_path, cpu_session, gpu_session.
 state: dict = {}
+
+# onnxruntime's EXTENDED-tier graph optimisation (SimplifiedLayerNormFusion) asserts
+# on some fp16 ONNX exports — it's what crashed the old mxbai fp16 model at session
+# build. BASIC keeps the cheap, safe optimisations (constant folding, redundant-cast
+# removal) and skips the aggressive fp16 fusions, so a model swap can't re-trip the bug.
+# Override with EMBED_ORT_OPT=all|extended|basic|disabled to chase max speed once a
+# model is verified to load clean.
+_ORT_OPT = {
+    "all": ort.GraphOptimizationLevel.ORT_ENABLE_ALL,
+    "extended": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
+    "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
+    "disabled": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
+}
+
+
+def _session_options() -> ort.SessionOptions:
+    so = ort.SessionOptions()
+    so.graph_optimization_level = _ORT_OPT.get(
+        os.environ.get("EMBED_ORT_OPT", "basic").lower(),
+        ort.GraphOptimizationLevel.ORT_ENABLE_BASIC)
+    return so
 
 
 def detect_provider() -> str:
@@ -78,7 +105,8 @@ def _build_gpu_session():
     if CUDA didn't actually engage. Called at init AND lazily by gpu_slot when the
     embedder reclaims the GPU after an ingest model evicted it."""
     try:
-        sess = ort.InferenceSession(state["onnx_path"], providers=_cuda_providers())
+        sess = ort.InferenceSession(
+            state["onnx_path"], sess_options=_session_options(), providers=_cuda_providers())
     except Exception as e:  # noqa: BLE001 — a CUDA build failure must not crash embedding
         log.warning("GPU session build failed (%s) — embedder stays on CPU", e)
         return None
@@ -124,7 +152,8 @@ def init() -> None:
     state.update(tokenizer=tokenizer, dim=dim, model_name=EMBED_MODEL, onnx_path=onnx_path)
 
     # CPU floor — always present so embedding works even while ingest owns the GPU.
-    state["cpu_session"] = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+    state["cpu_session"] = ort.InferenceSession(
+        onnx_path, sess_options=_session_options(), providers=["CPUExecutionProvider"])
     state["gpu_session"] = None
     state["provider"] = "CPUExecutionProvider"
 

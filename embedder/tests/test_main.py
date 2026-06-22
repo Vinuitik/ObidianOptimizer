@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 import main as embedder_main
 
 
-FAKE_DIM = 1024
+FAKE_DIM = 768
 
 
 class _MockTokenizer:

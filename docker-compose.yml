@@ -33,11 +33,11 @@ services:
       # through (DOWNLOAD_DIR=/workspace below). Replaces the old ./downloads mount.
       - ${HOST_VAULT_PATH}/_workspace:/workspace
     environment:
-      - EMBED_MODEL=${EMBED_MODEL:-mixedbread-ai/mxbai-embed-large-v1}
+      - EMBED_MODEL=${EMBED_MODEL:-Xenova/gte-base}
       - MODEL_CACHE=/models
       # 4GB-GPU memory policy (see embedder/ml gpu_slot.py + GPU_MEMORY FLOWS):
-      # fp16 weights (669MB) so the embedder + whisper never need the card at once;
-      # capped CUDA arena + sub-batch so a big note can't balloon VRAM.
+      # gte-base fp16 weights (~220MB) so the embedder + whisper never need the card at
+      # once; capped CUDA arena + sub-batch so a big note can't balloon VRAM.
       - EMBED_ONNX_FILE=${EMBED_ONNX_FILE:-onnx/model_fp16.onnx}
       - EMBED_GPU_MEM_LIMIT_MB=${EMBED_GPU_MEM_LIMIT_MB:-1800}
       - EMBED_BATCH_SIZE=${EMBED_BATCH_SIZE:-16}

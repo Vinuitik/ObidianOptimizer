@@ -30,8 +30,12 @@ embed_texts(texts)
 - GPU session is **capped** (`EMBED_GPU_MEM_LIMIT_MB`, arena_extend=kSameAsRequested)
   and inputs **sub-batched** (`EMBED_BATCH_SIZE`) so one multi-chunk note can't grow
   VRAM past the cap. To change either: env vars (model_runtime top).
-- Default weights are **fp16** (`EMBED_ONNX_FILE=onnx/model_fp16.onnx`, 669MB) — the
-  headroom that lets embedder-or-whisper fit on 4GB. fp32 = `onnx/model.onnx`.
+- Default weights are **fp16** (`EMBED_ONNX_FILE=onnx/model_fp16.onnx`, ~220MB for
+  gte-base) — the headroom that lets embedder-or-whisper fit on 4GB. fp32 = `onnx/model.onnx`.
+- Graph optimisation is pinned to **BASIC** (`EMBED_ORT_OPT`, default basic) because
+  onnxruntime 1.19's EXTENDED `SimplifiedLayerNormFusion` asserts on some fp16 exports
+  (it crashed the old mxbai fp16 model at load). Set `EMBED_ORT_OPT=all` to chase speed
+  once a model is verified to load clean.
 - When whisper/CLIP evict the embedder, `_unload_gpu_session` frees the GPU session
   (CPU floor stays); the next embed rebuilds it via `_ensure_gpu_session`.
 

@@ -95,7 +95,7 @@ NoteEmbeddingWorker.embedPendingNotes():
                   (source='text') — the changed set
         → pass 2: embed the changed set in slices of EMBED_BATCH (64) —
             POST http://embedder:8000/embed {"texts": [...slice...]}  (ONE call per slice)
-            → embeddings[] parsed in order → float[1024] each
+            → embeddings[] parsed in order → float[768] each
             → NoteChunkRepository.upsertChunk(path, index, 'text', text, embedding, hash) per chunk
         → deleteStaleChunks(path, 'text', newCount)
         → returns false on any slice failure (note stays in the diff, retried)
@@ -120,8 +120,8 @@ To change batch/schedule: `NoteEmbeddingWorker.BATCH_SIZE / @Scheduled`
 
 ## Embedder Service (Python FastAPI + ONNX)
 
-`GET /health` → `{"status":"ok","model":"...","dim":1024,"device":"GPU"|"CPU"}`  
-`POST /embed {"texts":[...]}` → `{"embeddings":[[...float[1024]...]],"model":"...","dim":1024}`
+`GET /health` → `{"status":"ok","model":"...","dim":768,"device":"GPU"|"CPU"}`  
+`POST /embed {"texts":[...]}` → `{"embeddings":[[...float[768]...]],"model":"...","dim":768}`
 
 Startup flow:
 ```
@@ -148,7 +148,7 @@ To fix GPU passthrough: install `nvidia-container-toolkit`, confirm Docker Deskt
 
 ```
 EmbeddingService.embedQuery(query)
-  → POST http://embedder:8000/embed {"texts": [query]} → float[1024]
+  → POST http://embedder:8000/embed {"texts": [query]} → float[768]
 NoteChunkRepository.findByVectorSimilarity(vec, 60)
   → ORDER BY embedding <=> ?::vector LIMIT 60
 NoteChunkRepository.findByTextSearch(query, 60)
@@ -244,7 +244,7 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 - **optimum + export=True**: downloads PyTorch model, converts to ONNX on first startup, caches to mounted volume. Container restart without volume re-runs conversion.
 - **paradedb**: `<=>` cosine operator from pgvector + `@@@` / `pg_search` BM25 from Tantivy. Both required for hybrid search.
 - **RRF**: order-invariant rank fusion — stable rankings regardless of raw score scales from different retrievers.
-- **CPU fallback dimension**: always 1024 — mxbai-embed-large-v1 used in both GPU and CPU paths. No schema migration if GPU unavailable.
+- **CPU fallback dimension**: always 768 — gte-base (`Xenova/gte-base`, mean-pooled) used in both GPU and CPU paths. No schema migration if GPU unavailable.
 - **MCP session manager**: `mcp.session_manager.run()` must be entered in the FastAPI lifespan or `/mcp` 500s. It can only be started once per process — relevant for tests (module-scoped client).
 - **MCP stateless mode**: no session persistence; every request is self-contained. Fine for tool calls; would need stateful mode for subscriptions/sampling.
 - **Embedder DB access**: the MCP tools read Postgres directly with psycopg (connection per call, no pool). Low traffic by design; add a pool if MCP usage grows.

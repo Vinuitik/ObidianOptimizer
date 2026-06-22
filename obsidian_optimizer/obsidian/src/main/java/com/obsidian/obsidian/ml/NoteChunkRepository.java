@@ -22,6 +22,8 @@ public class NoteChunkRepository {
     @PostConstruct
     public void initSchema() {
         jdbc.execute("CREATE EXTENSION IF NOT EXISTS vector");
+        // 768-dim = gte-base output (was 1024 for mxbai). Drop the postgres volume when
+        // changing this; CREATE TABLE IF NOT EXISTS won't resize a live column.
         jdbc.execute("""
             CREATE TABLE IF NOT EXISTS note_chunks (
                 id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -29,7 +31,7 @@ public class NoteChunkRepository {
                 chunk_index   INT  NOT NULL,
                 source        TEXT NOT NULL DEFAULT 'image',
                 text          TEXT NOT NULL,
-                embedding     vector(1024),
+                embedding     vector(768),
                 content_hash  TEXT NOT NULL,
                 fts_vector    TSVECTOR
             )
