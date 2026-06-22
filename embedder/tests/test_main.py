@@ -48,12 +48,16 @@ class _MockSession:
 
 @pytest.fixture(autouse=True)
 def mock_model_state():
-    """Inject a fake session into the shared state before every test."""
+    """Inject a fake CPU session into the shared state before every test. GPU is
+    disabled so embed_texts takes the CPU floor (no gpu_slot/CUDA in tests)."""
+    import gpu_slot
+    gpu_slot.set_gpu_available(False)
     embedder_main.state.clear()
     embedder_main.state.update(
         {
             "tokenizer": _MockTokenizer(),
-            "session": _MockSession(),
+            "cpu_session": _MockSession(),
+            "gpu_session": None,
             "dim": FAKE_DIM,
             "provider": "CPUExecutionProvider",
             "model_name": "mock-embed-model",

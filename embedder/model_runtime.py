@@ -1,8 +1,19 @@
 """
-Shared model runtime — owns the ONNX model, tokenizer, and embedding logic.
+Shared model runtime — owns the ONNX text-embedding model, tokenizer, and the
+GPU/CPU device policy.
 
 Both the FastAPI endpoints (main.py) and the MCP tools (mcp_server.py) import
 from here, so neither needs to import the other.
+
+Device policy (4GB-card aware — see gpu_slot.py):
+  • A **CPU session** is always built — the reliable floor.
+  • A **GPU session** is built when CUDA truly engages, but the embedder does NOT
+    own the GPU exclusively. Each embed call asks gpu_slot for the GPU: if it's
+    free (or already the embedder's) it runs on GPU; if an ingest model (whisper/
+    CLIP) holds the slot, it runs on the CPU session instead. So embeddings never
+    block ingest and never OOM the card.
+  • The GPU session is **capped** (gpu_mem_limit) and inputs are **sub-batched**
+    (EMBED_BATCH_SIZE) so a big note can't balloon VRAM past the cap.
 """
 import logging
 import os
@@ -12,15 +23,26 @@ import numpy as np
 import onnxruntime as ort
 from transformers import AutoTokenizer
 
+import gpu_slot
+
 log = logging.getLogger("embedder")
 
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "mixedbread-ai/mxbai-embed-large-v1")
 MODEL_CACHE = os.environ.get("MODEL_CACHE", "/models")
-# Pre-exported ONNX weights live under onnx/ in the model repo. Override to point
-# at a different file (e.g. onnx/model_fp16.onnx) or a fork that ships its own ONNX.
-EMBED_ONNX_FILE = os.environ.get("EMBED_ONNX_FILE", "onnx/model.onnx")
+# fp16 by default: 669MB vs the fp32 model.onnx's 1.34GB — the headroom that lets a
+# 4GB card hold the embedder OR whisper without OOM. fp16 vs fp32 shifts normalised
+# vectors by ~1e-3 cosine (no re-embedding needed). Override to onnx/model.onnx for
+# fp32, or onnx/model_quantized.onnx (337MB int8) for even less VRAM.
+EMBED_ONNX_FILE = os.environ.get("EMBED_ONNX_FILE", "onnx/model_fp16.onnx")
+# Hard ceiling on the onnxruntime CUDA arena so the (otherwise unbounded, grow-only)
+# activation scratch can't creep up and starve whisper. 0 = no cap.
+EMBED_GPU_MEM_LIMIT_MB = int(os.environ.get("EMBED_GPU_MEM_LIMIT_MB", "1800"))
+# Sub-batch size for a single session.run — bounds peak activation memory so one
+# multi-chunk note can't exceed the arena cap. Pairs with the cap above.
+EMBED_BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "16"))
 
-# Shared state — populated by init(), read by endpoints and MCP tools
+# Shared state — populated by init(), read by endpoints and MCP tools.
+# Keys: tokenizer, dim, model_name, provider, onnx_path, cpu_session, gpu_session.
 state: dict = {}
 
 
@@ -43,27 +65,45 @@ def detect_provider() -> str:
     return "CPUExecutionProvider"
 
 
-def init() -> None:
-    """Load tokenizer + ONNX session into shared state. Called once from the app lifespan.
+def _cuda_providers() -> list:
+    """CUDA provider + options (capped, request-sized arena) with a CPU fallback."""
+    cuda_opts = {"arena_extend_strategy": "kSameAsRequested"}
+    if EMBED_GPU_MEM_LIMIT_MB > 0:
+        cuda_opts["gpu_mem_limit"] = EMBED_GPU_MEM_LIMIT_MB * 1024 * 1024
+    return [("CUDAExecutionProvider", cuda_opts), "CPUExecutionProvider"]
 
-    Pure onnxruntime — no torch, no optimum. The model ships a pre-exported ONNX
-    on the Hub, so there is no PyTorch→ONNX conversion step. onnxruntime-gpu runs
-    it on CUDA when available and falls back to the CPU provider otherwise.
+
+def _build_gpu_session():
+    """Build a (capped) CUDA session for the embedder. Returns the session, or None
+    if CUDA didn't actually engage. Called at init AND lazily by gpu_slot when the
+    embedder reclaims the GPU after an ingest model evicted it."""
+    try:
+        sess = ort.InferenceSession(state["onnx_path"], providers=_cuda_providers())
+    except Exception as e:  # noqa: BLE001 — a CUDA build failure must not crash embedding
+        log.warning("GPU session build failed (%s) — embedder stays on CPU", e)
+        return None
+    if sess.get_providers()[0] != "CUDAExecutionProvider":
+        log.warning("CUDA requested but session is on %s — treating as no-GPU",
+                    sess.get_providers()[0])
+        return None
+    return sess
+
+
+def init() -> None:
+    """Load tokenizer + ONNX sessions into shared state. Called once from lifespan.
+
+    Pure onnxruntime — no torch, no optimum. The model ships pre-exported ONNX on
+    the Hub, so there's no PyTorch→ONNX conversion step.
     """
     from huggingface_hub import hf_hub_download
     from transformers import AutoConfig
 
-    provider = detect_provider()
-    # Always list the CPU provider as a fallback so a missing/partial CUDA stack
-    # degrades to CPU rather than failing to create the session.
-    providers = ([provider, "CPUExecutionProvider"]
-                 if provider == "CUDAExecutionProvider" else ["CPUExecutionProvider"])
-    log.info("Loading model '%s' (cache: %s, provider: %s) …", EMBED_MODEL, MODEL_CACHE, provider)
+    log.info("Loading model '%s' (cache: %s, onnx: %s) …",
+             EMBED_MODEL, MODEL_CACHE, EMBED_ONNX_FILE)
 
     def _resolve(local_only: bool):
         # local_only=True reads the /models volume with ZERO network — no HF Hub
-        # round-trips, no rate-limit, no stall. The three calls below are exactly
-        # the ones that phoned home on every boot before this change.
+        # round-trips, no rate-limit, no stall.
         tokenizer = AutoTokenizer.from_pretrained(
             EMBED_MODEL, cache_dir=MODEL_CACHE, local_files_only=local_only)
         onnx_path = hf_hub_download(
@@ -73,43 +113,77 @@ def init() -> None:
         return tokenizer, onnx_path, dim
 
     try:
-        # Fast path: everything already in the volume — load it, never touch HF.
         tokenizer, onnx_path, dim = _resolve(local_only=True)
-        log.info("Loaded from local cache — no HF Hub requests.")
+        log.info("Loaded tokenizer/config from local cache — no HF Hub requests.")
     except Exception as e:
-        # Cache miss (first run on an empty volume / new model) — download once.
+        # Cache miss (first run / new fp16 file) — download once.
         log.info("Model not fully cached (%s) — downloading from HF Hub (one-time) …",
                  type(e).__name__)
         tokenizer, onnx_path, dim = _resolve(local_only=False)
 
-    session = ort.InferenceSession(onnx_path, providers=providers)
+    state.update(tokenizer=tokenizer, dim=dim, model_name=EMBED_MODEL, onnx_path=onnx_path)
 
-    active = session.get_providers()[0]
-    # Verify the GPU actually engaged. onnxruntime falls back to CPU silently when
-    # the CUDA provider is listed but can't load its libs (e.g. cuDNN version
-    # mismatch) — surface that loudly instead of quietly running slow on CPU.
-    if provider == "CUDAExecutionProvider" and active != "CUDAExecutionProvider":
+    # CPU floor — always present so embedding works even while ingest owns the GPU.
+    state["cpu_session"] = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+    state["gpu_session"] = None
+    state["provider"] = "CPUExecutionProvider"
+
+    if detect_provider() == "CUDAExecutionProvider":
+        gpu_sess = _build_gpu_session()
+        if gpu_sess is not None:
+            state["gpu_session"] = gpu_sess
+            state["provider"] = "CUDAExecutionProvider"
+            gpu_slot.set_evictor("embedder", _unload_gpu_session)
+            gpu_slot.set_gpu_available(True)
+            log.info("Model ready — dim=%d, GPU session capped at %dMB, batch=%d",
+                     dim, EMBED_GPU_MEM_LIMIT_MB, EMBED_BATCH_SIZE)
+            return
+        # CUDA was advertised but didn't engage — surface it loudly, run CPU-only.
         log.warning("=" * 70)
-        log.warning("WARN: CUDA was requested but the session is running on %s.", active)
-        log.warning("WARN: onnxruntime-gpu couldn't initialise the CUDA provider —")
-        log.warning("WARN: usually a cuDNN/CUDA version mismatch (needs cuDNN 9 + CUDA 12)")
-        log.warning("WARN: or a missing driver. Check the onnxruntime error logged above.")
+        log.warning("WARN: CUDA requested but the GPU session didn't engage —")
+        log.warning("WARN: usually a cuDNN/CUDA mismatch (needs cuDNN 9 + CUDA 12).")
+        log.warning("WARN: Running CPU-only. Check the onnxruntime error above.")
         log.warning("=" * 70)
-    log.info("Model ready — dim=%d, provider=%s", dim, active)
-    state.update({
-        "tokenizer": tokenizer,
-        "session": session,
-        "dim": dim,
-        "provider": active,
-        "model_name": EMBED_MODEL,
-    })
+    gpu_slot.set_gpu_available(False)
+    log.info("Model ready — dim=%d, provider=CPU, batch=%d", dim, EMBED_BATCH_SIZE)
+
+
+def _ensure_gpu_session():
+    """Return the embedder's GPU session, rebuilding it if an ingest model evicted
+    it. Called by gpu_slot under its lock, so it's single-threaded here."""
+    if state.get("gpu_session") is None:
+        state["gpu_session"] = _build_gpu_session()
+    return state["gpu_session"]
+
+
+def _unload_gpu_session() -> None:
+    """Free the GPU session's VRAM so an ingest model can take the card. Registered
+    with gpu_slot as the 'embedder' evictor; the CPU session stays as the floor."""
+    if state.get("gpu_session") is not None:
+        state["gpu_session"] = None
+        import gc
+        gc.collect()
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
-    """Mean-pooled, L2-normalised embeddings. Raises KeyError if init() hasn't run."""
-    tokenizer = state["tokenizer"]
-    session = state["session"]
+    """Mean-pooled, L2-normalised embeddings, preserving input order.
 
+    Picks GPU (via gpu_slot, if free) or the CPU floor per call, and sub-batches so
+    a big input can't exceed the GPU arena cap. Raises KeyError if init() hasn't run.
+    """
+    if not texts:
+        return []
+    with gpu_slot.embedder_session(_ensure_gpu_session) as gpu_sess:
+        session = gpu_sess if gpu_sess is not None else state["cpu_session"]
+        out: List[List[float]] = []
+        for i in range(0, len(texts), EMBED_BATCH_SIZE):
+            out.extend(_embed_batch(session, texts[i:i + EMBED_BATCH_SIZE]))
+        return out
+
+
+def _embed_batch(session, texts: List[str]) -> List[List[float]]:
+    """Embed one sub-batch on the given onnxruntime session."""
+    tokenizer = state["tokenizer"]
     encoded = tokenizer(
         texts,
         padding=True,
@@ -130,6 +204,7 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
         token_embeddings = outputs[out_names.index("last_hidden_state")]
     else:                                                 # first 3-D output
         token_embeddings = next(a for a in outputs if a.ndim == 3)
+    # fp16 model → fp16 output; upcast so pooling/normalisation is done in fp32.
     token_embeddings = token_embeddings.astype(np.float32)  # (batch, seq, dim)
     attention_mask = encoded["attention_mask"]            # (batch, seq)
 

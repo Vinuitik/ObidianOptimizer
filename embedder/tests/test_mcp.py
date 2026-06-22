@@ -65,10 +65,13 @@ FAKE_ROWS = [
 @pytest.fixture(autouse=True)
 def mcp_env(monkeypatch):
     """Mock model + mock DB before every test — no Docker needed."""
+    import gpu_slot
+    gpu_slot.set_gpu_available(False)  # CPU floor only — no CUDA in tests
     state.clear()
     state.update({
         "tokenizer": _MockTokenizer(),
-        "session": _MockSession(),
+        "cpu_session": _MockSession(),
+        "gpu_session": None,
         "dim": FAKE_DIM,
         "provider": "CPUExecutionProvider",
         "model_name": "mock-embed-model",
