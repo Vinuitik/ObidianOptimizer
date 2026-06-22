@@ -9,7 +9,7 @@ const TABS = [
   { value: 'audio', label: 'Audio' },
 ];
 
-export default function ResourcePanel({ resourceType, onResourceTypeChange }) {
+export default function ResourcePanel({ resourceType, onResourceTypeChange, onVideoOrientation }) {
   const isAuthenticated = useStore(s => s.isAuthenticated);
 
   const [files,    setFiles]    = useState([]);
@@ -32,6 +32,7 @@ export default function ResourcePanel({ resourceType, onResourceTypeChange }) {
   function switchType(type) {
     onResourceTypeChange(type);
     setSelected(null);
+    onVideoOrientation?.(null);   // unknown until the next video's metadata loads
   }
 
   return (
@@ -59,7 +60,7 @@ export default function ResourcePanel({ resourceType, onResourceTypeChange }) {
             <button
               key={f.name}
               className={`${styles.fileRow} ${selected === f.name ? styles.fileRowActive : ''}`}
-              onClick={() => setSelected(f.name)}
+              onClick={() => { setSelected(f.name); onVideoOrientation?.(null); }}
               title={f.name}
             >
               {f.name}
@@ -69,7 +70,7 @@ export default function ResourcePanel({ resourceType, onResourceTypeChange }) {
 
         <div className={styles.viewer}>
           {selected ? (
-            <Viewer type={resourceType} name={selected} />
+            <Viewer type={resourceType} name={selected} onOrientation={onVideoOrientation} />
           ) : (
             <div className={styles.empty}>
               <p className={styles.emptyText}>
@@ -85,11 +86,15 @@ export default function ResourcePanel({ resourceType, onResourceTypeChange }) {
   );
 }
 
-function Viewer({ type, name }) {
+function Viewer({ type, name, onOrientation }) {
   const src = `/workspace/${encodeURIComponent(name)}`;
 
   if (type === 'video') {
-    return <video key={src} className={styles.videoViewer} src={src} controls />;
+    // Detect portrait (shorts) vs landscape from the real pixel size — no ffprobe
+    // needed. Drives the Learn split orientation so tall videos get height.
+    const onMeta = (e) => onOrientation?.(
+      e.target.videoHeight > e.target.videoWidth ? 'portrait' : 'landscape');
+    return <video key={src} className={styles.videoViewer} src={src} controls onLoadedMetadata={onMeta} />;
   }
   if (type === 'audio') {
     return (

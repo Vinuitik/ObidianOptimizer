@@ -16,9 +16,13 @@ export default function LearnPage() {
   const [view,         setView]         = useState('library'); // 'library' | 'inbox'
   const [resourceType, setResourceType] = useState('pdf');
   const [inboxCount,   setInboxCount]   = useState(0);
+  const [videoOrient,  setVideoOrient]  = useState(null);       // 'portrait' | 'landscape'
 
-  // orientation: video is naturally wider, so horizontal split; everything else vertical
-  const orientation = resourceType === 'video' ? 'horizontal' : 'vertical';
+  // Landscape video is wide → horizontal split (video on top). Portrait video
+  // (a short) is tall → vertical split so it gets the height. Everything else
+  // (and video before its metadata loads) defaults to a vertical split.
+  const orientation = (resourceType === 'video' && videoOrient === 'landscape')
+    ? 'horizontal' : 'vertical';
 
   useEffect(() => {
     if (isAuthenticated && !vaultRoot) {
@@ -67,6 +71,7 @@ export default function LearnPage() {
               <ResourcePanel
                 resourceType={resourceType}
                 onResourceTypeChange={setResourceType}
+                onVideoOrientation={setVideoOrient}
               />
             }
             slotB={<NotePanel />}
