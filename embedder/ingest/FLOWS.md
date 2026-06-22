@@ -43,7 +43,9 @@ in_place → also resolve+verify note_path (404 if missing)
 ## Job execution (jobs.py)
 
 ```
-_worker_loop (daemon, MAX 1 concurrent — one model in VRAM at a time)
+_worker_loop (daemon, MAX 1 concurrent; GPU VRAM arbitrated by ../GPU_MEMORY.md —
+              whisper/CLIP claim the slot via gpu_slot.exclusive(), evicting the
+              text embedder; freed on idle by _evict_models → gpu_slot.release_ingest)
   → router.route(ref)
   → av/youtube → extract_av.extract() → bundle; video also → _attach_keyframes()
   → pdf → extract_pdf.extract();  web → extract_web.extract()

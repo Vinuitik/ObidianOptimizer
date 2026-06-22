@@ -8,8 +8,9 @@ YouTube URLs:  captions via the in-process yt-dlp downloader (no download), pars
 The downloader was salvaged from the former VideoManager sister app into
 download/downloader.py, so this no longer makes an HTTP hop to a separate service.
 
-The whisper model loads lazily per job and is released afterwards — sequential,
-one-model-at-a-time resource policy (INGEST_AGENT_ARCH deployment notes).
+Whisper claims the GPU via the single-occupant slot (gpu_slot.exclusive), evicting
+the text embedder; it's cached across jobs and freed when the ingest queue drains.
+See ../GPU_MEMORY.md for the one-model-at-a-time VRAM policy.
 """
 import gc
 import logging

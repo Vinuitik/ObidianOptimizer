@@ -27,12 +27,20 @@ services:
       # _reports is in the retrieval ignore lists (FileRepository.EXCLUDED_DIRS +
       # embedder os.walk prune) so it's never scanned/embedded/carded.
       - ${HOST_VAULT_PATH}/_reports:/reports
-      # Offline downloads (yt-dlp) land here — bind-mounted so files are reachable
-      # on the host for offline viewing. Salvaged from the former VideoManager app.
-      - ${HOST_DOWNLOAD_PATH:-./downloads}:/downloads
+      # Offline downloads (yt-dlp) land in the vault's _workspace/ so they show up
+      # directly in the Learn page (ResourcePanel + nginx read _workspace). /vault is
+      # read-only, so this writable bind to the _workspace subdir is what yt-dlp writes
+      # through (DOWNLOAD_DIR=/workspace below). Replaces the old ./downloads mount.
+      - ${HOST_VAULT_PATH}/_workspace:/workspace
     environment:
       - EMBED_MODEL=${EMBED_MODEL:-mixedbread-ai/mxbai-embed-large-v1}
       - MODEL_CACHE=/models
+      # 4GB-GPU memory policy (see embedder/ml gpu_slot.py + GPU_MEMORY FLOWS):
+      # fp16 weights (669MB) so the embedder + whisper never need the card at once;
+      # capped CUDA arena + sub-batch so a big note can't balloon VRAM.
+      - EMBED_ONNX_FILE=${EMBED_ONNX_FILE:-onnx/model_fp16.onnx}
+      - EMBED_GPU_MEM_LIMIT_MB=${EMBED_GPU_MEM_LIMIT_MB:-1800}
+      - EMBED_BATCH_SIZE=${EMBED_BATCH_SIZE:-16}
       - DATABASE_URL=postgresql://obsidian:${POSTGRES_PASSWORD:-obsidian}@postgres:5432/obsidian
       - VAULT_DIR=/vault
       - AGENT_REPORTS_DIR=/reports
@@ -41,7 +49,7 @@ services:
       - WRAPPER_URL=${WRAPPER_URL:-http://host.docker.internal:5001}
       - SYNTH_MODEL=${SYNTH_MODEL:-haiku}
       - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
-      - DOWNLOAD_DIR=/downloads
+      - DOWNLOAD_DIR=/workspace
       - BACKEND_URL=${BACKEND_URL:-http://backend:8084}
     depends_on:
       postgres:
@@ -64,8 +72,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-      # First start downloads ~1.3GB of ONNX weights (onnx/model.onnx) into the
-      # /models volume — at typical Hub speeds that's several minutes. Failures
+      # First start downloads ~669MB of fp16 ONNX weights (onnx/model_fp16.onnx)
+      # into the /models volume — a few minutes at typical Hub speeds. Failures
       # inside start_period don't count, so the backend's service_healthy wait
       # won't abort the stack mid-download. Cached after the first run → fast.
       start_period: 600s
