@@ -75,9 +75,16 @@ publish.update_note(note_path, new)     → Java PUT /api/internal/notes (re-ind
 ### _synthesize_and_publish (standalone)
 ```
 _store_media → outline → write_note() per plan (frontmatter + sr fields + #review)
-→ publish.validate_note → find_home → publish.create_note (new file in find_home folder)
+→ publish.validate_note → publish.stamp_inbox(source, suggested=find_home)
+→ publish.create_note in INBOX_FOLDER (_inbox staging, NOT the find_home folder)
 one bad note never sinks its siblings; all-fail raises.
 ```
+- **find_home is now only a SUGGESTION.** Standalone notes land in `_inbox/` (env
+  `INGEST_INBOX_FOLDER`, default `_inbox`) with frontmatter `ingest-inbox: true` +
+  `ingest-source` + `ingest-suggested-folder`. The Java `InboxController` lists them
+  for the Learn **Inbox** triage view; the user edits + files them to a real folder
+  (which moves them into the FSRS review queue). `NoteIndexRepository` keeps `_inbox/`
+  out of the review query until then. To change the staging folder: `publish.INBOX_FOLDER`.
 
 ## Extractors (deterministic, zero LLM)
 

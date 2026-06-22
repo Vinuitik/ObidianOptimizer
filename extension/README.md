@@ -1,41 +1,46 @@
 # Obsidian Optimizer — Browser Extension
 
-A tiny Manifest V3 extension with two buttons:
+A tiny Manifest V3 extension with **one job**: capture anything worth reviewing into
+your Learn queue without opening the app.
 
-1. **New note** — clip the current page (title + your selection) straight into the
-   vault as a note that enters FSRS review, without opening the app.
-2. **Download** — queue a YouTube video / MIT OCW playlist / uni lecture for offline
-   viewing. yt-dlp runs inside the embedder; the backend proxies it.
+Paste plain text / markdown, an article link, a YouTube video, or a PDF link — or drop
+a PDF / audio / video file, or right-click a selection / link / page. The extension
+detects the type and routes it:
+
+- 📝 **Plain text / markdown** → saved as a note for review
+- 🔗 **A web page link** → read & turned into notes (Learn → Inbox)
+- 🎬 **A YouTube / video link** → downloaded to watch offline **+** notes generated
+- 📎 **A PDF / audio / video link, or a dropped file** → saved to your workspace **+** notes
+
+Everything lands in the **Learn** page: media to watch/read, and generated notes in the
+**Inbox** to review, edit, and file into a folder (which enters them into FSRS review).
 
 ## Install (unpacked)
 
-**Chrome / Edge / Brave** (Chromium, uses `manifest.json` with a service-worker background):
+**Chrome / Edge / Brave** (Chromium, `manifest.json`, service-worker background):
 1. `chrome://extensions` → enable **Developer mode**.
 2. **Load unpacked** → select this `extension/` folder.
-3. Reload the extension (↻ on its card) after editing files.
+3. Reload the extension (↻) after editing files.
 
-**Firefox** (MV3 uses an event-page background, so it needs a different manifest):
-1. From the repo root run `pwsh ./build-firefox-extension.ps1` → generates `extension-firefox/`.
+**Firefox** (MV3 uses an event-page background, so a different manifest):
+1. From the repo root run `bash linux_scripts/build-firefox-extension.sh` → generates
+   `extension-firefox/`.
 2. `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → select
-   `extension-firefox/manifest.json`. (Temporary = removed on Firefox restart; re-run
-   the script + reload after edits.) Needs Firefox 121+.
+   `extension-firefox/manifest.json`. (Temporary = removed on restart; re-run the
+   script + reload after edits.) Needs Firefox 121+.
 
-The JavaScript is identical for both — it uses a `browser ?? chrome` shim
-(`config.js`) so the promise-based APIs work in either engine. Only the manifest's
-background declaration differs.
+The JavaScript is identical for both — it uses a `browser ?? chrome` shim (`config.js`).
+Only the manifest's background declaration differs.
 
-Then in either browser, click the toolbar icon → **⚙ Settings**:
-- Set **ObsidianOptimizer API base** (default: the tunnel domain — see note below).
+On first install a welcome tab explains how to **pin the icon** and **sign in**. Then
+click the toolbar icon → **⚙ Settings**:
+- The **ObsidianOptimizer API base** defaults to the tunnel domain
+  (`https://obsidianoptimizer.uk/api`) — leave it unless you're doing same-machine dev
+  (then `http://localhost:8082`).
 - **Sign in** with your app credentials.
-
-Both features talk to this one backend. Downloads are handled by yt-dlp **inside the
-embedder** (`embedder/download/`), reached through the backend's `/download` proxy —
-no separate downloader service to run. Files land in the embedder's `DOWNLOAD_DIR`
-(host `${HOST_DOWNLOAD_PATH:-./downloads}`).
 
 ## Why the tunnel domain by default
 Service workers / extension fetches can't accept the local stack's **self-signed**
-`:8443` certificate, so the default points at the Cloudflare tunnel (real cert).
-For same-machine dev against the Vite proxy, set the API base to `http://localhost:8082`.
+`:8443` cert, so the default points at the Cloudflare tunnel (real cert).
 
-See `FLOWS.md` for architecture, data flows, and the full constraints list.
+See `FLOWS.md` for architecture, routing, and the full constraints list.

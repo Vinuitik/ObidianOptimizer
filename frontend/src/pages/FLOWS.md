@@ -57,15 +57,28 @@ To add more result fields: `ChronoService.ChronoResult` record + update display 
 Auth-gated ("Sign in to use Learn" when logged out).
 
 ```
-LearnPage → LearnLayout(orientation, slotA, slotB)
-  slotA: ResourcePanel (pdf | video | …) — resourceType state lives in LearnPage
-  slotB: NotePanel
-orientation: video → horizontal split, everything else → vertical
+LearnPage → view toggle: Library | Inbox(badge=count)
+  Library → LearnLayout(orientation, slotA, slotB)
+    slotA: ResourcePanel (pdf | video | …) — resourceType state lives in LearnPage
+    slotB: NotePanel
+  Inbox   → InboxPanel(onCount) — triage queue for ingest-generated notes
+orientation: landscape video → horizontal split; portrait video (short) &
+             everything else → vertical
 on mount (authed, no vaultRoot): fetchRootChildren() → fetchNoteNames()
+inbox badge: fetchInbox().length, refreshed on mount + after each file/discard
 ```
+
+- **Inbox** (`InboxPanel.jsx` + `api/inbox.js`): lists notes the ingest agent parked in
+  `_inbox/` (see backend `inbox/FLOWS.md`). Select → edit markdown → pick a destination
+  folder (datalist from `fetchChildren`, `_inbox` filtered out) → **Save & file**
+  (`POST /api/inbox/file`) moves it into review, or **Discard** (`DELETE /api/inbox`).
+- **Video orientation** is detected client-side from the `<video>` element's
+  `videoWidth/videoHeight` on `loadedmetadata` (`ResourcePanel Viewer → onOrientation`),
+  bubbled to `LearnPage` so a portrait short gets a vertical split. No ffprobe needed.
 
 To change the split rule: `LearnPage.jsx → orientation` ternary
 To add a resource type: `ResourcePanel.jsx` + orientation rule above
+To change inbox triage: `InboxPanel.jsx` + backend `inbox/InboxController`
 
 ---
 
@@ -104,6 +117,8 @@ Flashcard tests vs self-rated slideshow (see cards FLOWS + frontend/FLOWS.md).
 | Page routes | `App.jsx <Routes>` + `NavBar.jsx NAV_ITEMS` |
 | Settings sections / fields | `SettingsPage.jsx SECTIONS` array |
 | Chrono result display | `SettingsPage.jsx` chrono status section |
-| Learn split orientation | `LearnPage.jsx` orientation ternary |
+| Learn split orientation | `LearnPage.jsx` orientation ternary (video orient via `ResourcePanel` Viewer) |
+| Learn Library/Inbox toggle | `LearnPage.jsx` `view` state |
+| Inbox triage UI | `organisms/InboxPanel.jsx` + `api/inbox.js` (backend `inbox/InboxController`) |
 | Dashboard poll rate | `DashboardPage.jsx → POLL_MS` |
 | Dashboard counters | `stats/StatsController.java` (backend) |
