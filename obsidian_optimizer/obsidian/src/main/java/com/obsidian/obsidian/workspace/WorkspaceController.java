@@ -159,6 +159,56 @@ public class WorkspaceController {
         }
     }
 
+    // ── Upload a local file (extension drag-drop) ──────────────────────────────────
+
+    @PostMapping("/upload")
+    public ResponseEntity<?> uploadToWorkspace(
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body("file required");
+        }
+        if (file.getSize() > MAX_BYTES) {
+            return ResponseEntity.badRequest().body("File too large (> 512 MB)");
+        }
+
+        String original = file.getOriginalFilename();
+        if (original == null || original.isBlank()) {
+            return ResponseEntity.badRequest().body("filename required");
+        }
+        int dot = original.lastIndexOf('.');
+        String ext = dot >= 0 ? original.substring(dot).toLowerCase() : "";
+        if (!ALLOWED_EXTS.contains(ext)) {
+            return ResponseEntity.badRequest()
+                    .body("Unsupported type '" + ext + "'. Accepted: pdf, mp4, mov, mkv, webm, avi, mp3, m4a, wav, ogg, flac");
+        }
+
+        try {
+            Path workspaceDir = Paths.get(settingsRepo.getVaultPath()).resolve("_workspace");
+            Files.createDirectories(workspaceDir);
+
+            // Strip path components (browsers may send a full path) then sanitize.
+            String filename = original.replaceAll(".*[/\\\\]", "")
+                                      .replaceAll("[/\\\\:*?\"<>|]", "_").trim();
+            if (filename.isBlank()) filename = "upload-" + System.currentTimeMillis() + ext;
+
+            Path target = workspaceDir.resolve(filename).normalize();
+            if (!target.startsWith(workspaceDir)) {
+                return ResponseEntity.badRequest().body("Invalid filename");
+            }
+
+            try (InputStream stream = file.getInputStream()) {
+                Files.copy(stream, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            log.info("[workspace] uploaded {} ({} bytes)", filename, Files.size(target));
+            return ResponseEntity.ok(Map.of("filename", filename, "path", "_workspace/" + filename));
+
+        } catch (Exception e) {
+            log.error("[workspace] upload failed for {}: {}", original, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────
 
     private static String resolveFilename(URI uri, java.net.http.HttpHeaders headers) {

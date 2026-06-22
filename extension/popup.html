@@ -7,64 +7,25 @@
 <body>
   <header class="head">
     <span class="logo">◆</span>
-    <span class="title">Obsidian Optimizer</span>
+    <span class="title">Send to Learn</span>
     <button id="tab-settings-btn" class="gear" title="Settings">⚙</button>
   </header>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="note">New note</button>
-    <button class="tab" data-tab="workspace">Workspace</button>
-    <button class="tab" data-tab="download">Download</button>
-  </nav>
+  <!-- Capture --------------------------------------------------------------- -->
+  <section class="panel active" data-panel="capture">
+    <label class="lbl" for="cap-input">Paste text, a link, or drop a file</label>
+    <textarea id="cap-input" class="in area" rows="6"
+      placeholder="Paste anything — notes, an article link, a YouTube video, a PDF link… or drop a PDF / audio / video file here."></textarea>
+    <p id="cap-hint" class="hint"></p>
 
-  <!-- New note ------------------------------------------------------------- -->
-  <section class="panel active" data-panel="note">
-    <label class="lbl">Title</label>
-    <input id="note-title" class="in" type="text" placeholder="Note title" />
-
-    <label class="lbl">Folder</label>
-    <select id="note-folder" class="in"></select>
-
-    <label class="lbl">Body</label>
-    <textarea id="note-body" class="in area" rows="6" placeholder="Type your note… (selected text is pre-filled)"></textarea>
-
-    <button id="note-save" class="btn">Save to vault</button>
-    <p id="note-status" class="status"></p>
+    <button id="cap-send" class="btn">Add to Learn queue</button>
+    <p id="cap-status" class="status"></p>
   </section>
 
-  <!-- Workspace ------------------------------------------------------------ -->
-  <section class="panel" data-panel="workspace">
-    <label class="lbl">File URL</label>
-    <input id="ws-url" class="in" type="text" placeholder="https://…/paper.pdf" />
-    <p class="lbl" style="color:var(--color-muted);margin-top:4px">
-      PDF, video, or audio — saved to your vault's _workspace/ folder and shown in the Learn page.
-    </p>
-    <button id="ws-save" class="btn">Save to workspace</button>
-    <p id="ws-status" class="status"></p>
-  </section>
-
-  <!-- Download ------------------------------------------------------------- -->
-  <section class="panel" data-panel="download">
-    <label class="lbl">Resource URL</label>
-    <input id="dl-url" class="in" type="text" placeholder="YouTube / playlist / lecture URL" />
-    <button id="dl-start" class="btn">Download for offline</button>
-
-    <div id="dl-progress" class="progress-wrap hidden">
-      <div class="bar"><div id="dl-bar" class="bar-fill"></div></div>
-      <div class="progress-meta">
-        <span id="dl-state" class="badge">queued</span>
-        <span id="dl-speed"></span>
-        <span id="dl-pct">0%</span>
-      </div>
-    </div>
-    <p id="dl-status" class="status"></p>
-  </section>
-
-  <!-- Settings ------------------------------------------------------------- -->
+  <!-- Settings -------------------------------------------------------------- -->
   <section class="panel" data-panel="settings">
     <label class="lbl">ObsidianOptimizer API base</label>
     <input id="cfg-obsidian" class="in" type="text" placeholder="https://obsidianoptimizer.uk/api" />
-
     <button id="cfg-save" class="btn ghost">Save endpoint</button>
 
     <hr class="sep" />
@@ -74,6 +35,8 @@
     <input id="login-pass" class="in" type="password" placeholder="Password" autocomplete="current-password" />
     <button id="login-btn" class="btn">Sign in</button>
     <p id="settings-status" class="status"></p>
+
+    <button id="back-btn" class="btn ghost">← Back to capture</button>
   </section>
 
   <script type="module" src="popup.js"></script>

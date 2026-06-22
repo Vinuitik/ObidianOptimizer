@@ -71,8 +71,17 @@ body {
   font-size: 14px; font-family: inherit;
 }
 .in:focus { outline: none; border-color: var(--color-accent-border); }
-.area { resize: vertical; min-height: 90px; }
+.area { resize: vertical; min-height: 110px; }
+.area.drag {
+  border-color: var(--color-accent);
+  background: var(--color-accent-dim);
+}
 select.in { appearance: none; cursor: pointer; }
+
+.hint {
+  font-size: 12px; color: var(--color-accent-soft);
+  margin: 6px 0 0; min-height: 16px;
+}
 
 .btn {
   margin-top: 12px; padding: 10px;

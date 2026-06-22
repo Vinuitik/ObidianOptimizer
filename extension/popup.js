@@ -1,5 +1,5 @@
 // Popup controller. UI only — every network call is delegated to background.js
-// via chrome.runtime.sendMessage so it runs with the extension's host permissions.
+// via runtime.sendMessage so it runs with the extension's host permissions.
 import { getConfig, api } from './config.js';
 
 const send = (type, payload) => api.runtime.sendMessage({ type, payload });
@@ -10,142 +10,101 @@ function setStatus(el, msg, kind = 'info') {
   el.className = `status ${kind}`;
 }
 
-// ── Tabs ──────────────────────────────────────────────────────────────────────
-function showTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
+// ── Panels (capture / settings) ─────────────────────────────────────────────────
+function showPanel(name) {
+  document.querySelectorAll('.panel').forEach(p =>
+    p.classList.toggle('active', p.dataset.panel === name));
 }
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
-$('tab-settings-btn').addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === 'settings'));
+$('tab-settings-btn').addEventListener('click', () => { showPanel('settings'); loadSettings(); });
+$('back-btn').addEventListener('click', () => showPanel('capture'));
+
+// ── Live detection hint ──────────────────────────────────────────────────────────
+const URL_RE = /^https?:\/\/\S+$/i;
+const VIDEO_HOST_RE = /(?:^|\.)(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com)$/i;
+const MEDIA_EXT_RE = /\.(pdf|mp4|mov|mkv|webm|avi|mp3|m4a|wav|ogg|flac)(?:[?#]|$)/i;
+
+function detectLabel(text) {
+  const t = (text || '').trim();
+  if (!t) return '';
+  if (!URL_RE.test(t)) return '📝 Plain text → saved as a note for review';
+  let host = '';
+  try { host = new URL(t).host; } catch { return '📝 Text → saved as a note'; }
+  if (VIDEO_HOST_RE.test(host)) return '🎬 Video → downloaded to watch + notes generated';
+  if (MEDIA_EXT_RE.test(t)) return '📎 File link → saved to workspace + notes generated';
+  return '🔗 Web page → notes generated from it';
+}
+
+$('cap-input').addEventListener('input', (e) => {
+  $('cap-hint').textContent = detectLabel(e.target.value);
 });
 
-// ── Active-tab context (prefill) ───────────────────────────────────────────────
-async function loadPageContext() {
+// ── Prefill from the active tab ────────────────────────────────────────────────
+async function prefill() {
   try {
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
-    if (!tab) return;
-    $('note-title').value = tab.title || '';
-    $('dl-url').value = tab.url || '';
-    $('ws-url').value = tab.url || '';
-
-    // Pull any selected text from the page to pre-fill the note body.
-    if (tab.id != null) {
-      try {
-        const [res] = await api.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => window.getSelection().toString(),
-        });
-        if (res?.result) $('note-body').value = res.result;
-      } catch { /* some pages (chrome://, store) block injection — ignore */ }
+    if (tab?.url && /^https?:/i.test(tab.url) && !$('cap-input').value) {
+      $('cap-input').value = tab.url;
+      $('cap-hint').textContent = detectLabel(tab.url);
     }
   } catch { /* no tab access — leave blank */ }
 }
 
-// ── New note ───────────────────────────────────────────────────────────────────
-async function loadFolders() {
-  const sel = $('note-folder');
-  sel.innerHTML = '<option value="">Vault root</option>';
-  const res = await send('listFolders');
-  if (res?.ok) {
-    res.folders.forEach(f => {
-      const opt = document.createElement('option');
-      opt.value = f.path;
-      opt.textContent = f.name;
-      sel.appendChild(opt);
-    });
-  }
+// ── Send (text / URL) ─────────────────────────────────────────────────────────
+$('cap-send').addEventListener('click', () => submit());
+
+async function submit() {
+  const text = $('cap-input').value.trim();
+  if (!text) return setStatus($('cap-status'), 'Paste something or drop a file first.', 'err');
+
+  $('cap-send').disabled = true;
+  setStatus($('cap-status'), 'Queuing…', 'info');
+  const res = await send('routeText', { text });
+  handleResult(res);
 }
 
-$('note-save').addEventListener('click', async () => {
-  const btn = $('note-save');
-  const title = $('note-title').value.trim();
-  if (!title) return setStatus($('note-status'), 'Give the note a title.', 'err');
+// ── Drag & drop a file ──────────────────────────────────────────────────────────
+const drop = $('cap-input');
+['dragenter', 'dragover'].forEach(ev =>
+  drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(ev =>
+  drop.addEventListener(ev, () => drop.classList.remove('drag')));
 
-  const [tab] = await api.tabs.query({ active: true, currentWindow: true }).catch(() => [null]);
-  btn.disabled = true;
-  setStatus($('note-status'), 'Saving…', 'info');
-  const res = await send('createNote', {
-    title,
-    body: $('note-body').value,
-    folder: $('note-folder').value || null,
-    sourceUrl: tab?.url || '',
+drop.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  $('cap-send').disabled = true;
+  setStatus($('cap-status'), `Uploading “${file.name}”…`, 'info');
+  try {
+    const dataB64 = await fileToB64(file);
+    const res = await send('uploadFile', { name: file.name, type: file.type, dataB64 });
+    handleResult(res);
+  } catch (err) {
+    $('cap-send').disabled = false;
+    setStatus($('cap-status'), `Couldn't read the file: ${err}`, 'err');
+  }
+});
+
+function fileToB64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(',')[1]); // strip data: prefix
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
   });
-  btn.disabled = false;
-
-  if (res?.ok) {
-    setStatus($('note-status'), `Saved “${res.name}” ✓`, 'ok');
-  } else if (res?.status === 401) {
-    setStatus($('note-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
-  } else {
-    setStatus($('note-status'), `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
-  }
-});
-
-// ── Workspace ──────────────────────────────────────────────────────────────────
-$('ws-save').addEventListener('click', async () => {
-  const url = $('ws-url').value.trim();
-  if (!url) return setStatus($('ws-status'), 'Paste a URL first.', 'err');
-
-  $('ws-save').disabled = true;
-  setStatus($('ws-status'), 'Downloading…', 'info');
-
-  const res = await send('saveToWorkspace', { url });
-  $('ws-save').disabled = false;
-
-  if (res?.ok) {
-    setStatus($('ws-status'), `Saved: ${res.filename} ✓`, 'ok');
-  } else if (res?.status === 401) {
-    setStatus($('ws-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
-  } else {
-    setStatus($('ws-status'), `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
-  }
-});
-
-// ── Download ───────────────────────────────────────────────────────────────────
-let pollTimer = null;
-
-$('dl-start').addEventListener('click', async () => {
-  const url = $('dl-url').value.trim();
-  if (!url) return setStatus($('dl-status'), 'Paste a URL first.', 'err');
-
-  clearInterval(pollTimer);
-  $('dl-progress').classList.remove('hidden');
-  setBar(0, 'queued', '');
-  setStatus($('dl-status'), 'Starting…', 'info');
-
-  const res = await send('startDownload', { url });
-  if (!res?.ok) {
-    return setStatus($('dl-status'), `Can't reach downloader (${res?.error || res?.status}). Check Settings ⚙.`, 'err');
-  }
-  setStatus($('dl-status'), '', 'info');
-  pollTimer = setInterval(() => pollJob(res.jobId), 1000);
-});
-
-async function pollJob(jobId) {
-  const res = await send('downloadStatus', { jobId });
-  if (!res?.ok) return;
-  const job = res.job;
-  setBar(job.progress || 0, job.status, `${job.speed || ''} ${job.eta ? '· ' + job.eta : ''}`.trim());
-
-  if (job.status === 'done') {
-    clearInterval(pollTimer);
-    const file = (job.filename || '').split(/[/\\]/).pop();
-    setStatus($('dl-status'), `Downloaded: ${file} ✓`, 'ok');
-  } else if (job.status === 'error') {
-    clearInterval(pollTimer);
-    setStatus($('dl-status'), `Failed: ${job.error || 'download error'}`, 'err');
-  }
 }
 
-function setBar(pct, state, speed) {
-  $('dl-bar').style.width = `${Math.max(0, Math.min(100, pct))}%`;
-  $('dl-pct').textContent = `${(pct || 0).toFixed(0)}%`;
-  $('dl-speed').textContent = speed || '';
-  const badge = $('dl-state');
-  badge.textContent = state;
-  badge.className = `badge ${state === 'done' ? 'done' : state === 'error' ? 'error' : ''}`;
+function handleResult(res) {
+  $('cap-send').disabled = false;
+  if (res?.ok) {
+    setStatus($('cap-status'), `${res.detail || 'Queued'} ✓`, 'ok');
+    $('cap-input').value = '';
+    $('cap-hint').textContent = '';
+  } else if (res?.status === 401) {
+    setStatus($('cap-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
+  } else {
+    setStatus($('cap-status'), `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
+  }
 }
 
 // ── Settings ────────────────────────────────────────────────────────────────────
@@ -158,7 +117,6 @@ async function loadSettings() {
 $('cfg-save').addEventListener('click', async () => {
   await send('setConfig', { obsidianApi: $('cfg-obsidian').value.trim() });
   setStatus($('settings-status'), 'Endpoint saved.', 'ok');
-  loadFolders();
 });
 
 $('login-btn').addEventListener('click', async () => {
@@ -171,7 +129,6 @@ $('login-btn').addEventListener('click', async () => {
     setStatus($('settings-status'), 'Signed in ✓', 'ok');
     $('login-pass').value = '';
     refreshAuthLine();
-    loadFolders();
   } else {
     setStatus($('settings-status'), `Sign-in failed (${res?.status || res?.error || 'check endpoint'}).`, 'err');
   }
@@ -179,10 +136,9 @@ $('login-btn').addEventListener('click', async () => {
 
 async function refreshAuthLine() {
   const res = await send('checkAuth');
-  $('auth-line').textContent = res?.ok ? 'Signed in to ObsidianOptimizer ✓' : 'Sign in to ObsidianOptimizer';
+  $('auth-line').textContent = res?.ok
+    ? 'Signed in to ObsidianOptimizer ✓' : 'Sign in to ObsidianOptimizer';
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-loadPageContext();
-loadFolders();
-loadSettings();
+prefill();
