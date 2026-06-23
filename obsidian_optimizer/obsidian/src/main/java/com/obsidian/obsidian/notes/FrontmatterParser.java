@@ -4,7 +4,12 @@ import java.time.LocalDate;
 
 public class FrontmatterParser {
 
-    public record NoteMetadata(LocalDate srDue, Integer srInterval, Integer srEase) {}
+    // captureId / captureSeq link a proposed note back to the Capture that produced it
+    // (see CAPTURE_ARCH.md). Frontmatter is the durable source of truth — mirrored into
+    // notes.capture_id / capture_seq by NoteIndexRepository so the link survives a
+    // forceResync (which rebuilds the index from disk).
+    public record NoteMetadata(LocalDate srDue, Integer srInterval, Integer srEase,
+                               String captureId, Integer captureSeq) {}
 
     public static NoteMetadata parse(String rawContent) {
         if (rawContent == null) return empty();
@@ -24,6 +29,8 @@ public class FrontmatterParser {
         LocalDate srDue      = null;
         Integer  srInterval  = null;
         Integer  srEase      = null;
+        String   captureId   = null;
+        Integer  captureSeq  = null;
 
         for (String line : block.split("\n")) {
             int colon = line.indexOf(':');
@@ -41,13 +48,19 @@ public class FrontmatterParser {
                 case "sr-ease" -> {
                     try { srEase = Integer.parseInt(val); } catch (Exception ignored) {}
                 }
+                case "capture-id" -> {
+                    if (!val.isEmpty()) captureId = val;
+                }
+                case "capture-seq" -> {
+                    try { captureSeq = Integer.parseInt(val); } catch (Exception ignored) {}
+                }
             }
         }
 
-        return new NoteMetadata(srDue, srInterval, srEase);
+        return new NoteMetadata(srDue, srInterval, srEase, captureId, captureSeq);
     }
 
     private static NoteMetadata empty() {
-        return new NoteMetadata(null, null, null);
+        return new NoteMetadata(null, null, null, null, null);
     }
 }

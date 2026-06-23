@@ -1,6 +1,8 @@
 package com.obsidian.obsidian.inbox;
 
+import com.obsidian.obsidian.capture.CaptureRepository;
 import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,14 +40,20 @@ public class InboxController {
 
     private final FileRepository repository;
     private final SettingsRepository settingsRepo;
+    private final NoteIndexRepository noteIndex;
+    private final CaptureRepository captureRepo;
 
-    public InboxController(FileRepository repository, SettingsRepository settingsRepo) {
+    public InboxController(FileRepository repository, SettingsRepository settingsRepo,
+                           NoteIndexRepository noteIndex, CaptureRepository captureRepo) {
         this.repository = repository;
         this.settingsRepo = settingsRepo;
+        this.noteIndex = noteIndex;
+        this.captureRepo = captureRepo;
     }
 
     record InboxItem(String path, String title, String source,
-                     String suggestedFolder, String content) {}
+                     String suggestedFolder, String content,
+                     String captureId, Integer captureSeq) {}
 
     // ── List staged notes ──────────────────────────────────────────────────────
 
@@ -64,12 +72,18 @@ public class InboxController {
                       try {
                           String content = Files.readString(p);
                           String title = p.getFileName().toString().replaceAll("\\.md$", "");
+                          String seqRaw = frontmatterValue(content, "capture-seq");
+                          Integer seq = null;
+                          try { if (!seqRaw.isBlank()) seq = Integer.parseInt(seqRaw); }
+                          catch (NumberFormatException ignored) {}
                           items.add(new InboxItem(
                               p.toAbsolutePath().toString(),
                               title,
                               frontmatterValue(content, "ingest-source"),
                               suggestedFolderAbs(frontmatterValue(content, "ingest-suggested-folder")),
-                              content));
+                              content,
+                              emptyToNull(frontmatterValue(content, "capture-id")),
+                              seq));
                       } catch (IOException e) {
                           log.warn("[inbox] could not read {}: {}", p, e.getMessage());
                       }
@@ -96,9 +110,19 @@ public class InboxController {
             Files.createDirectories(target);
 
             String content = req.content() != null ? req.content() : repository.getText(req.path());
+            // Keep capture-id / capture-seq on the filed note (durable link back to its
+            // Capture); only the inbox-only ingest-* keys are stripped on graduation.
+            String captureId = emptyToNull(frontmatterValue(content, "capture-id"));
             repository.updateNote(req.path(), stripInboxFrontmatter(content));
             String newPath = repository.moveNote(req.path(), req.targetFolder());
             log.info("[inbox] filed {} -> {}", req.path(), newPath);
+
+            // When a capture's last proposed note leaves _inbox, the capture is fully
+            // triaged. Phase 6 will trash the source here; for now just flip the status.
+            if (captureId != null && noteIndex.countUnfiledNotesForCapture(captureId) == 0) {
+                captureRepo.updateStatus(captureId, "filed");
+                log.info("[inbox] capture {} fully filed", captureId);
+            }
             return ResponseEntity.ok(Map.of("path", newPath));
         } catch (IOException e) {
             log.error("[inbox] file failed for {}: {}", req.path(), e.getMessage());
@@ -135,6 +159,10 @@ public class InboxController {
             }
         }
         return "";
+    }
+
+    private static String emptyToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s;
     }
 
     /** Convert the stored vault-relative suggestion to an absolute path so it

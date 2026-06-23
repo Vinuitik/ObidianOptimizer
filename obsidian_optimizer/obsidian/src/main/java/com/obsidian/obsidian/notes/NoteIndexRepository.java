@@ -62,6 +62,36 @@ public class NoteIndexRepository {
         // generation (expensive LLM). content_hash stays full-file for Drive sync.
         jdbc.execute(
             "ALTER TABLE notes ADD COLUMN IF NOT EXISTS body_hash TEXT");
+        // capture_id / capture_seq mirror the note's frontmatter (capture-id / capture-seq):
+        // which Capture produced this proposed note, and its order within that capture
+        // (chapter 1 before chapter 2, t=0 before t=600). The DB column is a rebuildable
+        // index — frontmatter is the source of truth (see CAPTURE_ARCH.md). Lets the Learn
+        // queue join a resource to its ordered notes without scanning files.
+        jdbc.execute(
+            "ALTER TABLE notes ADD COLUMN IF NOT EXISTS capture_id TEXT");
+        jdbc.execute(
+            "ALTER TABLE notes ADD COLUMN IF NOT EXISTS capture_seq INT");
+        jdbc.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notes_capture_id ON notes(capture_id)");
+    }
+
+    /** Proposed-note paths for a capture, in source order (capture_seq). Used by the
+     *  Learn queue to render a resource's notes without shuffling. */
+    public List<String> findNotesByCapture(String captureId) {
+        return jdbc.queryForList("""
+            SELECT path FROM notes
+            WHERE capture_id = ?
+            ORDER BY capture_seq ASC NULLS LAST, path ASC
+            """, String.class, captureId);
+    }
+
+    /** How many of a capture's notes are still parked in _inbox/ awaiting triage.
+     *  When this hits zero the capture is fully filed (InboxController flips status). */
+    public int countUnfiledNotesForCapture(String captureId) {
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM notes WHERE capture_id = ? AND path LIKE '%/_inbox/%'",
+            Integer.class, captureId);
+        return n == null ? 0 : n;
     }
 
     /** Notes whose text changed since they were last embedded (or never were).
@@ -159,21 +189,26 @@ public class NoteIndexRepository {
 
     public void upsert(String path, String title, FrontmatterParser.NoteMetadata meta, long modifiedAt) {
         jdbc.update("""
-            INSERT INTO notes(path, title, sr_due, sr_interval, sr_ease, modified_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO notes(path, title, sr_due, sr_interval, sr_ease, modified_at,
+                              capture_id, capture_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (path) DO UPDATE SET
               title       = EXCLUDED.title,
               sr_due      = EXCLUDED.sr_due,
               sr_interval = EXCLUDED.sr_interval,
               sr_ease     = EXCLUDED.sr_ease,
-              modified_at = EXCLUDED.modified_at
+              modified_at = EXCLUDED.modified_at,
+              capture_id  = EXCLUDED.capture_id,
+              capture_seq = EXCLUDED.capture_seq
             """,
             path,
             title,
             meta.srDue() != null ? Date.valueOf(meta.srDue()) : null,
             meta.srInterval(),
             meta.srEase(),
-            modifiedAt);
+            modifiedAt,
+            meta.captureId(),
+            meta.captureSeq());
     }
 
     public void rename(String oldPath, String newPath, String newTitle) {
