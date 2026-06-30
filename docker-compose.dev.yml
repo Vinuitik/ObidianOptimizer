@@ -1,0 +1,11 @@
+# Local dev overrides — used by dev.ps1 (Windows / Docker Desktop).
+#
+# The base compose gives the frontend NO host ports (prod serves only through
+# the Cloudflare tunnel). For local dev we expose it on localhost. dev.ps1 also
+# runs with --no-deps so the GPU embedder and cloudflared are NOT started, and
+# QUIET MODE in .env keeps background processing (embedding/images/cards/ingest/
+# chrono) off. The host-wrapper is intentionally not run either.
+services:
+  frontend:
+    ports:
+      - "127.0.0.1:8081:8081"   # UI at http://localhost:8081
