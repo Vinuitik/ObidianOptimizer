@@ -75,32 +75,16 @@ async function login({ username, password }) {
 }
 
 // ── Capture actions ────────────────────────────────────────────────────────────
-// Raw text/markdown → a note in review (no synthesis, per product decision).
-async function saveText(text) {
-  const children = await obsidian('/children');
-  if (children.status === 401) return { ok: false, status: 401 };
-  if (!children.ok) return { ok: false, status: children.status };
-  const folder = (await children.json()).parentPath;
-
+// Raw text/markdown → a Capture: the original is kept as a resource and the ingest
+// agent synthesizes proposed notes from it (CAPTURE_ARCH.md). The user amends/files
+// them in the Learn queue — AI never auto-files.
+async function captureText(text) {
   const firstLine = text.split('\n').find(l => l.trim()) || '';
-  const name = sanitizeName(firstLine);
-
-  const created = await json('/notes', 'POST', { folder, name });
-  if (created.status === 401) return { ok: false, status: 401 };
-  if (!created.ok) return { ok: false, status: created.status, error: await created.text() };
-  const { path } = await created.json();
-
-  // Keep the template's sr-due frontmatter; append a heading + the captured body.
-  let template = '';
-  try {
-    const t = await obsidian(`/text?noteName=${encodeURIComponent(path)}`);
-    if (t.ok) template = await t.text();
-  } catch { /* fall back to empty */ }
-  const content = `${template.replace(/\s*$/, '')}\n\n# ${name}\n\n${text.trim()}\n`;
-
-  const put = await json('/notes', 'PUT', { path, content });
-  if (!put.ok) return { ok: false, status: put.status, error: await put.text() };
-  return { ok: true, kind: 'text', detail: `Saved note “${name}”` };
+  const title = sanitizeName(firstLine);
+  const res = await json('/capture', 'POST', { text, title });
+  if (res.status === 401) return { ok: false, status: 401 };
+  if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
+  return { ok: true, kind: 'text', detail: `Synthesizing notes from “${title}”` };
 }
 
 // A URL → the ingest pipeline (extract → synthesize → Learn inbox).
@@ -131,7 +115,7 @@ async function startDownload(url) {
 // Route a single captured string (used by both popup and context menu).
 async function routeText(text) {
   const { kind, value } = classify(text);
-  if (kind === 'text') return saveText(value);
+  if (kind === 'text') return captureText(value);
 
   // For URLs, always generate notes via /capture. For media/video, also keep a
   // viewable copy in _workspace so it shows up in Learn's player.

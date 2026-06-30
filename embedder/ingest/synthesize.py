@@ -54,6 +54,30 @@ phrases unique within this plan; 1-4 lowercase tags per note.
 SEGMENTS:
 {segments}"""
 
+# Text the user captured themselves (paste / selection / DOM article). The risk
+# here is padding/slop, so the prompt leans hard on faithfulness and concision —
+# the source is already prose, not a transcript to be reconstructed.
+TEXT_OUTLINE_PROMPT = """The source below is text the user captured (article, notes,
+or a selection): {title}. Segments are numbered [id @ location].
+
+Break it into the smallest set of self-contained concept notes. Group segments by
+idea; each note must stand alone and be worth keeping. Prefer FEWER, richer notes;
+split only on real topic boundaries (chapters {chapters}). Do NOT add anything that
+is not in the captured text — no outside knowledge, no filler.
+
+Return ONLY this JSON shape:
+{{"notes": [{{"title": "...", "segment_ids": [0,1], "tags": ["..."],
+             "summary_hint": "one line on what this note covers"}}]}}
+
+Rules: every segment id appears in exactly one note; titles are short noun
+phrases unique within this plan; 1-4 lowercase tags per note.
+
+SEGMENTS:
+{segments}"""
+
+# Source types whose segments are already prose (not a transcript) → text prompt.
+_TEXT_SOURCE_TYPES = {"text", "note", "web", "web_dom"}
+
 WRITE_SYSTEM = (
     "You write dense, well-structured Obsidian notes in markdown. Headings with "
     "##, code in fenced blocks, math in $...$. No frontmatter, no top-level "
@@ -122,12 +146,21 @@ def outline(bundle: dict) -> list[dict]:
 
 
 def _outline_window(bundle: dict, window: list[dict], rep: AgentReport) -> list[dict]:
-    prompt = OUTLINE_PROMPT.format(
-        title=bundle["source"].get("title", "untitled"),
-        source_type=bundle["source"]["type"],
-        chapters=[c.get("title") for c in bundle["source"].get("chapters", [])] or "none",
-        segments=bundle_util.render_segments(window),
-    )
+    source_type = bundle["source"]["type"]
+    chapters = [c.get("title") for c in bundle["source"].get("chapters", [])] or "none"
+    if source_type in _TEXT_SOURCE_TYPES:
+        prompt = TEXT_OUTLINE_PROMPT.format(
+            title=bundle["source"].get("title", "untitled"),
+            chapters=chapters,
+            segments=bundle_util.render_segments(window),
+        )
+    else:
+        prompt = OUTLINE_PROMPT.format(
+            title=bundle["source"].get("title", "untitled"),
+            source_type=source_type,
+            chapters=chapters,
+            segments=bundle_util.render_segments(window),
+        )
     valid_ids = {s["id"] for s in window}
     last_err = None
     for attempt in range(MAX_RETRIES + 1):

@@ -29,7 +29,9 @@ _worker_started = False
 
 def submit(ref: str, resolved_path, force_whisper: bool = False,
            extract_only: bool = False, note_path: str | None = None,
-           embed_ref: str | None = None) -> dict:
+           embed_ref: str | None = None, capture_id: str | None = None,
+           text: str | None = None, source_type: str | None = None,
+           title: str | None = None) -> dict:
     # In-place dedup: never run two jobs for the same (note, embed) at once —
     # the auto-scanner re-fires on every save until the marker lands.
     if note_path and embed_ref:
@@ -45,7 +47,9 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
         "created_at": time.time(), "error": None, "bundle_path": None,
         "force_whisper": force_whisper, "extract_only": extract_only,
         "note_path": note_path, "embed_ref": embed_ref,
+        "capture_id": capture_id, "source_type": source_type, "title": title,
         "_resolved_path": str(resolved_path) if resolved_path else None,
+        "_text": text,
     }
     with _lock:
         _jobs[job_id] = job
@@ -114,26 +118,33 @@ def _evict_models():
 
 
 def _run(job: dict):
-    from ingest import extract_av, extract_pdf, extract_web, router
+    from ingest import extract_av, extract_pdf, extract_text, extract_web, router
 
     job["status"] = "RUNNING"
-    kind = router.route(job["ref"])
-    job["stage"] = f"extract:{kind}"
     resolved = Path(job["_resolved_path"]) if job["_resolved_path"] else None
 
-    if kind in ("av", "youtube"):
-        bundle = extract_av.extract(job["ref"], resolved, job["force_whisper"])
-        if kind == "av" and resolved and not router.is_audio(job["ref"]):
-            job["stage"] = "keyframes"
-            _attach_keyframes(job, bundle, resolved)
-    elif kind == "pdf":
-        bundle = extract_pdf.extract(job["ref"], resolved)
-    elif kind == "web":
-        bundle = extract_web.extract(job["ref"])
+    # Text route: the captured prose IS the content — no fetch, no router, no media.
+    if job.get("_text") is not None:
+        job["stage"] = "extract:text"
+        bundle = extract_text.extract(
+            job["_text"], job.get("title") or job.get("ref") or "Captured text",
+            job.get("source_type") or "text", job.get("ref") or "")
     else:
-        raise NotImplementedError(
-            f"route '{kind}': single images go through the existing "
-            f"pending_image_jobs pipeline, not ingest")
+        kind = router.route(job["ref"])
+        job["stage"] = f"extract:{kind}"
+        if kind in ("av", "youtube"):
+            bundle = extract_av.extract(job["ref"], resolved, job["force_whisper"])
+            if kind == "av" and resolved and not router.is_audio(job["ref"]):
+                job["stage"] = "keyframes"
+                _attach_keyframes(job, bundle, resolved)
+        elif kind == "pdf":
+            bundle = extract_pdf.extract(job["ref"], resolved)
+        elif kind == "web":
+            bundle = extract_web.extract(job["ref"])
+        else:
+            raise NotImplementedError(
+                f"route '{kind}': single images go through the existing "
+                f"pending_image_jobs pipeline, not ingest")
 
     BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
     out = BUNDLE_DIR / f"{job['id']}.json"
@@ -227,14 +238,19 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     suggested = publish.find_home(bundle["source"].get("title", ""))
     source_ref = bundle["source"].get("ref", "")
     publish.ensure_folder(publish.INBOX_FOLDER)
+    capture_id = job.get("capture_id")
     created, failures = [], []
-    for plan in plans:
+    # enumerate → capture-seq: plans arrive in source order (outline windows run in
+    # order), so seq preserves chapter/segment ordering for the Learn queue.
+    for seq, plan in enumerate(plans):
         try:
             note_md = synthesize.write_note(bundle, plan, numbered)
             problems = publish.validate_note(note_md, stored_names)
             if problems:
                 raise publish.PublishError("; ".join(problems))
             note_md = publish.stamp_inbox(note_md, source_ref, suggested)
+            if capture_id:
+                note_md = publish.stamp_capture(note_md, capture_id, seq)
             path = publish.create_note(publish.INBOX_FOLDER,
                                        synthesize.slugify(plan["title"]), note_md)
             created.append(path)

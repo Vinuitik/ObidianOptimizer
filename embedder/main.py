@@ -62,11 +62,15 @@ class JudgeRequest(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    ref: str                        # /vault-relative path or URL
+    ref: str = ""                   # /vault-relative path or URL (blank for text route)
     force_whisper: bool = False     # re-transcribe even if captions exist
     extract_only: bool = False      # stop after the bundle (skip synthesis)
     note_path: str | None = None    # in-place mode: host note holding the embed
     embed_ref: str | None = None    # the ![[…]] target to ingest below
+    text: str | None = None         # text route: raw prose to ingest directly (no fetch)
+    source_type: str | None = None  # capture source type (text|web_dom|…) for the bundle
+    capture_id: str | None = None   # stamp into proposed notes so the Learn queue can group them
+    title: str | None = None        # display title for the text route
 
 
 class SplitNoteRequest(BaseModel):
@@ -183,6 +187,12 @@ def ingest_submit(req: IngestRequest):
     from ingest import jobs as ingest_jobs
     from ingest import router as ingest_router
 
+    # Text route: the captured prose is the content — no ref to route or resolve.
+    if req.text is not None and req.text.strip():
+        return ingest_jobs.submit(
+            req.ref or "", None, capture_id=req.capture_id, text=req.text,
+            source_type=req.source_type or "text", title=req.title)
+
     in_place = bool(req.note_path)
     target = req.embed_ref or req.ref if in_place else req.ref
 
@@ -208,7 +218,8 @@ def ingest_submit(req: IngestRequest):
 
     return ingest_jobs.submit(
         target, resolved, req.force_whisper, req.extract_only,
-        note_path=req.note_path, embed_ref=(target if in_place else None))
+        note_path=req.note_path, embed_ref=(target if in_place else None),
+        capture_id=req.capture_id, source_type=req.source_type, title=req.title)
 
 
 def _resolve_embed(ref: str):

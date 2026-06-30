@@ -26,9 +26,9 @@ const MEDIA_EXT_RE = /\.(pdf|mp4|mov|mkv|webm|avi|mp3|m4a|wav|ogg|flac)(?:[?#]|$
 function detectLabel(text) {
   const t = (text || '').trim();
   if (!t) return '';
-  if (!URL_RE.test(t)) return '📝 Plain text → saved as a note for review';
+  if (!URL_RE.test(t)) return '📝 Plain text → notes synthesized for review';
   let host = '';
-  try { host = new URL(t).host; } catch { return '📝 Text → saved as a note'; }
+  try { host = new URL(t).host; } catch { return '📝 Text → notes synthesized'; }
   if (VIDEO_HOST_RE.test(host)) return '🎬 Video → downloaded to watch + notes generated';
   if (MEDIA_EXT_RE.test(t)) return '📎 File link → saved to workspace + notes generated';
   return '🔗 Web page → notes generated from it';

@@ -87,6 +87,14 @@ def find_home(title: str) -> str:
     return DEFAULT_FOLDER
 
 
+def _insert_frontmatter(content: str, extra: str) -> str:
+    """Insert `extra` lines into a note's leading `---` block (or create one)."""
+    if content.startswith("---\n"):
+        end = content.index("\n---\n", 4)          # close of the frontmatter block
+        return content[:end + 1] + extra + content[end + 1:]
+    return f"---\n{extra}---\n\n{content}"
+
+
 def stamp_inbox(content: str, source: str, suggested_folder: str) -> str:
     """Inject the inbox-triage frontmatter into a standalone note's `---` block so
     the Learn Inbox can list it, show where it came from, and pre-pick a destination.
@@ -94,11 +102,18 @@ def stamp_inbox(content: str, source: str, suggested_folder: str) -> str:
     extra = (f"ingest-inbox: true\n"
              f"ingest-source: {source}\n"
              f"ingest-suggested-folder: {suggested_folder}\n")
-    if content.startswith("---\n"):
-        end = content.index("\n---\n", 4)          # close of the frontmatter block
-        return content[:end + 1] + extra + content[end + 1:]
-    # No frontmatter (shouldn't happen for standalone notes) → prepend a block.
-    return f"---\n{extra}---\n\n{content}"
+    return _insert_frontmatter(content, extra)
+
+
+def stamp_capture(content: str, capture_id: str, seq: int) -> str:
+    """Link a proposed note to the Capture that produced it (see CAPTURE_ARCH.md).
+    Frontmatter is the DURABLE source of truth — the Java NoteIndexRepository mirrors
+    capture-id/capture-seq into DB columns so the link survives a forceResync. `seq`
+    preserves source order so the Learn queue never shuffles chapters. Unlike the
+    ingest-* keys, these are NOT stripped when the note is filed."""
+    extra = (f"capture-id: {capture_id}\n"
+             f"capture-seq: {seq}\n")
+    return _insert_frontmatter(content, extra)
 
 
 def ensure_folder(folder: str) -> None:
