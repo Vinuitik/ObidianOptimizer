@@ -51,6 +51,11 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
       - DOWNLOAD_DIR=/workspace
       - BACKEND_URL=${BACKEND_URL:-http://backend:8084}
+    # Native Linux Docker doesn't provide host.docker.internal (only Docker
+    # Desktop does). Map it to the host gateway so the embedder can reach the
+    # host-wrapper (WRAPPER_URL) running on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,6 +115,11 @@ services:
       # Memory-tight host: G1 periodic GC uncommits idle heap back to the OS
       # (no hard -Xmx cap — caps risk OOM-kills; this just stops the JVM hoarding).
       - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=60 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:G1PeriodicGCInterval=300000 -XX:+G1PeriodicGCInvokesConcurrent
+    # Native Linux Docker doesn't provide host.docker.internal (only Docker
+    # Desktop does). Map it to the host gateway so the backend can reach the
+    # host-wrapper (WRAPPER_URL) running on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${HOST_VAULT_PATH}:/vault
     depends_on:
