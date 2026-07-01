@@ -1,0 +1,27 @@
+[Unit]
+Description=Obsidian Optimizer full stack (linux_scripts/start.sh)
+Documentation=file:///home/victor/Desktop/ObidianOptimizer/FLOWS.md
+# Docker must be up before the stack; start.sh runs `docker compose up --build`.
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=victor
+Group=victor
+WorkingDirectory=/home/victor/Desktop/ObidianOptimizer
+ExecStart=/usr/bin/env bash /home/victor/Desktop/ObidianOptimizer/linux_scripts/start.sh
+
+# Keep the stack online: relaunch if start.sh (or the attached compose) ever exits.
+Restart=always
+RestartSec=10
+
+# On `systemctl stop`, SIGTERM reaches the cgroup (bash + `docker compose up`),
+# mirroring a Ctrl-C: compose stops the containers, then start.sh's EXIT trap
+# runs `docker compose down` and kills the host-wrapper. Give it room to finish.
+KillMode=control-group
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

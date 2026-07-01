@@ -1,6 +1,8 @@
 services:
   postgres:
-    build: ./db
+    # paradedb/paradedb ships PostgreSQL 16 + pgvector (<=> cosine) + pg_search
+    # (BM25 via Tantivy, @@@). No custom build needed — used to be ./db/Dockerfile.
+    image: paradedb/paradedb:latest
     environment:
       POSTGRES_DB: obsidian
       POSTGRES_USER: obsidian
