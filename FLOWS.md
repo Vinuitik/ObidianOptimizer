@@ -33,3 +33,4 @@ Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notl
 | [Backend Testing](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#testing) | Testing | Unit tests (7 service layers), MockMvc controller tests, Testcontainers IT |
 | [Frontend Testing](frontend/FLOWS.md#testing) | Testing | Vitest: useStore, TabBar, FolderTree filter, diff, LoginModal, NewNoteForm |
 | [CI Pipeline](.github/workflows/ci.yml) | CI/CD | GitHub Actions: backend-unit, backend-integration, frontend, docker-build |
+| [Deploy/Boot FLOWS](linux_scripts/FLOWS.md) | Flows | systemd boot service, restart-on-crash, log querying, host-wrapper respawn |

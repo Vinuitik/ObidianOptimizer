@@ -106,17 +106,30 @@ if [[ -n "$VENV_PYTHON" ]]; then
     fi
 fi
 
-# Start the wrapper from the venv's interpreter.
+# Start the wrapper under a respawn loop so a crash auto-restarts it. systemd
+# only watches the whole service, and start.sh then blocks on `docker compose up`
+# below — so without this loop a wrapper crash would stay dead until a full
+# service restart. setsid puts the loop in its own process group, so the EXIT
+# trap can signal the loop AND its python child together (negative PID = group).
 if [[ -n "$VENV_PYTHON" ]]; then
-    (cd "$WRAPPER_DIR" && "$VENV_PYTHON" main.py) &
+    setsid bash -c '
+        cd "$1" || exit 1
+        while true; do
+            "$2" main.py
+            echo "[host-wrapper] exited (code $?) — restarting in 3s ..." >&2
+            sleep 3
+        done
+    ' _ "$WRAPPER_DIR" "$VENV_PYTHON" &
     WRAPPER_PID=$!
-    echo "host-wrapper started (PID $WRAPPER_PID)."
+    echo "host-wrapper started under respawn loop (PID/PGID $WRAPPER_PID)."
 fi
 
 trap '
     if [[ -n "$WRAPPER_PID" ]]; then
-        echo "Stopping host-wrapper (PID $WRAPPER_PID)..."
-        kill "$WRAPPER_PID" 2>/dev/null || true
+        echo "Stopping host-wrapper respawn loop (PGID $WRAPPER_PID)..."
+        # Kill the whole process group so the loop cannot respawn a new python
+        # after we stop it; fall back to a plain kill, then cleanup reaps by port.
+        kill -TERM -"$WRAPPER_PID" 2>/dev/null || kill "$WRAPPER_PID" 2>/dev/null || true
     fi
     cleanup "shutdown"
 ' EXIT
