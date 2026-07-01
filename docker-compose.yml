@@ -104,6 +104,10 @@ services:
       # Quiet-mode toggles (all default true). Set false in .env to boot the app
       # LIGHT — web/API/search/MCP only, zero background processing — for testing.
       - EMBEDDING_ENABLED=${EMBEDDING_ENABLED:-true}
+      # Spring relaxed-binds these to embedding.batch-limit / embedding.scan.delay-ms.
+      # Raise for a fast backlog drain (local ONNX, no API cost); defaults are 8 / 60000.
+      - EMBEDDING_BATCH_LIMIT=${EMBEDDING_BATCH_LIMIT:-8}
+      - EMBEDDING_SCAN_DELAY_MS=${EMBEDDING_SCAN_DELAY_MS:-60000}
       - IMAGES_ENABLED=${IMAGES_ENABLED:-true}
       - CHRONO_ENABLED=${CHRONO_ENABLED:-true}
       - INGEST_ENABLED=${INGEST_ENABLED:-true}
