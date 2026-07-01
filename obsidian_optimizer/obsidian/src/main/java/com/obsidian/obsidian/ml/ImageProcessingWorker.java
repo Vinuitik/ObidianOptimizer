@@ -3,6 +3,7 @@ package com.obsidian.obsidian.ml;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.common.ContentHashing;
+import com.obsidian.obsidian.common.WorkerLane;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -61,6 +62,10 @@ public class ImageProcessingWorker {
         .version(HttpClient.Version.HTTP_1_1).build();
     private ExecutorService pool;
 
+    // Outer lane: the drain runs here so its blocking invokeAll can't hold the
+    // shared scheduler thread. `pool` (below) is the INNER per-note parallelism.
+    private final WorkerLane lane = new WorkerLane("image");
+
     public ImageProcessingWorker(PendingImageJobRepository jobRepo,
                                  EmbeddingService embeddingService,
                                  NoteChunkRepository chunkRepo) {
@@ -76,12 +81,22 @@ public class ImageProcessingWorker {
 
     @PreDestroy
     void shutdownPool() {
+        lane.shutdown();
         pool.shutdownNow();
     }
 
+    /** Tick: hand the drain to the image lane and return immediately. */
     @Scheduled(fixedDelay = 30_000)
     public void processPendingImages() {
         if (!enabled) return;
+        lane.trigger(this::drain);
+    }
+
+    /** Runs on the image lane. One batch per tick — the 30s pacing is deliberate,
+     *  since captioning hits rate-limited vision providers; a tight drain loop would
+     *  hammer cooled providers. The blocking invokeAll now blocks the lane, not the
+     *  scheduler thread, so embedding/cards/chrono keep running alongside it. */
+    void drain() {
         List<PendingImageJob> batch = jobRepo.findPending(BATCH_SIZE);
         if (batch.isEmpty()) return;
 
