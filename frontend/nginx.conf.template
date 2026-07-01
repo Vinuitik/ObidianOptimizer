@@ -45,17 +45,23 @@ server {
     }
 
     # ── MCP endpoint — Model Context Protocol over streamable HTTP ───────────
-    # Public entry for REMOTE agents. OPEN endpoint (no client auth) because the
-    # claude.ai website connector only supports OAuth and has no header field —
-    # so nginx itself injects the embedder's X-API-Key below, and clients connect
-    # to https://obsidianoptimizer.uk/mcp with "no authentication". Protection is
-    # then only the obscure URL. To re-lock: drop the injected header + require the
-    # client to send X-API-Key, or put Cloudflare Access in front of /mcp.
-    # ${MCP_API_TOKEN} is filled at container start by nginx envsubst templating
-    # (NGINX_ENVSUBST_FILTER pins it to this one var), so the secret stays in .env,
-    # never in git. streamable-HTTP needs HTTP/1.1 keep-alive + unbuffered proxying
+    # Auth is a URL QUERY TOKEN, not a header — because the claude.ai website
+    # connector can't send custom headers and, if it gets a 401, falls into an
+    # OAuth flow we don't implement (hits a nonexistent /authorize). So the client
+    # connects to  https://obsidianoptimizer.uk/mcp?token=<MCP_API_TOKEN>  and nginx
+    # gates on ?token=: every request carries it → always 200 → the website never
+    # sees a 401 → never starts OAuth. Same pattern as the habitTracker Caddy rule.
+    # nginx then swaps the query token for the X-API-Key HEADER the embedder wants.
+    # ${MCP_API_TOKEN} is filled at container start by envsubst (NGINX_ENVSUBST_FILTER
+    # pins it to this one var), so the secret stays in .env, never in git.
+    # Trade-off: the token rides in the URL (visible in access logs / history) — fine
+    # for single-user. streamable-HTTP needs HTTP/1.1 keep-alive + unbuffered proxying
     # + long read timeout; the SDK host-validates so $host must be in MCP_ALLOWED_HOSTS.
     location /mcp {
+        # Reject anything whose ?token= query param doesn't match. if+return is the
+        # nginx-safe use of `if` (no side effects); on match, falls through to proxy.
+        if ($arg_token != "${MCP_API_TOKEN}") { return 401; }
+
         limit_req zone=api burst=60 nodelay;
         proxy_pass              http://embedder:8000;
         proxy_http_version      1.1;

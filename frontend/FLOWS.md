@@ -45,34 +45,41 @@ To edit routing: `frontend/nginx.conf.template`. To validate: render + `nginx -t
 network (see linux_scripts/FLOWS.md log/verify commands) — a bare `nginx -t` off-network fails on
 unresolvable `backend`/`embedder` upstreams, which is NOT a syntax error.
 
-### MCP public exposure  ⚠️ security trade-off — come back here to re-lock
+### MCP public exposure — query-token auth (no OAuth)
 `location /mcp` → `embedder:8000` makes the vault search / MCP engine reachable from the internet at
 `https://obsidianoptimizer.uk/mcp` (MCP streamable HTTP, `stateless_http + json_response`, so plain
 JSON-RPC — not SSE).
 
-- **Why it's an OPEN endpoint (no client auth):** the **claude.ai website** connector only supports
-  **OAuth 2.0** and has no field for a custom header — so a client-supplied `X-API-Key` can't be
-  entered there. Workaround: nginx itself injects the key via
-  `proxy_set_header X-API-Key "${MCP_API_TOKEN}"` (filled by envsubst from `.env`), and the connector
-  is added as **"no authentication"**. The embedder still enforces the key; nginx just supplies it.
-- **What protects it now:** only the obscure URL + nginx rate-limit. Anyone with the URL can query
-  your notes (read-only). Accepted deliberately for single-user use.
-- **The proper fix (Option 3, deferred):** implement OAuth 2.0 on the MCP server (auth-server +
-  protected-resource metadata, dynamic client registration, token endpoint) so the website connects
-  with real auth and the endpoint can require it. Then remove the injected header.
-- **Cheaper re-lock without OAuth:** put **Cloudflare Access** in front of `/mcp`, OR stop injecting
-  the header and use a header-capable client instead of the website
-  (`claude mcp add --transport http obsidian https://obsidianoptimizer.uk/mcp --header "X-API-Key: …"`).
+**Connect URL (this is the whole trick):**
+```
+https://obsidianoptimizer.uk/mcp?token=<MCP_API_TOKEN>
+```
+Add it to the **claude.ai** website as a custom connector with **No authentication**.
+
+- **Why a URL query token, not a header:** the claude.ai website connector can't send custom headers,
+  and if `/mcp` returns a **401** the website falls into an **OAuth 2.0** flow we don't implement —
+  it fetches a nonexistent `/authorize` and the callback fails. So nginx gates on the `?token=` query
+  param instead: `if ($arg_token != "${MCP_API_TOKEN}") { return 401; }`. The website carries the full
+  URL (query string included) on every request → always 200 → it **never sees a 401 → never starts
+  OAuth**. This is the exact pattern from the sister **habitTracker** project's Caddy rule, ported to nginx.
+- **nginx then swaps channels:** once the query token passes, nginx injects the `X-API-Key` **header**
+  (`proxy_set_header X-API-Key "${MCP_API_TOKEN}"`) that the embedder's `ApiKeyMiddleware` requires.
+  Same secret, two hops: query param (client→nginx) → header (nginx→embedder).
+- **Secret handling:** `${MCP_API_TOKEN}` is filled by envsubst from `.env` at container start, never in
+  git. **Trade-off:** the token rides in the URL, so it appears in nginx access logs and browser/app
+  history. Accepted for single-user use. To rotate: change `.env` → `MCP_API_TOKEN`, redeploy, hand out
+  the new URL.
 - **Host validation:** the MCP SDK guards against DNS-rebinding, so the request `Host` must be in
   `MCP_ALLOWED_HOSTS` (`.env` → `obsidianoptimizer.uk`). A 400 with a host error = this is unset/stale.
+- **Header-capable clients** (Claude Code/Desktop) can skip the query token and send the header directly:
+  `claude mcp add --transport http obsidian "https://obsidianoptimizer.uk/mcp?token=<MCP_API_TOKEN>"`.
 
 | Want to change | Where |
 |---|---|
 | MCP route / proxy tuning | `frontend/nginx.conf.template` → `location /mcp` |
-| Injected token (make endpoint require client auth) | remove the `X-API-Key` `proxy_set_header` line |
-| Token value | `.env` → `MCP_API_TOKEN` (also injected into frontend via compose `environment`) |
+| Auth token (query `?token=` + injected header) | `.env` → `MCP_API_TOKEN` (also passed to frontend via compose `environment`) |
 | Allowed public host | `.env` → `MCP_ALLOWED_HOSTS` |
-| Re-lock without OAuth | Cloudflare Access on `/mcp`, or header-capable client |
+| Lock down harder | add Cloudflare Access on `/mcp`, or narrow the nginx `limit_req` |
 
 **Caching disabled**: `nginx.conf Cache-Control: no-store` + `cache: 'no-store'` on all fetch calls.
 
