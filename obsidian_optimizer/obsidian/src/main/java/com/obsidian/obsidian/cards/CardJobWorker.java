@@ -1,5 +1,7 @@
 package com.obsidian.obsidian.cards;
 
+import com.obsidian.obsidian.common.WorkerLane;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,16 +35,29 @@ public class CardJobWorker {
     private final CardRepository cardRepo;
     private final CardGenerationService generationService;
 
+    // Own lane: card generation calls the LLM (slow / rate-limited), so it must not
+    // run on the shared scheduler thread where it would starve the other workers.
+    private final WorkerLane lane = new WorkerLane("cards");
+
     public CardJobWorker(CardRepository cardRepo, CardGenerationService generationService) {
         this.cardRepo = cardRepo;
         this.generationService = generationService;
     }
 
+    @PreDestroy
+    void stopLane() { lane.shutdown(); }
+
+    /** Tick: hand the drain to the cards lane and return immediately. */
     @Scheduled(fixedDelayString = "${cards.scan.delay-ms:1800000}",
                initialDelayString = "${cards.scan.initial-delay-ms:120000}")
     public void scanAndGenerate() {
         if (!enabled) return;
+        lane.trigger(this::drain);
+    }
 
+    /** Runs on the cards lane. One batch per tick — batch-capped so a fresh vault
+     *  doesn't burn a night of credits at once; the scan delay paces retries. */
+    void drain() {
         List<Map<String, Object>> pending = cardRepo.findNotesNeedingCards(batchLimit);
         if (pending.isEmpty()) return;
 
