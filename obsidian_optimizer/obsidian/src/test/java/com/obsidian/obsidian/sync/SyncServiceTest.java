@@ -9,6 +9,8 @@ import com.obsidian.obsidian.sync.DriveService.DriveFileInfo;
 import com.obsidian.obsidian.sync.SyncQueueRepository.SyncEntry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -308,7 +310,12 @@ class SyncServiceTest {
 
     // ── toRelative ────────────────────────────────────────────────────────
 
+    // Windows-only: java.nio Paths is platform-dependent, so "C:\\vault" only parses
+    // as a real path on Windows. Guards SyncService.toRelative's backslash→forward-slash
+    // normalization, which keeps Drive/sync keys identical across OSes. Skipped (not
+    // failed) on the Linux server; still runs on Windows dev.
     @Test
+    @EnabledOnOs(OS.WINDOWS)
     void toRelativeNormalizesBackslashes() {
         String rel = SyncService.toRelative("C:\\vault", "C:\\vault\\folder\\note.md");
         assertThat(rel).isEqualTo("folder/note.md");
