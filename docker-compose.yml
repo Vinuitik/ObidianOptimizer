@@ -139,6 +139,12 @@ services:
     # No host ports, no certs: the app is reachable ONLY through the Cloudflare
     # tunnel (cloudflared container → frontend:8081 over the docker network).
     # Cloudflare terminates real TLS at its edge. Nothing on localhost or the LAN.
+    environment:
+      # nginx envsubst injects this into the open /mcp proxy as the X-API-Key it
+      # forwards to the embedder. FILTER pins substitution to this one var so
+      # nginx's own $host/$uri/etc. survive templating. See frontend/nginx.conf.template.
+      - MCP_API_TOKEN=${MCP_API_TOKEN:?set MCP_API_TOKEN in .env}
+      - NGINX_ENVSUBST_FILTER=MCP_API_TOKEN
     volumes:
       # nginx serves these vault subdirs directly (range-request support, zero JVM involvement).
       # Derived from HOST_VAULT_PATH — no separate env vars needed.
