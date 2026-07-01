@@ -1,6 +1,7 @@
 package com.obsidian.obsidian.chrono;
 
 import com.obsidian.obsidian.common.ContentHashing;
+import com.obsidian.obsidian.common.WorkerLane;
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
@@ -8,6 +9,7 @@ import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.sync.SyncQueueRepository;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +31,11 @@ public class ChronoService {
     // POST /api/chrono/run still works. Lets you boot the app light for testing.
     @Value("${chrono.enabled:true}")
     private boolean chronoEnabled;
+
+    // Own lane: the nightly pass is minutes of file I/O + rewrites, so the 2am
+    // trigger runs here instead of holding a scheduler thread. Startup + manual
+    // (POST /api/chrono/run) paths still call runAllJobs() directly.
+    private final WorkerLane lane = new WorkerLane("chrono");
 
     private final FileMoverService   fileMover;
     private final BankruptcyService  bankruptcy;
@@ -78,11 +85,16 @@ public class ChronoService {
         }
     }
 
+    @PreDestroy
+    void stopLane() { lane.shutdown(); }
+
     @Scheduled(cron = "0 0 2 * * *")
     public void scheduledRun() {
         if (!chronoEnabled) return;
-        log.info("[ChronoService] Scheduled 2am run triggered.");
-        runAllJobs();
+        lane.trigger(() -> {
+            log.info("[ChronoService] Scheduled 2am run triggered.");
+            runAllJobs();
+        });
     }
 
     public ChronoResult runAllJobs() {
