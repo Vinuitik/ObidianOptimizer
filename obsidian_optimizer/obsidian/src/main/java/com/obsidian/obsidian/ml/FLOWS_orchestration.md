@@ -44,6 +44,25 @@ blocking). Now each drain is on its own lane; the tick just submits and returns.
 Regression guard: `SchedulerIsolationTest` (embedding completes while the cards
 worker's drain is held blocked).
 
+### How to SEE it working (the thread-name tell)
+The log's `[thread-name]` column is the proof. Run
+`docker compose logs backend -f | grep -E 'NoteEmbeddingWorker|ImageProcessingWorker'`
+and look at the bracketed thread:
+
+```
+[     lane-embed] NoteEmbeddingWorker : embedding 32 note(s)
+[pool-1-thread-1] ImageProcessingWorker: processed ... via mistral -> 1 chunk(s)   ← same seconds!
+[     lane-embed] NoteEmbeddingWorker : embedded 32/32 note(s)
+[     lane-embed] NoteEmbeddingWorker : embedding 32 note(s)                        ← back-to-back drain
+```
+
+- `lane-embed` running **interleaved** with `pool-1-thread-1` in the same timestamps =
+  true concurrency, blocking bug gone. On the old code both would share one
+  `scheduling-1` thread and the embed line would stall behind the image lines.
+- `embedded 32/32` immediately followed by `embedding 32` = the continuous drain loop.
+- Every worker's lane thread is named `lane-<name>` (`WorkerLane` constructor), so the
+  thread column tells you exactly which lane is doing what at a glance.
+
 ---
 
 ## Dimension 2 — hardware: the single-occupant GPU slot
