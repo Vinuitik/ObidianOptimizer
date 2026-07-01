@@ -3,6 +3,7 @@ services:
     # paradedb/paradedb ships PostgreSQL 16 + pgvector (<=> cosine) + pg_search
     # (BM25 via Tantivy, @@@). No custom build needed — used to be ./db/Dockerfile.
     image: paradedb/paradedb:latest
+    restart: unless-stopped
     environment:
       POSTGRES_DB: obsidian
       POSTGRES_USER: obsidian
@@ -19,6 +20,7 @@ services:
 
   embedder:
     build: ./embedder
+    restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"   # loopback only — MCP clients run on this machine
     volumes:
@@ -87,6 +89,7 @@ services:
 
   backend:
     build: ./obsidian_optimizer/obsidian
+    restart: unless-stopped
     ports:
       - "127.0.0.1:8084:8084"   # loopback only — kept for vite dev proxy; browsers go through nginx
     environment:
@@ -132,6 +135,7 @@ services:
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     # No host ports, no certs: the app is reachable ONLY through the Cloudflare
     # tunnel (cloudflared container → frontend:8081 over the docker network).
     # Cloudflare terminates real TLS at its edge. Nothing on localhost or the LAN.
