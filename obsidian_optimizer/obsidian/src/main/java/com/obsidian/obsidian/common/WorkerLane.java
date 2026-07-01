@@ -1,6 +1,5 @@
 package com.obsidian.obsidian.common;
 
-import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,7 +78,8 @@ public final class WorkerLane {
         return running.get();
     }
 
-    @PreDestroy
+    /** Stop the lane thread. Call from the owning worker's {@code @PreDestroy};
+     *  the thread is a daemon, so this is graceful cleanup rather than required. */
     public void shutdown() {
         exec.shutdownNow();
     }
