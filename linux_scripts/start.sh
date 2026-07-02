@@ -134,4 +134,12 @@ trap '
     cleanup "shutdown"
 ' EXIT
 
-docker compose "${COMPOSE_ARGS[@]}" up --build
+# Build separately from up: a broken build (e.g. a compile error left in the
+# working tree at reboot) must not keep the whole site down. On build failure
+# we warn loudly and start the last successfully-built images instead — the
+# error stays visible in `journalctl -u obsidian-optimizer`.
+if ! docker compose "${COMPOSE_ARGS[@]}" build; then
+    echo "WARNING: image build FAILED — starting last-good images instead." >&2
+    echo "         Fix the build, then: systemctl restart obsidian-optimizer" >&2
+fi
+docker compose "${COMPOSE_ARGS[@]}" up
