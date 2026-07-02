@@ -1,8 +1,44 @@
 # Sync Retention & Cleanup — keep Drive from filling up [NOT IMPLEMENTED]
 
 Files (target): `sync/SyncService.java`, `sync/SyncWorker.java`, `sync/SyncQueueRepository.java`,
-`sync/DriveService.java`, `stats/StatsController.java` (quota card), `frontend DashboardPage`.
-Implemented baseline: `sync/FLOWS.md` (per-file AES-256-GCM Drive sync).
+`sync/DriveService.java`, `sync/SyncOAuthService.java`, `settings/SettingsRepository.java`,
+`docker-compose.yml`, `frontend SettingsPage DriveSyncPanel`.
+Implemented baseline: `sync/FLOWS.md` (per-file AES-256-GCM Drive sync + OAuth sign-in).
+
+---
+
+## Part A — env-first config, hide-when-set (approved direction 2026-07-02)
+
+Root cause of the dead Connect button: the user's OAuth credentials live in `.env`
+(`GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REDIRECT_URI`)
+but nothing reads those vars — only `SYNC_PASSPHRASE` and `GOOGLE_DRIVE_FOLDER_ID` were
+seeded. Fix = envs become first-class seeds, and the UI stops showing fields that are
+already satisfied.
+
+1. **Compose passthrough + seeds.** Add the three `GOOGLE_OAUTH_*` vars to the backend
+   `environment:` block. `SettingsRepository`: seed `syncClientId`/`syncClientSecret`
+   from them. ⚠ Implementation detail: the rows already exist as `''` on live installs,
+   and `insertDefault` is `ON CONFLICT DO NOTHING` — these seeds need "fill if currently
+   blank" semantics at boot, not insert-only.
+2. **Redirect URI**: if `GOOGLE_OAUTH_REDIRECT_URI` is set (seeded to
+   `sync.oauth.redirect_uri`), `SyncOAuthService` uses it verbatim (it must match what's
+   registered in Google Cloud Console); otherwise derive from the request origin as today.
+3. **UI hide-when-set**: the panel renders a credential field ONLY when it's not yet
+   set (server already reports `syncClientId` + `…Set` booleans). When everything is
+   present the panel is just: status line, Connect/Disconnect, auto-sync toggle, Sync
+   now / Pull buttons. A small "edit credentials" link un-hides the fields — pure
+   hiding would make a typo'd secret unfixable from the UI.
+4. **Connect gating becomes self-explanatory**: when disabled, the status line says
+   exactly what's missing ("no OAuth client configured — set GOOGLE_OAUTH_CLIENT_ID/…
+   in .env or click edit credentials").
+5. **Folder-id vs `drive.file` scope (latent breakage, must fix with this)**: the
+   seeded `GOOGLE_DRIVE_FOLDER_ID` points at a folder the OAuth app did NOT create;
+   under the `drive.file` scope the app cannot see or write it → first upload after
+   connecting would 404. On successful OAuth connect, clear `sync.drive.folder_id` so
+   the auto-created "ObsidianOptimizer" folder takes over. (Explicit custom folders
+   under OAuth would need the full `drive` scope — not worth the consent screen.)
+
+---
 
 > Correction to the "multi-GB backups" framing first: the implemented sync is **not**
 > snapshot zips. It is a per-file encrypted **mirror** — each vault file is one `.enc`
@@ -38,6 +74,16 @@ multi-GB, quota exhaustion shows up as `storageQuotaExceeded` upload failures �
 tuning anything else; every later phase reduces it.
 
 ---
+
+## Part B — janitor + retention (decisions locked 2026-07-02)
+
+User constraints: big vault, small Drive quota, weekly cadence
+(`SYNC_UPLOAD_CRON=0 0 3 * * SUN` — already an env var, no code), wants "come back to a
+previous version" + old copies cleaned. Resolution: the mirror + Drive's native
+~30-day/100-revision auto-pruned version history covers rollback; the janitor (phases
+0–2 below) removes the only unbounded growth (orphans). Revisions need no cleanup code —
+Drive purges them itself; do NOT set keepRevisionForever anywhere. No new Google
+permission needed: `drive.file` already allows deleting app-created files.
 
 ## Phase 0 — Visibility (cheap, do first)
 
