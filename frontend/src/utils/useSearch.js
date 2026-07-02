@@ -4,7 +4,7 @@ import { searchNotes } from '../api/notes';
 /**
  * Debounced semantic search hook.
  *
- * - 500ms debounce before each request
+ * - 250ms debounce before each request (fast enough to feel live-as-you-type)
  * - AbortController cancels any in-flight request when query changes
  * - Returns [] immediately if query is null / shorter than minLength
  */
@@ -38,7 +38,7 @@ export function useSearch(query, minLength = 2) {
       } finally {
         if (!ctrl.signal.aborted) setLoading(false);
       }
-    }, 500);
+    }, 250);
   }, [query, minLength]);
 
   // Cleanup on unmount

@@ -10,19 +10,32 @@ export default function SearchBar({ value, onChange }) {
   const containerRef = useRef(null);
   const openTab     = useStore(s => s.openTab);
 
-  const [focused,  setFocused]  = useState(false);
+  const [open,     setOpen]     = useState(false);
   const [dropRect, setDropRect] = useState(null);
 
-  // Only run semantic search when the bar is focused and query is long enough
-  const { results, loading } = useSearch(focused ? value : null);
+  // Search follows the typed value, focused or not — results survive a
+  // click-away. Dismissal is explicit: Escape, ×, picking a result, or
+  // emptying the query.
+  const { results, loading } = useSearch(value);
 
-  // Recompute dropdown anchor when the bar is focused or query changes
   useEffect(() => {
-    if (focused && containerRef.current) {
-      const r = containerRef.current.getBoundingClientRect();
-      setDropRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    setOpen(value.trim().length >= 2);
+  }, [value]);
+
+  // Keep the dropdown anchored under the bar (portal is position:fixed)
+  useEffect(() => {
+    function anchor() {
+      if (containerRef.current) {
+        const r = containerRef.current.getBoundingClientRect();
+        setDropRect({ top: r.bottom + 4, left: r.left, width: r.width });
+      }
     }
-  }, [focused, value]);
+    if (open) {
+      anchor();
+      window.addEventListener('resize', anchor);
+      return () => window.removeEventListener('resize', anchor);
+    }
+  }, [open, value]);
 
   // ⌘K / Ctrl+K global focus shortcut
   useEffect(() => {
@@ -36,7 +49,12 @@ export default function SearchBar({ value, onChange }) {
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
-  const showDrop = focused && (loading || results.length > 0);
+  function pick(notePath) {
+    openTab(notePath);
+    setOpen(false);
+  }
+
+  const showDrop = open && dropRect;
 
   return (
     <div ref={containerRef} className={styles.container}>
@@ -48,23 +66,32 @@ export default function SearchBar({ value, onChange }) {
         placeholder="Search vault"
         value={value}
         onChange={e => onChange(e.target.value)}
-        onFocus={() => setFocused(true)}
-        // small delay so a mousedown on a result fires before focus is lost
-        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        onFocus={() => { if (value.trim().length >= 2) setOpen(true); }}
+        onKeyDown={e => {
+          if (e.key === 'Escape') setOpen(false);
+          if (e.key === 'Enter' && results.length > 0) pick(results[0].notePath);
+        }}
       />
       {value ? (
-        <button className={styles.clear} onClick={() => onChange('')} title="Clear">×</button>
+        <button
+          className={styles.clear}
+          onClick={() => { onChange(''); setOpen(false); }}
+          title="Clear"
+        >×</button>
       ) : (
         <kbd className={styles.kbd}>⌘K</kbd>
       )}
 
-      {showDrop && dropRect && createPortal(
+      {showDrop && createPortal(
         <div
           className={styles.dropdown}
           style={{ top: dropRect.top, left: dropRect.left, width: dropRect.width }}
         >
           {loading && results.length === 0 && (
             <div className={styles.dropLoading}>Searching…</div>
+          )}
+          {!loading && results.length === 0 && (
+            <div className={styles.dropLoading}>No matches</div>
           )}
           {results.map(r => {
             const title = r.notePath.split(/[/\\]/).pop().replace(/\.md$/, '');
@@ -74,8 +101,7 @@ export default function SearchBar({ value, onChange }) {
                 className={styles.dropItem}
                 onMouseDown={e => {
                   e.preventDefault();
-                  openTab(r.notePath);
-                  setFocused(false);
+                  pick(r.notePath);
                 }}
               >
                 <span className={styles.dropTitle}>{title}</span>
