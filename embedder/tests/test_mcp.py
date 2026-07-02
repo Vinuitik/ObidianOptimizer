@@ -207,11 +207,16 @@ def test_get_vault_tree_and_list_folder(tmp_path, monkeypatch):
     assert tree["/vault/AI/ML"] == 2
     assert not any("resources" in f or ".obsidian" in f for f in tree)
 
+    # default: folders + count only — note names are opt-in
     listing = mcp_server.list_folder("AI/ML")
     assert listing["folder"] == "/vault/AI/ML"
-    assert listing["notes"] == ["adam", "sgd"]
+    assert listing["noteCount"] == 2
+    assert "notes" not in listing
     assert listing["subfolders"] == []
-    assert listing["notesTruncated"] is False
+
+    with_notes = mcp_server.list_folder("AI/ML", include_notes=True)
+    assert with_notes["notes"] == ["adam", "sgd"]
+    assert with_notes["notesTruncated"] is False
 
     # "." == vault root (the '/vault' spelling only resolves when VAULT_DIR is /vault)
     root_listing = mcp_server.list_folder(".")

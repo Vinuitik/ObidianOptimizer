@@ -257,12 +257,13 @@ def get_vault_tree(max_depth: int = 3) -> list[dict]:
 
 
 @mcp.tool()
-def list_folder(folder_path: str = "/vault") -> dict:
-    """List ONE vault folder read-only: its subfolder names and note names
-    (no content). Accepts '/vault/...' or a vault-relative path. Use after
-    get_vault_tree to inspect a candidate folder — the note names show its
-    scope and naming conventions, which beats guessing from embeddings.
-    Note lists are capped at 200 (notesTruncated flags it)."""
+def list_folder(folder_path: str = "/vault", include_notes: bool = False) -> dict:
+    """List ONE vault folder read-only. By default returns subfolder names and
+    a note COUNT only (folders can hold hundreds of notes — keep the signal).
+    Pass include_notes=true to also get the note names (capped at 200,
+    notesTruncated flags it) — do this when you need a folder's scope and
+    naming conventions before filing a note there. Accepts '/vault/...' or a
+    vault-relative path. Use after get_vault_tree."""
     resolved = _resolve_in_vault(folder_path)
     if not resolved.is_dir():
         raise ValueError(f"Not a folder in the vault: {folder_path}")
@@ -276,12 +277,15 @@ def list_folder(folder_path: str = "/vault") -> dict:
         elif e.is_file() and e.suffix == ".md":
             notes.append(e.stem)
     rel = resolved.relative_to(VAULT_DIR.resolve()).as_posix()
-    return {
+    out = {
         "folder": "/vault" if rel == "." else f"/vault/{rel}",
         "subfolders": subfolders,
-        "notes": notes[:LIST_NOTES_CAP],
-        "notesTruncated": len(notes) > LIST_NOTES_CAP,
+        "noteCount": len(notes),
     }
+    if include_notes:
+        out["notes"] = notes[:LIST_NOTES_CAP]
+        out["notesTruncated"] = len(notes) > LIST_NOTES_CAP
+    return out
 
 
 @mcp.tool()
