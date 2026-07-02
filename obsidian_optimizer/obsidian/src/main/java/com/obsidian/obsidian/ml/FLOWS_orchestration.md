@@ -27,11 +27,23 @@ guard, so a tick mid-drain is a no-op, never stacks). To change the pattern:
 | Worker · method | Tick | Finds work by | Lane | Drain style |
 |---|---|---|---|---|
 | `NoteEmbeddingWorker.embedPendingNotes` | 60s | `content_hash` diff (`findNotesNeedingEmbedding`) | `embed` | **continuous** — loops while a batch is full AND progress is made (fast backlog drain); stops on partial batch or zero progress |
-| `ImageProcessingWorker.processPendingImages` | 30s | `pending_image_jobs` table | `image` | **one batch/tick** — 30s pacing is deliberate (don't hammer cooled vision providers); inner `pool` still parallelises across notes |
+| `ImageProcessingWorker.processPendingImages` | 30s | `pending_image_jobs` table | `image` | **CAPTION stage** — one batch/tick (30s pacing avoids hammering cooled vision providers); inner `pool` parallelises across notes. Writes chunk text with a **NULL vector** and marks DONE = "captioned" — never re-captions, never loses a caption to an embed hiccup |
+| `ChunkEmbeddingReconciler.reconcilePendingChunks` | 15s | `note_chunks WHERE embedding IS NULL` (the **embed queue**) | `embed-reconcile` | continuous drain; embeds any NULL-vector chunk (image OR text), sets the vector only on success (fail → stays NULL → retried next tick) |
 | `CardJobWorker.scanAndGenerate` | 30min | `body_hash` diff | `cards` | one batch/tick (credit-capped) |
 | `ChronoService.scheduledRun` | 2am cron | scans all md | `chrono` | full nightly pass (`runAllJobs`) |
 | `SyncWorker.scheduledUpload` | 6h cron | sync queue | `sync` | Drive upload |
 | `ResourceScanService.retryPendingIngests` | 5min | `ingest_pending` flag | **none — already async** (`trigger → pool.submit`, its own `resource-ingest-trigger` executor) | fires HTTP ingests off-thread |
+
+### Caption ↔ embed decoupling ("each table a queue")
+The image stage used to fuse caption+embed and mark the job DONE unconditionally — a
+cheap embed failure discarded the expensive VLM caption forever (ack-before-success
+bug). Now they are two independent queues feeding each other:
+- **caption queue** = `pending_image_jobs`: image → VLM → `chunkRepo.upsertChunkTextOnly` (text, NULL vector) → DONE = captioned.
+- **embed queue** = `note_chunks WHERE embedding IS NULL`: `ChunkEmbeddingReconciler` fills the vector (idempotent `setChunkEmbedding` — only writes if still NULL).
+
+Result: caption is never lost, and image+text embedding share ONE self-healing consumer.
+The other stages (text-embed, cards, ingest-via-marker, sync) were already correct
+self-healing reconciliation — this brought the one fire-once stage in line with them.
 
 `NoteEmbeddingWorker.purgeOrphanChunks` (daily) + `ImageProcessingWorker.requeueSkipped`
 (daily) stay as direct light `@Scheduled` janitors — no lane needed.
