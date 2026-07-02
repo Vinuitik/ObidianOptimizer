@@ -3,7 +3,19 @@
 > Handoff doc. Goal: turn the existing React frontend into an installable, offline-capable
 > PWA on Android, reusing the current codebase maximally so **a fix made once applies to both
 > desktop and phone**. Implementation happens in a later fresh session from this plan.
-> Status: [NOT IMPLEMENTED] — this supersedes the native approach in MOBILE_ARCH.md.
+> Status (2026-07-02 audit): **P1–P4 BUILT but DORMANT; backend §8 SHIPPED.**
+> All PWA code exists in `frontend/src/pwa/` (see its FLOWS.md — shell, MobileLayout,
+> offline review seam, share-target capture, hand-written `public/sw.js`) but is NOT
+> activated: `src/main.jsx` still renders desktop `App` directly and the store is not
+> wired to `pwa/offlineApi`. Backend (`CaptureController`) provides `POST /api/capture`,
+> `GET /api/review/bundle`, `/api/download`. **Next step is the two activation edits**
+> (`pwa/FLOWS.md` "Activation"), likely alongside the pending mobile-responsive fixes.
+> This plan supersedes the native approach (MOBILE_ARCH.md, deleted — its surviving
+> decisions are folded in at §14).
+> Requirements update (user, 2026-07-02): (a) **full web parity while the server is up**
+> (not view-only), (b) offline must cover **reviews AND the Learn triage queue**, (c) the
+> offline set must be **refreshed aggressively enough to be fresh, not stale** — see §15,
+> (d) a sync path for when the server is down for days — see §16.
 
 ---
 
@@ -26,8 +38,13 @@ A thing you install on your Android home screen that:
 3. **View** notes / images / PDFs / video from the cached subset offline.
 4. Portrait-first mobile UI; desktop UI unchanged.
 
-Out of scope for v1: editing notes on mobile (view-only on phone — matches the real need),
-full-vault offline (only the review/recent subset), iOS (Web Share Target is Android-only).
+Out of scope for v1: full-vault offline (only the review/learn subset), iOS (Web Share
+Target is Android-only).
+**Scope change (2026-07-02):** editing is IN while online — the phone must match the
+website feature-for-feature whenever the server is reachable. Since the mobile shell
+reuses the same pages/components (§2/§7), online parity is mostly free; the deliberate
+cut is only **offline** editing of arbitrary notes (offline writes are limited to the
+structured ones in §15: grades, inbox filing, quick-capture text).
 
 ## 2. Core principle — ONE codebase, reuse-everything
 
@@ -136,22 +153,24 @@ So swap the template by viewport, reuse everything inside.
   - Search tab: `SearchBar` + results full width.
   - Capture tab: shows recently captured + a manual "paste a link" box (same `/api/capture`).
 - **Portrait only** — don't build a separate landscape mobile layout; rotation just reflows.
-- **View-only on mobile in v1** — no Milkdown editing on a phone (fiddly, and not the need).
-  Editing stays desktop. This is a deliberate scope cut, not a limitation to fix later unless wanted.
+- **Editing on mobile: online yes, offline no** (scope change 2026-07-02, see §1). Online
+  the Notes tab opens the same editor path as desktop (Milkdown is fiddly on touch — if it
+  proves unusable, fall back to a plain `<textarea>` + preview toggle for the mobile shell
+  only; the API/diff layer is identical either way). Offline, notes render read-only and
+  the only writes are the structured outbox ones (§15).
 
 To change the breakpoint: `useMediaQuery` arg. To add a mobile tab: `BottomNav` items + a route.
 
-## 8. Backend additions needed (small, reuse the pipeline)
+## 8. Backend additions — ✅ SHIPPED (capture/CaptureController.java)
 
-1. **`POST /api/capture { url }`** (session auth) — new thin endpoint. Forwards to the embedder
-   `POST /ingest { ref: url }` (standalone). The PWA must NOT call the embedder directly (it's
-   loopback/internal). Add to a `CaptureController` (or `NotesController`). ~20 lines, reuses
-   `embedder.url` + the existing HTTP-1.1 client pattern (see `ResourceScanService`/`StatsController`).
-2. **`GET /api/review/bundle?limit=N`** (session auth, optional but recommended) — returns the due
-   notes **with their markdown content + media URLs** in one payload, so "Download for offline"
-   is one round-trip instead of N. Reuses `NoteIndexRepository.getReviewNotesPaged` + `getText`.
-3. CORS/headers: nginx already proxies `/api/*`; no new routing. CSP currently `connect-src 'self'`
-   — fine (PWA calls same origin).
+1. ✅ **`POST /api/capture { url | text }`** — exists, and grew beyond this plan: it also
+   creates a `capture` row (CAPTURE_ARCH lifecycle) and stores pasted text as a resource.
+2. ✅ **`GET /api/review/bundle?limit=N`** — exists (`CaptureController.bundle()`): due notes
+   with content + `/api/images/...` media URLs, one round-trip.
+3. ✅ CORS/CSP: unchanged, same-origin via the tunnel.
+   Still to add for §15: **`GET /api/learn/bundle`** — the inbox counterpart of the review
+   bundle (inbox notes + suggested folders + folder list for the picker), so the Learn
+   offline lane is also one round-trip. Reuses `InboxController.list()` + `/children` data.
 
 ## 9. Critical gotcha — HTTPS / service workers
 
@@ -170,13 +189,18 @@ obsidianoptimizer.uk on the phone once on wifi, Add to Home Screen, hit Sync, th
 - **P2 — Mobile layout**: `useMediaQuery` switch + `MobileLayout` + `BottomNav`; reuse pages/leaf
   components. Result: usable portrait UI on the phone (still online).
 - **P3 — Offline review** (the core value): `offline/db.js` + `syncOffline.js` + outbox; wrap
-  `fetchReview`/`fetchNoteContent`/`grade`; `GET /api/review/bundle`. Result: review the cached
-  subset offline, grades replay on reconnect. **This is the prototype's headline.**
-- **P4 — Capture**: `share_target` manifest + SW POST handler + `POST /api/capture`. Result: share
-  a link → note on the server.
+  `fetchReview`/`fetchNoteContent`/`grade`; `GET /api/review/bundle` (already shipped). Result:
+  review the cached subset offline, grades replay on reconnect. **The prototype's headline.**
+- **P3b — Offline Learn lane**: `GET /api/learn/bundle` (new) + inbox file/discard outbox
+  events + freshness plumbing (§15: focus-refresh, periodicsync, staleness banner).
+- **P4 — Capture**: `share_target` manifest + SW POST handler + `POST /api/capture` (endpoint
+  already shipped). Result: share a link → note on the server.
 - **P5 — Media offline**: cache images/PDF/video for the subset; `NoteViewer` plays from cache.
+- **P6 (conditional) — Drive read fallback** (§16 option B) — only if multi-day laptop-off
+  staleness proves painful in practice.
 
-P1+P2+P3 = the iterable prototype. P4/P5 follow fast.
+Phase state (2026-07-02): P1–P4 code-complete in `frontend/src/pwa/` but dormant
+(activation edits pending); P3b, P5, P6 and the §15 freshness plumbing are open.
 
 ## 11. Files to add / change
 
@@ -212,3 +236,73 @@ EDIT backend  NoteIndexRepository / a controller → GET /api/review/bundle (opt
 - Backend: +1 small endpoint (+1 optional) — the ingest/review/FSRS engines are reused whole.
 - New code is concentrated in: PWA plumbing + offline data layer + mobile shell. All additive,
   all isolated from the existing component tree.
+
+## 14. Decisions inherited from the deleted MOBILE_ARCH.md
+
+- **Web search stays backend-only; offline search runs on the cached subset only.** No
+  full-vault client replica (that was the native-app design; the PWA subset model
+  replaces it).
+- **Conflict artifacts, if ever needed, are `_conflicts/` files** — Obsidian-compatible,
+  human-resolvable. v1 avoids conflicts structurally instead (§15: offline writes are
+  append-only events, not note edits).
+- React Native/Expo/SQLite/FTS5 stack: dead — superseded by this PWA plan.
+
+## 15. Offline lanes + freshness (the "real, not stale data" requirement)
+
+The offline set is two **lanes**, refreshed together, each with its own IDB store +
+outbox event type:
+
+| Lane | Cached (read) | Offline writes (outbox events) | Replay endpoint |
+|---|---|---|---|
+| **Review** | `GET /api/review/bundle` (due now + next N days) + media | `{type:"grade", path, grade, ts}` | existing grade endpoint |
+| **Learn** | `GET /api/learn/bundle` (inbox notes, suggested folders, folder list) | `{type:"file", path, targetFolder, content, ts}` / `{type:"discard", path, ts}` | `POST /api/inbox/file` / `DELETE /api/inbox` |
+| (bonus) | — | `{type:"capture", text|url, ts}` quick-capture | `POST /api/capture` |
+
+Writes are **append-only events against server-owned state** — the phone never merges
+note content, so there is no three-way-merge problem. Replay in `ts` order on reconnect;
+a `file` event whose inbox note was already filed elsewhere → server returns conflict →
+surface in a small "sync issues" list, don't retry silently.
+
+**Freshness — belt and suspenders, in order of reliability:**
+1. **Every app open/focus while online** → refresh both bundles + flush outbox
+   (`visibilitychange` + `online` events). This is the workhorse.
+2. **Periodic Background Sync API** (`periodicsync`, Chrome Android, installed PWA):
+   request a ~6–12 h interval; Chrome fires it opportunistically based on site
+   engagement — treat it as best-effort top-up, never as the guarantee.
+3. **Staleness banner as the honesty backstop**: store `lastSyncedAt`; the review/learn
+   screens show "synced 26 h ago — cards may be stale" past a threshold (default 12 h).
+   FSRS tolerates a stale due-list gracefully (reviewing early/late just adjusts the
+   next interval), so stale is degraded, not broken — but the user must be able to SEE it.
+4. Cache **due-now + next `N` days** (default 3): even a day-old snapshot then still
+   contains today's real due cards — over-fetching is the cheap insurance against 1–2
+   missing.
+
+## 16. Server down for days — Google Drive as read fallback [phase after P5]
+
+The outbox (§15) already survives arbitrary server downtime for **writes**. The residual
+gap is **reads going stale** when the laptop is off for days: the phone's cached bundle
+ages and no new inbox notes arrive. Options considered:
+
+- **A. Do nothing extra (ship first, measure).** Bundles + outbox cover the commute
+  and the weekend. Staleness banner tells the truth. Zero new moving parts.
+- **B. Drive read-fallback in the PWA.** The vault already mirrors to Drive encrypted
+  (sync/FLOWS.md). WebCrypto natively does PBKDF2 + AES-256-GCM, and gzip via
+  `DecompressionStream` — so the browser CAN pull `.enc` notes from Drive and decrypt
+  them with the sync passphrase, entirely client-side. `sr-due` lives in note
+  frontmatter, so the phone can even recompute the due list locally. Costs: a Google
+  OAuth client (token flow in the PWA), Drive REST from JS, the sync passphrase typed
+  into/held by the phone, and a second read path to keep correct. Real but contained.
+- **C. Laptop-mediated outbox on Drive** (old native-app design: phone writes
+  `Mobile_Outbox/`, laptop merges). Superseded — the §15 outbox does the same job
+  without a second write protocol, just with laptop-wake latency.
+
+**Recommendation: A now; B only if lived usage shows multi-day laptop-off periods
+actually hurt.** B is the honest escalation path and is compatible with everything
+above (it only feeds the same IDB stores the bundles feed). Decide with usage data,
+not upfront — the offline lanes must exist first either way.
+
+Note for B's feasibility ledger: notes are small (fine to pull hundreds), but the
+review-due computation moves client-side (frontmatter parse — `utils/frontmatter.js`
+is already shared code), and grades still queue in the outbox until the server returns
+(FSRS scheduling itself stays server-authoritative — replayed grades are timestamped,
+so late scheduling is exact).

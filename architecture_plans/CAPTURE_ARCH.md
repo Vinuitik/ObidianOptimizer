@@ -5,8 +5,29 @@ Files (target): db capture table (`CaptureRepository.java`), `notes/NoteIndexRep
 `workspace/` (retired), embedder `ingest/synthesize.py` + `ingest/verify.py` (new) + `ingest/split_note.py`,
 `extension/popup.js` + `extension/content.js` (new), `frontend/.../organisms` (Learn queue).
 
-Supersedes the resource half of `LINK_SNIFFER_AGENT_ARCH.md` (network-sniffing is out;
-we capture the rendered DOM the user can already see) and unifies `INGEST_AGENT_ARCH.md`
+## STATUS (audited 2026-07-02) — phases 1–2 SHIPPED, 3 partial, 4–6 + VERIFY open
+
+| Phase (§6) | State | Evidence |
+|---|---|---|
+| 1. DB + linking | ✅ done | `capture` table + lifecycle (`CaptureRepository`), `capture-id`/`capture-seq` frontmatter stamped (`publish.stamp_capture`), mirrored into `notes` columns (`NoteIndexRepository`), `InboxController.file()` flips capture → `filed` when the last child leaves `_inbox` |
+| 2. Text synthesis | ✅ done | `POST /api/capture {text}` stores the original under `resources/files/` + routes through ingest (`extract_text.py`) |
+| 3. Chapter split + ordering | ◐ partial | `capture_seq` source-ordering works end-to-end (stamp → mirror → `ORDER BY capture_seq`); chapters are only a **hint** in the OUTLINE prompt — the deterministic **PDF chapter-boundary map** (`extract_pdf` returns `chapters: []`) and the hard "a plan can't cross a chapter" constraint are NOT implemented |
+| 3b. VERIFY (stage 3, §3) | ✗ open | no `ingest/verify.py` — no slop filter, no faithfulness judge, no `quality: needs-review` |
+| 4. Capture button (DOM grab) | ✗ open | extension sends only the URL; no `content.js`, no `extract_dom()` — web capture refetches server-side (`extract_web`), which loses paywalled/rendered content |
+| 5. Learn queue UI | ◐ partial | Inbox triage panel exists (edit + suggested-folder + file/discard); the **capture-grouped, seq-ordered queue with the source beside its notes + status badges** does not — and there is no `GET /api/capture` list endpoint yet (`CaptureRepository.listAll()` has no caller) |
+| 6. Storage cleanup + trash lifecycle | ✗ open | `WorkspaceController` alive, downloads still land in `_workspace/` (`DOWNLOAD_DIR`), source-trash on `filed` is a marked TODO in `InboxController` |
+
+**Recommended build order for what's left:** 5 (Learn capture queue — makes everything
+already shipped *visible*, pure UI + one list endpoint) → 3 (chapter map — the "300-page
+PDF must not become one blob note" guarantee) → 3b VERIFY → 4 → 6.
+Ordering rationale: the user-visible promise ("give me a source, get ordered, contained,
+placeable notes") is already 80% served by phases 1–2; the queue UI is what exposes the
+`capture_seq` ordering and the `ingest-suggested-folder` placement suggestion
+(find_home) that are already being written into every proposed note.
+
+Superseded the resource half of the old link-sniffer plan (file deleted; network-sniffing
+is out — we capture the rendered DOM the user can already see; finding media *on* a page
+is now `EXTENSION_MEDIA_CAPTURE_ARCH.md`) and unifies `INGEST_AGENT_ARCH.md`
 standalone mode with the Learn UI.
 
 > One sentence: **a Capture is one original resource plus the ordered, editable notes an
