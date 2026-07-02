@@ -68,15 +68,18 @@ def _vec_literal(vec: list[float]) -> str:
 
 
 def _vector_candidates(query_vec: list[float]) -> list[tuple]:
+    # 4th column: cosine similarity (1 - distance) — the interpretable score
+    # surfaced to callers. Tests monkeypatch _query_db with 3-tuples, so all
+    # consumers must tolerate a missing similarity column.
     return _query_db(
         """
-        SELECT note_path, chunk_index, text
+        SELECT note_path, chunk_index, text, 1 - (embedding <=> %s::vector) AS similarity
         FROM note_chunks
         WHERE embedding IS NOT NULL
         ORDER BY embedding <=> %s::vector
         LIMIT %s
         """,
-        (_vec_literal(query_vec), FETCH_LIMIT),
+        (_vec_literal(query_vec), _vec_literal(query_vec), FETCH_LIMIT),
     )
 
 
@@ -93,25 +96,40 @@ def _text_candidates(query: str) -> list[tuple]:
     )
 
 
-def _rrf_merge(rankings: list[list[tuple]], limit: int) -> list[dict]:
-    """RRF over (note_path, chunk_index, text) rankings, deduped per note."""
+def _rrf_merge(rankings: list[tuple[str, list[tuple]]], limit: int) -> list[dict]:
+    """RRF over labeled (source, rows) rankings, deduped per note.
+
+    RRF decides only the ORDER. The fused score is a rank artifact (~1/60
+    for everything), so it is not returned; instead each result carries the
+    interpretable signals: cosine `similarity` (when the semantic ranker saw
+    it) and `matchedBy` (which rankers found it — both = strongest)."""
     scores: dict[str, float] = {}
     chunks: dict[str, tuple] = {}
-    for ranking in rankings:
+    sources: dict[str, set] = {}
+    sims: dict[str, float] = {}
+    for source, ranking in rankings:
         for rank, row in enumerate(ranking):
             key = f"{row[0]}::{row[1]}"
             scores[key] = scores.get(key, 0.0) + 1.0 / (RRF_K + rank + 1)
             chunks.setdefault(key, row)
+            sources.setdefault(key, set()).add(source)
+            if len(row) > 3 and row[3] is not None:
+                sims[key] = max(sims.get(key, 0.0), float(row[3]))
 
     results: list[dict] = []
     seen_notes: set[str] = set()
-    for key, score in sorted(scores.items(), key=lambda kv: kv[1], reverse=True):
-        note_path, _, text = chunks[key]
+    for key, _score in sorted(scores.items(), key=lambda kv: kv[1], reverse=True):
+        note_path, _, text = chunks[key][:3]
         if note_path in seen_notes:
             continue
         seen_notes.add(note_path)
         snippet = text[:SNIPPET_LEN] + "..." if len(text) > SNIPPET_LEN else text
-        results.append({"notePath": note_path, "snippet": snippet, "score": score})
+        results.append({
+            "notePath": note_path,
+            "snippet": snippet,
+            "similarity": round(sims[key], 3) if key in sims else None,
+            "matchedBy": "+".join(sorted(sources[key])),
+        })
         if len(results) >= limit:
             break
     return results
@@ -136,13 +154,24 @@ def _resolve_in_vault(note_path: str) -> Path:
 @mcp.tool()
 def search_notes(query: str, limit: int = 10) -> list[dict]:
     """Hybrid search over the Obsidian vault: semantic (pgvector cosine) +
-    full-text (Postgres FTS), merged with reciprocal rank fusion.
-    Returns [{notePath, snippet, score}] sorted by relevance."""
+    full-text keyword (Postgres FTS), order fused with reciprocal rank fusion.
+
+    Returns [{notePath, snippet, similarity, matchedBy}] sorted by relevance.
+    - similarity: cosine similarity of the best semantically-matched chunk
+      (null when only the keyword ranker found it). CALIBRATION for the
+      gte-base embedding space: ~0.87 is the floor even for nonsense queries,
+      ~0.91+ is a strong match — the meaningful band is narrow, so compare
+      within one result set and treat ≤0.88 as probably tangential.
+    - matchedBy: 'semantic', 'keyword', or 'keyword+semantic' — a hit found
+      by BOTH rankers is the strongest relevance signal, stronger than any
+      similarity value.
+    Results are candidates, not ground truth: for filing/placement decisions
+    verify against the real structure with get_vault_tree / list_folder."""
     limit = max(1, min(limit, 50))
     query_vec = embed_texts([query])[0]
     vector_rows = _vector_candidates(query_vec)
     text_rows = _text_candidates(query)
-    return _rrf_merge([vector_rows, text_rows], limit)
+    return _rrf_merge([("semantic", vector_rows), ("keyword", text_rows)], limit)
 
 
 @mcp.tool()
@@ -157,16 +186,20 @@ def get_note_content(note_path: str) -> str:
 
 @mcp.tool()
 def find_home_for_note(proposed_title: str) -> dict:
-    """Given a proposed note title, suggest where it belongs in the vault:
-    semantically similar notes, the folders they live in (ranked), and
-    example note names from those folders."""
+    """CANDIDATE GENERATOR for where a new note might belong, based purely on
+    embedding similarity of the title — it is often wrong for short/generic
+    titles. Treat suggested_folders as hypotheses: verify with get_vault_tree()
+    (the real folder map) and list_folder(folder) (what actually lives there,
+    naming conventions) before deciding. Returns semantically similar notes,
+    the folders they live in (ranked), and example note names."""
     query_vec = embed_texts([proposed_title])[0]
     rows = _vector_candidates(query_vec)
 
     # note_path values are written by the backend container, so always POSIX
     similar_notes: list[str] = []
     folder_counts: Counter = Counter()
-    for note_path, _, _ in rows:
+    for row in rows:
+        note_path = row[0]
         if note_path not in similar_notes:
             similar_notes.append(note_path)
             folder_counts[str(PurePosixPath(note_path).parent)] += 1
@@ -177,6 +210,76 @@ def find_home_for_note(proposed_title: str) -> dict:
         "similar_notes": similar_notes,
         "suggested_folders": [f for f, _ in folder_counts.most_common(5)],
         "name_examples": [PurePosixPath(p).stem for p in similar_notes[:5]],
+    }
+
+
+# Folders that hold media/build artifacts, not knowledge notes — excluded
+# from traversal output so the tree stays signal, not noise.
+TREE_SKIP_DIRS = {"resources", "_workspace", "_reports"}
+LIST_NOTES_CAP = 200
+
+
+@mcp.tool()
+def get_vault_tree(max_depth: int = 3) -> list[dict]:
+    """Read-only map of the vault's folder structure: every folder (down to
+    max_depth) with its direct note count, e.g.
+    [{"folder": "/vault/Programming/Cloud", "noteCount": 12}, ...].
+
+    Embedding-based suggestions (search_notes, find_home_for_note) are
+    imperfect — when deciding where a note belongs, start here to see what
+    actually exists, then list_folder(candidate) to check its contents and
+    naming conventions. Skips media/system folders (resources, _workspace,
+    _reports, dotfolders)."""
+    max_depth = max(1, min(max_depth, 8))
+    root = VAULT_DIR.resolve()
+    out: list[dict] = []
+
+    def walk(d: Path, depth: int):
+        try:
+            entries = sorted(d.iterdir(), key=lambda p: p.name.lower())
+        except (PermissionError, OSError):
+            return
+        note_count = sum(1 for e in entries if e.is_file() and e.suffix == ".md")
+        rel = d.relative_to(root).as_posix()
+        out.append({
+            "folder": "/vault" if rel == "." else f"/vault/{rel}",
+            "noteCount": note_count,
+        })
+        if depth >= max_depth:
+            return
+        for e in entries:
+            if e.is_dir() and not e.name.startswith(".") and e.name not in TREE_SKIP_DIRS:
+                walk(e, depth + 1)
+
+    walk(root, 1)
+    return out
+
+
+@mcp.tool()
+def list_folder(folder_path: str = "/vault") -> dict:
+    """List ONE vault folder read-only: its subfolder names and note names
+    (no content). Accepts '/vault/...' or a vault-relative path. Use after
+    get_vault_tree to inspect a candidate folder — the note names show its
+    scope and naming conventions, which beats guessing from embeddings.
+    Note lists are capped at 200 (notesTruncated flags it)."""
+    resolved = _resolve_in_vault(folder_path)
+    if not resolved.is_dir():
+        raise ValueError(f"Not a folder in the vault: {folder_path}")
+    subfolders: list[str] = []
+    notes: list[str] = []
+    for e in sorted(resolved.iterdir(), key=lambda p: p.name.lower()):
+        if e.name.startswith("."):
+            continue
+        if e.is_dir():
+            subfolders.append(e.name)
+        elif e.is_file() and e.suffix == ".md":
+            notes.append(e.stem)
+    rel = resolved.relative_to(VAULT_DIR.resolve()).as_posix()
+    return {
+        "folder": "/vault" if rel == "." else f"/vault/{rel}",
+        "subfolders": subfolders,
+        "notes": notes[:LIST_NOTES_CAP],
+        "notesTruncated": len(notes) > LIST_NOTES_CAP,
     }
 
 

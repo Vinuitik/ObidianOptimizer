@@ -14,6 +14,13 @@ def _stub_module(name):
 # a fake session into model_runtime.state, so InferenceSession is never built here.
 ort_mod = _stub_module("onnxruntime")
 ort_mod.get_available_providers = lambda: ["CPUExecutionProvider"]
+# model_runtime references these at import time (session opts are built lazily,
+# but the _ORT_OPT level map is module-level).
+ort_mod.GraphOptimizationLevel = types.SimpleNamespace(
+    ORT_ENABLE_ALL="all", ORT_ENABLE_EXTENDED="extended",
+    ORT_ENABLE_BASIC="basic", ORT_DISABLE_ALL="disabled")
+ort_mod.SessionOptions = types.SimpleNamespace
+ort_mod.InferenceSession = None  # tests inject fake sessions via state
 
 # transformers
 trans = _stub_module("transformers")

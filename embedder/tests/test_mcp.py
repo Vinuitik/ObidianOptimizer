@@ -151,7 +151,7 @@ def test_tools_list_exposes_the_tools(client):
     assert resp.status_code == 200
     tools = {t["name"] for t in resp.json()["result"]["tools"]}
     assert tools == {"search_notes", "get_note_content", "find_home_for_note",
-                     "ingest_resource", "split_note"}
+                     "ingest_resource", "split_note", "get_vault_tree", "list_folder"}
 
 
 def test_tools_call_search_notes_returns_rrf_results(client):
@@ -166,11 +166,59 @@ def test_tools_call_search_notes_returns_rrf_results(client):
     results = result["structuredContent"]["result"]
     assert len(results) == 2  # two distinct note paths in FAKE_ROWS
     assert results[0]["notePath"].endswith(".md")
-    assert "snippet" in results[0] and "score" in results[0]
+    assert "snippet" in results[0]
+    # both mocked rankers return the same rows → matched by both sources;
+    # FAKE_ROWS are 3-tuples (no similarity column) → similarity is None
+    assert results[0]["matchedBy"] == "keyword+semantic"
+    assert results[0]["similarity"] is None
     # snippet truncated at 150 chars + ellipsis
     long_one = next(r for r in results if r["notePath"].endswith("FlexMatch.md"))
     assert long_one["snippet"].endswith("...")
     assert len(long_one["snippet"]) == 153
+
+
+def test_rrf_merge_reports_similarity_and_sources():
+    # semantic rows carry a 4th similarity column; keyword rows don't.
+    semantic = [("/vault/a.md", 0, "alpha text", 0.71)]
+    keyword = [("/vault/a.md", 0, "alpha text"), ("/vault/b.md", 0, "beta text")]
+    results = mcp_server._rrf_merge([("semantic", semantic), ("keyword", keyword)], 10)
+    by_path = {r["notePath"]: r for r in results}
+    assert by_path["/vault/a.md"]["matchedBy"] == "keyword+semantic"
+    assert by_path["/vault/a.md"]["similarity"] == 0.71
+    assert by_path["/vault/b.md"]["matchedBy"] == "keyword"
+    assert by_path["/vault/b.md"]["similarity"] is None
+    # the both-ranker hit outranks the keyword-only hit
+    assert results[0]["notePath"] == "/vault/a.md"
+
+
+def test_get_vault_tree_and_list_folder(tmp_path, monkeypatch):
+    (tmp_path / "AI" / "ML").mkdir(parents=True)
+    (tmp_path / "resources").mkdir()          # skipped: media folder
+    (tmp_path / ".obsidian").mkdir()          # skipped: dotfolder
+    (tmp_path / "AI" / "intro.md").write_text("x")
+    (tmp_path / "AI" / "ML" / "sgd.md").write_text("x")
+    (tmp_path / "AI" / "ML" / "adam.md").write_text("x")
+    (tmp_path / "root.md").write_text("x")
+    monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
+
+    tree = {t["folder"]: t["noteCount"] for t in mcp_server.get_vault_tree()}
+    assert tree["/vault"] == 1
+    assert tree["/vault/AI"] == 1
+    assert tree["/vault/AI/ML"] == 2
+    assert not any("resources" in f or ".obsidian" in f for f in tree)
+
+    listing = mcp_server.list_folder("AI/ML")
+    assert listing["folder"] == "/vault/AI/ML"
+    assert listing["notes"] == ["adam", "sgd"]
+    assert listing["subfolders"] == []
+    assert listing["notesTruncated"] is False
+
+    # "." == vault root (the '/vault' spelling only resolves when VAULT_DIR is /vault)
+    root_listing = mcp_server.list_folder(".")
+    assert "AI" in root_listing["subfolders"]
+
+    with pytest.raises(ValueError):
+        mcp_server.list_folder("../outside")
 
 
 def test_tools_call_find_home_returns_folder_suggestions(client):
@@ -212,6 +260,8 @@ def test_resolve_in_vault_rejects_traversal(tmp_path, monkeypatch):
 
 
 def test_resolve_in_vault_rejects_absolute_outside(tmp_path, monkeypatch):
+    # NB: a "C:/..." path is only absolute on Windows; on POSIX it's a weird
+    # relative subpath, so use a genuinely absolute outside path instead.
     monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
     with pytest.raises(ValueError):
-        mcp_server._resolve_in_vault("C:/Windows/system.ini")
+        mcp_server._resolve_in_vault(str(tmp_path.parent / "outside.md"))
