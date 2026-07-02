@@ -93,7 +93,12 @@ class Provider:
     def bench(self, seconds=None):
         self.consecutive_failures += 1
         if seconds is None:
-            seconds = min(30 * (2 ** (self.consecutive_failures - 1)), 3600)
+            # No Retry-After header → transient (usually a per-second rate cap that
+            # clears in ~1s). Recover fast: floor 1s, exponential on CONSECUTIVE
+            # failures (1,2,4,8,…), capped 3600s so a genuinely-down provider still
+            # backs off. A provider-supplied Retry-After (seconds set) is honored
+            # verbatim/uncapped instead — e.g. a daily-cap provider's multi-hour wait.
+            seconds = min(2 ** (self.consecutive_failures - 1), 3600)
         self.cooldown_until = time.time() + seconds
         self.fail_count += 1
 
