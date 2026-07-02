@@ -119,18 +119,27 @@ public class EmbeddingService {
         return (vectors == null || vectors.isEmpty()) ? null : vectors.get(0);
     }
 
+    /** Document-side batch embed (indexing). See {@link #embedBatch(List, String)}. */
+    public List<float[]> embedBatch(List<String> texts) {
+        return embedBatch(texts, "document");
+    }
+
     /**
      * Embeds a batch of texts in ONE request. Returns vectors in input order, or
      * null if the service is unreachable, errors, or the returned count doesn't
      * match the input (so the caller can leave the whole slice for a later retry).
+     *
+     * kind is "document" for content being indexed, "query" for search queries.
+     * The embedder's model (EmbeddingGemma) is prompt-asymmetric — the two sides
+     * are embedded differently, and mixing them up silently degrades retrieval.
      */
-    public List<float[]> embedBatch(List<String> texts) {
+    public List<float[]> embedBatch(List<String> texts, String kind) {
         if (texts.isEmpty()) {
             return List.of();
         }
         final String body;
         try {
-            body = objectMapper.writeValueAsString(Map.of("texts", texts));
+            body = objectMapper.writeValueAsString(Map.of("texts", texts, "kind", kind));
         } catch (Exception e) {
             log.warn("[EmbeddingService] embed serialize error: {}", e.getMessage());
             return null;
@@ -189,9 +198,10 @@ public class EmbeddingService {
         return null;
     }
 
-    /** Embeds a query string for search. */
+    /** Embeds a query string for search (query-side prompt on asymmetric models). */
     public float[] embedQuery(String query) {
-        return embed(query);
+        List<float[]> vectors = embedBatch(List.of(query), "query");
+        return (vectors == null || vectors.isEmpty()) ? null : vectors.get(0);
     }
 
     public int getSearchLimit() {

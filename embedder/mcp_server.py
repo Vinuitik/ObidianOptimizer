@@ -168,7 +168,7 @@ def search_notes(query: str, limit: int = 10) -> list[dict]:
     Results are candidates, not ground truth: for filing/placement decisions
     verify against the real structure with get_vault_tree / list_folder."""
     limit = max(1, min(limit, 50))
-    query_vec = embed_texts([query])[0]
+    query_vec = embed_texts([query], kind="query")[0]
     vector_rows = _vector_candidates(query_vec)
     text_rows = _text_candidates(query)
     return _rrf_merge([("semantic", vector_rows), ("keyword", text_rows)], limit)
@@ -192,7 +192,7 @@ def find_home_for_note(proposed_title: str) -> dict:
     (the real folder map) and list_folder(folder) (what actually lives there,
     naming conventions) before deciding. Returns semantically similar notes,
     the folders they live in (ranked), and example note names."""
-    query_vec = embed_texts([proposed_title])[0]
+    query_vec = embed_texts([proposed_title], kind="query")[0]
     rows = _vector_candidates(query_vec)
 
     # note_path values are written by the backend container, so always POSIX

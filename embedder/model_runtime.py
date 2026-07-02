@@ -27,19 +27,34 @@ import gpu_slot
 
 log = logging.getLogger("embedder")
 
-# gte-base (768-dim, mean-pooled, standard BERT). Replaced mxbai-embed-large-v1
-# (1024-dim, 335M): mxbai's fp16 ONNX crashed onnxruntime 1.19's SimplifiedLayerNormFusion
-# at load, and mxbai is officially CLS-pooled — our embed path mean-pools, so its vectors
-# were already slightly off. gte-base is mean-trained (so the mean-pool below is now
-# *correct*), needs no query/doc prefix, and at 109M/~220MB fp16 frees ~450MB of VRAM
-# for whisper/CLIP. Xenova/ mirror is used because it's the repo that ships model_fp16.onnx.
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "Xenova/gte-base")
+# EmbeddingGemma-300m (768-dim out, asymmetric prompts, QAT int8). Replaced gte-base
+# (109M, symmetric, English-only): gte-base's cosine band was so compressed
+# (nonsense floored at ~0.87, exact matches ~0.91) that semantic scores carried
+# almost no signal, and the vault has Russian notes it couldn't represent at all.
+# EmbeddingGemma is the top multilingual model <500M on MTEB (en v2 69.7 / mml 61.2),
+# and measured here: relevant 0.55, irrelevant 0.03, ru-relevant 0.46 — a real band.
+# Same 768 dims as gte-base, so pgvector schema is untouched (chunks DO need
+# re-embedding: vectors from different models share nothing).
+# The onnx-community export bakes the FULL sentence-transformers pipeline into the
+# graph (mean pool → dense 768→3072→768 → L2 norm) and exposes it as the 2-D
+# 'sentence_embedding' output — pooling last_hidden_state ourselves would skip the
+# dense projections and produce garbage. _embed_batch prefers the 2-D output.
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "onnx-community/embeddinggemma-300m-ONNX")
 MODEL_CACHE = os.environ.get("MODEL_CACHE", "/models")
-# fp16 by default: ~220MB vs the fp32 model.onnx's ~440MB — the headroom that lets a
-# 4GB card hold the embedder OR whisper without OOM. fp16 vs fp32 shifts normalised
-# vectors by ~1e-3 cosine (no re-embedding needed). Override to onnx/model.onnx for
-# fp32, or onnx/model_quantized.onnx (int8) for even less VRAM.
-EMBED_ONNX_FILE = os.environ.get("EMBED_ONNX_FILE", "onnx/model_fp16.onnx")
+# int8 (QAT — near-lossless for this model) by default: ~310MB, CPU-friendly, and
+# small enough beside whisper/CLIP on the 4GB card. onnx/model_fp16.onnx (~620MB)
+# if a GPU-heavy setup wants max fidelity.
+EMBED_ONNX_FILE = os.environ.get("EMBED_ONNX_FILE", "onnx/model_quantized.onnx")
+
+# EmbeddingGemma is prompt-asymmetric: queries and documents get different task
+# prefixes (same weights — the prompt conditions the space so questions land near
+# texts that ANSWER them, not texts phrased like them). Symmetric models keep both
+# prefixes empty. Env-overridable for model swaps.
+_IS_GEMMA = "embeddinggemma" in EMBED_MODEL.lower()
+EMBED_QUERY_PREFIX = os.environ.get(
+    "EMBED_QUERY_PREFIX", "task: search result | query: " if _IS_GEMMA else "")
+EMBED_DOC_PREFIX = os.environ.get(
+    "EMBED_DOC_PREFIX", "title: none | text: " if _IS_GEMMA else "")
 # Hard ceiling on the onnxruntime CUDA arena so the (otherwise unbounded, grow-only)
 # activation scratch can't creep up and starve whisper. 0 = no cap.
 EMBED_GPU_MEM_LIMIT_MB = int(os.environ.get("EMBED_GPU_MEM_LIMIT_MB", "1800"))
@@ -136,6 +151,14 @@ def init() -> None:
             EMBED_MODEL, cache_dir=MODEL_CACHE, local_files_only=local_only)
         onnx_path = hf_hub_download(
             EMBED_MODEL, EMBED_ONNX_FILE, cache_dir=MODEL_CACHE, local_files_only=local_only)
+        # External-data exports (embeddinggemma et al.) keep weights in a sibling
+        # '<file>.onnx_data' — the session load fails without it. Best-effort: not
+        # every repo splits its weights out.
+        try:
+            hf_hub_download(EMBED_MODEL, EMBED_ONNX_FILE + "_data",
+                            cache_dir=MODEL_CACHE, local_files_only=local_only)
+        except Exception:  # noqa: BLE001 — single-file exports have no _data companion
+            pass
         dim = AutoConfig.from_pretrained(
             EMBED_MODEL, cache_dir=MODEL_CACHE, local_files_only=local_only).hidden_size
         return tokenizer, onnx_path, dim
@@ -194,14 +217,21 @@ def _unload_gpu_session() -> None:
         gc.collect()
 
 
-def embed_texts(texts: List[str]) -> List[List[float]]:
-    """Mean-pooled, L2-normalised embeddings, preserving input order.
+def embed_texts(texts: List[str], kind: str = "document") -> List[List[float]]:
+    """L2-normalised embeddings, preserving input order.
+
+    kind='document' embeds content to be retrieved; kind='query' embeds a search
+    query. Prompt-asymmetric models (EmbeddingGemma) map the two differently —
+    mixing them up silently degrades retrieval, so every caller must say which
+    side it is. Symmetric models ignore the distinction (both prefixes empty).
 
     Picks GPU (via gpu_slot, if free) or the CPU floor per call, and sub-batches so
     a big input can't exceed the GPU arena cap. Raises KeyError if init() hasn't run.
     """
     if not texts:
         return []
+    prefix = EMBED_QUERY_PREFIX if kind == "query" else EMBED_DOC_PREFIX
+    texts = [prefix + t for t in texts] if prefix else list(texts)
     with gpu_slot.embedder_session(_ensure_gpu_session) as gpu_sess:
         session = gpu_sess if gpu_sess is not None else state["cpu_session"]
         out: List[List[float]] = []
@@ -229,19 +259,25 @@ def _embed_batch(session, texts: List[str]) -> List[List[float]]:
 
     outputs = session.run(None, feeds)
     out_names = [o.name for o in session.get_outputs()]
-    if "last_hidden_state" in out_names:
-        token_embeddings = outputs[out_names.index("last_hidden_state")]
-    else:                                                 # first 3-D output
-        token_embeddings = next(a for a in outputs if a.ndim == 3)
-    # fp16 model → fp16 output; upcast so pooling/normalisation is done in fp32.
-    token_embeddings = token_embeddings.astype(np.float32)  # (batch, seq, dim)
-    attention_mask = encoded["attention_mask"]            # (batch, seq)
+    if "sentence_embedding" in out_names:
+        # Sentence-transformers-style export: pooling + dense projections + norm
+        # are IN the graph. Pooling last_hidden_state ourselves would skip the
+        # dense layers (embeddinggemma: 768→3072→768) and produce garbage.
+        embeddings = outputs[out_names.index("sentence_embedding")].astype(np.float32)
+    else:
+        if "last_hidden_state" in out_names:
+            token_embeddings = outputs[out_names.index("last_hidden_state")]
+        else:                                             # first 3-D output
+            token_embeddings = next(a for a in outputs if a.ndim == 3)
+        # fp16 model → fp16 output; upcast so pooling/normalisation is done in fp32.
+        token_embeddings = token_embeddings.astype(np.float32)  # (batch, seq, dim)
+        attention_mask = encoded["attention_mask"]        # (batch, seq)
 
-    # Mean pooling over non-padding tokens
-    mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
-    summed = np.sum(token_embeddings * mask_expanded, axis=1)
-    counts = np.clip(mask_expanded.sum(axis=1), a_min=1e-9, a_max=None)
-    embeddings = summed / counts                          # (batch, dim)
+        # Mean pooling over non-padding tokens
+        mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
+        summed = np.sum(token_embeddings * mask_expanded, axis=1)
+        counts = np.clip(mask_expanded.sum(axis=1), a_min=1e-9, a_max=None)
+        embeddings = summed / counts                      # (batch, dim)
 
     # L2 normalise
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)

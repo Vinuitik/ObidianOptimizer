@@ -1,7 +1,7 @@
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import List
+from typing import List, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -35,6 +35,9 @@ app = FastAPI(title="Embedder", lifespan=lifespan)
 
 class EmbedRequest(BaseModel):
     texts: List[str]
+    # 'document' = content being indexed; 'query' = a search query. Asymmetric
+    # models (EmbeddingGemma) prefix the two differently — see model_runtime.
+    kind: Literal["document", "query"] = "document"
 
 
 class EmbedResponse(BaseModel):
@@ -106,7 +109,7 @@ def embed(req: EmbedRequest):
         raise HTTPException(status_code=422, detail="texts list cannot be empty")
 
     return EmbedResponse(
-        embeddings=model_runtime.embed_texts(req.texts),
+        embeddings=model_runtime.embed_texts(req.texts, kind=req.kind),
         model=state["model_name"],
         dim=state["dim"],
     )
