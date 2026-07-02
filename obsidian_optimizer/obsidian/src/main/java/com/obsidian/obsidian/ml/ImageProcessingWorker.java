@@ -184,7 +184,7 @@ public class ImageProcessingWorker {
         }
     }
 
-    private void handleResult(PendingImageJob job, JsonNode result, String provider) {
+    void handleResult(PendingImageJob job, JsonNode result, String provider) {
         if ("not_found".equals(result.path("error").asText(null))) {
             // image file gone — permanent until the note changes; daily requeue covers it
             log.warn("[ImageProcessingWorker] image not found for {} — marking SKIPPED", job.getImagePath());
