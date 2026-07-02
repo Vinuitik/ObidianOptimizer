@@ -207,15 +207,25 @@ public class ImageProcessingWorker {
         for (int i = 0; i < textChunks.size(); i++) {
             String chunk = textChunks.get(i);
             String hash = ContentHashing.sha256(chunk);
-            float[] embedding = embeddingService.embed(chunk);
+            int chunkIndex = imageChunkStartIndex + i;
 
+            // ALWAYS persist the caption text first — the VLM call is the expensive,
+            // rate-limited part and must never be lost to a cheap embed hiccup.
+            // Then best-effort embed inline; on failure the chunk stays NULL-vector
+            // and the embed reconciler backfills it later. Either way the caption is safe.
+            float[] embedding = embeddingService.embed(chunk);
             if (embedding != null) {
-                chunkRepo.upsertChunk(job.getNotePath(), imageChunkStartIndex + i, "image", chunk, embedding, hash);
+                chunkRepo.upsertChunk(job.getNotePath(), chunkIndex, "image", chunk, embedding, hash);
+            } else {
+                chunkRepo.upsertChunkTextOnly(job.getNotePath(), chunkIndex, "image", chunk, hash);
             }
         }
 
+        // DONE = "captioned" (VLM work banked). Embedding is a SEPARATE queue now
+        // (null-vector chunks), so a failed embed no longer means the job retries —
+        // and never means the caption is lost.
         jobRepo.markDone(job.getId());
-        log.debug("[ImageProcessingWorker] processed {} via {} -> {} chunk(s)",
+        log.debug("[ImageProcessingWorker] captioned {} via {} -> {} chunk(s)",
             job.getImagePath(), provider, textChunks.size());
     }
 
