@@ -218,7 +218,7 @@ Lives in the **embedder container** (already Python + FastAPI + GPU + MCP host):
   - MCP tool `ingest_resource` so Claude/chat clients can trigger it
 - new binaries in image: `ffmpeg`; new deps: `pymupdf`, `trafilatura`, `faster-whisper`, `scenedetect[opencv]`, `open_clip` (or CLIP exported to ONNX, same runtime as mxbai), `pytesseract` + tesseract-ocr. yt-dlp is NOT here — downloads/subs go through the VideoManager container (decision 3).
 - vault mount must become **read-write for the attachments dir only** (currently read-only `/vault`) — or frames are returned to the Java backend which writes them. Prefer the latter: keeps the "all vault writes go through Java" invariant.
-- YouTube *downloads* (when full video needed, not just captions) can delegate to VideoManager per VIDEO_MANAGER_ARCH.md `POST /api/v1/download`; captions-only path needs no download at all.
+- YouTube *downloads* (when full video needed, not just captions) go through the in-process `embedder/download/` module (yt-dlp salvaged from the removed VideoManager — see decision 3 + `embedder/download/FLOWS.md`); captions-only path needs no download at all.
 
 ### Resource policy — sequential, low-priority, overnight-friendly
 

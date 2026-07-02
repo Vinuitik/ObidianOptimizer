@@ -28,9 +28,14 @@ Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notl
 | [Flashcards Architecture](architecture_plans/FLASHCARDS_ARCH.md) | Architecture | Card types, FSRS-on-notes + bandit (Option A), assignments [PARTIALLY IMPLEMENTED] |
 | [Backend FLOWS — Chrono](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#chrono-service) | Flows | Daily jobs: FileMover, Bankruptcy (chronic-neglect + mass lapse), SpreadCheck |
 | [Ingest FLOWS](embedder/ingest/FLOWS.md) | Flows | Resource→notes stage 1: A/V whisper transcription, job API |
-| [Ingest Architecture](architecture_plans/INGEST_AGENT_ARCH.md) | Architecture | Full pipeline plan + v1 execution stages, note splitter |
-| [Link Sniffer Architecture](architecture_plans/LINK_SNIFFER_AGENT_ARCH.md) | Architecture | Extension-connected capture agent [NOT IMPLEMENTED] |
-| [Mobile Architecture](architecture_plans/MOBILE_ARCH.md) | Architecture | Offline-first mobile app, sync engine [NOT IMPLEMENTED] |
+| [Ingest Architecture](architecture_plans/INGEST_AGENT_ARCH.md) | Architecture | Full pipeline plan + v1 execution stages, note splitter [IMPLEMENTED] |
+| [Download FLOWS](embedder/download/FLOWS.md) | Flows | yt-dlp captions + offline media downloads (salvaged VideoManager core) |
+| [Inbox FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/inbox/FLOWS.md) | Flows | Learn Inbox triage: `_inbox/` staging, file/discard, review exclusion |
+| [Capture Architecture](architecture_plans/CAPTURE_ARCH.md) | Architecture | Capture model: resource → ordered proposed notes → Learn queue (phases 1–2 shipped; see STATUS table) |
+| [Extension Media Capture](architecture_plans/EXTENSION_MEDIA_CAPTURE_ARCH.md) | Architecture | "What's on this page?" DOM scanner + candidate picker [NOT IMPLEMENTED] |
+| [Sync Retention Plan](architecture_plans/SYNC_RETENTION_PLAN.md) | Architecture | Drive delete propagation, orphan janitor, quota visibility [NOT IMPLEMENTED] |
+| [PWA Mobile Architecture](architecture_plans/PWA_MOBILE_ARCH.md) | Architecture | Installable offline PWA; P1–P4 built but dormant in `frontend/src/pwa/` |
+| [PWA FLOWS](frontend/src/pwa/FLOWS.md) | Flows | Mobile shell, offline review seam, share-target, activation steps |
 | [Backend Testing](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#testing) | Testing | Unit tests (7 service layers), MockMvc controller tests, Testcontainers IT |
 | [Frontend Testing](frontend/FLOWS.md#testing) | Testing | Vitest: useStore, TabBar, FolderTree filter, diff, LoginModal, NewNoteForm |
 | [CI Pipeline](.github/workflows/ci.yml) | CI/CD | GitHub Actions: backend-unit, backend-integration, frontend, docker-build |

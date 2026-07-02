@@ -1,4 +1,14 @@
-# Deployment & Shipping Architecture
+# Deployment & Shipping Architecture [NOT IMPLEMENTED — and STALE in parts]
+
+> ⚠ 2026-07-02: the "ship to friends" installer remains future work, but several
+> assumptions below are dead: there is **no Ollama** (embeddings run as pure ONNX inside
+> the embedder container), **no VideoManager** (yt-dlp was salvaged into
+> `embedder/download/`), and no `nomic-embed-text`. The stack that would actually be
+> packaged is the current `docker-compose.yml` (backend, frontend/nginx, postgres+pgvector,
+> embedder, cloudflared) + the optional host-wrapper. The *actual* running deployment
+> (systemd boot, tunnel-only exposure) is documented in `linux_scripts/FLOWS.md` and
+> `frontend/FLOWS.md` — this file is only about a future distributable. Rewrite against
+> the real compose file before acting on it.
 
 ## Goal
 To ship Obsidian Optimizer to friends as a single, self-contained deliverable that runs purely locally. They should be able to double-click and run the entire suite without configuring environments, installing Python, or setting up PostgreSQL.

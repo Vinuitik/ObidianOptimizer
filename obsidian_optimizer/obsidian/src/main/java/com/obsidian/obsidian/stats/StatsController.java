@@ -19,7 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Lightweight count aggregates for the info dashboard (INFO_DASHBOARD_ARCH).
+ * Lightweight count aggregates for the info dashboard (frontend DashboardPage).
  * Polled every few seconds by the frontend — every query here must stay an
  * indexed COUNT, never a row fetch.
  */

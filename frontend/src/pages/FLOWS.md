@@ -84,7 +84,7 @@ To change inbox triage: `InboxPanel.jsx` + backend `inbox/InboxController`
 
 ## DashboardPage — Processing dashboard (`/dashboard`)
 
-Live view of async AI processing (INFO_DASHBOARD_ARCH). Polls `GET /api/stats`
+Live view of async AI processing. Polls `GET /api/stats`
 every 3s (`POLL_MS`), pauses while `document.hidden`, shows stale indicator on
 fetch errors (keeps last data).
 
@@ -95,7 +95,7 @@ fetchStats() → { embedding, images, flashcards, resources, wrapper }
   → Flashcard Coverage bar: notesWithCards / eligibleNotes (+ active/archived)
   → LLM Providers table: per-provider state (ready/working/cooling/no key)
       from host-wrapper /providers, proxied by StatsController
-  → Video & Resource Queue: [NOT IMPLEMENTED] — ingest agent not built
+  → Video & Resource Queue: ingest jobs (embedder /ingest via StatsController), counts + recent list
 ```
 
 To change poll rate: `DashboardPage.jsx → POLL_MS`

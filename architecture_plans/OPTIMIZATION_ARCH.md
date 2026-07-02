@@ -21,8 +21,10 @@ Currently, caching is disabled to prevent stale data while developing. Once the 
 *   **Lazy Loading**: The heavy Milkdown editor and its plugins will be lazy-loaded (`React.lazy`). The initial page load will just be the structural UI, keeping Time-To-Interactive (TTI) under 200ms.
 
 ## 4. Mobile Optimizations
-*   **SQLite FTS5**: The mobile app will rely entirely on SQLite's built-in FTS5 (Full Text Search) extensions, which are written in C and highly optimized for mobile ARM processors.
-*   **Background Fetch**: Syncing the Google Drive zip file happens silently in the background (`expo-background-fetch`). When you actually open the app, it doesn't need to load; the data is already there.
+*Stale (native-app era) — superseded by the PWA approach.* Mobile perf now means: keep the
+offline IndexedDB subset small (due + next N days), cache media explicitly not greedily,
+and lazy-load the desktop-only chunks (Milkdown) out of the mobile shell's critical path.
+See `PWA_MOBILE_ARCH.md` §15 for the offline lanes.
 
 ## 5. Parked Option: strict FSRS lapse mode could retire the chrono jobs
 
