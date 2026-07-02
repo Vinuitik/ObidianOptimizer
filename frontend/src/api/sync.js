@@ -40,3 +40,9 @@ export function triggerSyncUpload() {
 export function triggerSyncDownload() {
   return req('/sync/download', { method: 'POST' });
 }
+
+// Orphan sweep. dryRun=true only reports { scanned, orphans, freedBytes, deletedPaths };
+// dryRun=false moves the orphans to Drive trash (30-day recovery).
+export function runJanitor(dryRun = true) {
+  return req(`/sync/janitor?dryRun=${dryRun}`, { method: 'POST' });
+}

@@ -23,12 +23,18 @@ public class SyncQueueRepository {
             CREATE TABLE IF NOT EXISTS sync_queue (
                 path            TEXT PRIMARY KEY,
                 content_hash    TEXT NOT NULL,
-                status          TEXT NOT NULL DEFAULT 'PENDING'
-                                    CHECK (status IN ('PENDING','DONE','FAILED')),
+                status          TEXT NOT NULL DEFAULT 'PENDING',
                 last_synced_at  BIGINT,
                 drive_file_id   TEXT,
                 retry_count     INT NOT NULL DEFAULT 0
             )
+            """);
+        // Migration: the original CHECK didn't allow DELETE_PENDING (tombstones for
+        // Drive-side delete propagation). Recreate it — idempotent drop+add each boot.
+        jdbc.execute("ALTER TABLE sync_queue DROP CONSTRAINT IF EXISTS sync_queue_status_check");
+        jdbc.execute("""
+            ALTER TABLE sync_queue ADD CONSTRAINT sync_queue_status_check
+                CHECK (status IN ('PENDING','DONE','FAILED','DELETE_PENDING'))
             """);
     }
 
@@ -85,9 +91,25 @@ public class SyncQueueRepository {
             """, path);
     }
 
-    /** Remove entry — used on soft-delete and rename (old path). */
+    /** Remove entry (local bookkeeping only — does NOT touch Drive). */
     public void delete(String path) {
         jdbc.update("DELETE FROM sync_queue WHERE path = ?", path);
+    }
+
+    /**
+     * Local file went away (soft-delete / rename old path): if the file ever reached
+     * Drive, leave a DELETE_PENDING tombstone so the next upload pass removes the
+     * Drive copy; if it never uploaded, just drop the row. Replaces a pending upload
+     * atomically — we never upload-then-orphan.
+     */
+    public void tombstone(String path) {
+        int updated = jdbc.update("""
+            UPDATE sync_queue SET status = 'DELETE_PENDING'
+            WHERE path = ? AND drive_file_id IS NOT NULL
+            """, path);
+        if (updated == 0) {
+            delete(path);
+        }
     }
 
     public List<SyncEntry> findByStatus(String status) {

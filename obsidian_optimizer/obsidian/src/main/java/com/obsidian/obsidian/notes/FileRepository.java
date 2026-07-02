@@ -299,7 +299,7 @@ public class FileRepository {
         noteIndex.rename(oldPath, newPath, newName);
         noteLinkRepo.renameTarget(oldName, newName);
         noteLinkRepo.renameSource(oldPath, newPath);
-        syncQueueRepo.delete(toRelative(oldPath));
+        syncQueueRepo.tombstone(toRelative(oldPath));
         try {
             String content = Files.readString(Paths.get(newPath));
             syncQueueRepo.markPending(toRelative(newPath), ContentHashing.sha256(content));
@@ -334,7 +334,7 @@ public class FileRepository {
 
         noteIndex.rename(sourcePath, newAbsPath, title);
         noteLinkRepo.renameSource(sourcePath, newAbsPath);
-        syncQueueRepo.delete(toRelative(sourcePath));
+        syncQueueRepo.tombstone(toRelative(sourcePath));
         try {
             String content = Files.readString(newPath);
             syncQueueRepo.markPending(toRelative(newAbsPath), ContentHashing.sha256(content));
@@ -362,7 +362,7 @@ public class FileRepository {
 
         noteIndex.delete(path);
         noteLinkRepo.deleteSource(path);
-        syncQueueRepo.delete(toRelative(path));
+        syncQueueRepo.tombstone(toRelative(path));
     }
 
     private String toRelative(String absPath) {

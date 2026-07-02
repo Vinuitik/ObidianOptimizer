@@ -28,14 +28,18 @@ Settings edits apply without a restart):
 
 ### Connect flow (OAuth, scope `drive.file` — app-created files only)
 ```
-Settings panel: paste OAuth client id/secret (from Google Cloud Console, type "Web
-application", authorised redirect URI = <origin>/api/sync/oauth/callback) → Save
+.env GOOGLE_OAUTH_CLIENT_ID/SECRET (+ optional GOOGLE_OAUTH_REDIRECT_URI) seeded into
+app_settings at boot (SettingsRepository.seedIfBlank — fills only while blank, UI wins
+afterwards); or typed into the panel (fields auto-hide once set)
   → "Connect Google Drive" → GET /api/sync/oauth/url?origin=<window.origin>
-      SyncOAuthService.buildAuthUrl(): state nonce (10-min TTL, single-use, in-memory)
+      SyncOAuthService.buildAuthUrl(): redirect_uri = sync.oauth.redirect_uri setting
+      if set, else <origin>/api/sync/oauth/callback; state nonce (10-min TTL, single-use)
       → browser → Google consent (access_type=offline&prompt=consent ⇒ refresh token)
   → GET /api/sync/oauth/callback?code&state
       handleCallback(): state check → code exchange (POST oauth2.googleapis.com/token)
       → app_settings sync.refresh_token + sync.account_email (Drive about())
+      → CLEARS sync.drive.folder_id (an SA-era folder is invisible to drive.file —
+        keeping it would 404 every upload; the app folder auto-creates instead)
       → driveService.reset() → 302 → /settings?drive=connected
 Disconnect: POST /api/sync/disconnect → revoke (best-effort) + clear token/email.
 ```
@@ -124,9 +128,39 @@ for each DriveFileInfo:
     (upsert because files created on another device have no local row yet)
 ```
 
-Conflict rule: **PENDING local edits always win over Drive** until uploaded.
-Files without pending edits are overwritten by Drive (Drive-wins for clean files).
+Conflict rule: **PENDING local edits always win over Drive** until uploaded, and
+**DELETE_PENDING tombstones are never re-downloaded** (that would resurrect a deleted
+file and cancel its tombstone). Files without pending edits are overwritten by Drive
+(Drive-wins for clean files).
 Future per-file merge: compare `device_id` + `uploaded_at` in `appProperties`.
+
+---
+
+## Delete Propagation & Janitor (retention)
+
+**Tombstones** — local delete/rename now propagates to Drive:
+```
+FileRepository.softDeleteNote / renameNote(old) / moveNote(old)
+  → syncQueueRepo.tombstone(rel):  row has drive_file_id → status=DELETE_PENDING
+                                   never uploaded        → row just deleted
+SyncService.uploadPending() (every pass, before uploads)
+  → processTombstones(): DriveService.trashFile(id)  [Drive TRASH, 30-day recovery —
+    files().delete would bypass trash, never use it] → row removed; failure ⇒ retried
+```
+
+**Janitor** — weekly sweep for orphans that predate tombstones (or external edits):
+```
+SyncWorker @Scheduled(sync.janitor.cron, default Sun 4am; gated on syncEnabled)
+  → SyncService.janitor(dryRun): listAllFiles() → for each Drive file:
+      local twin exists → keep | queue row PENDING → keep |
+      uploaded_at within GRACE_DAYS (30) → keep (mid-rename race guard)
+      else → trashFile() + drop queue row; report {scanned, orphans, freedBytes, paths}
+Manual: POST /api/sync/janitor?dryRun=true (default true — report only)
+Settings panel: "Check orphans" (dry run) → "Trash N orphan(s)" confirm button.
+```
+Version history/rollback is Drive-native: updated files keep prior revisions ~30 days
+(auto-purged by Google — never set keepRevisionForever). Weekly cadence: set
+`SYNC_UPLOAD_CRON=0 0 3 * * SUN`.
 
 ---
 
@@ -169,6 +203,10 @@ the proxy — fixed 2026-07-02.)
 | `GET` | `/api/sync/oauth/url?origin=` | session | Google consent URL (Settings "Connect") |
 | `GET` | `/api/sync/oauth/callback` | session | Code exchange; 302 → `/settings?drive=…` |
 | `POST` | `/api/sync/disconnect` | session | Revoke + forget the Google connection |
+| `POST` | `/api/sync/janitor?dryRun=` | session | Orphan sweep (dryRun=true default: report only) |
+
+`/status` additionally returns `quota {usedBytes, limitBytes}` when connected (one
+Drive API call — the panel fetches status on mount, don't poll it).
 
 ---
 
@@ -220,6 +258,10 @@ sync_queue(
 | Thing to change | Where |
 |---|---|
 | Upload cron schedule | `SYNC_UPLOAD_CRON` env / `sync.upload.cron` property |
+| Janitor schedule | `SYNC_JANITOR_CRON` env / `sync.janitor.cron` (default Sun 4am) |
+| Janitor grace period | `SyncService.GRACE_DAYS` (30) |
+| Tombstone lifecycle | `SyncQueueRepository.tombstone()` + `SyncService.processTombstones()` |
+| OAuth redirect override | `.env GOOGLE_OAUTH_REDIRECT_URI` → `sync.oauth.redirect_uri` setting |
 | Auto-sync on/off | Settings UI toggle → `app_settings.syncEnabled` (gates `SyncWorker` only) |
 | Encryption passphrase | Settings UI → `app_settings.syncPassphrase` (env `SYNC_PASSPHRASE` = first-boot seed) |
 | OAuth client id/secret | Settings UI → `app_settings.syncClientId` / `syncClientSecret` |

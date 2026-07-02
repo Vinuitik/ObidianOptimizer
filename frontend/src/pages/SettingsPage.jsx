@@ -6,7 +6,7 @@ import {
 } from '../api/notes';
 import {
   fetchSyncStatus, fetchOAuthUrl, disconnectDrive,
-  triggerSyncUpload, triggerSyncDownload,
+  triggerSyncUpload, triggerSyncDownload, runJanitor,
 } from '../api/sync';
 import FolderPicker from '../components/organisms/FolderPicker';
 import styles from './SettingsPage.module.css';
@@ -494,9 +494,18 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [passphrase, setPassphrase]     = useState('');
-  const [busy, setBusy]         = useState(null);   // 'save' | 'connect' | 'disconnect' | 'upload' | 'download'
+  const [busy, setBusy]         = useState(null);   // 'save' | 'connect' | 'disconnect' | 'upload' | 'download' | 'janitor'
   const [error, setError]       = useState(null);
   const [notice, setNotice]     = useState(null);
+  const [editCreds, setEditCreds]     = useState(false); // un-hide saved fields to fix a typo
+  const [janitorReport, setJanitorReport] = useState(null); // last dry-run / clean result
+
+  // Fields are hidden once satisfied (from .env seed or a previous save).
+  const clientIdSet   = Boolean(settings.syncClientId);
+  const secretSet     = Boolean(settings.syncClientSecretSet);
+  const passSet       = Boolean(settings.syncPassphraseSet);
+  const credsComplete = clientIdSet && secretSet && passSet;
+  const showFields    = editCreds || !credsComplete;
 
   const refreshStatus = useCallback(() => {
     fetchSyncStatus().then(setSync).catch(() => setSync(null));
@@ -542,6 +551,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
       await applySettings(patch);
       setClientSecret('');
       setPassphrase('');
+      setEditCreds(false);
       setNotice('Saved.');
     });
   }
@@ -562,11 +572,15 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
       <div className={styles.sectionHeader}>
         <h2 className={styles.sectionTitle}>Google Drive Sync</h2>
         <p className={styles.sectionDesc}>
-          Encrypted per-file backup of the vault to your Google Drive. Create an OAuth client
-          (type “Web application”) in Google Cloud Console, add{' '}
-          <code>{window.location.origin}/api/sync/oauth/callback</code> as an authorised redirect
-          URI, paste its credentials here, then connect. Files are AES-256 encrypted with your
-          passphrase before upload — Google never sees plaintext.
+          Encrypted per-file backup of the vault to your Google Drive (gzip + AES-256, Google
+          never sees plaintext). Credentials come from <code>.env</code>{' '}
+          (<code>GOOGLE_OAUTH_CLIENT_ID/SECRET</code>, <code>SYNC_PASSPHRASE</code>) or the
+          fields below — once set, the fields hide.
+          {!credsComplete && (
+            <> Missing: create an OAuth client (type “Web application”) in Google Cloud Console
+            with redirect URI <code>{window.location.origin}/api/sync/oauth/callback</code>,
+            then fill the fields and Save.</>
+          )}
         </p>
       </div>
 
@@ -580,52 +594,77 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
               : connected
                 ? `Connected as ${sync.accountEmail || 'Google account'} · ${queueLine}`
                 : `Not connected · ${queueLine}`}
-            {sync && !sync.encryptionConfigured ? ' · passphrase not set' : ''}
+            {sync?.quota?.usedBytes != null &&
+              ` · Drive ${fmtBytes(sync.quota.usedBytes)} of ${sync.quota.limitBytes ? fmtBytes(sync.quota.limitBytes) : '∞'} used`}
+            {sync && !sync.encryptionConfigured ? ' · ⚠ passphrase not set' : ''}
           </span>
         </div>
 
-        <div className={styles.field}>
-          <div className={styles.fieldMeta}>
-            <label className={styles.label} htmlFor="sync-client-id">OAuth client ID</label>
-          </div>
-          <input
-            id="sync-client-id" type="text"
-            className={`${styles.input} ${styles.inputPath}`}
-            value={clientId} disabled={!loaded}
-            placeholder="…apps.googleusercontent.com"
-            onChange={e => setClientId(e.target.value)}
-          />
-        </div>
-
-        <div className={styles.field}>
-          <div className={styles.fieldMeta}>
-            <label className={styles.label} htmlFor="sync-client-secret">OAuth client secret</label>
-          </div>
-          <input
-            id="sync-client-secret" type="password"
-            className={styles.input}
-            value={clientSecret} disabled={!loaded}
-            placeholder={settings.syncClientSecretSet ? '•••••• (saved — type to replace)' : ''}
-            onChange={e => setClientSecret(e.target.value)}
-          />
-        </div>
-
-        <div className={styles.field}>
-          <div className={styles.fieldMeta}>
-            <label className={styles.label} htmlFor="sync-passphrase">Encryption passphrase</label>
+        {credsComplete && !editCreds && (
+          <div className={styles.field}>
+            <div className={styles.fieldMeta}>
+              <label className={styles.label}>Credentials</label>
+            </div>
             <span className={styles.hint}>
-              Same passphrase on every device. Changing it makes files already on Drive
-              unreadable until re-uploaded.
+              OAuth client + passphrase configured ✓{' '}
+              <button
+                type="button" className={styles.browseBtn}
+                onClick={() => setEditCreds(true)}
+              >
+                edit
+              </button>
             </span>
           </div>
-          <input
-            id="sync-passphrase" type="password"
-            className={styles.input}
-            value={passphrase} disabled={!loaded}
-            placeholder={settings.syncPassphraseSet ? '•••••• (saved — type to replace)' : ''}
-            onChange={e => setPassphrase(e.target.value)}
-          />
-        </div>
+        )}
+
+        {showFields && (!clientIdSet || editCreds) && (
+          <div className={styles.field}>
+            <div className={styles.fieldMeta}>
+              <label className={styles.label} htmlFor="sync-client-id">OAuth client ID</label>
+            </div>
+            <input
+              id="sync-client-id" type="text"
+              className={`${styles.input} ${styles.inputPath}`}
+              value={clientId} disabled={!loaded}
+              placeholder="…apps.googleusercontent.com"
+              onChange={e => setClientId(e.target.value)}
+            />
+          </div>
+        )}
+
+        {showFields && (!secretSet || editCreds) && (
+          <div className={styles.field}>
+            <div className={styles.fieldMeta}>
+              <label className={styles.label} htmlFor="sync-client-secret">OAuth client secret</label>
+            </div>
+            <input
+              id="sync-client-secret" type="password"
+              className={styles.input}
+              value={clientSecret} disabled={!loaded}
+              placeholder={secretSet ? '•••••• (saved — type to replace)' : ''}
+              onChange={e => setClientSecret(e.target.value)}
+            />
+          </div>
+        )}
+
+        {showFields && (!passSet || editCreds) && (
+          <div className={styles.field}>
+            <div className={styles.fieldMeta}>
+              <label className={styles.label} htmlFor="sync-passphrase">Encryption passphrase</label>
+              <span className={styles.hint}>
+                Same passphrase on every device. Changing it makes files already on Drive
+                unreadable until re-uploaded.
+              </span>
+            </div>
+            <input
+              id="sync-passphrase" type="password"
+              className={styles.input}
+              value={passphrase} disabled={!loaded}
+              placeholder={passSet ? '•••••• (saved — type to replace)' : ''}
+              onChange={e => setPassphrase(e.target.value)}
+            />
+          </div>
+        )}
 
         <div className={styles.field}>
           <div className={styles.fieldMeta}>
@@ -647,22 +686,34 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
 
       {error  && <span className={styles.errorMsg}>{error}</span>}
       {notice && !error && <span className={styles.savedMsg}>{notice}</span>}
+      {janitorReport && !error && (
+        <p className={styles.hint} style={{ marginTop: '8px' }}>
+          {janitorReport.dryRun
+            ? `Orphan check: ${janitorReport.orphans} of ${janitorReport.scanned} Drive files have no local twin (${fmtBytes(janitorReport.freedBytes)}).`
+            : `Moved ${janitorReport.orphans} orphan(s) to Drive trash — freed ${fmtBytes(janitorReport.freedBytes)} (recoverable for 30 days).`}
+        </p>
+      )}
 
       <div className={styles.sectionFooter}>
-        <button
-          className={styles.saveBtn}
-          disabled={!loaded || busy != null || !credsDirty}
-          onClick={saveCreds}
-        >
-          {busy === 'save' ? 'Saving…' : 'Save'}
-        </button>
+        {!connected && !(clientIdSet && secretSet) && (
+          <span className={styles.hint}>
+            Connect needs the OAuth client id + secret saved (fields above or .env).
+          </span>
+        )}
+        {showFields && (
+          <button
+            className={styles.saveBtn}
+            disabled={!loaded || busy != null || !credsDirty}
+            onClick={saveCreds}
+          >
+            {busy === 'save' ? 'Saving…' : 'Save'}
+          </button>
+        )}
         {!connected ? (
           <button
             className={styles.saveBtn}
-            disabled={!loaded || busy != null || !(settings.syncClientId && settings.syncClientSecretSet)}
+            disabled={!loaded || busy != null || !(clientIdSet && secretSet)}
             onClick={connect}
-            title={!(settings.syncClientId && settings.syncClientSecretSet)
-              ? 'Save the OAuth client id and secret first' : undefined}
           >
             {busy === 'connect' ? 'Redirecting…' : 'Connect Google Drive'}
           </button>
@@ -685,6 +736,22 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
             <button
               className={styles.saveBtn}
               disabled={busy != null}
+              onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(true)))}
+            >
+              {busy === 'janitor' ? 'Scanning…' : 'Check orphans'}
+            </button>
+            {janitorReport?.dryRun && janitorReport.orphans > 0 && (
+              <button
+                className={styles.saveBtn}
+                disabled={busy != null}
+                onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(false)))}
+              >
+                Trash {janitorReport.orphans} orphan(s)
+              </button>
+            )}
+            <button
+              className={styles.saveBtn}
+              disabled={busy != null}
               onClick={() => run('disconnect', disconnectDrive)}
             >
               {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
@@ -694,6 +761,14 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
       </div>
     </div>
   );
+}
+
+function fmtBytes(n) {
+  if (n == null) return '0 B';
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + ' GB';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + ' MB';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + ' KB';
+  return n + ' B';
 }
 
 // ── Vault recreation overlay ────────────────────────────────────────────────────

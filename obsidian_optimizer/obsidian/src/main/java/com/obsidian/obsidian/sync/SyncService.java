@@ -29,6 +29,9 @@ public class SyncService {
 
     private static final Logger log = LoggerFactory.getLogger(SyncService.class);
 
+    /** Janitor won't touch Drive files uploaded within this many days (rename race guard). */
+    static final int GRACE_DAYS = 30;
+
     private final SyncQueueRepository   syncQueueRepo;
     private final VaultEncryptionService encryptionService;
     private final DriveService           driveService;
@@ -132,8 +135,11 @@ public class SyncService {
 
         if (pending.isEmpty()) {
             log.debug("[SyncService.uploadPending] nothing to upload");
+            processTombstones();
             return;
         }
+
+        processTombstones();
 
         int uploaded = 0, failed = 0;
         for (SyncEntry entry : pending) {
@@ -201,10 +207,14 @@ public class SyncService {
 
                 // A PENDING local edit hasn't reached Drive yet — overwriting it
                 // here would destroy it (and markSynced would cancel its upload).
-                // Local wins until uploadPending has run.
+                // Local wins until uploadPending has run. DELETE_PENDING likewise:
+                // the file was deleted locally and its Drive copy is doomed —
+                // downloading would resurrect it AND cancel the tombstone.
                 SyncEntry existing = syncQueueRepo.findByPath(df.vaultPath());
-                if (existing != null && "PENDING".equals(existing.status())) {
-                    log.info("[SyncService.downloadAll] {} has a pending local edit — skipping download", df.vaultPath());
+                if (existing != null
+                        && ("PENDING".equals(existing.status()) || "DELETE_PENDING".equals(existing.status()))) {
+                    log.info("[SyncService.downloadAll] {} has a pending local {} — skipping download",
+                        df.vaultPath(), "PENDING".equals(existing.status()) ? "edit" : "delete");
                     kept++;
                     continue;
                 }
@@ -220,6 +230,82 @@ public class SyncService {
             }
         }
         log.info("[SyncService.downloadAll] downloaded={}, skipped={}, keptLocal={}", downloaded, skipped, kept);
+    }
+
+    // ── Delete propagation (tombstones → Drive trash) ────────────────────────
+
+    /** Drain DELETE_PENDING rows: move the Drive copy to trash, drop the row. */
+    private void processTombstones() {
+        List<SyncEntry> doomed = syncQueueRepo.findByStatus("DELETE_PENDING");
+        for (SyncEntry entry : doomed) {
+            try {
+                if (entry.driveFileId() != null) {
+                    driveService.trashFile(entry.driveFileId());
+                }
+                syncQueueRepo.delete(entry.path());
+            } catch (Exception e) {
+                log.error("[SyncService.processTombstones] failed for {}: {}", entry.path(), e.getMessage());
+                // row stays DELETE_PENDING — retried next pass
+            }
+        }
+        if (!doomed.isEmpty()) {
+            log.info("[SyncService.processTombstones] processed {} tombstone(s)", doomed.size());
+        }
+    }
+
+    // ── Janitor (weekly orphan sweep) ─────────────────────────────────────────
+
+    public record JanitorResult(boolean dryRun, int scanned, int orphans, long freedBytes,
+                                List<String> deletedPaths) {}
+
+    /**
+     * Remove Drive files whose local counterpart no longer exists ("orphans" left by
+     * pre-tombstone renames/deletes, or edits made outside the app). Safety rails:
+     * appProperties-matched files only (listAllFiles guarantees that), a grace period
+     * so we never race an in-flight rename, deletion goes to Drive TRASH (30-day
+     * recovery), and dryRun mode reports without touching anything.
+     */
+    public JanitorResult janitor(boolean dryRun) throws IOException {
+        if (!driveService.isConfigured()) {
+            throw new IOException("Drive not configured");
+        }
+        Path vaultRoot = Paths.get(settingsRepo.getVaultPath()).toAbsolutePath().normalize();
+        long graceCutoff = System.currentTimeMillis() - GRACE_DAYS * 24L * 3600 * 1000;
+
+        List<DriveFileInfo> driveFiles = driveService.listAllFiles();
+        List<String> deleted = new java.util.ArrayList<>();
+        long freed = 0;
+
+        for (DriveFileInfo df : driveFiles) {
+            Path target = vaultRoot.resolve(df.vaultPath()).normalize();
+            if (!target.startsWith(vaultRoot)) continue;          // hostile metadata — not ours to judge
+            if (Files.exists(target)) continue;                    // local twin alive
+
+            SyncEntry row = syncQueueRepo.findByPath(df.vaultPath());
+            if (row != null && "PENDING".equals(row.status())) continue; // about to (re)upload
+            if (df.uploadedAt() > graceCutoff) continue;            // too fresh — could be mid-rename
+
+            if (!dryRun) {
+                try {
+                    driveService.trashFile(df.fileId());
+                    syncQueueRepo.delete(df.vaultPath());
+                } catch (Exception e) {
+                    log.error("[SyncService.janitor] failed for {}: {}", df.vaultPath(), e.getMessage());
+                    continue;
+                }
+            }
+            deleted.add(df.vaultPath());
+            freed += df.sizeBytes();
+        }
+
+        JanitorResult result = new JanitorResult(dryRun, driveFiles.size(), deleted.size(), freed, deleted);
+        log.info("[SyncService.janitor] dryRun={} scanned={} orphans={} freedBytes={}",
+            dryRun, result.scanned(), result.orphans(), result.freedBytes());
+        if (!dryRun) {
+            settingsRepo.set("sync.janitor_last",
+                System.currentTimeMillis() + ":" + result.orphans() + ":" + result.freedBytes());
+        }
+        return result;
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

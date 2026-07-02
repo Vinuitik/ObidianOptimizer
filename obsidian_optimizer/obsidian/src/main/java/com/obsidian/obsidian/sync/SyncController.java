@@ -50,7 +50,7 @@ public class SyncController {
         this.settingsRepo          = settingsRepo;
     }
 
-    /** GET /api/sync/status — queue counts + configuration/connection state */
+    /** GET /api/sync/status — queue counts + configuration/connection state + quota */
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getStatus() {
         Map<String, Object> body = new LinkedHashMap<>(syncQueueRepo.getStatusSummary());
@@ -59,7 +59,38 @@ public class SyncController {
         body.put("encryptionConfigured", encryptionService.isConfigured());
         body.put("driveConfigured",      driveService.isConfigured());
         body.putAll(oauthService.statusFragment());
+        // Quota is one Drive API call; the panel fetches status on mount, not on a poll.
+        if (driveService.isConfigured() && oauthService.isConnected()) {
+            try {
+                body.put("quota", driveService.fetchQuota());
+            } catch (Exception e) {
+                log.warn("[SyncController] quota fetch failed: {}", e.getMessage());
+            }
+        }
         return ResponseEntity.ok(body);
+    }
+
+    /**
+     * POST /api/sync/janitor?dryRun=true — sweep Drive orphans (files whose local twin
+     * is gone). dryRun (default) only reports; dryRun=false trashes them (30-day
+     * recovery in Drive trash). Also runs weekly via SyncWorker.
+     */
+    @PostMapping("/janitor")
+    public ResponseEntity<Map<String, Object>> janitor(
+            @RequestParam(defaultValue = "true") boolean dryRun) {
+        try {
+            SyncService.JanitorResult r = syncService.janitor(dryRun);
+            return ResponseEntity.ok(Map.of(
+                "dryRun",       r.dryRun(),
+                "scanned",      r.scanned(),
+                "orphans",      r.orphans(),
+                "freedBytes",   r.freedBytes(),
+                "deletedPaths", r.deletedPaths()
+            ));
+        } catch (IOException e) {
+            log.error("[SyncController] janitor failed: {}", e.getMessage());
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
     }
 
     /** POST /api/sync/upload — immediately drain the PENDING queue */

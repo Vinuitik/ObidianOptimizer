@@ -25,8 +25,9 @@ Seeded on first boot from env vars via `ON CONFLICT DO NOTHING`.
 | `ollamaEmbedModel` | `mixedbread-ai/mxbai-embed-large-v1` | hardcoded (display-only — real model is `EMBED_MODEL` env) |
 | `flashcardsEnabled` | `"true"` | hardcoded — review UI mode: tests (on) vs self-rated slideshow (off) |
 | `syncEnabled` | `"false"` | hardcoded — gates the scheduled Drive upload cron only |
-| `syncClientId` / `syncClientSecret` | `""` | Settings UI — Google OAuth client (Cloud Console) |
-| `syncPassphrase` | `$SYNC_PASSPHRASE` | env seed; Settings UI afterwards (save → key re-derived) |
+| `syncClientId` / `syncClientSecret` | `$GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | `seedIfBlank` env seed (fills while blank, UI wins after); Settings UI |
+| `sync.oauth.redirect_uri` | `$GOOGLE_OAUTH_REDIRECT_URI` | `seedIfBlank`; blank = derive from request origin |
+| `syncPassphrase` | `$SYNC_PASSPHRASE` | `seedIfBlank` env seed; Settings UI afterwards (save → key re-derived) |
 | `sync.drive.folder_id` | `$GOOGLE_DRIVE_FOLDER_ID` | env seed; auto-filled in OAuth mode (see [../sync/FLOWS.md](../sync/FLOWS.md)) |
 | `sync.refresh_token` / `sync.account_email` | `""` | internal — written by the OAuth connect flow |
 

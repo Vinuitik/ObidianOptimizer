@@ -26,6 +26,15 @@ public class SettingsRepository {
     @Value("${GOOGLE_DRIVE_FOLDER_ID:placeholder}")
     private String defaultDriveFolderId;
 
+    @Value("${GOOGLE_OAUTH_CLIENT_ID:}")
+    private String defaultOAuthClientId;
+
+    @Value("${GOOGLE_OAUTH_CLIENT_SECRET:}")
+    private String defaultOAuthClientSecret;
+
+    @Value("${GOOGLE_OAUTH_REDIRECT_URI:}")
+    private String defaultOAuthRedirectUri;
+
     public SettingsRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
@@ -55,14 +64,30 @@ public class SettingsRepository {
         insertDefault("flashcardsEnabled", "true");
         insertDefault("chronicNeglectDays", "7");
 
-        // Google Drive sync (SyncController / DriveService / VaultEncryptionService)
+        // Google Drive sync (SyncController / DriveService / VaultEncryptionService).
+        // Env-backed keys use seedIfBlank, NOT insertDefault: on live installs the rows
+        // already exist (possibly as ''), and adding a var to .env later must still land.
         insertDefault("syncEnabled", "false");
-        insertDefault("syncClientId", "");
-        insertDefault("syncClientSecret", "");
-        insertDefault("syncPassphrase", defaultSyncPassphrase == null ? "" : defaultSyncPassphrase);
-        insertDefault("sync.drive.folder_id", isPlaceholder(defaultDriveFolderId) ? "" : defaultDriveFolderId);
         insertDefault("sync.refresh_token", "");
         insertDefault("sync.account_email", "");
+        seedIfBlank("syncClientId", defaultOAuthClientId);
+        seedIfBlank("syncClientSecret", defaultOAuthClientSecret);
+        seedIfBlank("sync.oauth.redirect_uri", defaultOAuthRedirectUri);
+        seedIfBlank("syncPassphrase", defaultSyncPassphrase);
+        seedIfBlank("sync.drive.folder_id", isPlaceholder(defaultDriveFolderId) ? "" : defaultDriveFolderId);
+    }
+
+    /**
+     * Ensure the row exists, and fill it from env ONLY while the stored value is blank
+     * (a value set via the Settings UI always wins over env afterwards).
+     */
+    private void seedIfBlank(String key, String value) {
+        String v = value == null ? "" : value.trim();
+        jdbc.update(
+            "INSERT INTO app_settings(key, value) VALUES (?, ?) "
+            + "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value "
+            + "WHERE app_settings.value = ''",
+            key, v);
     }
 
     private static boolean isPlaceholder(String v) {
@@ -160,5 +185,10 @@ public class SettingsRepository {
 
     public String getSyncAccountEmail() {
         return getOrDefault("sync.account_email", "");
+    }
+
+    /** Explicit OAuth redirect URI (must match Google Cloud Console); blank = derive from origin. */
+    public String getSyncOAuthRedirectUri() {
+        return getOrDefault("sync.oauth.redirect_uri", "");
     }
 }

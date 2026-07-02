@@ -41,4 +41,22 @@ public class SyncWorker {
             syncService.uploadPending();
         });
     }
+
+    // Weekly orphan sweep (Drive files whose local twin is gone → Drive trash).
+    // Full Drive BFS, so it gets its own slow cadence — never piggyback on the upload cron.
+    @Scheduled(cron = "${sync.janitor.cron:0 0 4 * * SUN}")
+    public void scheduledJanitor() {
+        if (!settingsRepo.isSyncEnabled()) {
+            log.debug("[SyncWorker] sync disabled in settings — skipping janitor");
+            return;
+        }
+        lane.trigger(() -> {
+            log.info("[SyncWorker] scheduled janitor triggered");
+            try {
+                syncService.janitor(false);
+            } catch (Exception e) {
+                log.error("[SyncWorker] janitor failed: {}", e.getMessage());
+            }
+        });
+    }
 }

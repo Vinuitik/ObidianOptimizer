@@ -82,10 +82,15 @@ public class SyncOAuthService {
         if (!isClientConfigured()) {
             throw new IllegalStateException("Save the OAuth client id and secret first");
         }
-        if (origin == null || !ORIGIN_OK.matcher(origin.trim()).matches()) {
-            throw new IllegalArgumentException("invalid origin");
+        // Explicit redirect URI (env GOOGLE_OAUTH_REDIRECT_URI / setting) wins — it must
+        // match Google Cloud Console exactly. Otherwise derive from the caller's origin.
+        String redirectUri = settingsRepo.getSyncOAuthRedirectUri();
+        if (redirectUri.isBlank()) {
+            if (origin == null || !ORIGIN_OK.matcher(origin.trim()).matches()) {
+                throw new IllegalArgumentException("invalid origin");
+            }
+            redirectUri = origin.trim() + CALLBACK_PATH;
         }
-        String redirectUri = origin.trim() + CALLBACK_PATH;
         byte[] nonce = new byte[16];
         new SecureRandom().nextBytes(nonce);
         String state = HexFormat.of().formatHex(nonce);
@@ -126,6 +131,10 @@ public class SyncOAuthService {
         }
 
         settingsRepo.set("sync.refresh_token", refreshToken);
+        // The seeded GOOGLE_DRIVE_FOLDER_ID (service-account era) is NOT visible to this
+        // OAuth client under the drive.file scope — keeping it would 404 every upload.
+        // Clear it; DriveService auto-creates/finds the app's own root folder instead.
+        settingsRepo.set("sync.drive.folder_id", "");
         driveService.reset();
 
         String email = "";

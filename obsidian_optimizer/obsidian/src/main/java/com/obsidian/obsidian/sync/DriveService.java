@@ -163,6 +163,28 @@ public class DriveService {
             .execute().getUser().getEmailAddress();
     }
 
+    /** Drive storage quota {usedBytes, limitBytes} — limitBytes null = unlimited. */
+    public Map<String, Long> fetchQuota() throws IOException {
+        var q = requireClient().about().get().setFields("storageQuota").execute().getStorageQuota();
+        Map<String, Long> out = new HashMap<>();
+        out.put("usedBytes",  q.getUsage());
+        out.put("limitBytes", q.getLimit());
+        return out;
+    }
+
+    /**
+     * Move a Drive file to TRASH (30-day recovery), never a hard delete —
+     * {@code files().delete()} would bypass the trash entirely.
+     */
+    public void trashFile(String fileId) throws IOException {
+        try {
+            requireClient().files().update(fileId, new File().setTrashed(true))
+                .setFields("id").execute();
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() != 404) throw e;   // already gone = done
+        }
+    }
+
     // ── Upload ────────────────────────────────────────────────────────────────
 
     /**
@@ -225,7 +247,7 @@ public class DriveService {
         do {
             Drive.Files.List req = requireClient().files().list()
                 .setQ("'" + folderId + "' in parents and trashed = false")
-                .setFields("nextPageToken, files(id, name, mimeType, appProperties)")
+                .setFields("nextPageToken, files(id, name, mimeType, size, appProperties)")
                 .setPageSize(1000);
             if (pageToken != null) req.setPageToken(pageToken);
             FileList page = req.execute();
@@ -241,7 +263,8 @@ public class DriveService {
                             props.get("vault_path"),
                             props.getOrDefault("content_hash", ""),
                             props.getOrDefault("device_id", ""),
-                            parseLong(props.getOrDefault("uploaded_at", "0"))
+                            parseLong(props.getOrDefault("uploaded_at", "0")),
+                            f.getSize() == null ? 0L : f.getSize()
                         ));
                     }
                 }
@@ -313,6 +336,7 @@ public class DriveService {
         String vaultPath,
         String contentHash,
         String deviceId,
-        long uploadedAt
+        long uploadedAt,
+        long sizeBytes
     ) {}
 }

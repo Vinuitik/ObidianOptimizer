@@ -172,7 +172,7 @@ class SyncServiceTest {
     // ── downloadAll ───────────────────────────────────────────────────────
 
     private DriveFileInfo driveFile(String vaultPath, String contentHash) {
-        return new DriveFileInfo("fid-" + vaultPath, vaultPath, contentHash, "dev-2", 123L);
+        return new DriveFileInfo("fid-" + vaultPath, vaultPath, contentHash, "dev-2", 123L, 64L);
     }
 
     @Test
@@ -306,6 +306,86 @@ class SyncServiceTest {
 
         verify(queueRepo).markPending("resources/images/x.png",
             ContentHashing.sha256(bytes));
+    }
+
+    // ── tombstones (Drive-side delete propagation) ────────────────────────
+
+    @Test
+    void tombstonesAreTrashedAndRowsRemoved() throws Exception {
+        SyncEntry doomed = new SyncEntry("gone.md", "h", "DELETE_PENDING", 1L, "fid-gone", 0);
+        when(queueRepo.findByStatus("DELETE_PENDING")).thenReturn(List.of(doomed));
+        when(queueRepo.findByStatus("PENDING")).thenReturn(List.of());
+
+        service.uploadPending();
+
+        verify(drive).trashFile("fid-gone");
+        verify(queueRepo).delete("gone.md");
+    }
+
+    @Test
+    void tombstoneStaysWhenTrashFails() throws Exception {
+        SyncEntry doomed = new SyncEntry("gone.md", "h", "DELETE_PENDING", 1L, "fid-gone", 0);
+        when(queueRepo.findByStatus("DELETE_PENDING")).thenReturn(List.of(doomed));
+        when(queueRepo.findByStatus("PENDING")).thenReturn(List.of());
+        org.mockito.Mockito.doThrow(new IOException("boom")).when(drive).trashFile("fid-gone");
+
+        service.uploadPending();
+
+        verify(queueRepo, never()).delete("gone.md"); // retried next pass
+    }
+
+    @Test
+    void downloadSkipsFilesWithPendingLocalDelete() throws Exception {
+        DriveFileInfo df = driveFile("deleted.md", "hash-x");
+        when(drive.listAllFiles()).thenReturn(List.of(df));
+        when(queueRepo.findByPath("deleted.md"))
+            .thenReturn(new SyncEntry("deleted.md", "h", "DELETE_PENDING", 1L, df.fileId(), 0));
+
+        service.downloadAll();
+
+        // downloading would resurrect the deleted file and cancel its tombstone
+        verify(drive, never()).downloadFile(anyString());
+        verify(queueRepo, never()).markSynced(anyString(), anyString(), anyString());
+    }
+
+    // ── janitor ───────────────────────────────────────────────────────────
+
+    private DriveFileInfo orphan(String vaultPath, long uploadedAt) {
+        return new DriveFileInfo("fid-" + vaultPath, vaultPath, "h", "dev-2", uploadedAt, 128L);
+    }
+
+    @Test
+    void janitorDryRunReportsWithoutTouchingDrive() throws Exception {
+        when(drive.listAllFiles()).thenReturn(List.of(orphan("old-orphan.md", 123L)));
+
+        SyncService.JanitorResult r = service.janitor(true);
+
+        assertThat(r.orphans()).isEqualTo(1);
+        assertThat(r.freedBytes()).isEqualTo(128L);
+        verify(drive, never()).trashFile(anyString());
+    }
+
+    @Test
+    void janitorTrashesOldOrphansButSparesLocalFreshAndPending() throws Exception {
+        writeVaultFile("alive.md", "still here");
+        long now = System.currentTimeMillis();
+        DriveFileInfo alive   = orphan("alive.md",   123L);   // local twin exists
+        DriveFileInfo fresh   = orphan("fresh.md",   now);    // inside grace window
+        DriveFileInfo queued  = orphan("queued.md",  123L);   // PENDING re-upload
+        DriveFileInfo doomed  = orphan("doomed.md",  123L);   // true orphan
+        when(drive.listAllFiles()).thenReturn(List.of(alive, fresh, queued, doomed));
+        when(queueRepo.findByPath("queued.md"))
+            .thenReturn(new SyncEntry("queued.md", "h", "PENDING", null, null, 0));
+
+        SyncService.JanitorResult r = service.janitor(false);
+
+        assertThat(r.orphans()).isEqualTo(1);
+        assertThat(r.deletedPaths()).containsExactly("doomed.md");
+        verify(drive).trashFile("fid-doomed.md");
+        verify(drive, never()).trashFile("fid-alive.md");
+        verify(drive, never()).trashFile("fid-fresh.md");
+        verify(drive, never()).trashFile("fid-queued.md");
+        verify(queueRepo).delete("doomed.md");
     }
 
     // ── toRelative ────────────────────────────────────────────────────────

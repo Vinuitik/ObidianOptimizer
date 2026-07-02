@@ -1,4 +1,7 @@
-# Sync Retention & Cleanup — keep Drive from filling up [NOT IMPLEMENTED]
+# Sync Retention & Cleanup — keep Drive from filling up
+# STATUS: Part A + Phases 0–2 IMPLEMENTED 2026-07-03 (see sync/FLOWS.md "Delete
+# Propagation & Janitor"). Phase 3 (resource sync-exclusion) remains open — decide
+# with real quota numbers from the new /sync/status readout.
 
 Files (target): `sync/SyncService.java`, `sync/SyncWorker.java`, `sync/SyncQueueRepository.java`,
 `sync/DriveService.java`, `sync/SyncOAuthService.java`, `settings/SettingsRepository.java`,
