@@ -3,6 +3,7 @@
   height: 100%;
   width: 100%;
   overflow: hidden;
+  position: relative; /* anchor for the mobile drawer panels */
 }
 
 .panel {
@@ -166,10 +167,44 @@
   background: var(--color-accent-border);
 }
 
-/* ── Responsive: collapse sidebars on mobile ──────────────────────────────── */
+/* ── Responsive: side panels become overlay drawers on mobile ─────────────
+   display:none would make Files/Review unreachable on a phone. Instead the
+   open panel floats over the editor; the existing "▶ Files" / "Review ◀"
+   header buttons open them, the PanelHeader chevron closes them.
+   (useStore initializes both panels collapsed below 768px.) */
 @media (max-width: 768px) {
   .panelLeft,
   .panelRight {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 50;
+    width: min(85vw, 320px) !important;  /* beats the inline resize width */
+    min-width: 0 !important;
+    box-shadow: var(--shadow-modal);
+  }
+
+  .panelLeft {
+    left: 0;
+    border-right: 1px solid var(--color-border-hover);
+  }
+
+  .panelRight {
+    right: 0;
+    border-left: 1px solid var(--color-border-hover);
+  }
+
+  .panelLeft.collapsed,
+  .panelRight.collapsed {
     display: none;
+  }
+
+  .resizeHandle {
+    display: none;
+  }
+
+  .centerHeader {
+    padding: 0 var(--sp-3);
+    gap: var(--sp-2);
   }
 }

@@ -1,3 +1,9 @@
+/*
+  Breakpoint convention (CSS vars can't be used in @media, so it lives here as doc):
+    mobile  →  @media (max-width: 768px)
+  768px matches SplitLayout's existing query and pwa/ResponsiveApp's switch.
+  Touch targets at mobile: interactive elements aim for ≥44px hit height.
+*/
 :root {
   /* ── Background stack ─────────────────────────────────────── */
   --color-page:    #08070c;

@@ -196,3 +196,10 @@
   color: var(--color-muted);
   font-size: var(--text-sm);
 }
+
+/* ── Responsive: tighter gutters on mobile ────────────────────────────────── */
+@media (max-width: 768px) {
+  .page {
+    padding: var(--sp-5) var(--sp-4);
+  }
+}

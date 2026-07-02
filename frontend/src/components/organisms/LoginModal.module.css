@@ -8,6 +8,10 @@
   justify-content: center;
   z-index: 200;
   padding: var(--sp-4);
+  padding-bottom: max(var(--sp-4), env(safe-area-inset-bottom));
+  /* When the on-screen keyboard shrinks the viewport below the modal's height,
+     the overlay must scroll or the top of the modal is clipped off-screen. */
+  overflow-y: auto;
 }
 
 .modal {
@@ -21,6 +25,8 @@
   flex-direction: column;
   gap: var(--sp-4);
   box-shadow: var(--shadow-modal);
+  /* margin:auto centers like align-items:center but never clips in a scroll box */
+  margin: auto;
 }
 
 .title {

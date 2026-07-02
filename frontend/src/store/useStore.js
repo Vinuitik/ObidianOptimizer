@@ -153,9 +153,10 @@ const useStore = create((set, get) => ({
   isAuthenticated: false,
   showLogin: false,
 
-  // Panel collapse
-  leftCollapsed: false,
-  rightCollapsed: false,
+  // Panel collapse — start closed on phones, where the panels render as
+  // overlay drawers (SplitLayout.module.css) and would cover the editor
+  leftCollapsed: typeof window?.matchMedia === 'function' && window.matchMedia('(max-width: 768px)').matches,
+  rightCollapsed: typeof window?.matchMedia === 'function' && window.matchMedia('(max-width: 768px)').matches,
 
   // UI preference stored in localStorage — 'inline' | 'flashcard'
   reviewMode: localStorage.getItem(REVIEW_MODE_KEY) ?? 'inline',

@@ -155,3 +155,10 @@
   border: none;
   display: block;
 }
+
+/* ── Responsive: narrower file strip on mobile ────────────────────────────── */
+@media (max-width: 768px) {
+  .fileList {
+    width: min(40vw, 180px);
+  }
+}

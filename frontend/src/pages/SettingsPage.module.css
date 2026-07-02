@@ -282,3 +282,10 @@ select.input option {
   color: var(--color-text-2);
   line-height: var(--leading-normal);
 }
+
+/* ── Responsive: tighter gutters on mobile ────────────────────────────────── */
+@media (max-width: 768px) {
+  .page {
+    padding: var(--sp-5) var(--sp-4);
+  }
+}

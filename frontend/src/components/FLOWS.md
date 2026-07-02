@@ -170,9 +170,11 @@ To change center panel routing: `SplitLayout.jsx` center panel conditional
 
 ## NavBar
 
-Fixed top bar, 56px height.  
+Fixed top bar, 56px height on desktop.  
 Auth state from `isAuthenticated` → "Sign in" / "Sign out".  
 `NavLink` from react-router-dom — `.linkActive` applied on active route.
+
+Mobile (≤768px): CSS-only two-row wrap — brand + auth on row 1 (auth always on-screen), links on row 2, horizontally scrollable, ≥44px touch targets. See `NavBar.module.css` `@media` block.
 
 Streak display: hardcoded "12-day streak" — wire to `streakDays` in store when backend supports it.
 
@@ -184,6 +186,24 @@ Renders over app when `showLogin = true`.
 `<label htmlFor="login-username">` / `<label htmlFor="login-password">` — required for `getByLabelText` in tests.  
 Submit → `POST /api/login` → `isAuthenticated = true`, `showLogin = false`.  
 Overlay click / Cancel → `showLogin = false`.
+
+Overlay is `overflow-y: auto` + modal `margin: auto` — on-screen keyboard shrinking the viewport scrolls instead of clipping the modal top.
+
+---
+
+## Responsive / Mobile (site-wide)
+
+Single breakpoint: `@media (max-width: 768px)` everywhere (documented in `styles/tokens.css`; matches `pwa/ResponsiveApp`). All CSS-only except two JS touches marked below.
+
+- `App.module.css .shell` — `100dvh` (visible viewport; `100vh` fallback) + `safe-area-inset-bottom`
+- `NavBar.module.css` — two-row wrap (see NavBar above); `safe-area-inset-top`
+- `SplitLayout.module.css` — side panels become absolute overlay **drawers** (`z-index: 50`, `min(85vw, 320px)`), not `display:none`; collapsed = hidden. **JS touch:** `useStore.js` initializes `leftCollapsed`/`rightCollapsed` via `matchMedia` so drawers start closed on phones (guarded — jsdom has no `matchMedia`). Open/close via existing "▶ Files"/"Review ◀" header buttons.
+- `LearnLayout.module.css` — panes always stack vertically; divider drag disabled (`pointer-events: none`; its math assumes desktop orientation), swap button still active
+- `ReviewPage.module.css` — one pane at a time: list full-screen ↔ session full-screen. **JS touch:** `ReviewPage.jsx` sets `.hasSession` class when a session/inline note is open
+- `ResourcePanel/InboxPanel .module.css` — fixed sidebars → `min(40-45vw, …)`
+- `DashboardPage/SettingsPage .module.css` — tighter gutters
+
+[NOT IMPLEMENTED]: drawer backdrop/swipe-to-close; live re-collapse when resizing desktop→mobile (initial-load only).
 
 ---
 
@@ -211,6 +231,10 @@ Controlled by `store.toastMessage` + `showToast()`.
 | Search filter logic | `organisms/FolderTree.jsx hasMatch()` |
 | Tab dirty indicator style | `molecules/TabBar.module.css .dirty` |
 | Resizable panel defaults | `templates/SplitLayout.jsx MIN/MAX/DEFAULT_WIDTH` |
+| Mobile breakpoint (768px) | every `@media` block; convention doc in `styles/tokens.css` |
+| Mobile drawer width/behavior | `templates/SplitLayout.module.css` `@media` block |
+| Drawer initial collapsed state | `store/useStore.js leftCollapsed/rightCollapsed` |
+| Review mobile pane switch | `pages/ReviewPage.jsx hasSession` + `.module.css` `@media` |
 | Center panel routing | `templates/SplitLayout.jsx` center conditional |
 | Streak display | `organisms/NavBar.jsx` hardcoded string |
 | Toast dismiss timing | `atoms/Toast.jsx` + `store/useStore.js showToast()` |

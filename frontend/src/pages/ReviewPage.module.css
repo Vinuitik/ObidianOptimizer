@@ -181,6 +181,44 @@
   word-break: break-word;
 }
 
+/* ── Responsive: one pane at a time on mobile ──────────────────────────────
+   No session → the due list gets the whole screen. Session active (.hasSession,
+   set by ReviewPage.jsx) → the list hides and the flashcard/inline view gets
+   the whole screen; its Close/Back buttons return to the list. */
+@media (max-width: 768px) {
+  .page {
+    flex-direction: column;
+  }
+
+  .noteList {
+    width: 100%;
+    flex: 1;
+    border-right: none;
+  }
+
+  .divider {
+    display: none;
+  }
+
+  .sessionPane {
+    display: none;
+  }
+
+  .hasSession .noteList {
+    display: none;
+  }
+
+  .hasSession .sessionPane {
+    display: flex;
+  }
+
+  .noteItem {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
 /* ── Auth gate ───────────────────────────────────────────────────────────── */
 
 .gate {

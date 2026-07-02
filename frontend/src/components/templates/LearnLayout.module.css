@@ -97,3 +97,45 @@
   color: var(--color-accent-soft);
   border-color: var(--color-accent-border);
 }
+
+/* ── Responsive: always stack panes vertically on mobile ──────────────────
+   Side-by-side panes don't fit a phone. Inline styles set the pane width in
+   'vertical' orientation, hence the !important overrides. The divider stays
+   as a visual separator + swap button, but drag-resize is pointer-disabled
+   (its math assumes the desktop orientation). */
+@media (max-width: 768px) {
+  .vertical {
+    flex-direction: column;
+  }
+
+  .vertical > .pane {
+    width: 100% !important;
+    height: 45%;
+  }
+
+  .vertical > .paneSecond {
+    height: auto;
+    flex: 1;
+  }
+
+  .dividerV {
+    width: auto;
+    height: 14px;
+    flex-direction: row;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .dividerV::before {
+    left: 0;
+    right: 0;
+    top: 5px;
+    bottom: auto;
+    width: auto;
+    height: 4px;
+  }
+
+  .swapBtn {
+    pointer-events: auto;
+  }
+}

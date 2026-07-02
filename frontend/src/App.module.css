@@ -2,8 +2,11 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* dvh tracks the *visible* viewport on mobile (URL bar, keyboard); vh doesn't */
+  height: 100dvh;
   overflow: hidden;
   background: var(--color-page);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .pageWrapper {

@@ -50,8 +50,10 @@ export default function ReviewPage() {
     );
   }
 
+  const hasSession = Boolean(activeNote || inlineNote);
+
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${hasSession ? styles.hasSession : ''}`}>
       {/* Left — note list */}
       <div className={styles.noteList}>
         <div className={styles.listHeader}>

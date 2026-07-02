@@ -113,10 +113,22 @@
   background: var(--color-card);
 }
 
-@media (max-width: 600px) {
+/* ── Mobile: two rows — brand + auth on top, scrollable links below ───────
+   Keeps "Sign in" on-screen at any width (the old single-row nav pushed it
+   past the right edge on phones, making login impossible). */
+@media (max-width: 768px) {
   .nav {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 0;
     padding: 0 var(--sp-3);
-    gap: var(--sp-3);
+    padding-top: env(safe-area-inset-top);
+    gap: 0 var(--sp-3);
+  }
+
+  .brand,
+  .right {
+    min-height: 48px;
   }
 
   .streak {
@@ -124,11 +136,28 @@
   }
 
   .links {
-    gap: 0;
+    order: 3;
+    flex-basis: 100%;
+    gap: var(--sp-1);
+    overflow-x: auto;
+    border-top: 1px solid var(--color-border);
+    scrollbar-width: none;
+  }
+
+  .links::-webkit-scrollbar {
+    display: none;
   }
 
   .link {
-    padding: var(--sp-1) var(--sp-2);
-    font-size: var(--text-xs);
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 var(--sp-3);
+    border-radius: 0;
+  }
+
+  .authBtn {
+    min-height: 36px;
+    padding: var(--sp-1) var(--sp-4);
   }
 }
