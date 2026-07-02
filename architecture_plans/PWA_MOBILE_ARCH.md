@@ -8,8 +8,11 @@
 > offline review seam, share-target capture, hand-written `public/sw.js`) but is NOT
 > activated: `src/main.jsx` still renders desktop `App` directly and the store is not
 > wired to `pwa/offlineApi`. Backend (`CaptureController`) provides `POST /api/capture`,
-> `GET /api/review/bundle`, `/api/download`. **Next step is the two activation edits**
-> (`pwa/FLOWS.md` "Activation"), likely alongside the pending mobile-responsive fixes.
+> `GET /api/review/bundle`, `/api/download`. Note: the mobile-responsive overhaul
+> (2026-07-02) deliberately went with responsive CSS on the one app INSTEAD of activating
+> the `MobileApp` shell — so activation is a **decision, not a default**: the offline
+> pieces (SW, IDB seam, share-target — `pwa/FLOWS.md` "Activation") can be turned on
+> without adopting the separate mobile shell.
 > This plan supersedes the native approach (MOBILE_ARCH.md, deleted — its surviving
 > decisions are folded in at §14).
 > Requirements update (user, 2026-07-02): (a) **full web parity while the server is up**
