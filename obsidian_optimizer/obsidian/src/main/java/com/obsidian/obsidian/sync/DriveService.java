@@ -10,7 +10,8 @@ import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
 import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.auth.oauth2.GoogleCredentials;
-import jakarta.annotation.PostConstruct;
+import com.google.auth.oauth2.UserCredentials;
+import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,41 +34,133 @@ public class DriveService {
     private static final Logger log = LoggerFactory.getLogger(DriveService.class);
     private static final String FOLDER_MIME = "application/vnd.google-apps.folder";
 
+    /** Name of the auto-created sync root in the user's Drive (OAuth mode only). */
+    private static final String DEFAULT_ROOT_NAME = "ObsidianOptimizer";
+
     @Value("${sync.google.service-account-json:placeholder}")
     private String serviceAccountJson;
 
-    @Value("${sync.google.drive.folder-id:placeholder}")
-    private String rootFolderId;
+    private final SettingsRepository settingsRepo;
 
-    private Drive drive;
+    // Built lazily so credentials added via the Settings UI take effect without a
+    // restart. reset() drops it after connect/disconnect/credential edits.
+    private volatile Drive drive;
+    private volatile String activeMode = "none"; // oauth | service-account | none
 
     /** Cache: "parentFolderId/name" → child folder ID. Avoids redundant list API calls. */
     private final Map<String, String> folderCache = new ConcurrentHashMap<>();
 
-    @PostConstruct
-    public void init() {
-        if (serviceAccountJson.isBlank() || "placeholder".equals(serviceAccountJson)) {
-            log.warn("[DriveService] No service account configured — Drive sync disabled");
-            return;
-        }
+    public DriveService(SettingsRepository settingsRepo) {
+        this.settingsRepo = settingsRepo;
+    }
+
+    /**
+     * Credential priority: OAuth refresh token from settings (user signed in via the
+     * Settings page — files land in THEIR Drive/quota) → service-account env JSON
+     * (headless fallback, 15GB service-account quota) → null (sync disabled).
+     */
+    private synchronized Drive ensureClient() {
+        if (drive != null) return drive;
         try {
-            GoogleCredentials creds = GoogleCredentials
-                .fromStream(new ByteArrayInputStream(serviceAccountJson.getBytes(StandardCharsets.UTF_8)))
-                .createScoped(Collections.singleton(DriveScopes.DRIVE));
+            String refreshToken = settingsRepo.getSyncRefreshToken();
+            String clientId     = settingsRepo.getSyncClientId();
+            String clientSecret = settingsRepo.getSyncClientSecret();
+
+            HttpCredentialsAdapter adapter;
+            if (!refreshToken.isBlank() && !clientId.isBlank() && !clientSecret.isBlank()) {
+                UserCredentials creds = UserCredentials.newBuilder()
+                    .setClientId(clientId)
+                    .setClientSecret(clientSecret)
+                    .setRefreshToken(refreshToken)
+                    .build();
+                adapter = new HttpCredentialsAdapter(creds);
+                activeMode = "oauth";
+            } else if (!serviceAccountJson.isBlank() && !"placeholder".equals(serviceAccountJson)) {
+                GoogleCredentials creds = GoogleCredentials
+                    .fromStream(new ByteArrayInputStream(serviceAccountJson.getBytes(StandardCharsets.UTF_8)))
+                    .createScoped(Collections.singleton(DriveScopes.DRIVE));
+                adapter = new HttpCredentialsAdapter(creds);
+                activeMode = "service-account";
+            } else {
+                activeMode = "none";
+                return null;
+            }
+
             drive = new Drive.Builder(
                 GoogleNetHttpTransport.newTrustedTransport(),
                 GsonFactory.getDefaultInstance(),
-                new HttpCredentialsAdapter(creds))
+                adapter)
                 .setApplicationName("ObsidianOptimizer")
                 .build();
-            log.info("[DriveService] Google Drive client initialised");
+            log.info("[DriveService] Google Drive client initialised ({})", activeMode);
+            return drive;
         } catch (Exception e) {
-            log.error("[DriveService] init failed: {}", e.getMessage());
+            log.error("[DriveService] client init failed: {}", e.getMessage());
+            activeMode = "none";
+            return null;
         }
     }
 
+    /** Drop the client + caches so the next call rebuilds from current settings. */
+    public synchronized void reset() {
+        drive = null;
+        activeMode = "none";
+        folderCache.clear();
+    }
+
+    /** oauth | service-account | none — which credential source WOULD be used. */
+    public String mode() {
+        String refreshToken = settingsRepo.getSyncRefreshToken();
+        if (!refreshToken.isBlank()
+            && !settingsRepo.getSyncClientId().isBlank()
+            && !settingsRepo.getSyncClientSecret().isBlank()) return "oauth";
+        if (!serviceAccountJson.isBlank() && !"placeholder".equals(serviceAccountJson)) return "service-account";
+        return "none";
+    }
+
     public boolean isConfigured() {
-        return drive != null && !rootFolderId.isBlank() && !"placeholder".equals(rootFolderId);
+        String m = mode();
+        if ("oauth".equals(m)) return true;                     // root folder is auto-created
+        return "service-account".equals(m) && !settingsRepo.getSyncDriveFolderId().isBlank();
+    }
+
+    /**
+     * Root folder for the encrypted mirror. Explicit setting/env wins; in OAuth mode a
+     * top-level "ObsidianOptimizer" folder is found-or-created (drive.file scope only
+     * sees app-created files, so the by-name lookup cannot collide with user files)
+     * and persisted so every device reuses the same ID.
+     */
+    private String rootFolderId() throws IOException {
+        String configured = settingsRepo.getSyncDriveFolderId();
+        if (!configured.isBlank()) return configured;
+        if (!"oauth".equals(mode())) throw new IOException("Drive root folder not configured");
+
+        Drive d = requireClient();
+        FileList found = d.files().list()
+            .setQ("name = '" + DEFAULT_ROOT_NAME + "' and mimeType = '" + FOLDER_MIME + "' and trashed = false")
+            .setFields("files(id)").setPageSize(1).execute();
+        String id;
+        if (!found.getFiles().isEmpty()) {
+            id = found.getFiles().get(0).getId();
+        } else {
+            File folder = new File().setName(DEFAULT_ROOT_NAME).setMimeType(FOLDER_MIME);
+            id = d.files().create(folder).setFields("id").execute().getId();
+            log.info("[DriveService] created sync root folder '{}' ({})", DEFAULT_ROOT_NAME, id);
+        }
+        settingsRepo.set("sync.drive.folder_id", id);
+        return id;
+    }
+
+    private Drive requireClient() throws IOException {
+        Drive d = ensureClient();
+        if (d == null) throw new IOException("Google Drive not configured");
+        return d;
+    }
+
+    /** Email of the connected account (OAuth) — used for the Settings status line. */
+    public String fetchAccountEmail() throws IOException {
+        return requireClient().about().get().setFields("user(emailAddress)")
+            .execute().getUser().getEmailAddress();
     }
 
     // ── Upload ────────────────────────────────────────────────────────────────
@@ -90,11 +183,12 @@ public class DriveService {
         props.put("uploaded_at",  String.valueOf(System.currentTimeMillis()));
 
         ByteArrayContent content = new ByteArrayContent("application/octet-stream", bytes);
+        Drive d = requireClient();
 
         if (existingFileId != null) {
             try {
                 File meta = new File().setName(encName).setAppProperties(props);
-                drive.files().update(existingFileId, meta, content).setFields("id").execute();
+                d.files().update(existingFileId, meta, content).setFields("id").execute();
                 return existingFileId;
             } catch (GoogleJsonResponseException e) {
                 if (e.getStatusCode() != 404) throw e;
@@ -106,14 +200,14 @@ public class DriveService {
             .setName(encName)
             .setParents(Collections.singletonList(folderId))
             .setAppProperties(props);
-        return drive.files().create(meta, content).setFields("id").execute().getId();
+        return d.files().create(meta, content).setFields("id").execute().getId();
     }
 
     // ── Download ──────────────────────────────────────────────────────────────
 
     public byte[] downloadFile(String fileId) throws IOException {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        drive.files().get(fileId).executeMediaAndDownloadTo(bos);
+        requireClient().files().get(fileId).executeMediaAndDownloadTo(bos);
         return bos.toByteArray();
     }
 
@@ -122,14 +216,14 @@ public class DriveService {
     /** Recursively list all .enc files under the sync root, returning their metadata. */
     public List<DriveFileInfo> listAllFiles() throws IOException {
         List<DriveFileInfo> result = new ArrayList<>();
-        listRecursive(rootFolderId, result);
+        listRecursive(rootFolderId(), result);
         return result;
     }
 
     private void listRecursive(String folderId, List<DriveFileInfo> acc) throws IOException {
         String pageToken = null;
         do {
-            Drive.Files.List req = drive.files().list()
+            Drive.Files.List req = requireClient().files().list()
                 .setQ("'" + folderId + "' in parents and trashed = false")
                 .setFields("nextPageToken, files(id, name, mimeType, appProperties)")
                 .setPageSize(1000);
@@ -165,7 +259,7 @@ public class DriveService {
      */
     private String ensureFolderPath(String relativePath) throws IOException {
         String[] parts = relativePath.split("/");
-        String current = rootFolderId;
+        String current = rootFolderId();
         for (int i = 0; i < parts.length - 1; i++) {
             if (!parts[i].isBlank()) {
                 current = getOrCreateFolder(parts[i], current);
@@ -179,11 +273,12 @@ public class DriveService {
         String cached = folderCache.get(cacheKey);
         if (cached != null) return cached;
 
+        Drive d = requireClient();
         String q = "name = '" + name.replace("'", "\\'") + "'"
             + " and '" + parentId + "' in parents"
             + " and mimeType = '" + FOLDER_MIME + "'"
             + " and trashed = false";
-        FileList result = drive.files().list()
+        FileList result = d.files().list()
             .setQ(q).setFields("files(id)").setPageSize(1).execute();
 
         String id;
@@ -194,7 +289,7 @@ public class DriveService {
                 .setName(name)
                 .setMimeType(FOLDER_MIME)
                 .setParents(Collections.singletonList(parentId));
-            id = drive.files().create(folder).setFields("id").execute().getId();
+            id = d.files().create(folder).setFields("id").execute().getId();
         }
         folderCache.put(cacheKey, id);
         return id;

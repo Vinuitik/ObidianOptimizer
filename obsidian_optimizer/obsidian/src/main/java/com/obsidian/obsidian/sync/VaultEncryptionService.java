@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.sync;
 
+import com.obsidian.obsidian.settings.SettingsRepository;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,22 +38,49 @@ public class VaultEncryptionService {
     @Value("${sync.passphrase:}")
     private String passphrase;
 
-    private SecretKey key;
+    // Settings-backed passphrase (editable in the UI); env `sync.passphrase` is the
+    // fallback so headless installs keep working. Nullable so unit tests can keep
+    // constructing the service bare and drive it via the `passphrase` field.
+    private final SettingsRepository settingsRepo;
+
+    private volatile SecretKey key;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public VaultEncryptionService(SettingsRepository settingsRepo) {
+        this.settingsRepo = settingsRepo;
+    }
+
+    VaultEncryptionService() {
+        this.settingsRepo = null;
+    }
 
     @PostConstruct
-    public void init() {
-        if (passphrase == null || passphrase.isBlank()) {
-            log.warn("[VaultEncryptionService] sync.passphrase not set — encryption disabled");
+    public synchronized void init() {
+        String effective = null;
+        if (settingsRepo != null) {
+            try { effective = settingsRepo.getSyncPassphrase(); } catch (Exception ignored) {}
+        }
+        if (effective == null || effective.isBlank()) effective = passphrase;
+
+        if (effective == null || effective.isBlank()) {
+            key = null;
+            log.warn("[VaultEncryptionService] sync passphrase not set — encryption disabled");
             return;
         }
         try {
-            KeySpec spec = new PBEKeySpec(passphrase.toCharArray(), PBKDF2_SALT, PBKDF2_ITERATIONS, KEY_BITS);
+            KeySpec spec = new PBEKeySpec(effective.toCharArray(), PBKDF2_SALT, PBKDF2_ITERATIONS, KEY_BITS);
             SecretKeyFactory skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
             key = new SecretKeySpec(skf.generateSecret(spec).getEncoded(), "AES");
             log.info("[VaultEncryptionService] AES-256-GCM key derived from passphrase");
         } catch (Exception e) {
+            key = null;
             log.error("[VaultEncryptionService] key derivation failed: {}", e.getMessage());
         }
+    }
+
+    /** Re-derive the key after the passphrase setting changed. */
+    public void reload() {
+        init();
     }
 
     public boolean isConfigured() {

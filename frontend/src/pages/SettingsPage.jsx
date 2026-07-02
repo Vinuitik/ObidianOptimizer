@@ -4,6 +4,10 @@ import {
   fetchChronoStatus, runChronoNow,
   fetchChildren, fetchHostChildren, fetchVaultHostPath, saveVaultHostPath, pingHealth,
 } from '../api/notes';
+import {
+  fetchSyncStatus, fetchOAuthUrl, disconnectDrive,
+  triggerSyncUpload, triggerSyncDownload,
+} from '../api/sync';
 import FolderPicker from '../components/organisms/FolderPicker';
 import styles from './SettingsPage.module.css';
 
@@ -425,6 +429,9 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Google Drive sync — sign in, passphrase, enable, manual triggers */}
+        <DriveSyncPanel loaded={loaded} isAuthenticated={isAuthenticated} />
+
         {/* Chrono status — read-only panel with manual trigger */}
         <div className={styles.section}>
           <div className={styles.sectionHeader}>
@@ -470,6 +477,221 @@ export default function SettingsPage() {
 
       {picker && <FolderPicker {...picker} />}
       {recreating && <RecreatingOverlay />}
+    </div>
+  );
+}
+
+// ── Google Drive sync panel ─────────────────────────────────────────────────────
+// Sign in with Google (OAuth, drive.file scope — synced files land in YOUR Drive),
+// set the encryption passphrase, toggle auto-sync, and trigger upload/download.
+// Secrets are write-only: the backend only reports whether they are saved.
+
+function DriveSyncPanel({ loaded, isAuthenticated }) {
+  const settings      = useStore(s => s.settings);
+  const applySettings = useStore(s => s.applySettings);
+
+  const [sync, setSync]         = useState(null);   // /sync/status payload
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [passphrase, setPassphrase]     = useState('');
+  const [busy, setBusy]         = useState(null);   // 'save' | 'connect' | 'disconnect' | 'upload' | 'download'
+  const [error, setError]       = useState(null);
+  const [notice, setNotice]     = useState(null);
+
+  const refreshStatus = useCallback(() => {
+    fetchSyncStatus().then(setSync).catch(() => setSync(null));
+  }, []);
+
+  useEffect(() => { if (isAuthenticated) refreshStatus(); }, [isAuthenticated, refreshStatus]);
+
+  // Prefill the client id from saved settings once they load.
+  useEffect(() => { setClientId(settings.syncClientId ?? ''); }, [settings.syncClientId]);
+
+  // Returning from Google: /settings?drive=connected|error&reason=…
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const drive = params.get('drive');
+    if (!drive) return;
+    if (drive === 'connected') setNotice('Google Drive connected.');
+    else setError(`Connect failed: ${params.get('reason') || 'unknown error'}`);
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
+
+  async function run(kind, fn) {
+    setBusy(kind);
+    setError(null);
+    setNotice(null);
+    try {
+      await fn();
+      refreshStatus();
+    } catch (e) {
+      setError(e.message ?? 'Request failed.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const credsDirty =
+    clientId !== (settings.syncClientId ?? '') || clientSecret !== '' || passphrase !== '';
+
+  function saveCreds() {
+    return run('save', async () => {
+      const patch = { syncClientId: clientId.trim() };
+      if (clientSecret.trim()) patch.syncClientSecret = clientSecret.trim();
+      if (passphrase.trim())   patch.syncPassphrase   = passphrase.trim();
+      await applySettings(patch);
+      setClientSecret('');
+      setPassphrase('');
+      setNotice('Saved.');
+    });
+  }
+
+  function connect() {
+    return run('connect', async () => {
+      window.location.href = await fetchOAuthUrl();
+    });
+  }
+
+  const connected = Boolean(sync?.connected);
+  const queueLine = sync
+    ? `${sync.pending ?? 0} pending · ${sync.done ?? 0} synced · ${sync.failed ?? 0} failed`
+    : '—';
+
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionHeader}>
+        <h2 className={styles.sectionTitle}>Google Drive Sync</h2>
+        <p className={styles.sectionDesc}>
+          Encrypted per-file backup of the vault to your Google Drive. Create an OAuth client
+          (type “Web application”) in Google Cloud Console, add{' '}
+          <code>{window.location.origin}/api/sync/oauth/callback</code> as an authorised redirect
+          URI, paste its credentials here, then connect. Files are AES-256 encrypted with your
+          passphrase before upload — Google never sees plaintext.
+        </p>
+      </div>
+
+      <div className={styles.fields}>
+        <div className={styles.field}>
+          <div className={styles.fieldMeta}>
+            <label className={styles.label}>Status</label>
+          </div>
+          <span className={styles.hint}>
+            {!sync ? 'Unavailable — sign in first.'
+              : connected
+                ? `Connected as ${sync.accountEmail || 'Google account'} · ${queueLine}`
+                : `Not connected · ${queueLine}`}
+            {sync && !sync.encryptionConfigured ? ' · passphrase not set' : ''}
+          </span>
+        </div>
+
+        <div className={styles.field}>
+          <div className={styles.fieldMeta}>
+            <label className={styles.label} htmlFor="sync-client-id">OAuth client ID</label>
+          </div>
+          <input
+            id="sync-client-id" type="text"
+            className={`${styles.input} ${styles.inputPath}`}
+            value={clientId} disabled={!loaded}
+            placeholder="…apps.googleusercontent.com"
+            onChange={e => setClientId(e.target.value)}
+          />
+        </div>
+
+        <div className={styles.field}>
+          <div className={styles.fieldMeta}>
+            <label className={styles.label} htmlFor="sync-client-secret">OAuth client secret</label>
+          </div>
+          <input
+            id="sync-client-secret" type="password"
+            className={styles.input}
+            value={clientSecret} disabled={!loaded}
+            placeholder={settings.syncClientSecretSet ? '•••••• (saved — type to replace)' : ''}
+            onChange={e => setClientSecret(e.target.value)}
+          />
+        </div>
+
+        <div className={styles.field}>
+          <div className={styles.fieldMeta}>
+            <label className={styles.label} htmlFor="sync-passphrase">Encryption passphrase</label>
+            <span className={styles.hint}>
+              Same passphrase on every device. Changing it makes files already on Drive
+              unreadable until re-uploaded.
+            </span>
+          </div>
+          <input
+            id="sync-passphrase" type="password"
+            className={styles.input}
+            value={passphrase} disabled={!loaded}
+            placeholder={settings.syncPassphraseSet ? '•••••• (saved — type to replace)' : ''}
+            onChange={e => setPassphrase(e.target.value)}
+          />
+        </div>
+
+        <div className={styles.field}>
+          <div className={styles.fieldMeta}>
+            <label className={styles.label} htmlFor="sync-enabled">Automatic sync</label>
+            <span className={styles.hint}>Uploads pending changes on a schedule (default every 6h).</span>
+          </div>
+          <select
+            id="sync-enabled"
+            className={styles.input}
+            value={String(settings.syncEnabled ?? false)}
+            disabled={!loaded || busy != null}
+            onChange={e => run('save', () => applySettings({ syncEnabled: e.target.value === 'true' }))}
+          >
+            <option value="false">Off</option>
+            <option value="true">On — scheduled background uploads</option>
+          </select>
+        </div>
+      </div>
+
+      {error  && <span className={styles.errorMsg}>{error}</span>}
+      {notice && !error && <span className={styles.savedMsg}>{notice}</span>}
+
+      <div className={styles.sectionFooter}>
+        <button
+          className={styles.saveBtn}
+          disabled={!loaded || busy != null || !credsDirty}
+          onClick={saveCreds}
+        >
+          {busy === 'save' ? 'Saving…' : 'Save'}
+        </button>
+        {!connected ? (
+          <button
+            className={styles.saveBtn}
+            disabled={!loaded || busy != null || !(settings.syncClientId && settings.syncClientSecretSet)}
+            onClick={connect}
+            title={!(settings.syncClientId && settings.syncClientSecretSet)
+              ? 'Save the OAuth client id and secret first' : undefined}
+          >
+            {busy === 'connect' ? 'Redirecting…' : 'Connect Google Drive'}
+          </button>
+        ) : (
+          <>
+            <button
+              className={styles.saveBtn}
+              disabled={busy != null}
+              onClick={() => run('upload', triggerSyncUpload)}
+            >
+              {busy === 'upload' ? 'Uploading…' : 'Sync now'}
+            </button>
+            <button
+              className={styles.saveBtn}
+              disabled={busy != null}
+              onClick={() => run('download', triggerSyncDownload)}
+            >
+              {busy === 'download' ? 'Pulling…' : 'Pull from Drive'}
+            </button>
+            <button
+              className={styles.saveBtn}
+              disabled={busy != null}
+              onClick={() => run('disconnect', disconnectDrive)}
+            >
+              {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

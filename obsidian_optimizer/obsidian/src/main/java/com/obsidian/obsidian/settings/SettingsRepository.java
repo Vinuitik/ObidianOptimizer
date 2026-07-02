@@ -18,6 +18,14 @@ public class SettingsRepository {
     @Value("${IMAGE_PATH:#{null}}")
     private String defaultImagePath;
 
+    // Sync seeds — env vars remain the headless bootstrap; the Settings UI owns the
+    // values afterwards (DB wins over env once seeded).
+    @Value("${SYNC_PASSPHRASE:}")
+    private String defaultSyncPassphrase;
+
+    @Value("${GOOGLE_DRIVE_FOLDER_ID:placeholder}")
+    private String defaultDriveFolderId;
+
     public SettingsRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
@@ -46,6 +54,19 @@ public class SettingsRepository {
         insertDefault("sync.device_id", "");
         insertDefault("flashcardsEnabled", "true");
         insertDefault("chronicNeglectDays", "7");
+
+        // Google Drive sync (SyncController / DriveService / VaultEncryptionService)
+        insertDefault("syncEnabled", "false");
+        insertDefault("syncClientId", "");
+        insertDefault("syncClientSecret", "");
+        insertDefault("syncPassphrase", defaultSyncPassphrase == null ? "" : defaultSyncPassphrase);
+        insertDefault("sync.drive.folder_id", isPlaceholder(defaultDriveFolderId) ? "" : defaultDriveFolderId);
+        insertDefault("sync.refresh_token", "");
+        insertDefault("sync.account_email", "");
+    }
+
+    private static boolean isPlaceholder(String v) {
+        return v == null || v.isBlank() || "placeholder".equals(v);
     }
 
     private void insertDefault(String key, String value) {
@@ -109,5 +130,35 @@ public class SettingsRepository {
 
     public int getChronicNeglectDays() {
         return Integer.parseInt(getOrDefault("chronicNeglectDays", "7"));
+    }
+
+    // ── Google Drive sync ─────────────────────────────────────────────────────
+
+    public boolean isSyncEnabled() {
+        return Boolean.parseBoolean(getOrDefault("syncEnabled", "false"));
+    }
+
+    public String getSyncClientId() {
+        return getOrDefault("syncClientId", "");
+    }
+
+    public String getSyncClientSecret() {
+        return getOrDefault("syncClientSecret", "");
+    }
+
+    public String getSyncPassphrase() {
+        return getOrDefault("syncPassphrase", "");
+    }
+
+    public String getSyncDriveFolderId() {
+        return getOrDefault("sync.drive.folder_id", "");
+    }
+
+    public String getSyncRefreshToken() {
+        return getOrDefault("sync.refresh_token", "");
+    }
+
+    public String getSyncAccountEmail() {
+        return getOrDefault("sync.account_email", "");
     }
 }

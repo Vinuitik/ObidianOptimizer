@@ -25,6 +25,11 @@ Implemented baseline: `sync/FLOWS.md` (per-file AES-256-GCM Drive sync).
 
 ## Hard constraint to verify first: whose quota is it?
 
+> **Update 2026-07-02:** OAuth sign-in shipped (Settings → Google Drive Sync,
+> `SyncOAuthService`). When connected, files are owned by the USER's account —
+> the user's real Drive quota applies and the service-account 15 GB problem
+> disappears. The paragraph below now describes only the headless SA fallback.
+
 Uploads via `GOOGLE_SERVICE_ACCOUNT_JSON` are **owned by the service account**, which has
 its own ~15 GB quota — unless the sync root lives on a Shared Drive or the files are
 created in a folder shared *to* the account (owner rules differ). If the vault is

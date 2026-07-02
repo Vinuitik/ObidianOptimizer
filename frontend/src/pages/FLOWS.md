@@ -38,6 +38,15 @@ To add a new setting:
 3. `SettingsController.SettingsResponse` + `UpdateSettingsRequest` records
 4. `SettingsController.updateSettings()` handler
 
+### Google Drive Sync panel
+
+`DriveSyncPanel` (custom section, not in `SECTIONS`): status from `GET /api/sync/status`
+(`api/sync.js`), OAuth client id/secret + passphrase fields (secrets write-only —
+placeholder shows "saved"), auto-sync toggle, **Connect Google Drive** (redirects to the
+consent URL from `/api/sync/oauth/url`), Disconnect, Sync now / Pull from Drive.
+Returning from Google lands on `/settings?drive=connected|error` — the panel reads and
+strips the param. Backend flow: `sync/FLOWS.md` → "Auth & configuration".
+
 ### Chrono Status Panel
 
 Rendered below the `SECTIONS` loop — not a form field, so not in the array.

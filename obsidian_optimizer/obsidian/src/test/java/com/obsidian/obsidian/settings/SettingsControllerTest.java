@@ -2,6 +2,8 @@ package com.obsidian.obsidian.settings;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.sync.DriveService;
+import com.obsidian.obsidian.sync.VaultEncryptionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,8 +22,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class SettingsControllerTest {
 
-    @Mock SettingsRepository settingsRepository;
-    @Mock FileRepository     fileRepository;
+    @Mock SettingsRepository     settingsRepository;
+    @Mock FileRepository         fileRepository;
+    @Mock VaultEncryptionService encryptionService;
+    @Mock DriveService           driveService;
 
     private MockMvc mvc;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -29,7 +33,8 @@ class SettingsControllerTest {
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders
-            .standaloneSetup(new SettingsController(settingsRepository, fileRepository))
+            .standaloneSetup(new SettingsController(settingsRepository, fileRepository,
+                                                    encryptionService, driveService))
             .build();
     }
 
@@ -40,6 +45,9 @@ class SettingsControllerTest {
         when(settingsRepository.getStartupSyncMode()).thenReturn("blocking");
         when(settingsRepository.getMaxDailyReviews()).thenReturn(30);
         when(settingsRepository.getBankruptcyLimit()).thenReturn(200);
+        // getSettings() masks the secrets via .isBlank() — must not be null on mocks
+        when(settingsRepository.getSyncClientSecret()).thenReturn("");
+        when(settingsRepository.getSyncPassphrase()).thenReturn("");
     }
 
     // ── GET /settings ─────────────────────────────────────────────────────────
@@ -52,6 +60,8 @@ class SettingsControllerTest {
         when(settingsRepository.getStartupSyncMode()).thenReturn("blocking");
         when(settingsRepository.getMaxDailyReviews()).thenReturn(30);
         when(settingsRepository.getBankruptcyLimit()).thenReturn(200);
+        when(settingsRepository.getSyncClientSecret()).thenReturn("s3cret");
+        when(settingsRepository.getSyncPassphrase()).thenReturn("");
         mvc.perform(get("/settings"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.vaultPath").value("/vault"))
@@ -59,7 +69,44 @@ class SettingsControllerTest {
             .andExpect(jsonPath("$.reviewPageSize").value(20))
             .andExpect(jsonPath("$.startupSyncMode").value("blocking"))
             .andExpect(jsonPath("$.maxDailyReviews").value(30))
-            .andExpect(jsonPath("$.bankruptcyLimit").value(200));
+            .andExpect(jsonPath("$.bankruptcyLimit").value(200))
+            .andExpect(jsonPath("$.syncClientSecretSet").value(true))
+            .andExpect(jsonPath("$.syncPassphraseSet").value(false));
+    }
+
+    // ── PUT /settings — sync fields ───────────────────────────────────────────
+
+    @Test
+    void updateSettings_syncPassphrase_savesAndReloadsKey() throws Exception {
+        stubSettings();
+        mvc.perform(put("/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("syncPassphrase", "hunter2"))))
+            .andExpect(status().isOk());
+        org.mockito.Mockito.verify(settingsRepository).set("syncPassphrase", "hunter2");
+        org.mockito.Mockito.verify(encryptionService).reload();
+    }
+
+    @Test
+    void updateSettings_blankSecret_isIgnored() throws Exception {
+        stubSettings();
+        mvc.perform(put("/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("syncClientSecret", ""))))
+            .andExpect(status().isOk());
+        org.mockito.Mockito.verify(settingsRepository, org.mockito.Mockito.never())
+            .set(org.mockito.ArgumentMatchers.eq("syncClientSecret"), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void updateSettings_syncClientId_savesAndResetsDrive() throws Exception {
+        stubSettings();
+        mvc.perform(put("/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("syncClientId", "abc.apps.googleusercontent.com"))))
+            .andExpect(status().isOk());
+        org.mockito.Mockito.verify(settingsRepository).set("syncClientId", "abc.apps.googleusercontent.com");
+        org.mockito.Mockito.verify(driveService).reset();
     }
 
     // ── PUT /settings — reviewPageSize ────────────────────────────────────────

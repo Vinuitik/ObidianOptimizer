@@ -24,6 +24,11 @@ Seeded on first boot from env vars via `ON CONFLICT DO NOTHING`.
 | `chronoLastRunDate` | `""` | internal |
 | `ollamaEmbedModel` | `mixedbread-ai/mxbai-embed-large-v1` | hardcoded (display-only — real model is `EMBED_MODEL` env) |
 | `flashcardsEnabled` | `"true"` | hardcoded — review UI mode: tests (on) vs self-rated slideshow (off) |
+| `syncEnabled` | `"false"` | hardcoded — gates the scheduled Drive upload cron only |
+| `syncClientId` / `syncClientSecret` | `""` | Settings UI — Google OAuth client (Cloud Console) |
+| `syncPassphrase` | `$SYNC_PASSPHRASE` | env seed; Settings UI afterwards (save → key re-derived) |
+| `sync.drive.folder_id` | `$GOOGLE_DRIVE_FOLDER_ID` | env seed; auto-filled in OAuth mode (see [../sync/FLOWS.md](../sync/FLOWS.md)) |
+| `sync.refresh_token` / `sync.account_email` | `""` | internal — written by the OAuth connect flow |
 
 To force re-seed: `DELETE FROM app_settings;` → restart
 
@@ -32,7 +37,8 @@ To force re-seed: `DELETE FROM app_settings;` → restart
 ## GET /settings
 
 `SettingsController.getSettings()` → `SettingsRepository.get*()`  
-Returns `{ vaultPath, resourcePath, reviewPageSize, startupSyncMode, maxDailyReviews, bankruptcyLimit, chronicNeglectDays, embedModel, flashcardsEnabled }`  
+Returns `{ vaultPath, resourcePath, reviewPageSize, startupSyncMode, maxDailyReviews, bankruptcyLimit, chronicNeglectDays, embedModel, flashcardsEnabled, syncEnabled, syncClientId, syncClientSecretSet, syncPassphraseSet }`  
+Sync secrets are **write-only**: the response carries `…Set` booleans, never the values.  
 Requires session auth (was public until the security-hardening pass — it leaked the vault path).
 
 ---
@@ -45,6 +51,9 @@ Field validation:
 - `startupSyncMode` — must be `"blocking"` or `"async"`
 - `reviewPageSize` — `[1, 500]`
 - `maxDailyReviews`, `bankruptcyLimit`, `chronicNeglectDays` — `>= 1`, no upper bound
+- `syncClientSecret` / `syncPassphrase` — **blank = leave as is** (the form shows a
+  saved-marker placeholder, not the value). Passphrase save → `VaultEncryptionService.reload()`;
+  client id/secret save → `DriveService.reset()` (next Drive call rebuilds the client).
 
 `vaultPath` change → `FileRepository.updateVaultPath()` → validates dir exists → saves to DB → sets `ROOT_FILE` → `NoteIndexRepository.forceResync()` (TRUNCATE notes + note_links → full delta sync)
 

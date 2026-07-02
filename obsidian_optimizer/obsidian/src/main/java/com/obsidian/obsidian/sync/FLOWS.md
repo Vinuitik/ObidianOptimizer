@@ -1,12 +1,53 @@
 # Sync Domain Flows
 
-Files: SyncController.java, SyncService.java, SyncWorker.java, SyncQueueRepository.java, VaultEncryptionService.java, DriveService.java, DeviceIdentityService.java
+Files: SyncController.java, SyncOAuthService.java, SyncService.java, SyncWorker.java, SyncQueueRepository.java, VaultEncryptionService.java, DriveService.java, DeviceIdentityService.java
 
 ---
 
 ## Overview
 
 Per-file encrypted sync to Google Drive. Every vault file (.md + resources/) is individually compressed, encrypted, and uploaded. Drive mirrors the vault folder structure as `path.enc` files with `appProperties` metadata that supports future conflict detection without downloading.
+
+Configured **from the Settings page** (Google Drive Sync panel): sign in with Google
+(OAuth), set the encryption passphrase, toggle scheduled uploads. Env vars remain a
+headless bootstrap only.
+
+---
+
+## Auth & configuration (Settings-first)
+
+Credential priority in `DriveService.ensureClient()` (client is built lazily, so
+Settings edits apply without a restart):
+
+```
+1. OAuth (user signed in via Settings)        — files owned by YOUR account/quota
+   app_settings: syncClientId + syncClientSecret + sync.refresh_token
+2. Service account (headless fallback)        — GOOGLE_SERVICE_ACCOUNT_JSON env, 15GB SA quota
+3. neither → sync disabled (isConfigured() = false)
+```
+
+### Connect flow (OAuth, scope `drive.file` — app-created files only)
+```
+Settings panel: paste OAuth client id/secret (from Google Cloud Console, type "Web
+application", authorised redirect URI = <origin>/api/sync/oauth/callback) → Save
+  → "Connect Google Drive" → GET /api/sync/oauth/url?origin=<window.origin>
+      SyncOAuthService.buildAuthUrl(): state nonce (10-min TTL, single-use, in-memory)
+      → browser → Google consent (access_type=offline&prompt=consent ⇒ refresh token)
+  → GET /api/sync/oauth/callback?code&state
+      handleCallback(): state check → code exchange (POST oauth2.googleapis.com/token)
+      → app_settings sync.refresh_token + sync.account_email (Drive about())
+      → driveService.reset() → 302 → /settings?drive=connected
+Disconnect: POST /api/sync/disconnect → revoke (best-effort) + clear token/email.
+```
+
+- **Root folder**: `sync.drive.folder_id` setting (seeded from `GOOGLE_DRIVE_FOLDER_ID`
+  env). Blank + OAuth mode → `DriveService.rootFolderId()` finds-or-creates a top-level
+  **"ObsidianOptimizer"** folder and persists its id. Service-account mode requires an
+  explicit folder id (the SA has no usable My Drive).
+- **Passphrase**: `syncPassphrase` setting (seeded from `SYNC_PASSPHRASE` env); saving it
+  in the UI calls `VaultEncryptionService.reload()` — no restart.
+- **Enable toggle**: `syncEnabled` setting gates ONLY the scheduled cron
+  (`SyncWorker.scheduledUpload`); the manual Sync now / Pull buttons work regardless.
 
 ---
 
@@ -93,12 +134,14 @@ Future per-file merge: compare `device_id` + `uploaded_at` in `appProperties`.
 
 `VaultEncryptionService`:
 - Key: `PBKDF2WithHmacSHA256(passphrase, "ObsidianSyncSalt", 310_000 iter)` → 256-bit AES key
+- Passphrase source: `app_settings.syncPassphrase` (Settings UI), fallback env `sync.passphrase`;
+  `reload()` re-derives after a Settings save — no restart
 - Fixed salt means any device with the same passphrase derives the same key — multi-device compatible
 - Per-file IV: 12B random, prepended to ciphertext
 - Wire format: `[12B IV][AES-GCM ciphertext + 16B auth tag]`
 - GCM auth tag detects tampering or corruption on download
 
-To rotate the key: change `SYNC_PASSPHRASE` — all existing Drive files become unreadable until re-uploaded.
+To rotate the key: change the passphrase in Settings — all existing Drive files become unreadable until re-uploaded.
 
 ---
 
@@ -114,11 +157,18 @@ To rotate the key: change `SYNC_PASSPHRASE` — all existing Drive files become 
 
 ## REST Endpoints
 
-| Method | Path | Auth | Description |
+Controller maps `/sync/**` — nginx/Vite strip the `/api/` prefix, so the browser calls
+`/api/sync/**`. (The original `@RequestMapping("/api/sync")` was unreachable through
+the proxy — fixed 2026-07-02.)
+
+| Method | Browser path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/api/sync/status` | session | Queue counts, deviceId, config flags |
+| `GET` | `/api/sync/status` | session | Queue counts, deviceId, enabled, mode (oauth/service-account/none), clientConfigured, connected, accountEmail, config flags |
 | `POST` | `/api/sync/upload` | session | Immediately drain PENDING queue |
 | `POST` | `/api/sync/download` | session | Pull all Drive files, write newer ones |
+| `GET` | `/api/sync/oauth/url?origin=` | session | Google consent URL (Settings "Connect") |
+| `GET` | `/api/sync/oauth/callback` | session | Code exchange; 302 → `/settings?drive=…` |
+| `POST` | `/api/sync/disconnect` | session | Revoke + forget the Google connection |
 
 ---
 
@@ -139,6 +189,23 @@ sync_queue(
 
 ## Technology Notes
 
+- **OAuth scope is `drive.file`** — the app can only see/touch files it created. No
+  "read all your Drive" consent screen, no collision with user files, and the by-name
+  root-folder lookup is safe. Trade-off: files uploaded earlier by the SERVICE ACCOUNT
+  are owned by the SA and invisible to the OAuth client — switching modes starts a
+  fresh mirror (uploads fall through 404→create; old SA files become orphans).
+- **Secrets live plaintext in `app_settings`** (client secret, refresh token,
+  passphrase). Same trust domain as the plaintext vault on the same disk — acceptable
+  for this single-user deployment; the passphrase protects data ON DRIVE, not locally.
+- **Refresh tokens can die** (user revokes in Google account, or the OAuth client is
+  in "Testing" publishing status — Google expires those tokens after ~7 days; set the
+  client to "In production" to stop that). Failure mode: uploads mark FAILED,
+  `/sync/status` still says connected — reconnect via Settings.
+- **OAuth state nonce is in-memory, single-use, 10-min TTL** — a backend restart
+  mid-consent aborts the flow; just click Connect again.
+- **The redirect URI must be registered** on the OAuth client in Google Cloud Console:
+  `<origin>/api/sync/oauth/callback` for every origin used (tunnel domain; add the
+  localhost dev origin too if connecting from `npm run dev`).
 - **Fixed PBKDF2 salt**: acceptable for a single-passphrase personal tool. If the codebase becomes public or multi-tenant, switch to a random salt stored in Drive (`.sync-salt` file) — all devices read it on first sync.
 - **Drive `appProperties`**: app-only key-value metadata, not visible in Drive UI. Max 30 properties, 124B per key+value. `content_hash` enables hash comparison without downloading ciphertext.
 - **No Drive-side delete**: renamed and soft-deleted files leave orphan `.enc` files on Drive. They're harmless but waste storage. Add `DriveService.deleteFile(fileId)` + call from rename/softDelete flows in V2.
@@ -153,9 +220,15 @@ sync_queue(
 | Thing to change | Where |
 |---|---|
 | Upload cron schedule | `SYNC_UPLOAD_CRON` env / `sync.upload.cron` property |
-| Encryption passphrase | `SYNC_PASSPHRASE` env var |
-| Drive root folder | `GOOGLE_DRIVE_FOLDER_ID` env var |
-| Drive credentials | `GOOGLE_SERVICE_ACCOUNT_JSON` env var |
+| Auto-sync on/off | Settings UI toggle → `app_settings.syncEnabled` (gates `SyncWorker` only) |
+| Encryption passphrase | Settings UI → `app_settings.syncPassphrase` (env `SYNC_PASSPHRASE` = first-boot seed) |
+| OAuth client id/secret | Settings UI → `app_settings.syncClientId` / `syncClientSecret` |
+| Connected account | Settings UI Connect/Disconnect → `sync.refresh_token` / `sync.account_email` |
+| Drive root folder | `app_settings sync.drive.folder_id` (env `GOOGLE_DRIVE_FOLDER_ID` seed; auto-created "ObsidianOptimizer" in OAuth mode) |
+| Auto-created root folder name | `DriveService.DEFAULT_ROOT_NAME` |
+| Service-account fallback | `GOOGLE_SERVICE_ACCOUNT_JSON` env var |
+| OAuth scope / endpoints / state TTL | `SyncOAuthService` constants |
+| Credential priority | `DriveService.ensureClient()` |
 | PBKDF2 iterations | `VaultEncryptionService.PBKDF2_ITERATIONS` |
 | PBKDF2 fixed salt | `VaultEncryptionService.PBKDF2_SALT` |
 | Device ID computation | `DeviceIdentityService.computeDeviceId()` |

@@ -1,6 +1,8 @@
 package com.obsidian.obsidian.settings;
 
 import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.sync.DriveService;
+import com.obsidian.obsidian.sync.VaultEncryptionService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,10 +16,15 @@ public class SettingsController {
 
     private final SettingsRepository settingsRepo;
     private final FileRepository repository;
+    private final VaultEncryptionService encryptionService;
+    private final DriveService driveService;
 
-    SettingsController(SettingsRepository settingsRepo, FileRepository repository) {
-        this.settingsRepo = settingsRepo;
-        this.repository   = repository;
+    SettingsController(SettingsRepository settingsRepo, FileRepository repository,
+                       VaultEncryptionService encryptionService, DriveService driveService) {
+        this.settingsRepo      = settingsRepo;
+        this.repository        = repository;
+        this.encryptionService = encryptionService;
+        this.driveService      = driveService;
     }
 
     @GetMapping("settings")
@@ -31,7 +38,12 @@ public class SettingsController {
             settingsRepo.getBankruptcyLimit(),
             settingsRepo.getChronicNeglectDays(),
             settingsRepo.getEmbedModel(),
-            settingsRepo.isFlashcardsEnabled()
+            settingsRepo.isFlashcardsEnabled(),
+            settingsRepo.isSyncEnabled(),
+            settingsRepo.getSyncClientId(),
+            // Secrets never leave the server — the UI only needs "is it saved?"
+            !settingsRepo.getSyncClientSecret().isBlank(),
+            !settingsRepo.getSyncPassphrase().isBlank()
         );
     }
 
@@ -84,6 +96,23 @@ public class SettingsController {
                 }
                 settingsRepo.set("ollamaEmbedModel", model);
             }
+            if (req.syncEnabled() != null) {
+                settingsRepo.set("syncEnabled", String.valueOf(req.syncEnabled()));
+            }
+            if (req.syncClientId() != null) {
+                settingsRepo.set("syncClientId", req.syncClientId().trim());
+                driveService.reset();
+            }
+            // Secret fields: blank means "leave as is" (the form shows a saved-marker
+            // placeholder, not the value). Disconnect clears the token, not these.
+            if (req.syncClientSecret() != null && !req.syncClientSecret().isBlank()) {
+                settingsRepo.set("syncClientSecret", req.syncClientSecret().trim());
+                driveService.reset();
+            }
+            if (req.syncPassphrase() != null && !req.syncPassphrase().isBlank()) {
+                settingsRepo.set("syncPassphrase", req.syncPassphrase().trim());
+                encryptionService.reload();
+            }
             return ResponseEntity.ok(getSettings());
         } catch (Exception e) {
             log.error("[updateSettings] failed: {}", e.getMessage());
@@ -95,8 +124,12 @@ public class SettingsController {
 
     public record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize,
                                    String startupSyncMode, int maxDailyReviews, int bankruptcyLimit,
-                                   int chronicNeglectDays, String embedModel, boolean flashcardsEnabled) {}
+                                   int chronicNeglectDays, String embedModel, boolean flashcardsEnabled,
+                                   boolean syncEnabled, String syncClientId,
+                                   boolean syncClientSecretSet, boolean syncPassphraseSet) {}
     record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize,
                                  String startupSyncMode, Integer maxDailyReviews, Integer bankruptcyLimit,
-                                 Integer chronicNeglectDays, String embedModel, Boolean flashcardsEnabled) {}
+                                 Integer chronicNeglectDays, String embedModel, Boolean flashcardsEnabled,
+                                 Boolean syncEnabled, String syncClientId,
+                                 String syncClientSecret, String syncPassphrase) {}
 }
