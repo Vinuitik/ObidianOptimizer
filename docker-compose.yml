@@ -45,6 +45,7 @@ services:
       - EMBED_ONNX_FILE=${EMBED_ONNX_FILE:-onnx/model_quantized.onnx}
       - EMBED_GPU_MEM_LIMIT_MB=${EMBED_GPU_MEM_LIMIT_MB:-1800}
       - EMBED_BATCH_SIZE=${EMBED_BATCH_SIZE:-16}
+      - EMBED_DEVICE=${EMBED_DEVICE:-auto}
       - DATABASE_URL=postgresql://obsidian:${POSTGRES_PASSWORD:-obsidian}@postgres:5432/obsidian
       - VAULT_DIR=/vault
       - AGENT_REPORTS_DIR=/reports

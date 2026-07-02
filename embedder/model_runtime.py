@@ -58,6 +58,11 @@ EMBED_DOC_PREFIX = os.environ.get(
 # Hard ceiling on the onnxruntime CUDA arena so the (otherwise unbounded, grow-only)
 # activation scratch can't creep up and starve whisper. 0 = no cap.
 EMBED_GPU_MEM_LIMIT_MB = int(os.environ.get("EMBED_GPU_MEM_LIMIT_MB", "1800"))
+# 'auto' = GPU when free (gpu_slot policy) with CPU floor; 'cpu' = never build a
+# GPU session. embeddinggemma int8 CANNOT run under the 4GB-card arena cap: its
+# 262k-vocab embedding table dequantizes to ~805MB in one node and OOMs the
+# arena mid-batch — so this box pins EMBED_DEVICE=cpu (see .env).
+EMBED_DEVICE = os.environ.get("EMBED_DEVICE", "auto").lower()
 # Sub-batch size for a single session.run — bounds peak activation memory so one
 # multi-chunk note can't exceed the arena cap. Pairs with the cap above.
 EMBED_BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "16"))
@@ -180,6 +185,12 @@ def init() -> None:
     state["gpu_session"] = None
     state["provider"] = "CPUExecutionProvider"
 
+    if EMBED_DEVICE == "cpu":
+        gpu_slot.set_gpu_available(False)
+        log.info("Model ready — dim=%d, provider=CPU (EMBED_DEVICE=cpu), batch=%d",
+                 dim, EMBED_BATCH_SIZE)
+        return
+
     if detect_provider() == "CUDAExecutionProvider":
         gpu_sess = _build_gpu_session()
         if gpu_sess is not None:
@@ -236,7 +247,18 @@ def embed_texts(texts: List[str], kind: str = "document") -> List[List[float]]:
         session = gpu_sess if gpu_sess is not None else state["cpu_session"]
         out: List[List[float]] = []
         for i in range(0, len(texts), EMBED_BATCH_SIZE):
-            out.extend(_embed_batch(session, texts[i:i + EMBED_BATCH_SIZE]))
+            batch = texts[i:i + EMBED_BATCH_SIZE]
+            try:
+                out.extend(_embed_batch(session, batch))
+            except Exception as e:  # noqa: BLE001 — GPU arena OOM etc.
+                if session is state["cpu_session"]:
+                    raise
+                # A GPU-side failure (arena OOM mid-batch) must not fail the
+                # caller and wedge the embedding worker's retry loop — redo the
+                # batch on the CPU floor and keep going.
+                log.warning("GPU embed batch failed (%s) — retrying on CPU", e)
+                session = state["cpu_session"]
+                out.extend(_embed_batch(session, batch))
         return out
 
 
