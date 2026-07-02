@@ -40,8 +40,9 @@ services:
       - EMBED_MODEL=${EMBED_MODEL:-onnx-community/embeddinggemma-300m-ONNX}
       - MODEL_CACHE=/models
       # 4GB-GPU memory policy (see embedder/ml gpu_slot.py + GPU_MEMORY FLOWS):
-      # gte-base fp16 weights (~220MB) so the embedder + whisper never need the card at
-      # once; capped CUDA arena + sub-batch so a big note can't balloon VRAM.
+      # embeddinggemma int8 (~310MB) runs CPU-only (EMBED_DEVICE=cpu in .env): its
+      # 262k-vocab embed table dequantizes to ~805MB in one node and OOMs the capped
+      # CUDA arena. GPU stays whisper/CLIP's.
       - EMBED_ONNX_FILE=${EMBED_ONNX_FILE:-onnx/model_quantized.onnx}
       - EMBED_GPU_MEM_LIMIT_MB=${EMBED_GPU_MEM_LIMIT_MB:-1800}
       - EMBED_BATCH_SIZE=${EMBED_BATCH_SIZE:-16}

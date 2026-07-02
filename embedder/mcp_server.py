@@ -159,12 +159,13 @@ def search_notes(query: str, limit: int = 10) -> list[dict]:
     Returns [{notePath, snippet, similarity, matchedBy}] sorted by relevance.
     - similarity: cosine similarity of the best semantically-matched chunk
       (null when only the keyword ranker found it). CALIBRATION for the
-      gte-base embedding space: ~0.87 is the floor even for nonsense queries,
-      ~0.91+ is a strong match — the meaningful band is narrow, so compare
-      within one result set and treat ≤0.88 as probably tangential.
-    - matchedBy: 'semantic', 'keyword', or 'keyword+semantic' — a hit found
-      by BOTH rankers is the strongest relevance signal, stronger than any
-      similarity value.
+      EmbeddingGemma space (asymmetric query/doc prompts, multilingual —
+      cross-language matches work), measured against this vault: ≥0.5 strong
+      match, 0.4–0.5 related, ≤0.35 likely noise (nonsense queries still
+      surface ~0.30–0.34 hits from a 13k-chunk corpus — do not trust
+      bottom-of-band results just because they exist).
+    - matchedBy: 'semantic', 'keyword', or 'keyword+semantic' — found by
+      both rankers is the strongest relevance signal.
     Results are candidates, not ground truth: for filing/placement decisions
     verify against the real structure with get_vault_tree / list_folder."""
     limit = max(1, min(limit, 50))
