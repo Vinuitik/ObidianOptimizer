@@ -63,6 +63,62 @@ public class NoteChunkRepository {
             notePath, chunkIndex, source, text, floatArrayToString(embedding), contentHash, text);
     }
 
+    /**
+     * Upsert a chunk's TEXT with no embedding yet (embedding = NULL). Used by the
+     * caption stage so an expensive VLM caption is persisted immediately; the embed
+     * reconciler ({@link #findChunksNeedingEmbedding}) fills the vector later. On
+     * conflict the embedding is reset to NULL so a changed caption gets re-embedded.
+     */
+    public void upsertChunkTextOnly(String notePath, int chunkIndex, String source,
+                                    String text, String contentHash) {
+        jdbc.update("""
+            INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector)
+            VALUES (?, ?, ?, ?, NULL, ?, to_tsvector('english', ?))
+            ON CONFLICT (note_path, source, chunk_index) DO UPDATE SET
+              text         = EXCLUDED.text,
+              embedding    = NULL,
+              content_hash = EXCLUDED.content_hash,
+              fts_vector   = EXCLUDED.fts_vector
+            """,
+            notePath, chunkIndex, source, text, contentHash, text);
+    }
+
+    /** Row awaiting a vector — the embed queue's unit of work. */
+    public record PendingChunk(String notePath, String source, int chunkIndex, String text) {}
+
+    /**
+     * Claim a batch of chunks that still need embedding (the "embed queue"). Any
+     * source (image/text) with a NULL vector qualifies, so one reconciler covers
+     * every stage. Single-consumer today (one lane); add {@code FOR UPDATE SKIP
+     * LOCKED} here when you want concurrent embed consumers.
+     */
+    public List<PendingChunk> findChunksNeedingEmbedding(int limit) {
+        return jdbc.query("""
+            SELECT note_path, source, chunk_index, text
+            FROM note_chunks
+            WHERE embedding IS NULL
+            ORDER BY note_path, source, chunk_index
+            LIMIT ?
+            """,
+            (rs, i) -> new PendingChunk(rs.getString("note_path"), rs.getString("source"),
+                                        rs.getInt("chunk_index"), rs.getString("text")),
+            limit);
+    }
+
+    /**
+     * Set a chunk's vector, but ONLY if it is still NULL (idempotent ack). The
+     * {@code embedding IS NULL} guard makes double-processing a no-op without row
+     * locks. Returns true if this call actually wrote the vector.
+     */
+    public boolean setChunkEmbedding(String notePath, String source, int chunkIndex, float[] embedding) {
+        int n = jdbc.update("""
+            UPDATE note_chunks SET embedding = ?::vector
+            WHERE note_path = ? AND source = ? AND chunk_index = ? AND embedding IS NULL
+            """,
+            floatArrayToString(embedding), notePath, source, chunkIndex);
+        return n > 0;
+    }
+
     /** Removes chunks of one source beyond newMaxIndex to handle note shrinkage. */
     public void deleteStaleChunks(String notePath, String source, int newMaxIndex) {
         jdbc.update(
