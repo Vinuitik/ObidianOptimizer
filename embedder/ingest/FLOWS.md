@@ -1,7 +1,7 @@
 # Ingest Module Flows — resource → notes
 
 Files (v1, live): router.py, extract_av.py, extract_pdf.py, extract_web.py, extract_text.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
-Files (v2, scaffolded — NOT yet wired into jobs.py): ir.py, extract_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py
+Files (v2, scaffolded — NOT yet wired into jobs.py): ir.py, extract_ir.py, extract_pdf_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py
 Architecture: architecture_plans/INGEST_AGENT_ARCH.md (v1), architecture_plans/INGESTION_V2_FLOWS.md (v2 design)
 
 > **v1 is what runs today.** The v2 files below are structural scaffolding toward
@@ -203,6 +203,22 @@ block.text` for every block (headings keep their raw `## ` prefix). Runs `flag_s
 before returning. `from_markdown` is pure/testable; `from_html` adds the trafilatura fetch.
 *Not yet called by jobs.py* — the cutover swaps `extract_text`/`extract_web` for this.
 
+### extract_pdf_ir.py — native PDF/EPUB IR extraction (§3a)  ✅ core built, tested
+Block-level replacement for `extract_pdf.py`'s page mode: one Block per layout block with a
+real `PageBox{page_no,bbox}` (v1 emitted one whole-page segment). **Split by testability:**
+```
+build_ir(pages[PageParse], toc, anchors, title, medium) → SourceIR   # PURE — unit-tested
+  _body_size (char-weighted mode) → _heading_levels (font ≥ FONT_HEADING_RATIO×body → L1..6)
+  layout HARD flags (§3c): READING_ORDER (x0 columns + order crosses bands), TABLE (bbox ∩
+    find_tables rect), OCR (scanned page), LAYOUT (y runs backward in a column)
+  then flag_source() adds IR-computable SOFT flags
+from_pdf(ref, path) → SourceIR   # I/O: fitz spans→runs, find_tables, OCR fallback, lazy
+                                 # page-shot anchors → build_ir. Needs PyMuPDF (not sandbox-run).
+```
+Clean single-column TOC'd PDF → no HARD flags → commits hands-off; messy layout → HARD flag →
+Unit REVIEWING. *Tune headings:* `FONT_HEADING_RATIO`; *columns:* `INGEST_COLUMN_GAP_PTS`.
+Tests: `tests/test_extract_pdf_ir.py` (pure core). *Not yet called by jobs.py.*
+
 ### retention.py — what survives commit (§6/§8c/§9h)  ✅ built, tested
 **Pure planning, zero I/O.** `compute_retention(ir, units, kept_fragments?, source_blob?)`
 → `RetentionPlan{keep_paths, drop_paths, keep_transcript, referenced_pages}`. Delete-by-
@@ -249,10 +265,11 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 
 ### Wiring that remains (the v1→v2 seam)  [NOT IMPLEMENTED]
 1. **Extractors emit SourceIR** — text/md/html ✅ **done natively** (`extract_ir.py`,
-   real char offsets). Remaining: `extract_pdf` block/bbox mode (§3a), `extract_av`
-   transcript→speech blocks (§8a). `ir.ir_from_v1_bundle()` ✅ bridges the still-v1
-   extractors (pdf/av) so `segment()` runs on live extraction NOW; native versions
-   replace the bridge per-medium for real bbox/time precision. `[text done; pdf/av NEW]`
+   real char offsets); pdf/epub ✅ **core done natively** (`extract_pdf_ir.py`, block/bbox +
+   HARD flags — the `from_pdf` fitz wrapper is written but sandbox-unrun). Remaining:
+   `extract_av` transcript→speech blocks (§8a). `ir.ir_from_v1_bundle()` ✅ still bridges the
+   live v1 av extractor so `segment()` runs on live extraction NOW; native versions replace
+   the bridge per-medium for real time precision. `[text+pdf done; av NEW]`
 2. **jobs.py calls pipeline_v2** — the orchestrator ✅ exists (`pipeline_v2.run`, chains
    segment + draft + retention + locator). Remaining: a `jobs.py` caller, `guard()`-gated on
    `INGEST_V2`, that builds the IR (native `extract_ir` for text/html, bridge for pdf/av),
@@ -321,6 +338,8 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | v2 retention keep/drop policy | `retention.py` (`compute_retention`) `[v2 scaffold]` |
 | v2 extraction flags (IR-computable) | `flagging.py` (`flag_source`) `[v2 scaffold]` |
 | v2 native text/html IR extraction | `extract_ir.py` (`from_markdown`) `[v2 scaffold]` |
+| v2 native pdf/epub IR extraction | `extract_pdf_ir.py` (`build_ir` / `from_pdf`) `[v2 scaffold]` |
+| v2 pdf heading / column thresholds | `FONT_HEADING_RATIO` / `INGEST_COLUMN_GAP_PTS` env `[v2]` |
 | v2 splice resolution (consume) | `locator.py` (`resolve_splice`) `[v2 scaffold]` |
 | v2 orchestrator chain (flagged) | `pipeline_v2.py` (`run`); `INGEST_V2` env, `guard()` `[v2 scaffold]` |
 | (note, embed) job de-dup | `jobs.submit()` |

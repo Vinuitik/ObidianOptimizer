@@ -1,7 +1,7 @@
 # Ingestion v2 — Source → anchored Units → Notes (DESIGN / PLAN)
 
 Files (v1, evolves): embedder/ingest/router.py, extract_pdf.py, extract_text.py, extract_web.py, extract_av.py, keyframes.py, synthesize.py, publish.py, bundle.py, split_note.py, jobs.py
-Files (v2 NEW): ir.py, extract_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py (orchestrator, flagged) — all built + unit-tested, none wired live
+Files (v2 NEW): ir.py, extract_ir.py, extract_pdf_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py (orchestrator, flagged) — all built + unit-tested, none wired live
 Supersedes aspects of: architecture_plans/INGEST_AGENT_ARCH.md, embedder/ingest/FLOWS.md (v1)
 Related: architecture_plans/SYNC_RETENTION_PLAN.md, ML_ARCH.md (pgvector search)
 
@@ -110,9 +110,11 @@ SourceIR {
 `order_index` is the spine: it becomes chronology **and** `SEQUENTIAL` links for free
 (§5). *To change the IR shape:* `ir.py`.
 
-### 3a. Extraction — PDF/EPUB `[NEW, replaces extract_pdf.py page mode]`
+### 3a. Extraction — PDF/EPUB `[BUILT — extract_pdf_ir.py; pure core tested, fitz wrapper unrun]`
 
-PyMuPDF (`fitz`), no ML in the happy path:
+PyMuPDF (`fitz`), no ML in the happy path. Implemented as `extract_pdf_ir.build_ir()` (pure
+PageParse[]→SourceIR: font-ratio headings + READING_ORDER/TABLE/OCR/LAYOUT HARD flags,
+unit-tested) behind `from_pdf()` (the fitz I/O that fills PageParse):
 
 ```
 fitz.open(path)
@@ -495,7 +497,7 @@ Drop the raw video; **keep the transcript** (§8c) + keyframes owned by a commit
 | Thing to change | Where |
 |---|---|
 | SourceIR shape | `ir.py` `[NEW]` |
-| PDF block/bbox extraction | `extract_pdf.py` → block mode `[NEW]` |
+| PDF block/bbox extraction | `extract_pdf_ir.py` (`build_ir`/`from_pdf`) `[BUILT]` |
 | PDF heading detection threshold | `FONT_HEADING_RATIO` env `[NEW]` |
 | txt/md/html char-offset extraction | `extract_text.py` / `extract_web.py` `[NEW]` |
 | Segmentation strategy | `segment.py` `[NEW]` |
