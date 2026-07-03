@@ -189,6 +189,15 @@ so segmentation runs GPU-free and is testable. Units inherit block flags (hardes
 Size band env: `INGEST_UNIT_WORDS_MIN/MAX/CEIL/FLOOR`, `INGEST_TOPICSHIFT_DELTA`,
 `INGEST_SEGMENT_HEADING_LEVEL`. *Change strategy:* `segment.py`.
 
+### extract_ir.py — native text-native extraction → SourceIR (§3b)  ✅ built, tested
+The first **native** IR extractor, replacing the bridge for text/md/html with *real* char
+offsets. `from_text(text,title)` / `from_html(ref)` → `from_markdown(md,title,medium)`:
+line scanner → HEADING blocks (ATX, level parsed) + paragraph blocks, each `CharSpan` an
+exact offset into the frozen `normalized_text`. **Invariant:** `normalized_text[span] ==
+block.text` for every block (headings keep their raw `## ` prefix). Runs `flag_source`
+before returning. `from_markdown` is pure/testable; `from_html` adds the trafilatura fetch.
+*Not yet called by jobs.py* — the cutover swaps `extract_text`/`extract_web` for this.
+
 ### retention.py — what survives commit (§6/§8c/§9h)  ✅ built, tested
 **Pure planning, zero I/O.** `compute_retention(ir, units, kept_fragments?, source_blob?)`
 → `RetentionPlan{keep_paths, drop_paths, keep_transcript, referenced_pages}`. Delete-by-
@@ -207,11 +216,11 @@ Units inherit these via `segment._inherit_flags` (hardest wins). `[not yet calle
 extractor — jobs cutover wires it]`
 
 ### Wiring that remains (the v1→v2 seam)  [NOT IMPLEMENTED]
-1. **Extractors emit SourceIR** — `extract_pdf` block/bbox mode (§3a), `extract_text`/
-   `extract_web` char-offset mode (§3b), `extract_av` transcript→speech blocks (§8a).
-   Today they emit v1 `{loc}` segments; `ir.ir_from_v1_bundle()` ✅ is the transitional
-   bridge (built + tested) so `segment()` runs on live extraction NOW — native IR
-   extractors replace it later for real bbox/char precision. `[bridge done; native NEW]`
+1. **Extractors emit SourceIR** — text/md/html ✅ **done natively** (`extract_ir.py`,
+   real char offsets). Remaining: `extract_pdf` block/bbox mode (§3a), `extract_av`
+   transcript→speech blocks (§8a). `ir.ir_from_v1_bundle()` ✅ bridges the still-v1
+   extractors (pdf/av) so `segment()` runs on live extraction NOW; native versions
+   replace the bridge per-medium for real bbox/time precision. `[text done; pdf/av NEW]`
 2. **jobs.py calls segment()** — replace the `synthesize.outline()` boundary role with
    `segment.segment(ir, embed_fn=model_runtime.embed)`; draft each Unit via the existing
    `synthesize._write_body()` (WRITE pass kept, outline/boundary role retired). `[NEW]`
