@@ -185,6 +185,14 @@ so segmentation runs GPU-free and is testable. Units inherit block flags (hardes
 Size band env: `INGEST_UNIT_WORDS_MIN/MAX/CEIL/FLOOR`, `INGEST_TOPICSHIFT_DELTA`,
 `INGEST_SEGMENT_HEADING_LEVEL`. *Change strategy:* `segment.py`.
 
+### retention.py — what survives commit (§6/§8c/§9h)  ✅ built, tested
+**Pure planning, zero I/O.** `compute_retention(ir, units, kept_fragments?, source_blob?)`
+→ `RetentionPlan{keep_paths, drop_paths, keep_transcript, referenced_pages}`. Delete-by-
+default: only page shots for **referenced** pages, media owned by a **committed** Unit,
+and user `KeptFragment`s survive; unreferenced shots/media + the raw blob drop; A/V keeps
+the transcript. The actual FS sweep is a **separate executor** (Java internal API /
+publish) — this module never deletes. *Change policy:* `retention.py`.
+
 ### Wiring that remains (the v1→v2 seam)  [NOT IMPLEMENTED]
 1. **Extractors emit SourceIR** — `extract_pdf` block/bbox mode (§3a), `extract_text`/
    `extract_web` char-offset mode (§3b), `extract_av` transcript→speech blocks (§8a).
@@ -194,7 +202,9 @@ Size band env: `INGEST_UNIT_WORDS_MIN/MAX/CEIL/FLOOR`, `INGEST_TOPICSHIFT_DELTA`
 2. **jobs.py calls segment()** — replace the `synthesize.outline()` boundary role with
    `segment.segment(ir, embed_fn=model_runtime.embed)`; draft each Unit via the existing
    `synthesize._write_body()` (WRITE pass kept, outline/boundary role retired). `[NEW]`
-3. **retention.py** (§6) + **locator.py** (learn-view splice, §7) — not started. `[NEW]`
+3. **retention.py** (§6) — planner ✅ built + tested; the FS-sweep **executor** that
+   consumes a `RetentionPlan` at commit is not wired. **locator.py** (learn-view splice,
+   §7) — not started. `[NEW]`
 4. **Extraction flagging** (§3c) — Flag type exists in ir.py; no check populates it yet.
 
 ---
