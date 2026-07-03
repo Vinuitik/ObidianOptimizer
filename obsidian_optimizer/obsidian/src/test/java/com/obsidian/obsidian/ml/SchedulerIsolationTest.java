@@ -43,7 +43,10 @@ class SchedulerIsolationTest {
             cardsBlock.await(5, TimeUnit.SECONDS);   // hold the cards lane hostage
             return null;
         });
-        CardJobWorker cards = new CardJobWorker(cardRepo, gen);
+        com.obsidian.obsidian.settings.SettingsRepository settingsRepo =
+            mock(com.obsidian.obsidian.settings.SettingsRepository.class);
+        when(settingsRepo.isFlashcardsEnabled()).thenReturn(true);
+        CardJobWorker cards = new CardJobWorker(cardRepo, gen, settingsRepo);
         ReflectionTestUtils.setField(cards, "enabled", true);
         ReflectionTestUtils.setField(cards, "batchLimit", 10);
 

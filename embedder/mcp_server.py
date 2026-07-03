@@ -317,6 +317,25 @@ def split_note(note_path: str) -> dict:
     return splitter.split(note_path, content)
 
 
+@mcp.tool()
+def create_note(text: str, title: str = "") -> dict:
+    """Create note(s) from text YOU authored, by running it through the SAME ingest
+    pipeline resources use (async job). Don't hand-write a note file — pass the whole
+    body here: it's treated as a *source* and deterministically segmented into one or
+    more self-contained concept notes (kept as a single note when short), chronologically
+    + semantically linked, and staged in the Learn Inbox for the user to review and file.
+
+    Use for anything substantial (research, a synthesis, a long answer) — these are
+    usually large, and one giant note is worse than a few well-scoped linked ones. Returns
+    the job descriptor; poll GET /ingest/{id}. `title` is an optional display hint."""
+    from ingest import jobs as ingest_jobs
+
+    if not text or not text.strip():
+        raise ValueError("text is empty")
+    return ingest_jobs.submit("", None, text=text, source_type="text",
+                              title=(title or None))
+
+
 # ---------------------------------------------------------------------------
 # Auth — constant-time X-API-Key check wrapped around the MCP ASGI app
 # ---------------------------------------------------------------------------

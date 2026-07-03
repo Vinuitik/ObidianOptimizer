@@ -50,6 +50,15 @@ reschedule), (2) generates cards if none exist — recorded against **body_hash*
 so `CardJobWorker` skips it, (3) chunk+embeds (`EmbeddingService.indexNote`).
 Idempotent + best-effort; a re-review of a prepared note is a no-op.
 
+**`flashcardsEnabled` is the single mutually-exclusive switch** (Settings → Review) picking ONE
+review system. It gates BOTH the UI and card generation:
+- ON: flashcard system. Review tab visible (NavBar), main-page review list hidden
+  (SplitLayout `showRight=!flashcardsEnabled`), `CardJobWorker` generates cards.
+- OFF: review-list system. Review tab hidden, review runs inline on the Notes page's right
+  panel, and `CardJobWorker.scanAndGenerate` early-returns on `settingsRepo.isFlashcardsEnabled()`
+  → **no new cards generated. Existing cards are NEVER deleted** (generation-only path).
+  Flip is live (read each tick). *To change:* `CardJobWorker` gate + `SettingsRepository.isFlashcardsEnabled`.
+
 **UI modes** (`flashcardsEnabled` setting, toggle in Settings → Review):
 - ON: ReviewPage → FlashcardSession.jsx — builds a tiered-knapsack assignment for
   the note, verifies each answer server-side, completes → band + next due shown.

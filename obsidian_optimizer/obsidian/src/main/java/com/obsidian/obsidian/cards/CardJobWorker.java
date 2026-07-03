@@ -1,6 +1,7 @@
 package com.obsidian.obsidian.cards;
 
 import com.obsidian.obsidian.common.WorkerLane;
+import com.obsidian.obsidian.settings.SettingsRepository;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,14 +35,17 @@ public class CardJobWorker {
 
     private final CardRepository cardRepo;
     private final CardGenerationService generationService;
+    private final SettingsRepository settingsRepo;
 
     // Own lane: card generation calls the LLM (slow / rate-limited), so it must not
     // run on the shared scheduler thread where it would starve the other workers.
     private final WorkerLane lane = new WorkerLane("cards");
 
-    public CardJobWorker(CardRepository cardRepo, CardGenerationService generationService) {
+    public CardJobWorker(CardRepository cardRepo, CardGenerationService generationService,
+                         SettingsRepository settingsRepo) {
         this.cardRepo = cardRepo;
         this.generationService = generationService;
+        this.settingsRepo = settingsRepo;
     }
 
     @PreDestroy
@@ -52,6 +56,10 @@ public class CardJobWorker {
                initialDelayString = "${cards.scan.initial-delay-ms:120000}")
     public void scanAndGenerate() {
         if (!enabled) return;
+        // User setting: when the review system is the self-rated list (not flashcards), stop
+        // generating NEW cards. Read live so flipping the setting takes effect next tick.
+        // Existing cards are never touched here — generation only, never deletion.
+        if (!settingsRepo.isFlashcardsEnabled()) return;
         lane.trigger(this::drain);
     }
 

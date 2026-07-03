@@ -388,6 +388,7 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | v2 orchestrator chain (flagged) | `pipeline_v2.py` (`run`); `INGEST_V2` env, `guard()` `[v2 scaffold]` |
 | (note, embed) job de-dup | `jobs.submit()` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
+| MCP: agent-authored text → notes | `mcp_server.create_note(text, title)` → `jobs.submit(text=…)` (text route → segment → _inbox) |
 | Routing rules | `router.py → ROUTE_TABLE` |
 | Whisper model / device | `WHISPER_MODEL` env / `extract_av._pick_device()` |
 | PDF diagram keep/drop | `keyframes.KEEP_PROMPTS / DROP_PROMPTS`, `extract_pdf._keep_diagrams()` |
