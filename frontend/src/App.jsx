@@ -46,7 +46,15 @@ export default function App() {
   const checkAuth  = useStore(s => s.checkAuth);
   const showLogin  = useStore(s => s.showLogin);
 
-  useEffect(() => { checkAuth(); }, []);
+  // Re-validate on mount AND whenever the tab regains focus, so a backend restart
+  // (session cookie invalidated) is detected proactively — not left showing stale
+  // "Sign out" + loaded data until the next action happens to 401.
+  useEffect(() => {
+    checkAuth();
+    const onFocus = () => checkAuth();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [checkAuth]);
 
   return (
     <BrowserRouter>

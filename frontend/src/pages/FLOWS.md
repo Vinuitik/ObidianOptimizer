@@ -66,23 +66,20 @@ To add more result fields: `ChronoService.ChronoResult` record + update display 
 Auth-gated ("Sign in to use Learn" when logged out).
 
 ```
-LearnPage → view toggle: Library | Inbox(badge=count)
-  Library → LearnLayout(orientation, slotA, slotB)
-    slotA: ResourcePanel (pdf | video | …) — resourceType state lives in LearnPage
-    slotB: NotePanel
-  Inbox   → InboxReview(onCount) — 3-panel ingest review (source | note | links)
-orientation: landscape video → horizontal split; portrait video (short) &
-             everything else → vertical
+LearnPage → InboxReview — the ingest review IS Learn now.
 on mount (authed, no vaultRoot): fetchRootChildren() → fetchNoteNames()
-inbox badge: fetchInbox().length, refreshed on mount + after each file/discard
 ```
+The old **Library** view (`LearnLayout` + `ResourcePanel` manual `_workspace/` media shelf +
+`NotePanel`) predated the capture→ingest→inbox pipeline and was vestigial — removed. Those
+components stay in-tree, unimported (restore by reinstating the view toggle in `LearnPage`).
 
 - **Inbox review** (`InboxReview.jsx` + `api/inbox.js`): the ingest consume layer
   (INGESTION_V2_FLOWS §7). A queue rail + **three panels**:
   - `SourceSplicePanel` — the source spliced to THIS note's region: `parseSourceRegion`
     reads the note's `## Source` footer → YouTube embed seeked to the timestamp / `<video>`
     `#t=` / PDF `#page=` / **text → `RsvpReader`** (fast one-word-at-a-time reading, §7).
-  - note column — Edit/Preview (`MarkdownContent`) + the **proposed** folder (find_home
+  - note column — Edit/Preview (`NoteRenderer` — the shared **read-only Milkdown** renderer,
+    same rich output as the main editor: GFM tables, `![[images]]`, math, code) + the **proposed** folder (find_home
     suggestion, editable — no longer chosen from scratch) → **Save & file** / **Discard**,
     or **Save & acknowledge** for in-place notes.
   - `LinksPanel` — `parseLinks` reads the injected `## Sequence` (prev → THIS → next) and
@@ -126,8 +123,11 @@ To add a chart: section in DashboardPage + counter in `StatsController.java`
 ## ReviewPage
 
 Flashcard tests vs self-rated slideshow (see cards FLOWS + frontend/FLOWS.md). The inline
-"Open note →" view renders through the shared `molecules/MarkdownContent` (not raw `<pre>`), so
-reviewing a note directly looks like the main note view.
+"Open note →" view renders through the shared `molecules/NoteRenderer` (read-only Milkdown — the
+SAME pipeline as the main editor, so tables/images/math/code render identically), not raw `<pre>`.
+(`molecules/MarkdownContent` is the older markdown-it renderer — kept for the mobile/lightweight
+path; the rich Milkdown reuse is `NoteRenderer`, since the main note surface is Milkdown, not
+markdown-it. `NoteViewer.jsx` is legacy/unused.)
 
 **One review system (`settings.flashcardsEnabled`)** — mutually exclusive, replaces the old
 local `reviewMode` pref:

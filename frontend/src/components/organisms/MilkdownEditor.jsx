@@ -75,7 +75,7 @@ function WikiLinkSuggest({ query, rect, onSelect, onClose }) {
 
 // ── Inner editor: mounts once per note (key forces remount on note change) ───
 
-function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUnsupported }) {
+export function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste, onUnsupported }) {
   const [loading, getInstance] = useInstance();
   const skipFirst = useRef(true);
 

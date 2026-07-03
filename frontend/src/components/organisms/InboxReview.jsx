@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { fetchInbox, fileInboxNote, discardInboxNote, acknowledgeCapture } from '../../api/inbox';
 import { fetchChildren, updateNote } from '../../api/notes';
 import useStore from '../../store/useStore';
-import MarkdownContent from '../molecules/MarkdownContent';
+import NoteRenderer from '../molecules/NoteRenderer';
 import SourceSplicePanel from './SourceSplicePanel';
 import LinksPanel from './LinksPanel';
 import styles from './InboxReview.module.css';
@@ -143,7 +143,7 @@ export default function InboxReview({ onCount }) {
             </div>
 
             {preview
-              ? <div className={styles.previewBox}><MarkdownContent content={draft} /></div>
+              ? <div className={styles.previewBox}><NoteRenderer content={draft} resetKey={current.path} /></div>
               : <textarea className={styles.editor} value={draft}
                           onChange={e => setDraft(e.target.value)} spellCheck={false} />}
 

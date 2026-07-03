@@ -367,7 +367,7 @@ const useStore = create((set, get) => ({
       get().fetchNoteNames();
       get().fetchReviewNotes(get().reviewOffset);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
+      if (e instanceof ApiError && e.status === 401) get().sessionExpired();
       else throw e;
     }
   },
@@ -376,7 +376,27 @@ const useStore = create((set, get) => ({
 
   checkAuth: async () => {
     const ok = await checkAuth();
+    // Was signed in, server now says no (e.g. backend restarted → session cookie
+    // invalid): tear down stale data + surface login, don't just flip the flag.
+    if (!ok && get().isAuthenticated) { get().sessionExpired(); return; }
     set({ isAuthenticated: ok });
+  },
+
+  // Session lost server-side. Wipe all vault data like logout (note content must not
+  // linger) but skip the logout endpoint (backend may be gone) and show the login modal.
+  // Fixes: after a server restart the app still showed "Sign out" with stale data loaded.
+  sessionExpired: () => {
+    Object.values(get().pendingFiles).forEach(({ blobURL }) => {
+      try { URL.revokeObjectURL(blobURL); } catch {}
+    });
+    setPendingBlobs({});
+    localStorage.removeItem(REVIEW_KEY);
+    set(s => ({
+      ...initialDataState(),
+      isAuthenticated: false,
+      showLogin: true,
+      editorResetKey: s.editorResetKey + 1,
+    }));
   },
 
   login: async (username, password) => {
@@ -424,7 +444,7 @@ const useStore = create((set, get) => ({
       get().fetchNoteNames();
       await get().openTab(path);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
+      if (e instanceof ApiError && e.status === 401) get().sessionExpired();
       else throw e;
     }
   },
@@ -469,7 +489,7 @@ const useStore = create((set, get) => ({
       get().fetchNoteNames();
       get().fetchReviewNotes(get().reviewOffset);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
+      if (e instanceof ApiError && e.status === 401) get().sessionExpired();
       else throw e;
     }
   },
@@ -481,7 +501,7 @@ const useStore = create((set, get) => ({
       await apiCreateFolder(parentPath, name);
       await get().fetchChildrenOf(parentPath);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
+      if (e instanceof ApiError && e.status === 401) get().sessionExpired();
       else throw e;
     }
   },
@@ -511,7 +531,7 @@ const useStore = create((set, get) => ({
       ]);
       get().fetchNoteNames();
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) set({ showLogin: true });
+      if (e instanceof ApiError && e.status === 401) get().sessionExpired();
       else throw e;
     }
   },

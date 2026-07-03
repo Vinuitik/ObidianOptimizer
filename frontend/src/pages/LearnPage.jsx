@@ -1,39 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import useStore from '../store/useStore';
-import LearnLayout from '../components/templates/LearnLayout';
-import ResourcePanel from '../components/organisms/ResourcePanel';
-import NotePanel from '../components/organisms/NotePanel';
 import InboxReview from '../components/organisms/InboxReview';
-import { fetchInbox } from '../api/inbox';
 import styles from './LearnPage.module.css';
 
+// Learn IS the ingest review now: capture a resource → it's segmented into proposed
+// notes → you review + file them here. The old "Library" view (manual _workspace media
+// shelf: ResourcePanel + NotePanel) predated the capture→ingest→inbox pipeline and was
+// vestigial, so it's gone — resources flow through the Inbox instead of being browsed by
+// hand. (ResourcePanel/NotePanel/LearnLayout kept in-tree but unused, easy to restore.)
 export default function LearnPage() {
   const fetchRootChildren = useStore(s => s.fetchRootChildren);
   const fetchNoteNames    = useStore(s => s.fetchNoteNames);
   const isAuthenticated   = useStore(s => s.isAuthenticated);
   const vaultRoot         = useStore(s => s.vaultRoot);
 
-  const [view,         setView]         = useState('library'); // 'library' | 'inbox'
-  const [resourceType, setResourceType] = useState('pdf');
-  const [inboxCount,   setInboxCount]   = useState(0);
-  const [videoOrient,  setVideoOrient]  = useState(null);       // 'portrait' | 'landscape'
-
-  // Landscape video is wide → horizontal split (video on top). Portrait video
-  // (a short) is tall → vertical split so it gets the height. Everything else
-  // (and video before its metadata loads) defaults to a vertical split.
-  const orientation = (resourceType === 'video' && videoOrient === 'landscape')
-    ? 'horizontal' : 'vertical';
-
   useEffect(() => {
     if (isAuthenticated && !vaultRoot) {
       fetchRootChildren().then(() => fetchNoteNames());
     }
-  }, [isAuthenticated]);
-
-  // Keep the Inbox badge fresh without mounting the panel.
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    fetchInbox().then(l => setInboxCount(l.length)).catch(() => {});
   }, [isAuthenticated]);
 
   if (!isAuthenticated) {
@@ -46,37 +30,8 @@ export default function LearnPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.viewTabs}>
-        <button
-          className={`${styles.viewTab} ${view === 'library' ? styles.viewTabActive : ''}`}
-          onClick={() => setView('library')}
-        >
-          Library
-        </button>
-        <button
-          className={`${styles.viewTab} ${view === 'inbox' ? styles.viewTabActive : ''}`}
-          onClick={() => setView('inbox')}
-        >
-          Inbox{inboxCount > 0 && <span className={styles.badge}>{inboxCount}</span>}
-        </button>
-      </div>
-
       <div className={styles.viewBody}>
-        {view === 'inbox' ? (
-          <InboxReview onCount={setInboxCount} />
-        ) : (
-          <LearnLayout
-            orientation={orientation}
-            slotA={
-              <ResourcePanel
-                resourceType={resourceType}
-                onResourceTypeChange={setResourceType}
-                onVideoOrientation={setVideoOrient}
-              />
-            }
-            slotB={<NotePanel />}
-          />
-        )}
+        <InboxReview />
       </div>
     </div>
   );
