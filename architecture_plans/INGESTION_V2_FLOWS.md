@@ -1,7 +1,7 @@
 # Ingestion v2 — Source → anchored Units → Notes (DESIGN / PLAN)
 
 Files (v1, evolves): embedder/ingest/router.py, extract_pdf.py, extract_text.py, extract_web.py, extract_av.py, keyframes.py, synthesize.py, publish.py, bundle.py, split_note.py, jobs.py
-Files (v2 NEW / planned): ir.py [NEW], segment.py [NEW], retention.py [NEW], locator.py [NEW]
+Files (v2 NEW): ir.py, extract_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py (orchestrator, flagged) — all built + unit-tested, none wired live
 Supersedes aspects of: architecture_plans/INGEST_AGENT_ARCH.md, embedder/ingest/FLOWS.md (v1)
 Related: architecture_plans/SYNC_RETENTION_PLAN.md, ML_ARCH.md (pgvector search)
 
@@ -517,6 +517,7 @@ Drop the raw video; **keep the transcript** (§8c) + keyframes owned by a commit
 | SEMANTIC link caps | `INGEST_SEMANTIC_TOPK/FLOOR/MAX_PER_NOTE` env `[NEW]` |
 | Chunk window | `bundle.WINDOW_TOKENS` (`INGEST_WINDOW_TOKENS`) |
 | Retention / deletion sweep | `retention.py` `[NEW]` |
+| v2 orchestrator chain (flagged, not live) | `pipeline_v2.py` `run()`; `INGEST_V2` env, `guard()` `[NEW]` |
 | Staging folder | `INGEST_INBOX_FOLDER` env (v1) |
 | Diagram keep/drop | `keyframes.KEEP_PROMPTS / DROP_PROMPTS` |
 | Routing rules | `router.py → ROUTE_TABLE` |

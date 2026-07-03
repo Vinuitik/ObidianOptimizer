@@ -1,7 +1,7 @@
 # Ingest Module Flows — resource → notes
 
 Files (v1, live): router.py, extract_av.py, extract_pdf.py, extract_web.py, extract_text.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
-Files (v2, scaffolded — NOT yet wired into jobs.py): ir.py, segment.py
+Files (v2, scaffolded — NOT yet wired into jobs.py): ir.py, extract_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py
 Architecture: architecture_plans/INGEST_AGENT_ARCH.md (v1), architecture_plans/INGESTION_V2_FLOWS.md (v2 design)
 
 > **v1 is what runs today.** The v2 files below are structural scaffolding toward
@@ -153,12 +153,17 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 The v2 target pipeline (INGESTION_V2_FLOWS §2), with build status:
 ```
 Acquire → Extract → SourceIR → Segment → Units → Draft → Place → Commit → Retain
-  (v1)    (v1+bridge) ✅ir.py  ✅segment  ✅      (v1 synth)(v1)   (v1)    ✅retention
+  (v1)    (v1+bridge) ✅ir.py  ✅segment  ✅  (inject/✅stub) ✅   (v1)   ✅retention
                      ✅flagging                                            (planner only)
+      └──────────── ✅pipeline_v2.run() chains all of the above (flagged, not live) ───────┘
 ```
-✅ = built + unit-tested (pure, GPU-free). The gaps are the *seam*: extractors still emit
-v1 `{loc}` (bridged via `ir_from_v1_bundle`), `jobs.py` still runs v1 synth/outline, and
-the retention/flagging planners aren't called at commit yet. See "wiring that remains".
+✅ = built + unit-tested (pure, GPU-free). `pipeline_v2.run(ir)` is the orchestrator that
+chains segment → draft(injectable) → retention → locator behind the `INGEST_V2` flag
+(default off) — **imported by tests only, not wired to the live trigger**. The remaining
+gaps are the *seam*: extractors still emit v1 `{loc}` (bridged via `ir_from_v1_bundle`;
+text/md/html have `extract_ir.py` native), `jobs.py` still runs v1 synth/outline and never
+calls `pipeline_v2`, and the retention/flag planners aren't executed at commit. See
+"wiring that remains".
 
 ### ir.py — the SourceIR contract (§3)  ✅ built, tested
 `raw bytes → ordered positioned Blocks`. No LLM, no concepts. Pure dataclasses +
@@ -223,15 +228,36 @@ Idempotent per code. Layout-specific HARD checks (READING_ORDER, TABLE, OCR, LAY
 Units inherit these via `segment._inherit_flags` (hardest wins). `[not yet called by any
 extractor — jobs cutover wires it]`
 
+### pipeline_v2.py — the flagged orchestrator (§2)  ✅ built, tested
+Chains the pure stages into one call. **Not wired to the live trigger** — `jobs.py` never
+imports it yet; the cutover is a `guard()`-gated caller (task 2 below).
+```
+run(ir, draft_fn?, embed_fn?, kept_fragments?, source_blob_path?) → PipelineResult
+  segment(ir, embed_fn)            → Units          (LLM never picks boundaries)
+  per Unit: draft_fn(unit,title)   → body           (the ONLY LLM; None → echo raw_text)
+            locator.resolve_splice → splice dict     (consume-layer region)
+            HARD flag → REVIEWING else DRAFT (§3c/§7 lifecycle)
+  compute_retention over DRAFT (auto-committable) Units only → RetentionPlan
+PipelineResult{ ir, units, notes[DraftedNote], retention }.needs_review  # any HARD flag
+```
+`draft_fn: (Unit,title)→body` and `embed_fn: list[str]→vecs` are injected — the live wiring
+passes `synthesize._write_body()` + `model_runtime.embed`; tests pass pure stubs so the whole
+chain runs LLM/GPU-free. Feature flag `INGEST_V2` (default off); `v2_enabled()`/`guard()` are
+what the future `jobs.py` caller checks. Convenience: `run_text` / `run_html` / `run_v1_bundle`
+build the IR (via `extract_ir` / bridge) then `run()`. *Change the chain:* this file; *a stage:*
+its module. Tests: `tests/test_pipeline_v2.py`.
+
 ### Wiring that remains (the v1→v2 seam)  [NOT IMPLEMENTED]
 1. **Extractors emit SourceIR** — text/md/html ✅ **done natively** (`extract_ir.py`,
    real char offsets). Remaining: `extract_pdf` block/bbox mode (§3a), `extract_av`
    transcript→speech blocks (§8a). `ir.ir_from_v1_bundle()` ✅ bridges the still-v1
    extractors (pdf/av) so `segment()` runs on live extraction NOW; native versions
    replace the bridge per-medium for real bbox/time precision. `[text done; pdf/av NEW]`
-2. **jobs.py calls segment()** — replace the `synthesize.outline()` boundary role with
-   `segment.segment(ir, embed_fn=model_runtime.embed)`; draft each Unit via the existing
-   `synthesize._write_body()` (WRITE pass kept, outline/boundary role retired). `[NEW]`
+2. **jobs.py calls pipeline_v2** — the orchestrator ✅ exists (`pipeline_v2.run`, chains
+   segment + draft + retention + locator). Remaining: a `jobs.py` caller, `guard()`-gated on
+   `INGEST_V2`, that builds the IR (native `extract_ir` for text/html, bridge for pdf/av),
+   calls `run(ir, embed_fn=model_runtime.embed, draft_fn=<synthesize._write_body wrapper>)`,
+   and publishes each `DraftedNote` — retiring `synthesize.outline()`'s boundary role. `[NEW]`
 3. **retention.py** (§6) — planner ✅ built + tested; the FS-sweep **executor** that
    consumes a `RetentionPlan` at commit is not wired. **locator.py** (learn-view splice,
    §7) — splice resolver ✅ built + tested; the **frontend learn-view** that renders a
@@ -296,6 +322,7 @@ extractor — jobs cutover wires it]`
 | v2 extraction flags (IR-computable) | `flagging.py` (`flag_source`) `[v2 scaffold]` |
 | v2 native text/html IR extraction | `extract_ir.py` (`from_markdown`) `[v2 scaffold]` |
 | v2 splice resolution (consume) | `locator.py` (`resolve_splice`) `[v2 scaffold]` |
+| v2 orchestrator chain (flagged) | `pipeline_v2.py` (`run`); `INGEST_V2` env, `guard()` `[v2 scaffold]` |
 | (note, embed) job de-dup | `jobs.submit()` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | Routing rules | `router.py → ROUTE_TABLE` |
