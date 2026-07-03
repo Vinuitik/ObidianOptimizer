@@ -193,6 +193,15 @@ and user `KeptFragment`s survive; unreferenced shots/media + the raw blob drop; 
 the transcript. The actual FS sweep is a **separate executor** (Java internal API /
 publish) — this module never deletes. *Change policy:* `retention.py`.
 
+### flagging.py — extraction confidence, IR-computable subset (§3c/§8d)  ✅ built, tested
+`flag_source(ir)` annotates `block.flags` in place with checks needing only the IR (no
+fitz, no ML): `NO_STRUCTURE` (no toc+no headings → token-window only), `OVERSIZE_BLOCK`
+(one block > 60% of source words), `LONG_UNBROKEN` (A/V speech run > 500 words). All SOFT.
+Idempotent per code. Layout-specific HARD checks (READING_ORDER, TABLE, OCR, LAYOUT) need
+`fitz` and belong in `extract_pdf.py` — not here. `INGEST_FLAG_MODE=off` disables.
+Units inherit these via `segment._inherit_flags` (hardest wins). `[not yet called by any
+extractor — jobs cutover wires it]`
+
 ### Wiring that remains (the v1→v2 seam)  [NOT IMPLEMENTED]
 1. **Extractors emit SourceIR** — `extract_pdf` block/bbox mode (§3a), `extract_text`/
    `extract_web` char-offset mode (§3b), `extract_av` transcript→speech blocks (§8a).
@@ -261,6 +270,8 @@ publish) — this module never deletes. *Change policy:* `retention.py`.
 | v2 segmentation strategy | `segment.py` (Stage A/B) `[v2 scaffold]` |
 | v2 Unit size band | `INGEST_UNIT_WORDS_MIN/MAX/CEIL/FLOOR`, `INGEST_TOPICSHIFT_DELTA` env `[v2]` |
 | v2 heading boundary level | `INGEST_SEGMENT_HEADING_LEVEL` env `[v2]` |
+| v2 retention keep/drop policy | `retention.py` (`compute_retention`) `[v2 scaffold]` |
+| v2 extraction flags (IR-computable) | `flagging.py` (`flag_source`) `[v2 scaffold]` |
 | (note, embed) job de-dup | `jobs.submit()` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | Routing rules | `router.py → ROUTE_TABLE` |
