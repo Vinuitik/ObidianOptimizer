@@ -1,7 +1,14 @@
 # Ingest Module Flows — resource → notes
 
-Files: router.py, extract_av.py, extract_pdf.py, extract_web.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
-Architecture: architecture_plans/INGEST_AGENT_ARCH.md
+Files (v1, live): router.py, extract_av.py, extract_pdf.py, extract_web.py, extract_text.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
+Files (v2, scaffolded — NOT yet wired into jobs.py): ir.py, segment.py
+Architecture: architecture_plans/INGEST_AGENT_ARCH.md (v1), architecture_plans/INGESTION_V2_FLOWS.md (v2 design)
+
+> **v1 is what runs today.** The v2 files below are structural scaffolding toward
+> INGESTION_V2_FLOWS (block-level anchoring + deterministic segmentation). They are
+> unit-tested and importable but **no extractor emits SourceIR yet and jobs.py does
+> not call segment()** — v1's `{loc}`-segment pipeline is still the live path. See the
+> "## v2 scaffolding" section below for what exists and the wiring that remains.
 
 Two output modes share one extraction+synthesis core:
 - **in-place** (the common case): a note holds `![[lecture.mp4]]` → synthesize a
@@ -141,6 +148,56 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 
 ---
 
+## v2 scaffolding (ir.py, segment.py)  [PARTIAL — not wired]
+
+The v2 target pipeline (INGESTION_V2_FLOWS §2):
+```
+Acquire → Extract → SourceIR → Segment → Units → Draft → Place → Commit → Retain
+          (§3 NEW)  (ir.py)    (segment)          (synth)  (find_home)(publish) (§6 NEW)
+```
+
+### ir.py — the SourceIR contract (§3)  ✅ built, tested
+`raw bytes → ordered positioned Blocks`. No LLM, no concepts. Pure dataclasses +
+JSON round-trip (bundles persist as JSON), zero heavy deps.
+```
+Medium(text_native | inferred_text)
+Block { id, order_index, locator, type, text, level?, media_ref?, flags[] }
+Locator = CharSpan{start,end} | PageBox{page_no,bbox} | TimeSpan{start_ms,end_ms}
+Flag { code, severity=HARD|SOFT }        # §3c confidence gating (extraction not yet emitting)
+SourceIR { medium, title, blocks[], anchors[], toc[], normalized_text, source_id }
+  .has_structure() → toc or any heading   → Stage A picks its strategy off this
+  .hard_flags()    → gates auto-commit
+```
+`order_index` is the spine → chronology + SEQUENTIAL links for free. *Change shape:* `ir.py`.
+
+### segment.py — SourceIR → Units (§4)  ✅ built, tested
+**LLM never chooses boundaries.** Structure + embedding topic-shift only.
+```
+segment(ir, embed_fn?) → list[Unit]
+  Stage A (deterministic):  toc → group by leaf page ; elif headings → cut at level ≤ 2 ;
+                            else → token windows (UNIT_WORDS_MAX)
+  Stage B (bounded):        SPLIT > 600 words at topic-shift (embed_fn adjacency cosine,
+                            TOPICSHIFT_DELTA below local mean) ; MERGE < 60 words forward
+Unit { source_id, block_ids[], locator_span, order_index, raw_text, flags[] }
+```
+`embed_fn` is pluggable (`list[str]→vecs`); **None → deterministic word-balance split**
+so segmentation runs GPU-free and is testable. Units inherit block flags (hardest wins).
+Size band env: `INGEST_UNIT_WORDS_MIN/MAX/CEIL/FLOOR`, `INGEST_TOPICSHIFT_DELTA`,
+`INGEST_SEGMENT_HEADING_LEVEL`. *Change strategy:* `segment.py`.
+
+### Wiring that remains (the v1→v2 seam)  [NOT IMPLEMENTED]
+1. **Extractors emit SourceIR** — `extract_pdf` block/bbox mode (§3a), `extract_text`/
+   `extract_web` char-offset mode (§3b), `extract_av` transcript→speech blocks (§8a).
+   Today they emit v1 `{loc}` segments; a shim (`ir_from_v1_bundle()`) or a rewrite is
+   the bridge. `[NEW]`
+2. **jobs.py calls segment()** — replace the `synthesize.outline()` boundary role with
+   `segment.segment(ir, embed_fn=model_runtime.embed)`; draft each Unit via the existing
+   `synthesize._write_body()` (WRITE pass kept, outline/boundary role retired). `[NEW]`
+3. **retention.py** (§6) + **locator.py** (learn-view splice, §7) — not started. `[NEW]`
+4. **Extraction flagging** (§3c) — Flag type exists in ir.py; no check populates it yet.
+
+---
+
 ## Technology Notes
 
 - **In-place placement, not a separate note**: the synthesized block lives below
@@ -189,6 +246,10 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 | In-place capture snapshot + link | `jobs._synthesize_and_inject()` → `publish.create_capture()` + `stamp_capture()` |
 | Capture source folder | Java `InternalAgentController.createCapture` (`_inbox/_sources`) |
 | In-place review/acknowledge | Java `inbox/FLOWS.md` (`InboxController`) |
+| v2 SourceIR / Block / Locator shape | `ir.py` `[v2 scaffold]` |
+| v2 segmentation strategy | `segment.py` (Stage A/B) `[v2 scaffold]` |
+| v2 Unit size band | `INGEST_UNIT_WORDS_MIN/MAX/CEIL/FLOOR`, `INGEST_TOPICSHIFT_DELTA` env `[v2]` |
+| v2 heading boundary level | `INGEST_SEGMENT_HEADING_LEVEL` env `[v2]` |
 | (note, embed) job de-dup | `jobs.submit()` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | Routing rules | `router.py → ROUTE_TABLE` |
