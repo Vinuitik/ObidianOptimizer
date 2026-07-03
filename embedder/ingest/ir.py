@@ -228,3 +228,84 @@ class SourceIR:
 
 def new_block_id() -> str:
     return uuid.uuid4().hex[:12]
+
+
+# ── v1 → SourceIR bridge (transitional) ───────────────────────────────────────
+
+_V1_MEDIUM = {
+    "text": Medium.TEXT, "web": Medium.HTML, "web_dom": Medium.HTML, "html": Medium.HTML,
+    "pdf": Medium.PDF, "epub": Medium.EPUB,
+    "audio": Medium.AUDIO, "video": Medium.VIDEO, "youtube": Medium.VIDEO,
+}
+
+
+def ir_from_v1_bundle(bundle: dict) -> "SourceIR":
+    """Adapt a live v1 extraction bundle (`{source, segments:[{loc,text}], media}`)
+    into a SourceIR so `segment.py` can run **before** the extractors are rewritten to
+    emit IR natively. Transitional — it reconstructs locators from what v1 recorded:
+
+      text/html : builds a frozen normalized string from the segments and assigns each
+                  block a real CharSpan into it (heading segments also get a HEADING
+                  block so Stage A heading-grouping works).
+      pdf/epub  : PageBox per segment; bbox is unknown in v1 → [] (a SOFT signal only).
+      audio/vid : TimeSpan from loc.t_start/t_end seconds → ms.
+
+    Once §3a/§3b/§8a extractors emit SourceIR directly, delete this and its callers.
+    """
+    src = bundle.get("source", {})
+    medium = _V1_MEDIUM.get(src.get("type", "text"), Medium.TEXT)
+    title = src.get("title") or "Untitled"
+    segments = bundle.get("segments", [])
+
+    blocks: list[Block] = []
+    order = 0
+    norm_parts: list[str] = []
+    cursor = 0
+
+    for seg in segments:
+        loc = seg.get("loc", {})
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+
+        if medium.text_native and "page" not in loc:
+            heading = loc.get("heading", "")
+            if heading:
+                start = cursor
+                blocks.append(Block(order_index=order, type=BlockType.HEADING,
+                                    level=2, text=heading,
+                                    locator=CharSpan(start, start + len(heading))))
+                order += 1
+                norm_parts.append(heading)
+                cursor += len(heading) + 2  # + "\n\n"
+            start = cursor
+            blocks.append(Block(order_index=order, type=BlockType.PARAGRAPH, text=text,
+                                locator=CharSpan(start, start + len(text))))
+            order += 1
+            norm_parts.append(text)
+            cursor += len(text) + 2
+
+        elif "page" in loc:
+            blocks.append(Block(order_index=order, type=BlockType.PARAGRAPH, text=text,
+                                locator=PageBox(page_no=int(loc["page"]), bbox=[])))
+            order += 1
+
+        elif "t_start" in loc:
+            blocks.append(Block(order_index=order, type=BlockType.SPEECH, text=text,
+                                locator=TimeSpan(start_ms=int(float(loc["t_start"]) * 1000),
+                                                 end_ms=int(float(loc.get("t_end", loc["t_start"])) * 1000))))
+            order += 1
+        else:
+            # unknown loc → coarse char block at end of the running string
+            start = cursor
+            blocks.append(Block(order_index=order, type=BlockType.PARAGRAPH, text=text,
+                                locator=CharSpan(start, start + len(text))))
+            order += 1
+            norm_parts.append(text)
+            cursor += len(text) + 2
+
+    toc = [TocEntry(title=c["title"], level=1)
+           for c in src.get("chapters", []) if c.get("title")]
+    normalized = "\n\n".join(norm_parts) if norm_parts else None
+    return SourceIR(medium=medium, title=title, blocks=blocks, toc=toc,
+                    normalized_text=normalized)
