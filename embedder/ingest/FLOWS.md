@@ -150,11 +150,15 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 
 ## v2 scaffolding (ir.py, segment.py)  [PARTIAL — not wired]
 
-The v2 target pipeline (INGESTION_V2_FLOWS §2):
+The v2 target pipeline (INGESTION_V2_FLOWS §2), with build status:
 ```
 Acquire → Extract → SourceIR → Segment → Units → Draft → Place → Commit → Retain
-          (§3 NEW)  (ir.py)    (segment)          (synth)  (find_home)(publish) (§6 NEW)
+  (v1)    (v1+bridge) ✅ir.py  ✅segment  ✅      (v1 synth)(v1)   (v1)    ✅retention
+                     ✅flagging                                            (planner only)
 ```
+✅ = built + unit-tested (pure, GPU-free). The gaps are the *seam*: extractors still emit
+v1 `{loc}` (bridged via `ir_from_v1_bundle`), `jobs.py` still runs v1 synth/outline, and
+the retention/flagging planners aren't called at commit yet. See "wiring that remains".
 
 ### ir.py — the SourceIR contract (§3)  ✅ built, tested
 `raw bytes → ordered positioned Blocks`. No LLM, no concepts. Pure dataclasses +
