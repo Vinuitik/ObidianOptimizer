@@ -70,24 +70,35 @@ LearnPage → view toggle: Library | Inbox(badge=count)
   Library → LearnLayout(orientation, slotA, slotB)
     slotA: ResourcePanel (pdf | video | …) — resourceType state lives in LearnPage
     slotB: NotePanel
-  Inbox   → InboxPanel(onCount) — triage queue for ingest-generated notes
+  Inbox   → InboxReview(onCount) — 3-panel ingest review (source | note | links)
 orientation: landscape video → horizontal split; portrait video (short) &
              everything else → vertical
 on mount (authed, no vaultRoot): fetchRootChildren() → fetchNoteNames()
 inbox badge: fetchInbox().length, refreshed on mount + after each file/discard
 ```
 
-- **Inbox** (`InboxPanel.jsx` + `api/inbox.js`): lists notes the ingest agent parked in
-  `_inbox/` (see backend `inbox/FLOWS.md`). Select → edit markdown → pick a destination
-  folder (datalist from `fetchChildren`, `_inbox` filtered out) → **Save & file**
-  (`POST /api/inbox/file`) moves it into review, or **Discard** (`DELETE /api/inbox`).
+- **Inbox review** (`InboxReview.jsx` + `api/inbox.js`): the ingest consume layer
+  (INGESTION_V2_FLOWS §7). A queue rail + **three panels**:
+  - `SourceSplicePanel` — the source spliced to THIS note's region: `parseSourceRegion`
+    reads the note's `## Source` footer → YouTube embed seeked to the timestamp / `<video>`
+    `#t=` / PDF `#page=` / **text → `RsvpReader`** (fast one-word-at-a-time reading, §7).
+  - note column — Edit/Preview (`MarkdownContent`) + the **proposed** folder (find_home
+    suggestion, editable — no longer chosen from scratch) → **Save & file** / **Discard**,
+    or **Save & acknowledge** for in-place notes.
+  - `LinksPanel` — `parseLinks` reads the injected `## Sequence` (prev → THIS → next) and
+    `## Related` wikilinks, shown IN ORDER so chronology is verifiable; click to jump.
+  Panels render the LIVE edited draft, so splice + links reflect what you'll file. The old
+  2-pane `InboxPanel.jsx` is superseded (kept in-tree, unused). Rendering is the shared
+  `molecules/MarkdownContent` (extracted from `NoteViewer` — every note surface renders
+  identically now). Pure parse/RSVP logic: `utils/inboxParse.js`, `utils/rsvp.js` (tested).
 - **Video orientation** is detected client-side from the `<video>` element's
   `videoWidth/videoHeight` on `loadedmetadata` (`ResourcePanel Viewer → onOrientation`),
   bubbled to `LearnPage` so a portrait short gets a vertical split. No ffprobe needed.
 
 To change the split rule: `LearnPage.jsx → orientation` ternary
 To add a resource type: `ResourcePanel.jsx` + orientation rule above
-To change inbox triage: `InboxPanel.jsx` + backend `inbox/InboxController`
+To change inbox triage: `InboxReview.jsx` (+ `SourceSplicePanel`/`LinksPanel`/`RsvpReader`) + backend `inbox/InboxController`
+To change the shared note renderer: `molecules/MarkdownContent.jsx` (wraps `utils/markdown.renderMarkdown`)
 
 ---
 

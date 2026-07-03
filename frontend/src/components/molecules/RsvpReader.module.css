@@ -1,0 +1,73 @@
+.rsvp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  width: 100%;
+}
+
+/* The reading stage: pivot letter is centred so the eye never moves. A 3-column grid
+   (before right-aligned | pivot | after left-aligned) keeps the ORP letter on the axis. */
+.stageWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 1.5rem 0;
+}
+
+.guide {
+  width: 2px;
+  height: 10px;
+  background: var(--accent, #6c8cff);
+  opacity: 0.7;
+}
+
+.stage {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: baseline;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: clamp(1.6rem, 5vw, 2.6rem);
+  line-height: 1;
+  width: 100%;
+}
+
+.before { text-align: right; color: var(--text, #222); }
+.after  { text-align: left;  color: var(--text, #222); }
+.pivot  {
+  color: var(--accent, #6c8cff);
+  font-weight: 700;
+  padding: 0 1px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.play {
+  min-width: 2.4rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border, #d5d5dd);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.play:hover { background: var(--surface-hover, #f2f2f6); }
+
+.wpm { flex: 1 1 120px; }
+.wpmLabel { font-size: 0.8rem; color: var(--text-muted, #666); min-width: 4.5rem; }
+.count { font-size: 0.8rem; color: var(--text-muted, #666); margin-left: auto; }
+
+.scrub { width: 100%; }
+
+.empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--text-muted, #888);
+  font-size: 0.9rem;
+}

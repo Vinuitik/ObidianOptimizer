@@ -311,7 +311,14 @@ clips and shows kept page-shots; it does **not** scrub the original. Consistent 
 
 ---
 
-## 7. Consume layer `[NOT IMPLEMENTED]`
+## 7. Consume layer `[BUILT — frontend, browser-unverified]`
+
+> Frontend: `frontend/src/components/organisms/InboxReview.jsx` (3-panel), `SourceSplicePanel.jsx`
+> (splice viewer + RSVP), `LinksPanel.jsx` (ordered links), `molecules/RsvpReader.jsx`,
+> `molecules/MarkdownContent.jsx` (shared renderer). Pure logic `utils/inboxParse.js` +
+> `utils/rsvp.js` (tested). Splice granularity = page/timestamp parsed from the note's `##
+> Source` footer (precise bbox/char crop still wants a backend `SpliceView` endpoint). Wired
+> into `LearnPage` Inbox view. Not yet run in a browser (no node in the build sandbox).
 
 - **Learn-view splice** — a note renders its source region directly: PDF → the kept
   page-shot cropped to `locator_span` bbox (no scrolling); txt → scroll+highlight
@@ -541,5 +548,7 @@ Drop the raw video; **keep the transcript** (§8c) + keyframes owned by a commit
 | Staging folder | `INGEST_INBOX_FOLDER` env (v1) |
 | Diagram keep/drop | `keyframes.KEEP_PROMPTS / DROP_PROMPTS` |
 | Routing rules | `router.py → ROUTE_TABLE` |
-| RSVP reader / learn-view / 3-panel | frontend `[NOT IMPLEMENTED]` |
+| RSVP reader / learn-view / 3-panel | `frontend` InboxReview + SourceSplicePanel + LinksPanel + RsvpReader `[BUILT, browser-unverified]` |
+| Shared note markdown renderer | `frontend molecules/MarkdownContent.jsx` (wraps `utils/markdown.renderMarkdown`) |
+| Precise splice (bbox/char crop) | needs backend `locator.SpliceView` endpoint `[NOT IMPLEMENTED]` — page/timestamp parsed from `## Source` for now |
 | Silent/visual-primary video (frame-primary) | §9f `[NOT IMPLEMENTED]` — degrades via captions for now |

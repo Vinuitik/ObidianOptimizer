@@ -3,7 +3,7 @@ import useStore from '../store/useStore';
 import LearnLayout from '../components/templates/LearnLayout';
 import ResourcePanel from '../components/organisms/ResourcePanel';
 import NotePanel from '../components/organisms/NotePanel';
-import InboxPanel from '../components/organisms/InboxPanel';
+import InboxReview from '../components/organisms/InboxReview';
 import { fetchInbox } from '../api/inbox';
 import styles from './LearnPage.module.css';
 
@@ -63,7 +63,7 @@ export default function LearnPage() {
 
       <div className={styles.viewBody}>
         {view === 'inbox' ? (
-          <InboxPanel onCount={setInboxCount} />
+          <InboxReview onCount={setInboxCount} />
         ) : (
           <LearnLayout
             orientation={orientation}
