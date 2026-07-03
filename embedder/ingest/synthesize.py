@@ -204,6 +204,15 @@ def _write_body(bundle: dict, plan: dict, by_id: dict[int, dict]) -> tuple[str, 
     return _strip_fences(body), segs
 
 
+def write_unit_body(title: str, raw_text: str, summary_hint: str = "") -> str:
+    """v2 WRITE pass: draft ONE segment-v2 Unit (boundaries already fixed by
+    `segment.py`). Same WRITE prompt/system as `_write_body`, but the input is the
+    Unit's `raw_text` directly — `outline()`'s boundary role is retired (INGESTION_V2 §2)."""
+    body = _complete(WRITE_PROMPT.format(
+        title=title, summary_hint=summary_hint, segments=raw_text), WRITE_SYSTEM)
+    return _strip_fences(body)
+
+
 def _strip_fences(body: str) -> str:
     t = body.strip()
     if t.startswith("```"):
@@ -235,6 +244,38 @@ def build_inplace_body(bundle: dict, plans: list[dict],
             section += "\n\n" + "\n".join(media_lines)
         sections.append(section)
     return "\n\n".join(sections) + "\n\n" + _source_section(bundle["source"], used)
+
+
+# ── in-place assembly, v2 (pre-drafted Units) ─────────────────────────────
+
+def _span_to_segs(span: dict) -> list[dict]:
+    """A v2 Unit.locator_span → v1-shaped `[{loc}]` stubs so the existing deterministic
+    helpers (`_media_for_segments`, `_source_section`) work unchanged for v2. Text spans
+    carry no page/time meta → no media, ref-only footer."""
+    kind = span.get("kind")
+    if kind == "page":
+        return [{"loc": {"page": p}} for p in span.get("pages", [])]
+    if kind == "time":
+        return [{"loc": {"t_start": span.get("start_ms", 0) / 1000,
+                         "t_end": span.get("end_ms", 0) / 1000}}]
+    return []
+
+
+def build_inplace_body_v2(source: dict, drafted: list[dict], media: list[dict]) -> str:
+    """v2 counterpart of `build_inplace_body`: the bodies are ALREADY drafted per Unit
+    (`write_unit_body`), so this only assembles — one `## title` section per Unit, media
+    interleaved by locator span, one source footer over all spans. No LLM here."""
+    bundle = {"source": source, "media": media}
+    sections, all_segs = [], []
+    for d in drafted:
+        segs = _span_to_segs(d["span"])
+        all_segs.extend(segs)
+        section = f"## {d['title']}\n\n{d['body'].rstrip()}"
+        media_lines = _media_for_segments(bundle, segs)
+        if media_lines:
+            section += "\n\n" + "\n".join(media_lines)
+        sections.append(section)
+    return "\n\n".join(sections) + "\n\n" + _source_section(source, all_segs)
 
 
 # ── deterministic assembly (standalone note) ─────────────────────────────

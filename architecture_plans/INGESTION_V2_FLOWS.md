@@ -77,8 +77,8 @@ consume layer (§7): learn-view splice · RSVP reader        ──────�
   feeds logged-in sources. Unchanged.
 - **Extract → SourceIR** — `[NEW]` the contract between extraction and segmentation.
 - **Segment → Units** — `[NEW]` deterministic boundaries.
-- **Draft** — reuse `synthesize._write_body()` (WRITE pass) per Unit. **Drop the
-  outline/boundary role** of `synthesize.outline()`.
+- **Draft** — reuse the WRITE pass per Unit via `synthesize.write_unit_body()` `[BUILT]`.
+  **Outline/boundary role of `synthesize.outline()` is dropped on the v2 path.**
 - **Place** — reuse v1 `_inbox` staging + `find_home_for_note` suggestion.
 - **Commit** — reuse `publish.*`; add chunk/embed/link + flashcards + retention sweep.
 - **Retain** — `[NEW]` §6.
@@ -517,7 +517,8 @@ Drop the raw video; **keep the transcript** (§8c) + keyframes owned by a commit
 | Keyframe → Unit placement (by t_ms) | `segment.py` / `publish.py` `[NEW]` |
 | Topic-shift sensitivity | `INGEST_TOPICSHIFT_DELTA` env `[NEW]` |
 | Structural heading boundary level | `SEGMENT_HEADING_LEVEL` env `[NEW]` |
-| Note drafting (WRITE only, no outline) | `synthesize._write_body()` (reuse); retire outline-boundary role |
+| Note drafting (WRITE only, no outline) | `synthesize.write_unit_body()` `[BUILT]`; v2 path retires outline-boundary role |
+| v1↔v2 synthesis cutover (flagged) | `jobs._run` on `pipeline_v2.v2_enabled()` (`INGEST_V2` env) `[BUILT]` |
 | SEMANTIC link caps | `INGEST_SEMANTIC_TOPK/FLOOR/MAX_PER_NOTE` env `[NEW]` |
 | Chunk window | `bundle.WINDOW_TOKENS` (`INGEST_WINDOW_TOKENS`) |
 | Retention / deletion sweep | `retention.py` `[NEW]` |

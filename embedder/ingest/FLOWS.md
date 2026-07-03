@@ -1,14 +1,16 @@
 # Ingest Module Flows — resource → notes
 
 Files (v1, live): router.py, extract_av.py, extract_pdf.py, extract_web.py, extract_text.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
-Files (v2, scaffolded — NOT yet wired into jobs.py): ir.py, extract_ir.py, extract_pdf_ir.py, extract_av_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py
+Files (v2, wired behind INGEST_V2 flag, default off): ir.py, extract_ir.py, extract_pdf_ir.py, extract_av_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py (+ jobs.py `_*_v2`, synthesize.py `write_unit_body`/`build_inplace_body_v2`)
 Architecture: architecture_plans/INGEST_AGENT_ARCH.md (v1), architecture_plans/INGESTION_V2_FLOWS.md (v2 design)
 
-> **v1 is what runs today.** The v2 files below are structural scaffolding toward
-> INGESTION_V2_FLOWS (block-level anchoring + deterministic segmentation). They are
-> unit-tested and importable but **no extractor emits SourceIR yet and jobs.py does
-> not call segment()** — v1's `{loc}`-segment pipeline is still the live path. See the
-> "## v2 scaffolding" section below for what exists and the wiring that remains.
+> **v1 is the default; v2 is wired but flag-gated (`INGEST_V2`, default off).** `jobs._run`
+> now branches on `pipeline_v2.v2_enabled()`: OFF → the v1 `outline()`+`{loc}` path (unchanged,
+> live); ON → v2 (bundle → SourceIR → `segment()` boundaries → `write_unit_body()` draft per
+> Unit → same capture/publish path). The v2 branch is written + unit-tested but **has not run
+> against a real PDF/video/LLM in Docker** — flip the flag in a runnable env to smoke-test
+> before trusting it. Extraction still emits v1 `{loc}` (bridged to IR at the seam); the native
+> `*_ir` extractors are built but not yet the live extract stage. See "## v2 scaffolding".
 
 Two output modes share one extraction+synthesis core:
 - **in-place** (the common case): a note holds `![[lecture.mp4]]` → synthesize a
@@ -153,17 +155,16 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 The v2 target pipeline (INGESTION_V2_FLOWS §2), with build status:
 ```
 Acquire → Extract → SourceIR → Segment → Units → Draft → Place → Commit → Retain
-  (v1)    (v1+bridge) ✅ir.py  ✅segment  ✅  (inject/✅stub) ✅   (v1)   ✅retention
-                     ✅flagging                                            (planner only)
-      └──────────── ✅pipeline_v2.run() chains all of the above (flagged, not live) ───────┘
+  (v1)    (v1+bridge) ✅ir.py  ✅segment  ✅  ✅write_unit  ✅    ✅jobs   ✅plan
+                     ✅flagging                _body (WRITE)  (v1)  publish  (no sweep yet)
+      └── ✅pipeline_v2.run() chains these; ✅ jobs._run branches on INGEST_V2 (flagged) ──┘
 ```
-✅ = built + unit-tested (pure, GPU-free). `pipeline_v2.run(ir)` is the orchestrator that
-chains segment → draft(injectable) → retention → locator behind the `INGEST_V2` flag
-(default off) — **imported by tests only, not wired to the live trigger**. The remaining
-gaps are the *seam*: extractors still emit v1 `{loc}` (bridged via `ir_from_v1_bundle`;
-text/md/html have `extract_ir.py` native), `jobs.py` still runs v1 synth/outline and never
-calls `pipeline_v2`, and the retention/flag planners aren't executed at commit. See
-"wiring that remains".
+✅ = built + unit-tested (pure, GPU-free). `pipeline_v2.run(ir)` chains segment →
+draft(injectable) → retention → locator; `jobs._synthesize_and_{inject,publish}_v2` call it
+behind `INGEST_V2` (default off) and publish via the existing v1 path. **Untested against a
+real source/LLM** — flip the flag in Docker to smoke-test. Remaining seam: native `*_ir`
+extractors aren't the live extract stage yet (v1 `{loc}` is bridged to IR), and the retention
+plan is recorded on the job but the FS-sweep **executor** isn't wired (task below).
 
 ### ir.py — the SourceIR contract (§3)  ✅ built, tested
 `raw bytes → ordered positioned Blocks`. No LLM, no concepts. Pure dataclasses +
@@ -260,9 +261,11 @@ Idempotent per code. Layout-specific HARD checks (READING_ORDER, TABLE, OCR, LAY
 Units inherit these via `segment._inherit_flags` (hardest wins). `[not yet called by any
 extractor — jobs cutover wires it]`
 
-### pipeline_v2.py — the flagged orchestrator (§2)  ✅ built, tested
-Chains the pure stages into one call. **Not wired to the live trigger** — `jobs.py` never
-imports it yet; the cutover is a `guard()`-gated caller (task 2 below).
+### pipeline_v2.py — the flagged orchestrator (§2)  ✅ built, tested, wired (flagged)
+Chains the pure stages into one call. **Wired into `jobs._run` behind `INGEST_V2` (default
+off)** via `_synthesize_and_{inject,publish}_v2`; the live draft is `synthesize.write_unit_body`
+and the live embedder is `model_runtime.embed_texts`. `v2_enabled()` selects the path; `guard()`
+is available for any caller that wants a hard fail when off.
 ```
 run(ir, draft_fn?, embed_fn?, kept_fragments?, source_blob_path?) → PipelineResult
   segment(ir, embed_fn)            → Units          (LLM never picks boundaries)
@@ -287,11 +290,14 @@ its module. Tests: `tests/test_pipeline_v2.py`.
    blocks, chapters TOC, ASR/NON_SPEECH/AUTO_CAPTIONS flags — the `from_av` whisper wrapper is
    written but sandbox-unrun). `ir.ir_from_v1_bundle()` remains only as the generic fallback;
    `extract_av_ir.from_bundle()` is the richer A/V bridge. `[text+pdf+av core done; live IO unrun]`
-2. **jobs.py calls pipeline_v2** — the orchestrator ✅ exists (`pipeline_v2.run`, chains
-   segment + draft + retention + locator). Remaining: a `jobs.py` caller, `guard()`-gated on
-   `INGEST_V2`, that builds the IR (native `extract_ir` for text/html, bridge for pdf/av),
-   calls `run(ir, embed_fn=model_runtime.embed, draft_fn=<synthesize._write_body wrapper>)`,
-   and publishes each `DraftedNote` — retiring `synthesize.outline()`'s boundary role. `[NEW]`
+2. **jobs.py calls pipeline_v2** ✅ **wired (flagged).** `jobs._run` branches on
+   `pipeline_v2.v2_enabled()`; `_synthesize_and_{inject,publish}_v2` build the IR
+   (`_ir_from_bundle`: native `extract_av_ir.from_bundle` for A/V, `ir_from_v1_bundle` bridge
+   for pdf/text), run `pipeline_v2.run(ir, embed_fn=model_runtime.embed_texts, draft_fn=
+   synthesize.write_unit_body)`, and publish each Unit via the v1 capture/inbox path.
+   `outline()`'s boundary role is retired on the v2 path. **Remaining:** make the native
+   `*_ir` extractors the live *extract* stage (so bbox/char/ASR precision is real, not bridged);
+   route HARD-flagged Units to REVIEWING instead of auto-injecting; **smoke-test in Docker.**
 3. **retention.py** (§6) — planner ✅ built + tested; the FS-sweep **executor** that
    consumes a `RetentionPlan` at commit is not wired. **locator.py** (learn-view splice,
    §7) — splice resolver ✅ built + tested; the **frontend learn-view** that renders a
@@ -345,6 +351,10 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | Resource embed extensions (trigger) | `ResourceScanService.RESOURCE_EMBED` (Java) |
 | Ingest marker format | `publish.inject_block()` |
 | In-place vs standalone branch | `jobs._run()` (`note_path` set ⇒ in-place) |
+| v1 vs v2 synthesis branch | `jobs._run()` (`pipeline_v2.v2_enabled()` ⇒ `_*_v2`); `INGEST_V2` env |
+| v2 bundle→IR bridge at the seam | `jobs._ir_from_bundle()` (native A/V, bridge pdf/text) |
+| v2 per-Unit WRITE draft | `synthesize.write_unit_body()` |
+| v2 in-place / standalone assembly | `synthesize.build_inplace_body_v2()` / `assemble()` via `_span_to_segs()` |
 | In-place capture snapshot + link | `jobs._synthesize_and_inject()` → `publish.create_capture()` + `stamp_capture()` |
 | Capture source folder | Java `InternalAgentController.createCapture` (`_inbox/_sources`) |
 | In-place review/acknowledge | Java `inbox/FLOWS.md` (`InboxController`) |

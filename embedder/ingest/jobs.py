@@ -160,10 +160,15 @@ def _run(job: dict):
         return
 
     job["stage"] = "synthesize"
+    # v2 cutover (INGEST_V2, default off): segment.py picks boundaries, the LLM only
+    # writes each Unit. Same publish/capture path; v1 stays the default until flipped.
+    from ingest import pipeline_v2
+    v2 = pipeline_v2.v2_enabled()
+    job["pipeline"] = "v2" if v2 else "v1"
     if job.get("note_path"):
-        _synthesize_and_inject(job, bundle)        # in-place: below the embed
+        (_synthesize_and_inject_v2 if v2 else _synthesize_and_inject)(job, bundle)
     else:
-        _synthesize_and_publish(job, bundle)       # standalone: new note(s)
+        (_synthesize_and_publish_v2 if v2 else _synthesize_and_publish)(job, bundle)
     job["status"] = "DONE"
     log.info("ingest job %s: %d segments, %d note(s) from %s",
              job["id"], len(bundle["segments"]),
@@ -229,6 +234,116 @@ def _synthesize_and_inject(job: dict, bundle: dict):
     publish.update_note(job["note_path"], new_content)
     job["notes_created"] = [job["note_path"]]
     job["capture_id"] = capture_id
+
+
+# ── v2 synthesis (flagged) — deterministic boundaries, LLM writes only ────────
+
+def _ir_from_bundle(bundle: dict):
+    """A live v1 extraction bundle → SourceIR for the v2 pipeline. Native per-medium where
+    it needs no re-reading of the source (A/V transcript → `extract_av_ir.from_bundle`);
+    the generic `ir_from_v1_bundle` bridge for pdf/text (page/heading anchoring holds; real
+    bbox/char precision arrives once extraction itself emits IR via `*_ir.from_*`)."""
+    from ingest import extract_av_ir
+    from ingest.ir import ir_from_v1_bundle
+    stype = bundle.get("source", {}).get("type")
+    if stype in ("audio", "video", "youtube"):
+        return extract_av_ir.from_bundle(bundle)
+    return ir_from_v1_bundle(bundle)
+
+
+def _run_pipeline_v2(job: dict, bundle: dict):
+    """IR → segment → draft each Unit (the ONLY LLM: `write_unit_body`) → retention/splice.
+    Records the retention plan + review gate on the job (executor is a later step)."""
+    from ingest import pipeline_v2, synthesize
+    try:
+        import model_runtime
+        def embed_fn(texts):
+            return model_runtime.embed_texts(texts, "document")
+    except Exception as e:  # embedder missing → deterministic word-balance split
+        log.warning("v2: embedder unavailable, deterministic split (%s)", e)
+        embed_fn = None
+
+    def draft_fn(unit, title):
+        return synthesize.write_unit_body(title, unit.raw_text)
+
+    ir = _ir_from_bundle(bundle)
+    res = pipeline_v2.run(ir, draft_fn=draft_fn, embed_fn=embed_fn,
+                          source_blob_path=bundle.get("source", {}).get("ref"))
+    job["planned_notes"] = [n.title for n in res.notes]
+    job["retention"] = res.retention.as_dict()   # observability; sweep is task 4
+    job["needs_review"] = res.needs_review
+    return res
+
+
+def _synthesize_and_inject_v2(job: dict, bundle: dict):
+    """v2 in-place: draft each Unit, assemble ONE block, inject below the embed — same
+    capture/snapshot path as v1 `_synthesize_and_inject`."""
+    import hashlib
+
+    from ingest import publish, synthesize
+    from mcp_server import _resolve_in_vault
+
+    stored_names = _store_media(bundle)
+    res = _run_pipeline_v2(job, bundle)
+    drafted = [{"title": n.title, "body": n.body, "span": n.unit.locator_span}
+               for n in res.notes]
+    block = synthesize.build_inplace_body_v2(bundle["source"], drafted,
+                                             bundle.get("media", []))
+
+    problems = publish.validate_embeds(block, stored_names)
+    if problems:
+        raise publish.PublishError("; ".join(problems))
+
+    resolved = Path(job["_resolved_path"]) if job["_resolved_path"] else None
+    sha = hashlib.sha256(resolved.read_bytes()).hexdigest()[:16] if resolved else "live"
+    content = _resolve_in_vault(job["note_path"]).read_text(encoding="utf-8")
+
+    capture_id = uuid.uuid4().hex[:12]
+    publish.create_capture(capture_id, job["note_path"], content)
+    new_content = publish.inject_block(content, job["embed_ref"], block, sha)
+    new_content = publish.stamp_capture(new_content, capture_id, 1)
+    publish.update_note(job["note_path"], new_content)
+    job["notes_created"] = [job["note_path"]]
+    job["capture_id"] = capture_id
+
+
+def _synthesize_and_publish_v2(job: dict, bundle: dict):
+    """v2 standalone: one note per Unit into the Inbox staging folder. Reuses v1
+    `synthesize.assemble` via a span→segs shim; one bad note never sinks its siblings."""
+    from ingest import publish, synthesize
+
+    stored_names = _store_media(bundle)
+    res = _run_pipeline_v2(job, bundle)
+
+    suggested = publish.find_home(bundle["source"].get("title", ""))
+    source_ref = bundle["source"].get("ref", "")
+    publish.ensure_folder(publish.INBOX_FOLDER)
+    capture_id = job.get("capture_id")
+    mini_bundle = {"source": bundle["source"], "media": bundle.get("media", [])}
+    created, failures = [], []
+    for seq, n in enumerate(res.notes):
+        try:
+            segs = synthesize._span_to_segs(n.unit.locator_span)
+            note_md = synthesize.assemble(mini_bundle, {"title": n.title, "tags": []},
+                                          segs, n.body)
+            problems = publish.validate_note(note_md, stored_names)
+            if problems:
+                raise publish.PublishError("; ".join(problems))
+            note_md = publish.stamp_inbox(note_md, source_ref, suggested)
+            if capture_id:
+                note_md = publish.stamp_capture(note_md, capture_id, seq)
+            path = publish.create_note(publish.INBOX_FOLDER,
+                                       synthesize.slugify(n.title), note_md)
+            created.append(path)
+        except Exception as e:  # one bad note must not sink its siblings
+            log.warning("v2 note %r failed: %s", n.title, e)
+            failures.append({"title": n.title, "error": str(e)[:300]})
+
+    job["notes_created"] = created
+    if failures:
+        job["note_failures"] = failures
+    if not created:
+        raise RuntimeError(f"all {len(res.notes)} planned notes failed: {failures}")
 
 
 def _synthesize_and_publish(job: dict, bundle: dict):
