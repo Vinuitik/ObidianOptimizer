@@ -1,7 +1,7 @@
 # Ingestion v2 — Source → anchored Units → Notes (DESIGN / PLAN)
 
 Files (v1, evolves): embedder/ingest/router.py, extract_pdf.py, extract_text.py, extract_web.py, extract_av.py, keyframes.py, synthesize.py, publish.py, bundle.py, split_note.py, jobs.py
-Files (v2 NEW): ir.py, extract_ir.py, extract_pdf_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py (orchestrator, flagged) — all built + unit-tested, none wired live
+Files (v2 NEW): ir.py, extract_ir.py, extract_pdf_ir.py, extract_av_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py (orchestrator, flagged) — all built + unit-tested, none wired live
 Supersedes aspects of: architecture_plans/INGEST_AGENT_ARCH.md, embedder/ingest/FLOWS.md (v1)
 Related: architecture_plans/SYNC_RETENTION_PLAN.md, ML_ARCH.md (pgvector search)
 
@@ -330,7 +330,7 @@ TOC (pdf) ≈ **chapters** (podcast / YouTube via yt-dlp `chapters`) ≈ chapter
 (audiobook) — all authored boundaries feeding the same Stage A. Audio only *feels*
 structureless when chapters are absent.
 
-### 8a. Extraction — transcript by trust ladder `[evolves extract_av.py]`
+### 8a. Extraction — transcript by trust ladder `[BUILT — extract_av_ir.py; pure core+bridge tested, whisper wrapper unrun]`
 ```
 acquire audio (yt-dlp / file)
   chapters metadata?  (yt-dlp --dump-json .chapters / chapter track) → structural prior
@@ -506,6 +506,8 @@ Drop the raw video; **keep the transcript** (§8c) + keyframes owned by a commit
 | Word-level timestamps (audio) | `INGEST_WORD_TIMESTAMPS` env `[NEW]` |
 | Diarization hook (audio, default off) | `INGEST_DIARIZE` env `[NEW]` |
 | Audio boundary precedence (chapters→manual→auto) | `segment.py` `[NEW]` |
+| A/V transcript→speech IR extraction | `extract_av_ir.py` (`build_ir`/`from_bundle`/`from_av`) `[BUILT]` |
+| A/V ASR / non-speech flag thresholds | `INGEST_ASR_LOGPROB_MIN` / `INGEST_NO_SPEECH_MAX` env `[NEW]` |
 | A/V transcript retention | `retention.py` `[NEW]` (keep transcript, drop media) |
 | Keyframe candidates (scene/cue/periodic) | `keyframes.py → SCENE_THRESHOLD / CUE_PATTERNS / PERIODIC_SECS` |
 | Keyframe CLIP keep/drop prompts | `keyframes.KEEP_PROMPTS / DROP_PROMPTS` |

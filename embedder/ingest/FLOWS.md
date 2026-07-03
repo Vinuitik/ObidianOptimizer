@@ -1,7 +1,7 @@
 # Ingest Module Flows — resource → notes
 
 Files (v1, live): router.py, extract_av.py, extract_pdf.py, extract_web.py, extract_text.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
-Files (v2, scaffolded — NOT yet wired into jobs.py): ir.py, extract_ir.py, extract_pdf_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py
+Files (v2, scaffolded — NOT yet wired into jobs.py): ir.py, extract_ir.py, extract_pdf_ir.py, extract_av_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py
 Architecture: architecture_plans/INGEST_AGENT_ARCH.md (v1), architecture_plans/INGESTION_V2_FLOWS.md (v2 design)
 
 > **v1 is what runs today.** The v2 files below are structural scaffolding toward
@@ -219,6 +219,22 @@ Clean single-column TOC'd PDF → no HARD flags → commits hands-off; messy lay
 Unit REVIEWING. *Tune headings:* `FONT_HEADING_RATIO`; *columns:* `INGEST_COLUMN_GAP_PTS`.
 Tests: `tests/test_extract_pdf_ir.py` (pure core). *Not yet called by jobs.py.*
 
+### extract_av_ir.py — native A/V IR extraction (§8a)  ✅ core+bridge built, tested
+Transcript → SPEECH blocks (v1 emitted the same `{loc}` shape but untyped). Same pure/IO split:
+```
+build_ir(cues[Cue], chapters, title, medium, auto_captions) → SourceIR   # PURE — unit-tested
+  Cue{start_s,end_s,text,avg_logprob?,no_speech_prob?} → SPEECH Block + TimeSpan{ms}
+  §8d flags: ASR_LOW (HARD, avg_logprob < ASR_LOGPROB_MIN), NON_SPEECH (SOFT, no_speech_prob
+    > NO_SPEECH_MAX), AUTO_CAPTIONS (SOFT); chapters → TOC (§8b prior); flag_source adds
+    NO_STRUCTURE (no chapters) + LONG_UNBROKEN
+from_bundle(v1_bundle) → SourceIR   # PURE — richer A/V bridge than ir_from_v1_bundle (SPEECH
+                                    # + chapters TOC); the tested bridge replacement for A/V
+from_av(ref, path, force_whisper) → SourceIR   # I/O: reuses extract_av whisper/captions but
+                                    # KEEPS avg_logprob/no_speech_prob + word_timestamps. Unrun.
+```
+Diarization stays OFF (hook only, §8a). *Tune ASR gating:* `INGEST_ASR_LOGPROB_MIN` /
+`INGEST_NO_SPEECH_MAX`. Tests: `tests/test_extract_av_ir.py`. *Not yet called by jobs.py.*
+
 ### retention.py — what survives commit (§6/§8c/§9h)  ✅ built, tested
 **Pure planning, zero I/O.** `compute_retention(ir, units, kept_fragments?, source_blob?)`
 → `RetentionPlan{keep_paths, drop_paths, keep_transcript, referenced_pages}`. Delete-by-
@@ -267,9 +283,10 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 1. **Extractors emit SourceIR** — text/md/html ✅ **done natively** (`extract_ir.py`,
    real char offsets); pdf/epub ✅ **core done natively** (`extract_pdf_ir.py`, block/bbox +
    HARD flags — the `from_pdf` fitz wrapper is written but sandbox-unrun). Remaining:
-   `extract_av` transcript→speech blocks (§8a). `ir.ir_from_v1_bundle()` ✅ still bridges the
-   live v1 av extractor so `segment()` runs on live extraction NOW; native versions replace
-   the bridge per-medium for real time precision. `[text+pdf done; av NEW]`
+   av transcript→speech blocks ✅ **core+bridge done natively** (`extract_av_ir.py`: SPEECH
+   blocks, chapters TOC, ASR/NON_SPEECH/AUTO_CAPTIONS flags — the `from_av` whisper wrapper is
+   written but sandbox-unrun). `ir.ir_from_v1_bundle()` remains only as the generic fallback;
+   `extract_av_ir.from_bundle()` is the richer A/V bridge. `[text+pdf+av core done; live IO unrun]`
 2. **jobs.py calls pipeline_v2** — the orchestrator ✅ exists (`pipeline_v2.run`, chains
    segment + draft + retention + locator). Remaining: a `jobs.py` caller, `guard()`-gated on
    `INGEST_V2`, that builds the IR (native `extract_ir` for text/html, bridge for pdf/av),
@@ -340,6 +357,8 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | v2 native text/html IR extraction | `extract_ir.py` (`from_markdown`) `[v2 scaffold]` |
 | v2 native pdf/epub IR extraction | `extract_pdf_ir.py` (`build_ir` / `from_pdf`) `[v2 scaffold]` |
 | v2 pdf heading / column thresholds | `FONT_HEADING_RATIO` / `INGEST_COLUMN_GAP_PTS` env `[v2]` |
+| v2 native av IR extraction | `extract_av_ir.py` (`build_ir` / `from_bundle` / `from_av`) `[v2 scaffold]` |
+| v2 av ASR / non-speech thresholds | `INGEST_ASR_LOGPROB_MIN` / `INGEST_NO_SPEECH_MAX` env `[v2]` |
 | v2 splice resolution (consume) | `locator.py` (`resolve_splice`) `[v2 scaffold]` |
 | v2 orchestrator chain (flagged) | `pipeline_v2.py` (`run`); `INGEST_V2` env, `guard()` `[v2 scaffold]` |
 | (note, embed) job de-dup | `jobs.submit()` |
