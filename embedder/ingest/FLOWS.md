@@ -206,6 +206,14 @@ and user `KeptFragment`s survive; unreferenced shots/media + the raw blob drop; 
 the transcript. The actual FS sweep is a **separate executor** (Java internal API /
 publish) — this module never deletes. *Change policy:* `retention.py`.
 
+### locator.py — splice resolution for the consume layer (§7)  ✅ built, tested
+`resolve_splice(unit, ir)` → `SpliceView`: a Unit's `locator_span` → a renderable source
+region. text → `{start_char,end_char,quote}` (scroll+highlight); pdf → `{pages,page_images,
+bbox_start,bbox_end}` (kept page-shots, cropped); av → `{start_ms,end_ms}` (play clip).
+`resolve_all(units, ir)` returns descriptors in `order_index` order (learn-view walks a
+source one-to-many without jumping). Pure — no file I/O. *Frontend learn-view consumes
+this shape;* the 3-panel review UI / RSVP reader (§7) are still `[NOT IMPLEMENTED]`.
+
 ### flagging.py — extraction confidence, IR-computable subset (§3c/§8d)  ✅ built, tested
 `flag_source(ir)` annotates `block.flags` in place with checks needing only the IR (no
 fitz, no ML): `NO_STRUCTURE` (no toc+no headings → token-window only), `OVERSIZE_BLOCK`
@@ -226,7 +234,8 @@ extractor — jobs cutover wires it]`
    `synthesize._write_body()` (WRITE pass kept, outline/boundary role retired). `[NEW]`
 3. **retention.py** (§6) — planner ✅ built + tested; the FS-sweep **executor** that
    consumes a `RetentionPlan` at commit is not wired. **locator.py** (learn-view splice,
-   §7) — not started. `[NEW]`
+   §7) — splice resolver ✅ built + tested; the **frontend learn-view** that renders a
+   `SpliceView` (+ 3-panel review UI, RSVP reader) is not built. `[resolver done; UI NEW]`
 4. **Extraction flagging** (§3c) — Flag type exists in ir.py; no check populates it yet.
 
 ---
@@ -285,6 +294,8 @@ extractor — jobs cutover wires it]`
 | v2 heading boundary level | `INGEST_SEGMENT_HEADING_LEVEL` env `[v2]` |
 | v2 retention keep/drop policy | `retention.py` (`compute_retention`) `[v2 scaffold]` |
 | v2 extraction flags (IR-computable) | `flagging.py` (`flag_source`) `[v2 scaffold]` |
+| v2 native text/html IR extraction | `extract_ir.py` (`from_markdown`) `[v2 scaffold]` |
+| v2 splice resolution (consume) | `locator.py` (`resolve_splice`) `[v2 scaffold]` |
 | (note, embed) job de-dup | `jobs.submit()` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | Routing rules | `router.py → ROUTE_TABLE` |
