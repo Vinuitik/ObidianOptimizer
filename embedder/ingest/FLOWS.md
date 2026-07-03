@@ -308,6 +308,16 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 
 ## Technology Notes
 
+- **Ingest infinite-loop guard.** An approved v2 note is filed → re-scanned by Java
+  `ResourceScanService` at the post-write chokepoint. If it carried a live `![[clip.mp4]]`
+  embed, the scanner would re-fire ingestion on the very source we just ingested → loop.
+  Prevented two ways: in-place notes keep the embed but carry the `<!-- ingest:… -->` marker
+  (scanner skips marked embeds); standalone v2 bodies pass through
+  `publish.demote_resource_embeds()`, which turns any A/V/PDF `![[…]]` into a plain `[[…]]`
+  link. **Images are intentionally exempt** — `![[frame.jpg]]` must stay an embed so the
+  reused `ImageScanService` captions it. Post-approval the note is otherwise a normal vault
+  note: chunked+embedded by `NoteEmbeddingWorker` (re-embedded on edit via content-hash),
+  images captioned by `ImageProcessingWorker` — no v2-specific indexing.
 - **In-place placement, not a separate note**: the synthesized block lives below
   the embed in the host note. The marker is an HTML comment so it renders
   invisibly AND is stripped by `MarkdownPreprocessor` (Java) along with the
@@ -358,6 +368,8 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | v2 SEQUENTIAL chrono links (prev/next) | `synthesize.chronology_block()`, injected in `jobs._synthesize_and_publish_v2` (order_index order) |
 | v2 SEMANTIC links (ANN → `## Related`) | `linking.related_links()` (reuses `mcp_server._vector_candidates` + `embed_texts`); `INGEST_SEMANTIC_FLOOR/MAX_PER_NOTE/CHUNK_CHARS` |
 | Proposed-note chunk/embed (searchable) | REUSED — existing Java `NoteEmbeddingWorker` embeds `_inbox/` notes; nothing v2-specific |
+| Proposed-note image captioning | REUSED — existing `ImageScanService`/`ImageProcessingWorker` (`![[frame.jpg]]`) |
+| Ingest infinite-loop guard (A/V/PDF) | `publish.demote_resource_embeds()` — `![[clip.mp4]]`→`[[clip.mp4]]` in v2 note bodies (images kept) |
 | In-place capture snapshot + link | `jobs._synthesize_and_inject()` → `publish.create_capture()` + `stamp_capture()` |
 | Capture source folder | Java `InternalAgentController.createCapture` (`_inbox/_sources`) |
 | In-place review/acknowledge | Java `inbox/FLOWS.md` (`InboxController`) |

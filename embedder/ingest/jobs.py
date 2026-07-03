@@ -335,7 +335,9 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             # notes (best-effort — no index / DB down → no links). Excludes self + siblings.
             related = linking.related_block(
                 linking.related_links(n.body, exclude_stems=sibling_stems))
-            body = n.body
+            # loop guard: an approved note is re-scanned; demote any A/V/PDF embed so it
+            # never re-ingests the source (images stay embeds → still captioned). §9/loop.
+            body = publish.demote_resource_embeds(n.body)
             if chron:
                 body += "\n\n" + chron
             if related:

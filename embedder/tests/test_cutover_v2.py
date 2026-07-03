@@ -102,6 +102,21 @@ def test_v2_flag_default_off_selects_v1(monkeypatch):
     assert not pipeline_v2.v2_enabled()               # jobs._run picks the v1 path
 
 
+# ── infinite-loop guard: ingest-produced notes don't re-ingest A/V/PDF ───────
+
+def test_demote_resource_embeds_breaks_the_loop():
+    from ingest import publish
+    body = ("Prose.\n\n![[lecture.mp4]] and ![[paper.PDF]] and ![[talk.mp3]]\n\n"
+            "![[keyframe.jpg]] stays an embed for captioning.")
+    out = publish.demote_resource_embeds(body)
+    # A/V/PDF demoted to plain links (no leading !), so ResourceScanService won't re-fire
+    assert "![[lecture.mp4]]" not in out and "[[lecture.mp4]]" in out
+    assert "![[paper.PDF]]" not in out and "[[paper.PDF]]" in out
+    assert "![[talk.mp3]]" not in out
+    # image embed untouched → still flows through the caption pipeline
+    assert "![[keyframe.jpg]]" in out
+
+
 # ── chronological (SEQUENTIAL) linking helper ────────────────────────────────
 
 def test_chronology_block_first_middle_last():

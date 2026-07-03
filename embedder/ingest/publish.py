@@ -22,9 +22,29 @@ INBOX_FOLDER = os.environ.get("INGEST_INBOX_FOLDER", "_inbox")
 
 _EMBED_RE = re.compile(r"!\[\[([^\]]+)\]\]")
 
+# A/V/PDF resource embeds (same extensions Java ResourceScanService.RESOURCE_EMBED matches).
+# An ingest-produced note that carries one of these would make the scanner re-fire ingestion
+# on it → infinite loop. We demote them to plain links so the reference survives but the
+# `![[…]]` trigger doesn't. Image embeds are deliberately left ALONE — they still need the
+# image-caption pipeline (ImageScanService picks up `![[frame.jpg]]`).
+_RESOURCE_EMBED_RE = re.compile(
+    r"!(\[\[[^\]|]+\.(?:mp4|mkv|webm|mov|avi|mp3|m4a|wav|ogg|flac|pdf)(?:\|[^\]]*)?\]\])",
+    re.IGNORECASE)
+
 
 class PublishError(Exception):
     pass
+
+
+def demote_resource_embeds(content: str) -> str:
+    """Neutralize any A/V/PDF embed in an ingest-produced note body: `![[clip.mp4]]` →
+    `[[clip.mp4]]` (a link, not an embed). This is the explicit infinite-loop guard —
+    once approved and filed, the note is re-scanned by ResourceScanService, and a live
+    resource embed would re-trigger ingestion of the source we just ingested. Images are
+    untouched so keyframes/figures still flow through the captioner. Standalone v2 notes
+    don't emit these today (source is a link footer), so this is belt-and-suspenders that
+    keeps the invariant true even if drafting/media rendering changes."""
+    return _RESOURCE_EMBED_RE.sub(r"\1", content)
 
 
 def validate_embeds(content: str, stored_media_names: set[str]) -> list[str]:
