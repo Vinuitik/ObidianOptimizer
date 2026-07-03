@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchInbox, fileInboxNote, discardInboxNote } from '../../api/inbox';
-import { fetchChildren } from '../../api/notes';
+import { fetchInbox, fileInboxNote, discardInboxNote, acknowledgeCapture } from '../../api/inbox';
+import { fetchChildren, updateNote } from '../../api/notes';
 import useStore from '../../store/useStore';
 import styles from './InboxPanel.module.css';
 
-// Triage queue for notes the ingest agent generated (parked in _inbox/). The user
-// reviews each, edits it, picks where it lives, and files it — which moves it into
-// the FSRS review queue. onCount lets the parent show a badge.
+// Triage queue for everything the ingest agent touched. Two shapes share it:
+//   inPlace=false → a new note staged in _inbox/; edit it, pick a folder, file it.
+//   inPlace=true  → an existing note rewritten below an embed; edit it, acknowledge.
+// Filing moves a note into the FSRS review queue; acknowledging just clears the
+// in-place note (already live) and trashes its pre-rewrite snapshot. onCount badges.
 export default function InboxPanel({ onCount }) {
   const isAuthenticated = useStore(s => s.isAuthenticated);
 
@@ -69,6 +71,24 @@ export default function InboxPanel({ onCount }) {
     }
   }
 
+  async function acknowledge() {
+    if (!current) return;
+    setBusy(true);
+    setStatus('Saving…');
+    try {
+      // The note is already live at its real path — persist edits, then clear it
+      // from the queue (which also trashes the pre-rewrite source snapshot).
+      if (draft !== current.content) await updateNote(current.path, draft);
+      await acknowledgeCapture(current.captureId);
+      setStatus('');
+      load();
+    } catch (e) {
+      setStatus(`Failed: ${e.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function discard() {
     if (!current) return;
     setBusy(true);
@@ -103,7 +123,9 @@ export default function InboxPanel({ onCount }) {
               title={it.title}
             >
               <span className={styles.rowTitle}>{it.title}</span>
-              {it.source && <span className={styles.rowSource}>{hostOf(it.source)}</span>}
+              {it.inPlace
+                ? <span className={styles.rowSource}>in place</span>
+                : it.source && <span className={styles.rowSource}>{hostOf(it.source)}</span>}
             </button>
           ))}
         </div>
@@ -112,7 +134,11 @@ export default function InboxPanel({ onCount }) {
         <div className={styles.editor}>
           {current ? (
             <>
-              {current.source && (
+              {current.inPlace ? (
+                <span className={styles.sourceLink} title={current.path}>
+                  ✎ Rewritten in place · {current.path.replace(/.*[/\\]/, '')}
+                </span>
+              ) : current.source && (
                 <a className={styles.sourceLink} href={current.source} target="_blank" rel="noreferrer">
                   ↗ {current.source}
                 </a>
@@ -124,27 +150,39 @@ export default function InboxPanel({ onCount }) {
                 spellCheck={false}
               />
               <div className={styles.controls}>
-                <label className={styles.fieldLabel}>File into folder</label>
-                <input
-                  className={styles.folderInput}
-                  list="inbox-folders"
-                  value={dest}
-                  onChange={e => setDest(e.target.value)}
-                  placeholder="Choose or type a folder…"
-                />
-                <datalist id="inbox-folders">
-                  {folders.map(f => <option key={f} value={f} />)}
-                </datalist>
+                {current.inPlace ? (
+                  // Already lives in its real folder — no destination to pick.
+                  <div className={styles.actions}>
+                    <button className={styles.primary} onClick={acknowledge} disabled={busy}>
+                      Save &amp; acknowledge
+                    </button>
+                    {status && <span className={styles.actionStatus}>{status}</span>}
+                  </div>
+                ) : (
+                  <>
+                    <label className={styles.fieldLabel}>File into folder</label>
+                    <input
+                      className={styles.folderInput}
+                      list="inbox-folders"
+                      value={dest}
+                      onChange={e => setDest(e.target.value)}
+                      placeholder="Choose or type a folder…"
+                    />
+                    <datalist id="inbox-folders">
+                      {folders.map(f => <option key={f} value={f} />)}
+                    </datalist>
 
-                <div className={styles.actions}>
-                  <button className={styles.primary} onClick={file} disabled={busy}>
-                    Save &amp; file
-                  </button>
-                  <button className={styles.ghost} onClick={discard} disabled={busy}>
-                    Discard
-                  </button>
-                  {status && <span className={styles.actionStatus}>{status}</span>}
-                </div>
+                    <div className={styles.actions}>
+                      <button className={styles.primary} onClick={file} disabled={busy}>
+                        Save &amp; file
+                      </button>
+                      <button className={styles.ghost} onClick={discard} disabled={busy}>
+                        Discard
+                      </button>
+                      {status && <span className={styles.actionStatus}>{status}</span>}
+                    </div>
+                  </>
+                )}
               </div>
             </>
           ) : (
