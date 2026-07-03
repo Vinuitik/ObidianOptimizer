@@ -188,8 +188,9 @@ Size band env: `INGEST_UNIT_WORDS_MIN/MAX/CEIL/FLOOR`, `INGEST_TOPICSHIFT_DELTA`
 ### Wiring that remains (the v1→v2 seam)  [NOT IMPLEMENTED]
 1. **Extractors emit SourceIR** — `extract_pdf` block/bbox mode (§3a), `extract_text`/
    `extract_web` char-offset mode (§3b), `extract_av` transcript→speech blocks (§8a).
-   Today they emit v1 `{loc}` segments; a shim (`ir_from_v1_bundle()`) or a rewrite is
-   the bridge. `[NEW]`
+   Today they emit v1 `{loc}` segments; `ir.ir_from_v1_bundle()` ✅ is the transitional
+   bridge (built + tested) so `segment()` runs on live extraction NOW — native IR
+   extractors replace it later for real bbox/char precision. `[bridge done; native NEW]`
 2. **jobs.py calls segment()** — replace the `synthesize.outline()` boundary role with
    `segment.segment(ir, embed_fn=model_runtime.embed)`; draft each Unit via the existing
    `synthesize._write_body()` (WRITE pass kept, outline/boundary role retired). `[NEW]`

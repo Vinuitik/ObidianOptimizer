@@ -5,12 +5,21 @@ Files (v2 NEW / planned): ir.py [NEW], segment.py [NEW], retention.py [NEW], loc
 Supersedes aspects of: architecture_plans/INGEST_AGENT_ARCH.md, embedder/ingest/FLOWS.md (v1)
 Related: architecture_plans/SYNC_RETENTION_PLAN.md, ML_ARCH.md (pgvector search)
 
-> **Status: design only. Nothing here is built.** This doc is the spec the
-> implementer works from. Every section is tagged with what it reuses from v1 vs.
-> what is `[NEW]`. Read v1 first (`embedder/ingest/FLOWS.md`) — v2 keeps the job
-> runner, host-wrapper LLM routing, publish/write-through, and keyframe/CLIP
-> machinery; it replaces **extraction granularity** and **who decides note
-> boundaries**.
+> **Status: design + first scaffolding landed.** The contract and segmentation are
+> built and unit-tested; extraction still emits v1 shapes and `jobs.py` still runs the
+> v1 path — the cutover is not done. What exists today (see `embedder/ingest/FLOWS.md`
+> "v2 scaffolding"):
+> - `ir.py` — SourceIR / Block / Locator / Flag schema (§3), JSON round-trip. ✅
+> - `ir.ir_from_v1_bundle()` — transitional bridge: live v1 bundle → SourceIR. ✅
+> - `segment.py` — deterministic Stage A/B segmentation → Units (§4), GPU-free fallback. ✅
+> - `tests/test_segment.py` — round-trip, bridge, ceiling/merge/topic-shift. ✅
+> Not built: native IR extractors (§3a/b, §8a), `jobs.py` cutover to `segment()`,
+> extraction flagging population (§3c), `retention.py` (§6), `locator.py`/consume (§7).
+>
+> Every section is tagged with what it reuses from v1 vs. what is `[NEW]`. Read v1 first
+> (`embedder/ingest/FLOWS.md`) — v2 keeps the job runner, host-wrapper LLM routing,
+> publish/write-through, and keyframe/CLIP machinery; it replaces **extraction
+> granularity** and **who decides note boundaries**.
 
 ---
 
