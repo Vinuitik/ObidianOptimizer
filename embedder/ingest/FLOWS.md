@@ -356,6 +356,8 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | v2 per-Unit WRITE draft | `synthesize.write_unit_body()` |
 | v2 in-place / standalone assembly | `synthesize.build_inplace_body_v2()` / `assemble()` via `_span_to_segs()` |
 | v2 SEQUENTIAL chrono links (prev/next) | `synthesize.chronology_block()`, injected in `jobs._synthesize_and_publish_v2` (order_index order) |
+| v2 SEMANTIC links (ANN → `## Related`) | `linking.related_links()` (reuses `mcp_server._vector_candidates` + `embed_texts`); `INGEST_SEMANTIC_FLOOR/MAX_PER_NOTE/CHUNK_CHARS` |
+| Proposed-note chunk/embed (searchable) | REUSED — existing Java `NoteEmbeddingWorker` embeds `_inbox/` notes; nothing v2-specific |
 | In-place capture snapshot + link | `jobs._synthesize_and_inject()` → `publish.create_capture()` + `stamp_capture()` |
 | Capture source folder | Java `InternalAgentController.createCapture` (`_inbox/_sources`) |
 | In-place review/acknowledge | Java `inbox/FLOWS.md` (`InboxController`) |

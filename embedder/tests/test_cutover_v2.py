@@ -57,8 +57,11 @@ def _text_bundle():
 
 
 def test_v2_publish_branch_one_note_per_unit(monkeypatch):
-    from ingest import jobs, publish
+    from ingest import jobs, linking, publish
     monkeypatch.setattr(synthesize, "_complete", lambda p, s: "Drafted body text.")
+    # semantic linking hits the DB/embedder — stub it to a fixed neighbour here
+    monkeypatch.setattr(linking, "related_links",
+                        lambda body, exclude_stems=(): ["Neighbor"])
     # Small Units (< 600-word ceiling) never trigger Stage B, so the embedder is never
     # called; patch it if importable, else jobs falls back to the deterministic split.
     try:
@@ -89,6 +92,8 @@ def test_v2_publish_branch_one_note_per_unit(monkeypatch):
     assert "[[Alpha]]" in by_title["Beta"]
     assert "start of source" in by_title["Alpha"]
     assert "[[Beta]]" in by_title["Alpha"]            # forward link for walking
+    # SEMANTIC links: the injected neighbour appears under ## Related
+    assert "## Related" in by_title["Alpha"] and "[[Neighbor]]" in by_title["Alpha"]
 
 
 def test_v2_flag_default_off_selects_v1(monkeypatch):

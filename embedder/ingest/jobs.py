@@ -310,7 +310,7 @@ def _synthesize_and_inject_v2(job: dict, bundle: dict):
 def _synthesize_and_publish_v2(job: dict, bundle: dict):
     """v2 standalone: one note per Unit into the Inbox staging folder. Reuses v1
     `synthesize.assemble` via a span→segs shim; one bad note never sinks its siblings."""
-    from ingest import publish, synthesize
+    from ingest import linking, publish, synthesize
 
     stored_names = _store_media(bundle)
     res = _run_pipeline_v2(job, bundle)
@@ -323,6 +323,7 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     # SEQUENTIAL links (§5): deterministic prev/next along order_index — res.notes is already
     # in order, so seq-1 / seq+1 ARE the chronological neighbours. We inject these, not the LLM.
     titles = [n.title for n in res.notes]
+    sibling_stems = [synthesize.slugify(t) for t in titles]   # same-source, already SEQUENTIAL-linked
     created, failures = [], []
     for seq, n in enumerate(res.notes):
         try:
@@ -330,7 +331,15 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             prev_title = titles[seq - 1] if seq > 0 else None
             next_title = titles[seq + 1] if seq < len(titles) - 1 else None
             chron = synthesize.chronology_block(prev_title, next_title)
-            body = n.body + ("\n\n" + chron if chron else "")
+            # SEMANTIC links (§5): ANN over the EXISTING vault index for the closest prior
+            # notes (best-effort — no index / DB down → no links). Excludes self + siblings.
+            related = linking.related_block(
+                linking.related_links(n.body, exclude_stems=sibling_stems))
+            body = n.body
+            if chron:
+                body += "\n\n" + chron
+            if related:
+                body += "\n\n" + related
             note_md = synthesize.assemble(mini_bundle, {"title": n.title, "tags": []},
                                           segs, body)
             problems = publish.validate_note(note_md, stored_names)

@@ -265,13 +265,21 @@ Two **distinct** edge types:
   walks `res.notes` (already in `order_index` order) so `seq-1`/`seq+1` are the true neighbours, the
   first note has no predecessor. (In-place notes are one file with ordered `##` sections — no
   cross-note edge needed.)
-- **SEMANTIC** `[NOT IMPLEMENTED]` — **ANN top-k, never pairwise.** For each new note *chunk*, query the
-  vector index (pgvector, see `ML_ARCH.md`) for top-k nearest neighbors above a
-  similarity floor; cap top-N per note. Compute at **chunk grain**, store at **note
-  grain** with the chunk as evidence anchor: `noteA/chunk3 ↔ noteB/chunk1, 0.82`.
+- **SEMANTIC** `[BUILT]` — **ANN top-k, never pairwise.** `linking.related_links(body)` embeds the
+  note's prose (chunk grain, `SEMANTIC_CHUNK_CHARS`; ≤600-word Units = one chunk) and ANN-queries the
+  **existing** vault index (`mcp_server._vector_candidates` → `note_chunks`, pgvector cosine — the same
+  index `search_notes` uses), aggregates to note grain (max sim), applies `SEMANTIC_FLOOR` + `MAX_PER_NOTE`
+  cap, excludes self + same-source siblings, and injects a `## Related` `[[wikilinks]]` section at
+  `jobs._synthesize_and_publish_v2`. Outbound only (new note → indexed notes); inbound appears as Obsidian
+  backlinks once the note is itself embedded. **Best-effort** — cold index / DB down → no links, never
+  fails the note.
+  - **Indexing the new note is REUSED, not rebuilt:** a proposed note published to `_inbox/` is chunked +
+    embedded by the existing `NoteEmbeddingWorker` (it gates only on `ingest_pending=false` + hash-change,
+    NOT on `_inbox`), re-embedded on edit (hash changes), and thereby searchable. Images are a separate
+    chunk source already, so text-only indexing is automatic. No custom store/queue in v2.
 
-*To change link thresholds:* `INGEST_SEMANTIC_TOPK`, `INGEST_SEMANTIC_FLOOR`,
-`INGEST_SEMANTIC_MAX_PER_NOTE`. Chunking window reuses `bundle.WINDOW_TOKENS`.
+*To change link thresholds:* `INGEST_SEMANTIC_FLOOR`, `INGEST_SEMANTIC_MAX_PER_NOTE`,
+`INGEST_SEMANTIC_CHUNK_CHARS`.
 
 ---
 
@@ -524,7 +532,9 @@ Drop the raw video; **keep the transcript** (§8c) + keyframes owned by a commit
 | Structural heading boundary level | `SEGMENT_HEADING_LEVEL` env `[NEW]` |
 | Note drafting (WRITE only, no outline) | `synthesize.write_unit_body()` `[BUILT]`; v2 path retires outline-boundary role |
 | v1↔v2 synthesis cutover (flagged) | `jobs._run` on `pipeline_v2.v2_enabled()` (`INGEST_V2` env) `[BUILT]` |
-| SEMANTIC link caps | `INGEST_SEMANTIC_TOPK/FLOOR/MAX_PER_NOTE` env `[NEW]` |
+| SEMANTIC linking (ANN over existing index) | `linking.py` (`related_links`) `[BUILT]`; injected in `jobs._synthesize_and_publish_v2` |
+| SEMANTIC link caps | `INGEST_SEMANTIC_FLOOR/MAX_PER_NOTE/CHUNK_CHARS` env `[NEW]` |
+| Proposed-note indexing (chunk/embed/re-embed) | REUSED — Java `NoteEmbeddingWorker` (no v2 custom store) |
 | Chunk window | `bundle.WINDOW_TOKENS` (`INGEST_WINDOW_TOKENS`) |
 | Retention / deletion sweep | `retention.py` `[NEW]` |
 | v2 orchestrator chain (flagged, not live) | `pipeline_v2.py` `run()`; `INGEST_V2` env, `guard()` `[NEW]` |
