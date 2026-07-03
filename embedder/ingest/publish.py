@@ -157,3 +157,15 @@ def update_note(vault_rel_path: str, content: str) -> None:
                     json={"path": vault_rel_path, "content": content}, timeout=60)
     if res.status_code != 200:
         raise PublishError(f"update_note {res.status_code}: {res.text[:300]}")
+
+
+def create_capture(capture_id: str, source_ref: str, content: str) -> str:
+    """Stash a pre-rewrite snapshot of an in-place note as its Capture source —
+    a note can hold multiple embeds, so the note itself (not any one embed) is
+    always the single source. Returns the vault-relative snapshot path."""
+    res = httpx.post(f"{BACKEND_URL}/api/internal/capture", headers=_headers(),
+                     json={"captureId": capture_id, "sourceRef": source_ref, "content": content},
+                     timeout=30)
+    if res.status_code != 200:
+        raise PublishError(f"create_capture {res.status_code}: {res.text[:300]}")
+    return res.json()["sourcePath"]

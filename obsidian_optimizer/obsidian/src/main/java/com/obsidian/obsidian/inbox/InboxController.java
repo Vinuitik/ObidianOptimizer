@@ -19,14 +19,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Learn "Inbox" — the triage queue for notes the ingest agent generated. Ingest
- * parks standalone notes in the vault's {@code _inbox/} staging folder (see
- * embedder ingest/publish.py INBOX_FOLDER) with frontmatter:
- *   ingest-inbox: true
- *   ingest-source: <url>
- *   ingest-suggested-folder: <find_home guess>
- * NoteIndexRepository keeps {@code _inbox/} out of the FSRS review queue, so notes
- * sit here until the user files them.
+ * Learn "Inbox" — the triage queue for anything the ingest agent touched. Two
+ * shapes feed it:
+ *   - standalone: new notes physically staged in {@code _inbox/} (frontmatter
+ *     ingest-inbox/ingest-source/ingest-suggested-folder). NoteIndexRepository
+ *     keeps {@code _inbox/} out of the FSRS review queue until filed.
+ *   - in-place: an existing note rewritten below a resource embed. It never
+ *     leaves its real folder or FSRS rotation — found via capture_id instead
+ *     of a directory scan. Its Capture's source is a pre-rewrite snapshot of
+ *     the note (not the embedded media — a note can hold several embeds, a
+ *     Capture always has exactly one source) under {@code _inbox/_sources/}.
+ * Filing a standalone note moves it to a real folder; acknowledging an in-place
+ * note just flips the capture status — either way, once a capture's notes are
+ * all triaged its source snapshot is soft-deleted to {@code _trash/}.
  *
  * Session-authenticated (SecurityConfig: anyRequest authenticated). nginx strips
  * {@code /api/}, so these map to {@code /api/inbox}.
@@ -53,45 +58,60 @@ public class InboxController {
 
     record InboxItem(String path, String title, String source,
                      String suggestedFolder, String content,
-                     String captureId, Integer captureSeq) {}
+                     String captureId, Integer captureSeq, boolean inPlace) {}
 
     // ── List staged notes ──────────────────────────────────────────────────────
 
+    /**
+     * Two sources feed the same queue: standalone notes physically staged in
+     * _inbox/, and in-place notes that never left their real folder (found via
+     * capture_id instead of a directory scan — see INGESTION_V2_FLOWS).
+     */
     @GetMapping
     public ResponseEntity<List<InboxItem>> list() {
-        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
-        if (!Files.isDirectory(dir)) {
-            return ResponseEntity.ok(List.of());
-        }
         List<InboxItem> items = new ArrayList<>();
-        try (var stream = Files.list(dir)) {
-            stream.filter(p -> p.toString().endsWith(".md"))
-                  .sorted((a, b) -> b.getFileName().toString()
-                                     .compareToIgnoreCase(a.getFileName().toString()))
-                  .forEach(p -> {
-                      try {
-                          String content = Files.readString(p);
-                          String title = p.getFileName().toString().replaceAll("\\.md$", "");
-                          String seqRaw = frontmatterValue(content, "capture-seq");
-                          Integer seq = null;
-                          try { if (!seqRaw.isBlank()) seq = Integer.parseInt(seqRaw); }
-                          catch (NumberFormatException ignored) {}
-                          items.add(new InboxItem(
-                              p.toAbsolutePath().toString(),
-                              title,
-                              frontmatterValue(content, "ingest-source"),
-                              suggestedFolderAbs(frontmatterValue(content, "ingest-suggested-folder")),
-                              content,
-                              emptyToNull(frontmatterValue(content, "capture-id")),
-                              seq));
-                      } catch (IOException e) {
-                          log.warn("[inbox] could not read {}: {}", p, e.getMessage());
-                      }
-                  });
-        } catch (IOException e) {
-            log.error("[inbox] list failed: {}", e.getMessage());
-            return ResponseEntity.ok(List.of());
+
+        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
+        if (Files.isDirectory(dir)) {
+            try (var stream = Files.list(dir)) {
+                stream.filter(p -> p.toString().endsWith(".md"))
+                      .forEach(p -> {
+                          try {
+                              String content = Files.readString(p);
+                              String title = p.getFileName().toString().replaceAll("\\.md$", "");
+                              String seqRaw = frontmatterValue(content, "capture-seq");
+                              Integer seq = null;
+                              try { if (!seqRaw.isBlank()) seq = Integer.parseInt(seqRaw); }
+                              catch (NumberFormatException ignored) {}
+                              items.add(new InboxItem(
+                                  p.toAbsolutePath().toString(),
+                                  title,
+                                  frontmatterValue(content, "ingest-source"),
+                                  suggestedFolderAbs(frontmatterValue(content, "ingest-suggested-folder")),
+                                  content,
+                                  emptyToNull(frontmatterValue(content, "capture-id")),
+                                  seq,
+                                  false));
+                          } catch (IOException e) {
+                              log.warn("[inbox] could not read {}: {}", p, e.getMessage());
+                          }
+                      });
+            } catch (IOException e) {
+                log.error("[inbox] list failed: {}", e.getMessage());
+            }
         }
+
+        for (CaptureRepository.Capture c : captureRepo.listAll()) {
+            if (!"note".equals(c.sourceType())) continue;
+            if (!"processing".equals(c.status()) && !"ready".equals(c.status())) continue;
+            for (String path : noteIndex.findNotesByCapture(c.id())) {
+                String content = repository.getText(path);
+                String title = Paths.get(path).getFileName().toString().replaceAll("\\.md$", "");
+                items.add(new InboxItem(path, title, null, null, content, c.id(), 1, true));
+            }
+        }
+
+        items.sort((a, b) -> b.path().compareToIgnoreCase(a.path()));
         return ResponseEntity.ok(items);
     }
 
@@ -117,16 +137,42 @@ public class InboxController {
             String newPath = repository.moveNote(req.path(), req.targetFolder());
             log.info("[inbox] filed {} -> {}", req.path(), newPath);
 
-            // When a capture's last proposed note leaves _inbox, the capture is fully
-            // triaged. Phase 6 will trash the source here; for now just flip the status.
+            // When a capture's last proposed note leaves _inbox, the capture is fully triaged.
             if (captureId != null && noteIndex.countUnfiledNotesForCapture(captureId) == 0) {
-                captureRepo.updateStatus(captureId, "filed");
-                log.info("[inbox] capture {} fully filed", captureId);
+                fileCapture(captureId);
             }
             return ResponseEntity.ok(Map.of("path", newPath));
         } catch (IOException e) {
             log.error("[inbox] file failed for {}: {}", req.path(), e.getMessage());
             return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // ── Acknowledge an in-place note (no folder to move to — it's already home) ──
+
+    @PostMapping("/acknowledge")
+    public ResponseEntity<?> acknowledge(@RequestBody AcknowledgeRequest req) {
+        if (req == null || req.captureId() == null || req.captureId().isBlank()) {
+            return ResponseEntity.badRequest().body("captureId required");
+        }
+        try {
+            fileCapture(req.captureId());
+            return ResponseEntity.ok().build();
+        } catch (IOException e) {
+            log.error("[inbox] acknowledge failed for {}: {}", req.captureId(), e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /** Mark a capture filed and soft-delete its source snapshot to _trash/. */
+    private void fileCapture(String captureId) throws IOException {
+        captureRepo.updateStatus(captureId, "filed");
+        log.info("[inbox] capture {} fully filed", captureId);
+        CaptureRepository.Capture c = captureRepo.get(captureId);
+        if (c != null && c.sourcePath() != null && !c.sourcePath().isBlank()) {
+            String abs = Paths.get(settingsRepo.getVaultPath()).resolve(c.sourcePath()).toString();
+            repository.softDeleteFile(abs);
+            log.info("[inbox] trashed capture {} source {}", captureId, c.sourcePath());
         }
     }
 
@@ -180,4 +226,5 @@ public class InboxController {
 
     record FileRequest(String path, String targetFolder, String content) {}
     record DiscardRequest(String path) {}
+    record AcknowledgeRequest(String captureId) {}
 }

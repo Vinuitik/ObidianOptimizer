@@ -217,9 +217,18 @@ def _synthesize_and_inject(job: dict, bundle: dict):
     resolved = Path(job["_resolved_path"]) if job["_resolved_path"] else None
     sha = hashlib.sha256(resolved.read_bytes()).hexdigest()[:16] if resolved else "live"
     content = _resolve_in_vault(job["note_path"]).read_text(encoding="utf-8")
+
+    # The note is the Capture's source — not the embed — since a note can hold
+    # multiple embeds and a Capture always has exactly one source. Snapshot the
+    # pre-rewrite content before injecting so the Inbox can show what changed.
+    capture_id = uuid.uuid4().hex[:12]
+    publish.create_capture(capture_id, job["note_path"], content)
+
     new_content = publish.inject_block(content, job["embed_ref"], block, sha)
+    new_content = publish.stamp_capture(new_content, capture_id, 1)
     publish.update_note(job["note_path"], new_content)
     job["notes_created"] = [job["note_path"]]
+    job["capture_id"] = capture_id
 
 
 def _synthesize_and_publish(job: dict, bundle: dict):

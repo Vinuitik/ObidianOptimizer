@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.internalapi;
 
+import com.obsidian.obsidian.capture.CaptureRepository;
 import com.obsidian.obsidian.media.MediaController;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
@@ -44,16 +45,19 @@ public class InternalAgentController {
     private final FileRepository fileRepository;
     private final SettingsRepository settingsRepo;
     private final MediaController mediaController;
+    private final CaptureRepository captureRepo;
 
     @Value("${mcp.api.token:}")
     private String internalToken;
 
     public InternalAgentController(FileRepository fileRepository,
                                    SettingsRepository settingsRepo,
-                                   MediaController mediaController) {
+                                   MediaController mediaController,
+                                   CaptureRepository captureRepo) {
         this.fileRepository = fileRepository;
         this.settingsRepo = settingsRepo;
         this.mediaController = mediaController;
+        this.captureRepo = captureRepo;
     }
 
     private boolean badToken(String header) {
@@ -93,6 +97,30 @@ public class InternalAgentController {
             String abs = resolveUnderVault(req.path()).toString();
             fileRepository.updateNote(abs, req.content());
             return ResponseEntity.ok().build();
+        } catch (IOException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /**
+     * Stash a pre-rewrite snapshot of an in-place note as its Capture source, and
+     * create the capture row. A note can hold multiple embeds, so the note itself
+     * (not any one embed) is always the single source — see INGESTION_V2_FLOWS.
+     */
+    @PostMapping("/capture")
+    public ResponseEntity<?> createCapture(@RequestHeader(value = "X-Internal-Token", required = false) String token,
+                                           @RequestBody CreateCaptureRequest req) {
+        if (badToken(token)) return unauthorized();
+        try {
+            Path sourcesDir = resolveUnderVault("_inbox/_sources");
+            Files.createDirectories(sourcesDir);
+            String filename = req.captureId() + ".md";
+            Files.writeString(sourcesDir.resolve(filename), req.content());
+            String sourcePath = "_inbox/_sources/" + filename;
+
+            String title = req.sourceRef().replaceAll(".*[/\\\\]", "").replaceAll("\\.md$", "");
+            captureRepo.create(req.captureId(), "note", req.sourceRef(), sourcePath, title);
+            return ResponseEntity.ok(Map.of("sourcePath", sourcePath));
         } catch (IOException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
@@ -152,4 +180,5 @@ public class InternalAgentController {
     record UpdateNoteRequest(String path, String content) {}
     record EnsureFolderRequest(String path) {}
     record StoreMediaRequest(String filename, String dataB64) {}
+    record CreateCaptureRequest(String captureId, String sourceRef, String content) {}
 }

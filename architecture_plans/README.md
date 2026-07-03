@@ -8,7 +8,8 @@ ENCRYPTION (2026-07-02 cleanup).
 
 | Plan | Status | One-liner |
 |---|---|---|
-| [INGEST_AGENT_ARCH](INGEST_AGENT_ARCH.md) | ✅ implemented | resource → notes pipeline; kept as rationale (live doc: embedder/ingest/FLOWS.md) |
+| [INGESTION_V2_FLOWS](INGESTION_V2_FLOWS.md) | ✗ design, in progress | block-level anchored ingestion; sub-page locators, deterministic segmentation, retention; text-native done, A/V TODO |
+| [INGEST_AGENT_ARCH](INGEST_AGENT_ARCH.md) | ✅ implemented (v1) | resource → notes pipeline; kept as rationale (live doc: embedder/ingest/FLOWS.md); superseded in part by INGESTION_V2 |
 | [CAPTURE_ARCH](CAPTURE_ARCH.md) | ◐ phases 1–2 shipped | capture model, ordered proposed notes, Learn queue — see its STATUS table |
 | [PWA_MOBILE_ARCH](PWA_MOBILE_ARCH.md) | ◐ built, dormant | PWA P1–P4 code-complete in frontend/src/pwa/, not activated; §15–16 new scope |
 | [EXTENSION_MEDIA_CAPTURE_ARCH](EXTENSION_MEDIA_CAPTURE_ARCH.md) | ✗ planned | find videos/URIs on the current page → picker → existing capture/download |

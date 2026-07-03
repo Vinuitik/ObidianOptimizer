@@ -23,7 +23,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/workspace")
@@ -50,35 +49,34 @@ public class WorkspaceController {
         "filename[^;=\n]*=\\s*['\"]?([^'\";\n]+)['\"]?", Pattern.CASE_INSENSITIVE);
 
     private final SettingsRepository settingsRepo;
+    private final WorkspaceRepository workspaceRepo;
 
-    public WorkspaceController(SettingsRepository settingsRepo) {
+    public WorkspaceController(SettingsRepository settingsRepo, WorkspaceRepository workspaceRepo) {
         this.settingsRepo = settingsRepo;
+        this.workspaceRepo = workspaceRepo;
     }
 
     record WorkspaceFile(String name, String type) {}
 
     // ── List ─────────────────────────────────────────────────────────────────────
 
+    /**
+     * DB-backed, not a directory scan — workspace_items is the source of truth for
+     * type/order so a listing never has to open every file. Prunes rows whose file
+     * no longer exists (the user removed it by hand; nothing else writes here).
+     */
     @GetMapping("/files")
     public ResponseEntity<List<WorkspaceFile>> listFiles() {
         Path dir = Paths.get(settingsRepo.getVaultPath()).resolve("_workspace");
-        if (!Files.isDirectory(dir)) {
-            return ResponseEntity.ok(Collections.emptyList());
+        List<WorkspaceFile> files = new ArrayList<>();
+        for (WorkspaceRepository.WorkspaceItem item : workspaceRepo.listAll()) {
+            if (!Files.isRegularFile(dir.resolve(item.filename()))) {
+                workspaceRepo.delete(item.filename());
+                continue;
+            }
+            files.add(new WorkspaceFile(item.filename(), item.type()));
         }
-        try (var stream = Files.list(dir)) {
-            List<WorkspaceFile> files = stream
-                    .filter(Files::isRegularFile)
-                    .map(p -> {
-                        String name = p.getFileName().toString();
-                        return new WorkspaceFile(name, typeFor(name));
-                    })
-                    .filter(f -> !f.type().equals("other"))
-                    .sorted((a, b) -> a.name().compareToIgnoreCase(b.name()))
-                    .collect(Collectors.toList());
-            return ResponseEntity.ok(files);
-        } catch (IOException e) {
-            return ResponseEntity.ok(Collections.emptyList());
-        }
+        return ResponseEntity.ok(files);
     }
 
     // ── Save from URL ─────────────────────────────────────────────────────────────
@@ -150,6 +148,7 @@ public class WorkspaceController {
                 Files.copy(stream, target, StandardCopyOption.REPLACE_EXISTING);
             }
 
+            workspaceRepo.insert(filename, typeFor(filename), null, 0);
             log.info("[workspace] saved {} ({} bytes) from {}", filename, Files.size(target), uri.getHost());
             return ResponseEntity.ok(Map.of("filename", filename));
 
@@ -200,6 +199,7 @@ public class WorkspaceController {
                 Files.copy(stream, target, StandardCopyOption.REPLACE_EXISTING);
             }
 
+            workspaceRepo.insert(filename, typeFor(filename), null, 0);
             log.info("[workspace] uploaded {} ({} bytes)", filename, Files.size(target));
             return ResponseEntity.ok(Map.of("filename", filename, "path", "_workspace/" + filename));
 

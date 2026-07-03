@@ -33,7 +33,9 @@ public class FileRepository {
     private static final Logger log = LoggerFactory.getLogger(FileRepository.class);
 
     // _reports = agent debug reports (embedder AgentReport); never a note source.
-    private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources", "_workspace", "_reports");
+    // _sources = Capture source snapshots (_inbox/_sources/*.md) — pre-rewrite copies,
+    // not real notes; never indexed even though nested inside _inbox/.
+    private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources", "_workspace", "_reports", "_sources");
 
     private String ROOT_FILE;
 
@@ -363,6 +365,29 @@ public class FileRepository {
         noteIndex.delete(path);
         noteLinkRepo.deleteSource(path);
         syncQueueRepo.tombstone(toRelative(path));
+    }
+
+    /**
+     * Soft-delete an arbitrary vault file (not a note tracked by the note index —
+     * e.g. a Capture source snapshot under _inbox/_sources/) into _trash/. No
+     * noteIndex/noteLinkRepo bookkeeping, since these were never indexed as notes.
+     */
+    public void softDeleteFile(String path) throws IOException {
+        requireInsideVault(path);
+        File file = new File(path);
+        if (!file.exists()) return; // already gone — acknowledge is idempotent
+
+        File trashDir = new File(ROOT_FILE, "_trash");
+        if (!trashDir.exists()) trashDir.mkdirs();
+
+        File dest = new File(trashDir, file.getName());
+        if (dest.exists()) {
+            String base = file.getName();
+            int dot = base.lastIndexOf('.');
+            dest = new File(trashDir, (dot >= 0 ? base.substring(0, dot) : base)
+                + "_" + System.currentTimeMillis() + (dot >= 0 ? base.substring(dot) : ""));
+        }
+        if (!file.renameTo(dest)) throw new IOException("Failed to move file to trash: " + path);
     }
 
     private String toRelative(String absPath) {
