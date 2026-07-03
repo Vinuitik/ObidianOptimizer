@@ -23,6 +23,6 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["activeTab", "storage", "tabs", "contextMenus"],
+  "permissions": ["activeTab", "storage", "tabs", "contextMenus", "scripting"],
   "host_permissions": ["http://localhost/*", "https://*/*"]
 }

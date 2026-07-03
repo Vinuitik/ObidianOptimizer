@@ -78,13 +78,14 @@ async function login({ username, password }) {
 // Raw text/markdown → a Capture: the original is kept as a resource and the ingest
 // agent synthesizes proposed notes from it (CAPTURE_ARCH.md). The user amends/files
 // them in the Learn queue — AI never auto-files.
-async function captureText(text) {
-  const firstLine = text.split('\n').find(l => l.trim()) || '';
-  const title = sanitizeName(firstLine);
-  const res = await json('/capture', 'POST', { text, title });
+async function captureText(text, title) {
+  const t = title
+    ? sanitizeName(title)
+    : sanitizeName(text.split('\n').find(l => l.trim()) || '');
+  const res = await json('/capture', 'POST', { text, title: t });
   if (res.status === 401) return { ok: false, status: 401 };
   if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
-  return { ok: true, kind: 'text', detail: `Synthesizing notes from “${title}”` };
+  return { ok: true, kind: 'text', detail: `Synthesizing notes from “${t}”` };
 }
 
 // A URL → the ingest pipeline (extract → synthesize → Learn inbox).
@@ -135,6 +136,76 @@ async function routeText(text) {
   return { ok: true, kind, detail: 'Generating notes from the page' };
 }
 
+// ── Smart one-click "capture this page" ─────────────────────────────────────────
+// Below this many chars of scraped text the page is JS-rendered / paywalled / mostly
+// media → don't ship an empty note; escalate to the agent with the raw URL instead.
+const MIN_SCRAPE_CHARS = 200;
+
+// Injected into the page (must be self-contained — executeScript serializes it). Grabs
+// the RENDERED main text the user actually sees, which beats server-side scraping on
+// logged-in / SPA pages. Strips chrome (nav/scripts/etc).
+function extractPageText() {
+  const pick = document.querySelector('article, main, [role="main"]') || document.body;
+  if (!pick) return { title: document.title || '', text: '' };
+  const clone = pick.cloneNode(true);
+  clone.querySelectorAll('script,style,noscript,nav,header,footer,aside,svg,button,form,iframe')
+    .forEach(n => n.remove());
+  const text = (clone.innerText || '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { title: document.title || '', text };
+}
+
+async function scrapeTab(tabId) {
+  try {
+    const results = await api.scripting.executeScript({ target: { tabId }, func: extractPageText });
+    return results?.[0]?.result || null;
+  } catch { return null; }   // restricted page (chrome://, store) or no host permission
+}
+
+// Escalate to the agent: hand the raw URL to /capture so the backend ingest pipeline
+// (extract → synthesize) tries its own extraction/download. The fallback when the
+// client-side smart path can't do it (scrape too thin, download failed).
+async function escalate(url, note) {
+  const cap = await capture(url);
+  if (!cap.ok) return cap;
+  return { ok: true, kind: 'agent', detail: note || 'Handed to the agent to extract' };
+}
+
+// The smart button: look at the active tab and do the right thing.
+//   youtube/video → download (yt-dlp) + notes   ·   pdf/media → download file + notes
+//   web page      → scrape the RENDERED text and send it as text
+//   anything that fails → escalate to the agent (raw URL → ingest)
+async function capturePage({ url, tabId }) {
+  if (!url || !URL_RE.test(url)) {
+    return { ok: false, error: 'This page can’t be captured (not a web URL).' };
+  }
+  const { kind, value } = classify(url);
+
+  if (kind === 'video') {
+    const dl  = await startDownload(value);
+    const cap = await capture(value);
+    if (!dl.ok && !cap.ok) return escalate(value, 'Download failed — agent will try the URL');
+    return { ok: true, kind, detail: dl.ok
+      ? 'Downloading video + generating notes' : 'Generating notes (download failed)' };
+  }
+  if (kind === 'media') {   // pdf / direct media file
+    const keep = await workspaceSave(value);
+    const cap  = await capture(value);
+    if (!keep.ok && !cap.ok) return escalate(value, 'Save failed — agent will try the URL');
+    return { ok: true, kind, detail: keep.ok
+      ? 'Downloaded file + generating notes' : 'Generating notes (save failed)' };
+  }
+
+  // web page → scrape the rendered text client-side; thin/blocked → escalate.
+  const scraped = tabId != null ? await scrapeTab(tabId) : null;
+  if (scraped && (scraped.text || '').length >= MIN_SCRAPE_CHARS) {
+    return captureText(scraped.text, scraped.title);
+  }
+  return escalate(value, 'Page scrape was thin — agent extracting from the URL');
+}
+
 // A dropped local file → store in _workspace, then ingest it for notes.
 async function uploadFile({ name, type, dataB64 }) {
   try {
@@ -156,6 +227,7 @@ const HANDLERS = {
   checkAuth: () => checkAuth(),
   login,
   routeText: ({ text }) => routeText(text),
+  capturePage,
   uploadFile,
   getConfig: () => getConfig(),
   setConfig: (patch) => setConfig(patch).then(() => ({ ok: true })),
@@ -187,12 +259,16 @@ async function flashBadge(ok) {
   } catch { /* badge is best-effort */ }
 }
 
-api.contextMenus.onClicked.addListener(async (info) => {
-  const text = info.menuItemId === 'learn-selection' ? info.selectionText
-             : info.menuItemId === 'learn-link'      ? info.linkUrl
-             : info.pageUrl;
-  if (!text) return;
-  const res = await routeText(text);
+api.contextMenus.onClicked.addListener(async (info, tab) => {
+  let res;
+  if (info.menuItemId === 'learn-page') {
+    // whole page → smart capture (scrape rendered text / download / escalate)
+    res = await capturePage({ url: info.pageUrl, tabId: tab?.id });
+  } else {
+    const text = info.menuItemId === 'learn-selection' ? info.selectionText : info.linkUrl;
+    if (!text) return;
+    res = await routeText(text);
+  }
   flashBadge(res.ok);
 });
 

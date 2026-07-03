@@ -118,3 +118,20 @@ select.in { appearance: none; cursor: pointer; }
 }
 .badge.done { background: rgba(76,195,138,0.16); color: var(--color-success); }
 .badge.error { background: rgba(224,92,92,0.16); color: var(--color-danger); }
+
+/* "or" divider between the smart one-click button and the paste/drop box */
+.or {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--color-muted);
+  font-size: 11px;
+  margin: 10px 0 6px;
+}
+.or::before, .or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+.or span { padding: 0 8px; }

@@ -13,12 +13,18 @@
 
   <!-- Capture --------------------------------------------------------------- -->
   <section class="panel active" data-panel="capture">
-    <label class="lbl" for="cap-input">Paste text, a link, or drop a file</label>
-    <textarea id="cap-input" class="in area" rows="6"
+    <!-- One-click smart capture of the current tab -->
+    <button id="cap-page" class="btn">📄 Capture this page</button>
+    <p id="cap-page-hint" class="hint">Grabs this tab: scrape an article, download a YouTube video or PDF — the agent takes over if that fails.</p>
+
+    <div class="or"><span>or</span></div>
+
+    <label class="lbl" for="cap-input">Paste text / a link, or drop a file</label>
+    <textarea id="cap-input" class="in area" rows="5"
       placeholder="Paste anything — notes, an article link, a YouTube video, a PDF link… or drop a PDF / audio / video file here."></textarea>
     <p id="cap-hint" class="hint"></p>
 
-    <button id="cap-send" class="btn">Add to Learn queue</button>
+    <button id="cap-send" class="btn ghost">Add to Learn queue</button>
     <p id="cap-status" class="status"></p>
   </section>
 

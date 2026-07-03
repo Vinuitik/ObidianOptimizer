@@ -49,6 +49,24 @@ async function prefill() {
   } catch { /* no tab access — leave blank */ }
 }
 
+// ── Smart one-click: capture the active tab ─────────────────────────────────────
+$('cap-page').addEventListener('click', capturePage);
+
+async function capturePage() {
+  let tab;
+  try { [tab] = await api.tabs.query({ active: true, currentWindow: true }); }
+  catch { /* no tab access */ }
+  if (!tab?.url || !/^https?:/i.test(tab.url)) {
+    return setStatus($('cap-status'), 'This page can’t be captured — open a normal web page.', 'err');
+  }
+  $('cap-page').disabled = true;
+  $('cap-send').disabled = true;
+  setStatus($('cap-status'), 'Capturing this page…', 'info');
+  const res = await send('capturePage', { url: tab.url, tabId: tab.id });
+  $('cap-page').disabled = false;
+  handleResult(res);
+}
+
 // ── Send (text / URL) ─────────────────────────────────────────────────────────
 $('cap-send').addEventListener('click', () => submit());
 
