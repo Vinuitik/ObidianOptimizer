@@ -56,6 +56,7 @@ public class CaptureController {
 
     private final FileRepository repository;
     private final CaptureRepository captureRepo;
+    private final CaptureIngestWorker ingestWorker;
     private final SettingsRepository settingsRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -70,9 +71,10 @@ public class CaptureController {
     private String embedderUrl;
 
     public CaptureController(FileRepository repository, CaptureRepository captureRepo,
-                             SettingsRepository settingsRepo) {
+                             CaptureIngestWorker ingestWorker, SettingsRepository settingsRepo) {
         this.repository = repository;
         this.captureRepo = captureRepo;
+        this.ingestWorker = ingestWorker;
         this.settingsRepo = settingsRepo;
     }
 
@@ -89,51 +91,29 @@ public class CaptureController {
 
         String captureId = UUID.randomUUID().toString().substring(0, 12);
         try {
-            Map<String, Object> ingest = new LinkedHashMap<>();
-            ingest.put("capture_id", captureId);
-
+            // Persist the resource into the durable ingest queue, then nudge the worker.
+            // Enqueue-and-drain (not fire-and-forget HTTP) means a resource captured while
+            // the embedder is down survives a restart and is submitted once it returns —
+            // the embedder's own job queue is in-memory. Submission itself goes through the
+            // one IngestClient gate, inside CaptureIngestWorker.
             if (hasText) {
                 // Keep the original text as a resource so Learn can show it beside the
-                // proposed notes; the capture row records where it lives + lifecycle.
+                // proposed notes; the worker reads it back for the embedder's text route.
                 String title = (body.title() != null && !body.title().isBlank())
                     ? body.title() : firstLine(text);
                 String sourcePath = storeTextResource(captureId, title, text);
-                captureRepo.create(captureId, "text", title, sourcePath, title);
-                ingest.put("text", text);
-                ingest.put("source_type", "text");
-                ingest.put("title", title);
+                captureRepo.enqueue(captureId, "text", title, sourcePath, title);
             } else {
                 String ref = url.trim();
-                String sourceType = classifyUrl(ref);
-                captureRepo.create(captureId, sourceType, ref, null, ref);
-                ingest.put("ref", ref);
-                ingest.put("source_type", sourceType);
+                captureRepo.enqueue(captureId, classifyUrl(ref), ref, null, ref);
             }
-
-            String payload = objectMapper.writeValueAsString(ingest);
-            HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(embedderUrl + "/ingest"))
-                .timeout(Duration.ofSeconds(10))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(payload))
-                .build();
-            HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-            if (r.statusCode() == 200) {
-                log.info("[Capture] queued ingest {} ({})", captureId, hasText ? "text" : url);
-                return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
-            }
-            // Ingest never started → the capture is dead on arrival; mark it failed.
-            captureRepo.updateStatus(captureId, "failed");
-            log.warn("[Capture] embedder {} for {}: {}", r.statusCode(), captureId, r.body());
-            return ResponseEntity.status(502).body(Map.of("error", "embedder " + r.statusCode()));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            captureRepo.updateStatus(captureId, "failed");
-            return ResponseEntity.status(503).body(Map.of("error", "interrupted"));
+            ingestWorker.nudge();
+            log.info("[Capture] enqueued {} ({})", captureId, hasText ? "text" : url);
+            return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
         } catch (Exception e) {
             captureRepo.updateStatus(captureId, "failed");
-            log.warn("[Capture] failed for {}: {}", captureId, e.toString());
-            return ResponseEntity.status(502).body(Map.of("error", "embedder unreachable"));
+            log.warn("[Capture] enqueue failed for {}: {}", captureId, e.toString());
+            return ResponseEntity.status(500).body(Map.of("error", "could not queue resource"));
         }
     }
 

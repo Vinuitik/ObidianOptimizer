@@ -14,7 +14,11 @@ import java.util.Map;
  * disk. Notes link back via frontmatter {@code capture-id} (mirrored into
  * {@code notes.capture_id}); this table holds the resource side + lifecycle status.
  *
- * Lifecycle: processing → ready → filed (all child notes triaged) → source trashed.
+ * Lifecycle: queued → processing → ready → filed (all child notes triaged) → source
+ * trashed. {@code queued} = the resource has been received but not yet handed to the
+ * embedder; the {@link CaptureIngestWorker} drains those continuously (durable across
+ * restart, unlike the embedder's in-memory job queue). A capture whose ingest already
+ * ran when the row was created (in-place note snapshots) is inserted at {@code processing}.
  */
 @Component
 public class CaptureRepository {
@@ -37,7 +41,7 @@ public class CaptureRepository {
                 source_ref  TEXT,               -- url / original filename / paste label
                 source_path TEXT,               -- vault-relative path of the kept original
                 title       TEXT,
-                status      TEXT    NOT NULL DEFAULT 'processing', -- processing|ready|filed|failed
+                status      TEXT    NOT NULL DEFAULT 'processing', -- queued|processing|ready|filed|failed
                 created_at  BIGINT  NOT NULL
             )
             """);
@@ -53,8 +57,34 @@ public class CaptureRepository {
             """, id, sourceType, sourceRef, sourcePath, title, System.currentTimeMillis());
     }
 
+    /** Insert a resource into the durable ingest queue (status {@code queued}); the
+     *  {@link CaptureIngestWorker} submits it to the embedder on its next drain. */
+    public void enqueue(String id, String sourceType, String sourceRef,
+                        String sourcePath, String title) {
+        jdbc.update("""
+            INSERT INTO capture(id, source_type, source_ref, source_path, title, status, created_at)
+            VALUES (?, ?, ?, ?, ?, 'queued', ?)
+            ON CONFLICT (id) DO NOTHING
+            """, id, sourceType, sourceRef, sourcePath, title, System.currentTimeMillis());
+    }
+
     public void updateStatus(String id, String status) {
         jdbc.update("UPDATE capture SET status = ? WHERE id = ?", status, id);
+    }
+
+    /** Oldest-first batch of queued resources awaiting submission (FIFO fairness). */
+    public List<Capture> findQueued(int limit) {
+        return jdbc.query(
+            "SELECT * FROM capture WHERE status = 'queued' ORDER BY created_at ASC LIMIT ?",
+            CaptureRepository::map, limit);
+    }
+
+    /** Atomically claim a queued row (→ {@code processing}) so a nudge and a scheduled
+     *  tick can't double-submit the same resource. Returns true if THIS caller won it. */
+    public boolean claim(String id) {
+        return jdbc.update(
+            "UPDATE capture SET status = 'processing' WHERE id = ? AND status = 'queued'",
+            id) > 0;
     }
 
     /** Clear the source path once the original has been trashed on completion. */

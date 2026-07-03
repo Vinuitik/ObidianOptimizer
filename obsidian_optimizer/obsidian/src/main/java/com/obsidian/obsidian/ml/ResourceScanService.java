@@ -1,6 +1,6 @@
 package com.obsidian.obsidian.ml;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.obsidian.obsidian.common.IngestClient;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
@@ -11,17 +11,11 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -55,22 +49,12 @@ public class ResourceScanService {
 
     private final SettingsRepository settingsRepo;
     private final NoteIndexRepository noteIndexRepo;
-    private final ObjectMapper objectMapper = new ObjectMapper();
-    // HTTP_1_1 is mandatory: the embedder is uvicorn, which doesn't support the
-    // h2c cleartext upgrade the JDK client attempts by default — that handshake
-    // makes uvicorn drop the request body, yielding a 422 "body field required".
-    private final HttpClient httpClient = HttpClient.newBuilder()
-        .version(HttpClient.Version.HTTP_1_1)
-        .connectTimeout(Duration.ofSeconds(2))
-        .build();
+    private final IngestClient ingestClient;   // the one gate to the embedder /ingest
     private final ExecutorService pool = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "resource-ingest-trigger");
         t.setDaemon(true);
         return t;
     });
-
-    @Value("${embedder.url:http://localhost:8000}")
-    private String embedderUrl;
 
     // Master switch for the whole ingest pipeline. false → notes are NOT gated on a
     // transcript (they embed/card from their text) and no ingest is fired.
@@ -93,9 +77,11 @@ public class ResourceScanService {
         appReady = true;
     }
 
-    public ResourceScanService(SettingsRepository settingsRepo, NoteIndexRepository noteIndexRepo) {
+    public ResourceScanService(SettingsRepository settingsRepo, NoteIndexRepository noteIndexRepo,
+                               IngestClient ingestClient) {
         this.settingsRepo = settingsRepo;
         this.noteIndexRepo = noteIndexRepo;
+        this.ingestClient = ingestClient;
     }
 
     /**
@@ -164,28 +150,15 @@ public class ResourceScanService {
     }
 
     private void trigger(String relNotePath, String embed) {
+        // Off-thread + best-effort: submitting must never block a note write, and a down
+        // embedder is fine — the note stays ingest_pending and retryPendingIngests re-fires.
         pool.submit(() -> {
-            try {
-                String body = objectMapper.writeValueAsString(
-                    Map.of("ref", embed, "note_path", relNotePath));
-                HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(embedderUrl + "/ingest"))
-                    .timeout(Duration.ofSeconds(10))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-                HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
-                if (r.statusCode() == 200) {
-                    log.info("[ResourceScanService] queued ingest of {} in {}", embed, relNotePath);
-                } else {
-                    log.warn("[ResourceScanService] ingest {} -> {}: {}", embed,
-                        r.statusCode(), r.body());
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } catch (Exception e) {
-                // embedder down / slow — a later save or restart re-fires
-                log.debug("[ResourceScanService] trigger failed for {}: {}", embed, e.toString());
+            IngestClient.Result r = ingestClient.submitInPlace(embed, relNotePath);
+            if (r.ok()) {
+                log.info("[ResourceScanService] queued ingest of {} in {}", embed, relNotePath);
+            } else {
+                log.debug("[ResourceScanService] ingest {} not accepted ({}) — will retry",
+                    embed, r.status());
             }
         });
     }

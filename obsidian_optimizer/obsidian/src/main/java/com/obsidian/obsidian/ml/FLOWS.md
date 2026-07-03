@@ -216,9 +216,15 @@ To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
 `ResourceScanService.scan(absPath, content)` runs at the same chokepoint as
 `registerImages` (called at its tail), so every note write is covered. For each
 `![[*.mp4|mkv|webm|mov|avi|mp3|m4a|wav|ogg|flac|pdf]]` lacking a `<!-- ingest:… -->`
-marker it POSTs the embedder `/ingest {ref, note_path}` off-thread (best-effort).
-The embedder synthesizes a note and injects it below the embed; the next write-back
-carries the marker, so re-scans skip it. Pipeline detail: embedder/ingest/FLOWS.md.
+marker it submits `{ref, note_path}` off-thread via `common/IngestClient.submitInPlace()`
+(best-effort). The embedder synthesizes a note and injects it below the embed; the next
+write-back carries the marker, so re-scans skip it. Pipeline detail: embedder/ingest/FLOWS.md.
+
+**Centralized gate:** all Java→embedder ingest submissions now go through the one
+`common/IngestClient` (in-place here; standalone from the capture queue) — see
+`capture/FLOWS.md`. It owns the HTTP/1.1 transport + `embedder.url`; callers pass a typed
+request. Previously each caller hand-rolled its own client (drifting defaults, duplicated
+h2c workaround).
 
 `scan` also sets `notes.ingest_pending` (synchronously, before the off-thread POSTs):
 true while any resource embed still lacks its marker, cleared once all do. This is the
