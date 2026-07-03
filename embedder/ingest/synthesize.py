@@ -335,3 +335,18 @@ def _source_section(src: dict, segs: list[dict]) -> str:
 def slugify(title: str) -> str:
     s = re.sub(r"[^\w\s-]", "", title).strip()
     return re.sub(r"[\s]+", " ", s)[:80] or "untitled"
+
+
+def chronology_block(prev_title: str | None, next_title: str | None) -> str:
+    """SEQUENTIAL link section (INGESTION_V2_FLOWS §5) — the chronological spine we inject
+    OURSELVES from `order_index`, never the LLM. A note links to its predecessor within the
+    same source (and successor, for walking forward); the first has no predecessor. Wikilink
+    targets are the slugified titles = the created note filenames, so they resolve in Obsidian.
+    Returns '' when there is neither neighbour (a lone note needs no sequence)."""
+    if not prev_title and not next_title:
+        return ""
+    prev = f"[[{slugify(prev_title)}]]" if prev_title else "— (start of source)"
+    parts = [f"Previous: {prev}"]
+    if next_title:
+        parts.append(f"Next: [[{slugify(next_title)}]]")
+    return "## Sequence\n\n" + " · ".join(parts)

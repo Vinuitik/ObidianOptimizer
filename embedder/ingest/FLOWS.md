@@ -355,6 +355,7 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | v2 bundle→IR bridge at the seam | `jobs._ir_from_bundle()` (native A/V, bridge pdf/text) |
 | v2 per-Unit WRITE draft | `synthesize.write_unit_body()` |
 | v2 in-place / standalone assembly | `synthesize.build_inplace_body_v2()` / `assemble()` via `_span_to_segs()` |
+| v2 SEQUENTIAL chrono links (prev/next) | `synthesize.chronology_block()`, injected in `jobs._synthesize_and_publish_v2` (order_index order) |
 | In-place capture snapshot + link | `jobs._synthesize_and_inject()` → `publish.create_capture()` + `stamp_capture()` |
 | Capture source folder | Java `InternalAgentController.createCapture` (`_inbox/_sources`) |
 | In-place review/acknowledge | Java `inbox/FLOWS.md` (`InboxController`) |

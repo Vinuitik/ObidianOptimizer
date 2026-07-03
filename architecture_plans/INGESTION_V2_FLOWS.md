@@ -259,8 +259,13 @@ Tiny 2-page PDF, "Intro to Cells", Ch.2 starts at bottom of p1 → spills to p2.
 ## 5. Linking (at commit) `[NEW linking, reuses pgvector]`
 
 Two **distinct** edge types:
-- **SEQUENTIAL** — from `order_index` within a source. Deterministic, no embeddings.
-- **SEMANTIC** — **ANN top-k, never pairwise.** For each new note *chunk*, query the
+- **SEQUENTIAL** `[BUILT]` — from `order_index` within a source. Deterministic, no embeddings,
+  injected by us (never the LLM). `synthesize.chronology_block(prev,next)` writes a `## Sequence`
+  section with prev/next `[[wikilinks]]` into each standalone note; `jobs._synthesize_and_publish_v2`
+  walks `res.notes` (already in `order_index` order) so `seq-1`/`seq+1` are the true neighbours, the
+  first note has no predecessor. (In-place notes are one file with ordered `##` sections — no
+  cross-note edge needed.)
+- **SEMANTIC** `[NOT IMPLEMENTED]` — **ANN top-k, never pairwise.** For each new note *chunk*, query the
   vector index (pgvector, see `ML_ARCH.md`) for top-k nearest neighbors above a
   similarity floor; cap top-N per note. Compute at **chunk grain**, store at **note
   grain** with the chunk as evidence anchor: `noteA/chunk3 ↔ noteB/chunk1, 0.82`.

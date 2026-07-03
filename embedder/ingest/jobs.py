@@ -320,12 +320,19 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     publish.ensure_folder(publish.INBOX_FOLDER)
     capture_id = job.get("capture_id")
     mini_bundle = {"source": bundle["source"], "media": bundle.get("media", [])}
+    # SEQUENTIAL links (§5): deterministic prev/next along order_index — res.notes is already
+    # in order, so seq-1 / seq+1 ARE the chronological neighbours. We inject these, not the LLM.
+    titles = [n.title for n in res.notes]
     created, failures = [], []
     for seq, n in enumerate(res.notes):
         try:
             segs = synthesize._span_to_segs(n.unit.locator_span)
+            prev_title = titles[seq - 1] if seq > 0 else None
+            next_title = titles[seq + 1] if seq < len(titles) - 1 else None
+            chron = synthesize.chronology_block(prev_title, next_title)
+            body = n.body + ("\n\n" + chron if chron else "")
             note_md = synthesize.assemble(mini_bundle, {"title": n.title, "tags": []},
-                                          segs, n.body)
+                                          segs, body)
             problems = publish.validate_note(note_md, stored_names)
             if problems:
                 raise publish.PublishError("; ".join(problems))
