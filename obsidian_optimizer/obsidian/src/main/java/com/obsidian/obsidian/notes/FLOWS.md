@@ -189,6 +189,12 @@ Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String>
 `NotesController.deleteNote(DeleteNoteRequest{path})`  
 → `FileRepository.softDeleteNote()` → move to `ROOT_FILE/_trash/` → `NoteIndexRepository.delete()` → `NoteLinkRepository.deleteSource()`
 
+### softDeleteFile (non-note siblings)
+`FileRepository.softDeleteFile(path)` — same `_trash/` move, but **no** note-index /
+link / sync bookkeeping (the target was never indexed). Used by the Inbox to trash a
+Capture source snapshot (`_inbox/_sources/*.md`) on acknowledge. Idempotent: a missing
+file is a no-op (acknowledge can be retried). Collision-suffixes on name clash.
+
 ---
 
 ## Technology Notes
@@ -203,7 +209,8 @@ Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String>
 
 | Thing to change | Where |
 |---|---|
-| Excluded dirs in BFS | `FileRepository.EXCLUDED_DIRS` |
+| Excluded dirs in BFS | `FileRepository.EXCLUDED_DIRS` (incl. `_workspace`, `_reports`, `_sources`) |
+| Soft-delete a non-note file | `FileRepository.softDeleteFile()` (Inbox capture snapshots) |
 | Initial note frontmatter | `FileRepository.createNote()` |
 | Review sort order | `NoteIndexRepository.getReviewNotesPaged()` ORDER BY |
 | Frontmatter keys indexed | `FrontmatterParser.parse()` + `NoteIndexRepository` schema + `upsert()` |

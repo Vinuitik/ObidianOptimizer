@@ -68,9 +68,21 @@ _store_media(bundle)                    → keyframes/PDF figures via Java /api/
 synthesize.outline(bundle)              → N plans (split into sections allowed)
 synthesize.build_inplace_body(...)      → ONE block: ## per plan, media by loc, 1 source footer
 publish.validate_embeds(block, stored)  → produced media must resolve
-read note via _resolve_in_vault         → publish.inject_block(content, embed, block, sha)
+read note via _resolve_in_vault         → SNAPSHOT pre-rewrite content
+capture_id = uuid[:12]
+publish.create_capture(capture_id, note_path, snapshot)  → Java POST /api/internal/capture
+     writes _inbox/_sources/{capture_id}.md + capture row (source_type='note',
+     source_path=snapshot, status='processing')  — the NOTE is the single Capture source
+publish.inject_block(content, embed, block, sha)         → rewrite in place (embed kept)
+publish.stamp_capture(new, capture_id, seq=1)            → link note ↔ capture (durable FM)
 publish.update_note(note_path, new)     → Java PUT /api/internal/notes (re-indexes, re-syncs)
 ```
+The rewritten note stays live in its real folder and in FSRS. It surfaces in the Learn
+**Inbox** as an `inPlace` item (found via `capture_id`, not a folder scan) for human
+review; the user edits + **acknowledges** → `capture.status='filed'` + snapshot trashed.
+See `../../obsidian_optimizer/.../inbox/FLOWS.md` and INGESTION_V2_FLOWS §7 (lifecycle).
+*Why the note, not the embed:* a note can hold several embeds; a Capture always has
+exactly one source, so the source is the pre-rewrite note itself.
 
 ### _synthesize_and_publish (standalone)
 ```
@@ -119,6 +131,11 @@ inject_block(content, embed, body, sha): insert/replace block below the embed li
     marker <!-- ingest:<base> sha=… --> … <!-- /ingest:<base> --> (HTML comment = chunker-stripped)
 validate_embeds / validate_note : produced ![[…]] must resolve to stored media
 store_media / create_note / update_note : POST|PUT /api/internal/* with X-Internal-Token
+create_capture(capture_id, source_ref, content): POST /api/internal/capture — snapshot the
+    pre-rewrite note as the Capture source (in-place only), returns _inbox/_sources path
+stamp_capture(content, capture_id, seq): inject capture-id/capture-seq frontmatter (durable
+    note↔capture link, mirrored to notes.capture_id/seq). Shared with standalone captures.
+stamp_inbox(content, source, folder): inject ingest-inbox/-source/-suggested-folder (standalone)
 find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 ```
 
@@ -169,6 +186,9 @@ find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
 | Resource embed extensions (trigger) | `ResourceScanService.RESOURCE_EMBED` (Java) |
 | Ingest marker format | `publish.inject_block()` |
 | In-place vs standalone branch | `jobs._run()` (`note_path` set ⇒ in-place) |
+| In-place capture snapshot + link | `jobs._synthesize_and_inject()` → `publish.create_capture()` + `stamp_capture()` |
+| Capture source folder | Java `InternalAgentController.createCapture` (`_inbox/_sources`) |
+| In-place review/acknowledge | Java `inbox/FLOWS.md` (`InboxController`) |
 | (note, embed) job de-dup | `jobs.submit()` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | Routing rules | `router.py → ROUTE_TABLE` |
