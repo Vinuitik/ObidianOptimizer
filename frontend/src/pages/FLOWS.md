@@ -74,27 +74,26 @@ The old **Library** view (`LearnLayout` + `ResourcePanel` manual `_workspace/` m
 components stay in-tree, unimported (restore by reinstating the view toggle in `LearnPage`).
 
 - **Inbox review** (`InboxReview.jsx` + `api/inbox.js`): the ingest consume layer
-  (INGESTION_V2_FLOWS §7). A queue rail + **three panels**:
-  - `SourceSplicePanel` — the source spliced to THIS note's region: `parseSourceRegion`
-    reads the note's `## Source` footer → YouTube embed seeked to the timestamp / `<video>`
-    `#t=` / PDF `#page=` / **text → `RsvpReader`** (fast one-word-at-a-time reading, §7).
-  - note column — Edit/Preview (`NoteRenderer` — the shared **read-only Milkdown** renderer,
-    same rich output as the main editor: GFM tables, `![[images]]`, math, code) + the **proposed** folder (find_home
-    suggestion, editable — no longer chosen from scratch) → **Save & file** / **Discard**,
-    or **Save & acknowledge** for in-place notes.
-  - `LinksPanel` — `parseLinks` reads the injected `## Sequence` (prev → THIS → next) and
-    `## Related` wikilinks, shown IN ORDER so chronology is verifiable; click to jump.
-  Panels render the LIVE edited draft, so splice + links reflect what you'll file. The old
-  2-pane `InboxPanel.jsx` is superseded (kept in-tree, unused). Rendering is the shared
-  `molecules/MarkdownContent` (extracted from `NoteViewer` — every note surface renders
-  identically now). Pure parse/RSVP logic: `utils/inboxParse.js`, `utils/rsvp.js` (tested).
-- **Video orientation** is detected client-side from the `<video>` element's
-  `videoWidth/videoHeight` on `loadedmetadata` (`ResourcePanel Viewer → onOrientation`),
-  bubbled to `LearnPage` so a portrait short gets a vertical split. No ffprobe needed.
+  (INGESTION_V2_FLOWS §7). Layout REUSES the old Library shell the user liked:
+  `[collapsible queue] · LearnLayout( ORIGINAL | NEW ) · [proposed-folder bar]`.
+  - `LearnLayout` gives the adjustable, swappable, **orientation-aware** split for free —
+    landscape video → horizontal, else vertical. `SourceSplicePanel` reports orientation via
+    `onOrientation` (YouTube→landscape; local `<video>` from `loadedmetadata`; else vertical).
+  - **ORIGINAL** = `SourceSplicePanel` (read-only): `parseSourceRegion` reads the note's `##
+    Source` footer → YouTube embed seeked to the timestamp / `<video>#t=` / PDF `#page=` /
+    **text → `RsvpReader`** (fast one-word ORP reading, §7).
+  - **NEW** = the editable note: Edit/Preview, Preview = `NoteRenderer` (shared **read-only
+    Milkdown** — GFM tables, `![[images]]`, math, code; identical to the main editor).
+  - **Bottom bar**: the **proposed** folder (find_home), re-picked from an animated folder
+    tree (`FolderPicker` modal) → **Save & file** / **Discard**, or **Save & acknowledge**
+    for in-place notes. Filing moves the note into its folder + the FSRS queue.
+  The panels render the LIVE draft (source/preview reflect edits). The injected `## Sequence`
+  / `## Related` links live in the note itself (visible in Preview) — the standalone
+  `LinksPanel.jsx` is unused now (kept in-tree). Superseded: `InboxPanel.jsx` (old 2-pane).
+  Pure parse/RSVP logic: `utils/inboxParse.js`, `utils/rsvp.js` (tested).
 
-To change the split rule: `LearnPage.jsx → orientation` ternary
-To add a resource type: `ResourcePanel.jsx` + orientation rule above
-To change inbox triage: `InboxReview.jsx` (+ `SourceSplicePanel`/`LinksPanel`/`RsvpReader`) + backend `inbox/InboxController`
+To change the split rule: `InboxReview.jsx → orientation` ternary (+ `SourceSplicePanel.onOrientation`)
+To change inbox triage: `InboxReview.jsx` (+ `SourceSplicePanel`/`RsvpReader`/`FolderPicker`) + backend `inbox/InboxController`
 To change the shared note renderer: `molecules/MarkdownContent.jsx` (wraps `utils/markdown.renderMarkdown`)
 
 ---

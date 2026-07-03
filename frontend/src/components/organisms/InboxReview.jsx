@@ -2,33 +2,43 @@ import { useState, useEffect, useCallback } from 'react';
 import { fetchInbox, fileInboxNote, discardInboxNote, acknowledgeCapture } from '../../api/inbox';
 import { fetchChildren, updateNote } from '../../api/notes';
 import useStore from '../../store/useStore';
+import LearnLayout from '../templates/LearnLayout';
 import NoteRenderer from '../molecules/NoteRenderer';
 import SourceSplicePanel from './SourceSplicePanel';
-import LinksPanel from './LinksPanel';
+import FolderPicker from './FolderPicker';
 import styles from './InboxReview.module.css';
 
-// Three-panel ingest review (INGESTION_V2_FLOWS §7): a queue rail, then
-//   SOURCE (spliced to this note's region) │ NOTE (edit + proposed folder + file) │ LINKS
-// Redesign of the old 2-pane InboxPanel: the destination folder is no longer chosen from
-// scratch — it's PROPOSED (find_home) and editable. Filing moves the note into its folder
-// + the FSRS queue; acknowledging clears an in-place note. Data/actions reuse the inbox API.
+const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
+const dirName  = p => p.replace(/[/\\]+$/, '').replace(/[/\\][^/\\]*$/, '');
+
+// Ingest review (INGESTION_V2_FLOWS §7). Reuses the Library layout the user liked:
+//   [collapsible queue] · LearnLayout( ORIGINAL source | NEW note ) · [proposed folder bar]
+// LearnLayout brings the adjustable, swappable, orientation-aware split for free (landscape
+// video → horizontal, else vertical). The source panel is read-only ("original"); the note
+// is editable ("new"). The destination folder is PROPOSED (find_home) and re-picked from an
+// animated folder tree (FolderPicker). Filing moves the note into its folder + FSRS queue.
 export default function InboxReview({ onCount }) {
   const isAuthenticated = useStore(s => s.isAuthenticated);
 
   const [items,    setItems]    = useState([]);
-  const [folders,  setFolders]  = useState([]);
   const [selected, setSelected] = useState(null);   // path
   const [draft,    setDraft]    = useState('');
   const [dest,     setDest]     = useState('');
   const [preview,  setPreview]  = useState(false);
+  const [collapsed, setCollapsed] = useState(false);  // queue rail
+  const [orient,   setOrient]   = useState(null);     // 'portrait' | 'landscape' | null
+  const [picker,   setPicker]   = useState(null);
+  const [vaultRoot, setVaultRoot] = useState(null);
   const [loading,  setLoading]  = useState(false);
   const [busy,     setBusy]     = useState(false);
   const [error,    setError]    = useState(null);
   const [status,   setStatus]   = useState('');
 
   const current = items.find(i => i.path === selected) || null;
-  // review the LIVE edited content so source-splice + links reflect what you'll file
   const workingItem = current ? { ...current, content: draft } : null;
+
+  // Landscape video is wide → horizontal split (source on top); everything else vertical.
+  const orientation = orient === 'landscape' ? 'horizontal' : 'vertical';
 
   const select = useCallback((item) => {
     setSelected(item.path);
@@ -36,6 +46,7 @@ export default function InboxReview({ onCount }) {
     setDest(item.suggestedFolder || '');
     setPreview(false);
     setStatus('');
+    setOrient(null);
   }, []);
 
   const load = useCallback(() => {
@@ -55,12 +66,36 @@ export default function InboxReview({ onCount }) {
   useEffect(() => {
     if (!isAuthenticated) return;
     load();
-    fetchChildren(null)
-      .then(r => setFolders((r.folderPaths || []).filter(f => !/[/\\]_inbox$/.test(f))))
-      .catch(() => {});
+    fetchChildren(null).then(r => setVaultRoot(r.parentPath)).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
+  // ── folder tree picker (reuses FolderPicker, browsing the vault) ──────────────
+  const loadVaultDir = useCallback(async (path) => {
+    const r = await fetchChildren(path);
+    const cur = r.parentPath;
+    const parent = (!vaultRoot || cur === vaultRoot) ? null : dirName(cur);
+    return {
+      current: cur,
+      parent,
+      dirs: (r.folderPaths || [])
+        .filter(f => !/[/\\]_inbox$/.test(f))
+        .map(p => ({ path: p, name: baseName(p) })),
+    };
+  }, [vaultRoot]);
+
+  function openFolderPicker() {
+    setPicker({
+      title: 'File into folder',
+      loadPath: loadVaultDir,
+      initialPath: dest || null,
+      confirmLabel: 'Choose this folder',
+      onSelect: (p) => { setDest(p); setPicker(null); },
+      onClose: () => setPicker(null),
+    });
+  }
+
+  // ── actions ───────────────────────────────────────────────────────────────────
   async function file() {
     if (!current) return;
     if (!dest.trim()) { setStatus('Pick a destination folder.'); return; }
@@ -89,100 +124,80 @@ export default function InboxReview({ onCount }) {
     finally { setBusy(false); }
   }
 
-  // Clicking a link jumps to that note if it's also awaiting review.
-  const openStem = useCallback((stem) => {
-    const s = stem.toLowerCase();
-    const hit = items.find(i => (i.title || '').toLowerCase() === s
-      || i.path.toLowerCase().endsWith(`/${s}.md`));
-    if (hit) select(hit);
-  }, [items, select]);
+  // ── panels ──────────────────────────────────────────────────────────────────
+  const sourcePanel = <SourceSplicePanel item={workingItem} onOrientation={setOrient} />;
+
+  const notePanel = (
+    <div className={styles.notePanel}>
+      <div className={styles.noteHead}>
+        <span className={styles.noteTag}>New note {current?.inPlace ? '· in place' : '· editable'}</span>
+        <div className={styles.tabs}>
+          <button className={`${styles.tab} ${!preview ? styles.tabOn : ''}`} onClick={() => setPreview(false)}>Edit</button>
+          <button className={`${styles.tab} ${preview ? styles.tabOn : ''}`} onClick={() => setPreview(true)}>Preview</button>
+        </div>
+      </div>
+      {preview
+        ? <div className={styles.previewBox}><NoteRenderer content={draft} resetKey={selected} /></div>
+        : <textarea className={styles.editor} value={draft}
+                    onChange={e => setDraft(e.target.value)} spellCheck={false} />}
+    </div>
+  );
 
   return (
     <div className={styles.review}>
-      <div className={styles.queue}>
-        {loading && <p className={styles.status}>Loading…</p>}
-        {error   && <p className={styles.statusError}>{error}</p>}
-        {!loading && !error && items.length === 0 && (
-          <p className={styles.status}>
-            Inbox is empty. Capture a resource and its proposed notes appear here to review.
-          </p>
+      <aside className={`${styles.queue} ${collapsed ? styles.queueCollapsed : ''}`}>
+        <button className={styles.collapseBtn} onClick={() => setCollapsed(c => !c)}
+                title={collapsed ? 'Expand list' : 'Collapse list'}>
+          {collapsed ? '☰' : '‹'}
+        </button>
+        {!collapsed && (
+          <div className={styles.queueList}>
+            {loading && <p className={styles.status}>Loading…</p>}
+            {error   && <p className={styles.statusError}>{error}</p>}
+            {!loading && !error && items.length === 0 && (
+              <p className={styles.status}>Inbox is empty. Capture a resource and its proposed notes appear here.</p>
+            )}
+            {items.map(it => (
+              <button key={it.path}
+                className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
+                onClick={() => select(it)} title={it.title}>
+                <span className={styles.rowTitle}>{it.title}</span>
+                {it.inPlace
+                  ? <span className={styles.rowTag}>in place</span>
+                  : it.captureSeq != null && <span className={styles.rowTag}>#{it.captureSeq + 1}</span>}
+              </button>
+            ))}
+          </div>
         )}
-        {items.map(it => (
-          <button
-            key={it.path}
-            className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
-            onClick={() => select(it)}
-            title={it.title}
-          >
-            <span className={styles.rowTitle}>{it.title}</span>
-            {it.inPlace
-              ? <span className={styles.rowTag}>in place</span>
-              : it.captureSeq != null && <span className={styles.rowTag}>#{it.captureSeq + 1}</span>}
-          </button>
-        ))}
-      </div>
+      </aside>
 
       {current ? (
-        <div className={styles.panels}>
-          <section className={styles.panelSource}>
-            <SourceSplicePanel item={workingItem} />
-          </section>
+        <div className={styles.main}>
+          <div className={styles.splitArea}>
+            <LearnLayout orientation={orientation} slotA={sourcePanel} slotB={notePanel} />
+          </div>
 
-          <section className={styles.panelNote}>
-            <div className={styles.noteHead}>
-              {current.inPlace
-                ? <span className={styles.srcLink}>✎ in place · {current.path.replace(/.*[/\\]/, '')}</span>
-                : current.source && (
-                  <a className={styles.srcLink} href={current.source} target="_blank" rel="noreferrer">
-                    ↗ {current.source}
-                  </a>)}
-              <div className={styles.tabs}>
-                <button className={`${styles.tab} ${!preview ? styles.tabOn : ''}`} onClick={() => setPreview(false)}>Edit</button>
-                <button className={`${styles.tab} ${preview ? styles.tabOn : ''}`} onClick={() => setPreview(true)}>Preview</button>
-              </div>
-            </div>
-
-            {preview
-              ? <div className={styles.previewBox}><NoteRenderer content={draft} resetKey={current.path} /></div>
-              : <textarea className={styles.editor} value={draft}
-                          onChange={e => setDraft(e.target.value)} spellCheck={false} />}
-
-            <div className={styles.controls}>
-              {current.inPlace ? (
-                <div className={styles.actions}>
-                  <button className={styles.primary} onClick={acknowledge} disabled={busy}>Save &amp; acknowledge</button>
-                  {status && <span className={styles.actionStatus}>{status}</span>}
-                </div>
-              ) : (
-                <>
-                  <label className={styles.fieldLabel}>Proposed folder <span className={styles.hint}>(edit if wrong)</span></label>
-                  <input
-                    className={styles.folderInput}
-                    list="review-folders"
-                    value={dest}
-                    onChange={e => setDest(e.target.value)}
-                    placeholder="Choose or type a folder…"
-                  />
-                  <datalist id="review-folders">
-                    {folders.map(f => <option key={f} value={f} />)}
-                  </datalist>
-                  <div className={styles.actions}>
-                    <button className={styles.primary} onClick={file} disabled={busy}>Save &amp; file</button>
-                    <button className={styles.ghost} onClick={discard} disabled={busy}>Discard</button>
-                    {status && <span className={styles.actionStatus}>{status}</span>}
-                  </div>
-                </>
-              )}
-            </div>
-          </section>
-
-          <section className={styles.panelLinks}>
-            <LinksPanel item={workingItem} onOpen={openStem} />
-          </section>
+          <div className={styles.bottomBar}>
+            {current.inPlace ? (
+              <button className={styles.primary} onClick={acknowledge} disabled={busy}>Save &amp; acknowledge</button>
+            ) : (
+              <>
+                <span className={styles.barLabel}>Proposed folder</span>
+                <button className={styles.folderBtn} onClick={openFolderPicker} title={dest}>
+                  📁 {dest || 'Choose a folder'} ▸
+                </button>
+                <button className={styles.primary} onClick={file} disabled={busy}>Save &amp; file</button>
+                <button className={styles.ghost} onClick={discard} disabled={busy}>Discard</button>
+              </>
+            )}
+            {status && <span className={styles.barStatus}>{status}</span>}
+          </div>
         </div>
       ) : (
         <div className={styles.emptyMain}><p>Select a note to review.</p></div>
       )}
+
+      {picker && <FolderPicker {...picker} />}
     </div>
   );
 }
