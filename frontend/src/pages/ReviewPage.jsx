@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { gradeNote, fetchNoteContent } from '../api/notes';
 import FlashcardSession from '../components/organisms/FlashcardSession';
+import MarkdownContent from '../components/molecules/MarkdownContent';
 import cardStyles from '../components/organisms/FlashcardSession.module.css';
 import styles from './ReviewPage.module.css';
 
@@ -94,7 +95,9 @@ export default function ReviewPage() {
               </button>
               <span className={styles.inlineNoteTitle}>{inlineNote.title}</span>
             </div>
-            <pre className={styles.inlineNoteBody}>{inlineNote.raw}</pre>
+            <div className={styles.inlineNoteBody}>
+              <MarkdownContent content={inlineNote.raw} />
+            </div>
           </div>
         ) : activeNote ? (
           flashcardsEnabled ? (

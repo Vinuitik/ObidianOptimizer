@@ -69,8 +69,11 @@ export default function SplitLayout() {
   const rightCollapsed = useStore(s => s.rightCollapsed);
   const toggleLeft     = useStore(s => s.toggleLeft);
   const toggleRight    = useStore(s => s.toggleRight);
-  const reviewMode     = useStore(s => s.reviewMode);
-  const showRight      = reviewMode !== 'flashcard';
+  // One switch (settings.flashcardsEnabled) picks the review SYSTEM: flashcards ON →
+  // review lives on the dedicated /review page, so the main-page review list is not
+  // shown; OFF → the review list occupies the right panel here. See ReviewPage / NavBar.
+  const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
+  const showRight      = !flashcardsEnabled;
   const currentNotePath = useStore(s => s.currentNotePath);
   const centerMode     = useStore(s => s.centerMode);
   const isMutable      = useStore(s => s.isMutable);

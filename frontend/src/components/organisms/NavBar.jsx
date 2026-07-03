@@ -6,7 +6,7 @@ import styles from './NavBar.module.css';
 const NAV_ITEMS = [
   { to: '/',         label: 'Notes' },
   { to: '/learn',    label: 'Learn' },
-  { to: '/review',   label: 'Review' },
+  { to: '/review',   label: 'Review', flashcardsOnly: true },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/settings', label: 'Settings' },
 ];
@@ -15,6 +15,10 @@ export default function NavBar() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const logout = useStore(s => s.logout);
   const setShowLogin = useStore(s => s.setShowLogin);
+  // Flashcards off → the review-list system runs inline on the Notes page, so the
+  // dedicated flashcard Review tab disappears (mutually exclusive systems).
+  const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
+  const items = NAV_ITEMS.filter(it => !it.flashcardsOnly || flashcardsEnabled);
 
   return (
     <nav className={styles.nav}>
@@ -26,7 +30,7 @@ export default function NavBar() {
       </div>
 
       <div className={styles.links}>
-        {NAV_ITEMS.map(({ to, label }) => (
+        {items.map(({ to, label }) => (
           <NavLink
             key={to}
             to={to}

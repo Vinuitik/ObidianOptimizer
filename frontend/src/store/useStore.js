@@ -17,7 +17,6 @@ import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
 // ── Review session (localStorage) ────────────────────────────────────────────
 
 const REVIEW_KEY = 'obsOpt_reviewSession';
-const REVIEW_MODE_KEY = 'obsOpt_reviewMode';
 
 function getReviewSession() {
   const today = new Date().toISOString().slice(0, 10);
@@ -158,8 +157,6 @@ const useStore = create((set, get) => ({
   leftCollapsed: typeof window?.matchMedia === 'function' && window.matchMedia('(max-width: 768px)').matches,
   rightCollapsed: typeof window?.matchMedia === 'function' && window.matchMedia('(max-width: 768px)').matches,
 
-  // UI preference stored in localStorage — 'inline' | 'flashcard'
-  reviewMode: localStorage.getItem(REVIEW_MODE_KEY) ?? 'inline',
 
   // ── Toast ─────────────────────────────────────────────────────────────────
 
@@ -629,11 +626,6 @@ const useStore = create((set, get) => ({
 
   toggleLeft:  () => set(s => ({ leftCollapsed:  !s.leftCollapsed })),
   toggleRight: () => set(s => ({ rightCollapsed: !s.rightCollapsed })),
-
-  setReviewMode: (mode) => {
-    localStorage.setItem(REVIEW_MODE_KEY, mode);
-    set({ reviewMode: mode });
-  },
 
   // ── Settings ──────────────────────────────────────────────────────────────
 

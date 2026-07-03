@@ -125,7 +125,16 @@ To add a chart: section in DashboardPage + counter in `StatsController.java`
 
 ## ReviewPage
 
-Flashcard tests vs self-rated slideshow (see cards FLOWS + frontend/FLOWS.md).
+Flashcard tests vs self-rated slideshow (see cards FLOWS + frontend/FLOWS.md). The inline
+"Open note →" view renders through the shared `molecules/MarkdownContent` (not raw `<pre>`), so
+reviewing a note directly looks like the main note view.
+
+**One review system (`settings.flashcardsEnabled`)** — mutually exclusive, replaces the old
+local `reviewMode` pref:
+- ON: Review tab shown (`NavBar` filters `flashcardsOnly` items), main-page review list hidden
+  (`SplitLayout showRight=!flashcardsEnabled`), flashcards generated (backend `CardJobWorker`).
+- OFF: Review tab hidden, review list runs inline in the Notes right panel, **no new cards**
+  (existing kept). To change: `SettingsPage` `flashcardsEnabled` field + the three gates above.
 
 ---
 

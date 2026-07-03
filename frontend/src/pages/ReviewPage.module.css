@@ -173,12 +173,8 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--sp-5) var(--sp-6);
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  color: var(--color-text);
-  line-height: var(--leading-normal);
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* Holds rendered markdown (MarkdownContent → .markdown-body) — no pre-wrap/monospace
+     overrides so the shared renderer's own styles apply, same as the main note view. */
 }
 
 /* ── Responsive: one pane at a time on mobile ──────────────────────────────

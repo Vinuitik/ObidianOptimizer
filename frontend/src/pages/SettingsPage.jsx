@@ -49,13 +49,16 @@ const SECTIONS = [
       },
       {
         key: 'flashcardsEnabled',
-        label: 'Flashcard tests',
+        label: 'Review system',
         type: 'select',
         options: [
-          { value: true,  label: 'On — reviews run as auto-graded mini-tests built from AI flashcards' },
-          { value: false, label: 'Off — slideshow: read the note and self-rate with the four buttons' },
+          { value: true,  label: 'Flashcards — auto-graded mini-tests on a dedicated Review tab' },
+          { value: false, label: 'Review list — read & self-rate from the Notes page' },
         ],
-        hint: 'Either way the grade feeds the same FSRS + bandit scheduler.',
+        hint: 'Picks ONE system. Flashcards: the Notes-page review list is hidden, the Review tab '
+          + 'appears, and new cards are generated. Review list: the Review tab disappears, review '
+          + 'runs inline on the Notes page, and NO new flashcards are created (existing cards are '
+          + 'kept, never deleted). Either grade feeds the same FSRS scheduler.',
       },
     ],
   },
@@ -126,8 +129,6 @@ export default function SettingsPage() {
   const settings       = useStore(s => s.settings);
   const applySettings  = useStore(s => s.applySettings);
   const isAuthenticated = useStore(s => s.isAuthenticated);
-  const reviewMode     = useStore(s => s.reviewMode);
-  const setReviewMode  = useStore(s => s.setReviewMode);
 
   // Local draft state: one object per section id
   const [drafts, setDrafts]     = useState({});
@@ -399,35 +400,6 @@ export default function SettingsPage() {
             </div>
           );
         })}
-
-        {/* Preferences — local browser settings (not persisted to backend) */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <h2 className={styles.sectionTitle}>Preferences</h2>
-            <p className={styles.sectionDesc}>
-              UI preferences stored in your browser. Cleared when browser data is reset.
-            </p>
-          </div>
-          <div className={styles.fields}>
-            <div className={styles.field}>
-              <div className={styles.fieldMeta}>
-                <label className={styles.label} htmlFor="pref-reviewMode">Review style</label>
-                <span className={styles.hint}>
-                  Flashcard mode hides the right panel on the main page and moves review to a dedicated flashcard view at <code>/review</code>.
-                </span>
-              </div>
-              <select
-                id="pref-reviewMode"
-                className={styles.input}
-                value={reviewMode}
-                onChange={e => setReviewMode(e.target.value)}
-              >
-                <option value="inline">Inline — review queue in main right panel</option>
-                <option value="flashcard">Flashcard — dedicated review page with flashcards</option>
-              </select>
-            </div>
-          </div>
-        </div>
 
         {/* Google Drive sync — sign in, passphrase, enable, manual triggers */}
         <DriveSyncPanel loaded={loaded} isAuthenticated={isAuthenticated} />
