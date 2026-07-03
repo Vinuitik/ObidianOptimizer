@@ -1,8 +1,8 @@
 .rsvp {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
   width: 100%;
 }
 
@@ -12,14 +12,14 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 1.5rem 0;
+  gap: var(--sp-1);
+  padding: var(--sp-5) 0;
 }
 
 .guide {
   width: 2px;
   height: 10px;
-  background: var(--accent, #6c8cff);
+  background: var(--color-accent);
   opacity: 0.7;
 }
 
@@ -27,16 +27,17 @@
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: baseline;
-  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: clamp(1.6rem, 5vw, 2.6rem);
   line-height: 1;
   width: 100%;
+  color: var(--color-text);
 }
 
-.before { text-align: right; color: var(--text, #222); }
-.after  { text-align: left;  color: var(--text, #222); }
+.before { text-align: right; }
+.after  { text-align: left; }
 .pivot  {
-  color: var(--accent, #6c8cff);
+  color: var(--color-accent-soft);
   font-weight: 700;
   padding: 0 1px;
 }
@@ -44,30 +45,31 @@
 .controls {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
 .play {
   min-width: 2.4rem;
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--border, #d5d5dd);
-  border-radius: 6px;
-  background: var(--surface, #fff);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-card);
+  color: var(--color-text);
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: var(--text-sm);
 }
-.play:hover { background: var(--surface-hover, #f2f2f6); }
+.play:hover { border-color: var(--color-border-hover); }
 
 .wpm { flex: 1 1 120px; }
-.wpmLabel { font-size: 0.8rem; color: var(--text-muted, #666); min-width: 4.5rem; }
-.count { font-size: 0.8rem; color: var(--text-muted, #666); margin-left: auto; }
+.wpmLabel { font-size: var(--text-xs); color: var(--color-text-2); min-width: 4.5rem; }
+.count { font-size: var(--text-xs); color: var(--color-text-2); margin-left: auto; }
 
 .scrub { width: 100%; }
 
 .empty {
-  padding: 2rem 1rem;
+  padding: var(--sp-5) var(--sp-4);
   text-align: center;
-  color: var(--text-muted, #888);
-  font-size: 0.9rem;
+  color: var(--color-text-2);
+  font-size: var(--text-sm);
 }
