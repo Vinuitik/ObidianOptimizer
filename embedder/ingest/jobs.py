@@ -131,6 +131,12 @@ def _run(job: dict):
             job.get("source_type") or "text", job.get("ref") or "")
     else:
         kind = router.route(job["ref"])
+        # Many PDF URLs have no .pdf extension (arxiv /pdf/ID, CDN links) so the router calls
+        # them 'web' → trafilatura fails on the binary. Sniff the content-type and reroute to
+        # pdf so it downloads + extracts properly.
+        if kind == "web" and job["ref"].startswith(("http://", "https://")) \
+                and _sniff_is_pdf(job["ref"]):
+            kind = "pdf"
         # PDF / direct-media URLs need a LOCAL file — extract_pdf/extract_av don't fetch URLs.
         # When the ref is an unresolved URL, download the bytes into resources/ FIRST so
         # extraction has a file and the note gets a local: copy (LOCAL_MEDIA_RETENTION §2c).
@@ -224,6 +230,24 @@ def _vault_rel(p) -> str:
         if s.startswith(prefix):
             return rel + s[len(prefix):]
     return s
+
+
+def _sniff_is_pdf(url: str) -> bool:
+    """Is this URL actually a PDF, regardless of its (missing) extension? HEAD first, then a
+    tiny ranged GET (magic bytes) as fallback. Best-effort — errors → False (stays 'web')."""
+    import httpx
+    try:
+        r = httpx.head(url, follow_redirects=True, timeout=15.0)
+        if "application/pdf" in r.headers.get("content-type", "").lower():
+            return True
+        if r.status_code >= 400:   # server dislikes HEAD → peek at the first bytes
+            g = httpx.get(url, follow_redirects=True, timeout=15.0,
+                          headers={"Range": "bytes=0-1023"})
+            return ("application/pdf" in g.headers.get("content-type", "").lower()
+                    or g.content[:5] == b"%PDF-")
+    except Exception as e:
+        log.debug("pdf sniff failed for %s: %s", url, e)
+    return False
 
 
 def _prefetch_to_resources(job: dict, kind: str) -> Path:
