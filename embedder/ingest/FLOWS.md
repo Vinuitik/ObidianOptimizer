@@ -391,6 +391,7 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | (note, embed) job de-dup | `jobs.submit()` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | MCP: agent-authored text → notes | `mcp_server.create_note(text, title)` → `jobs.submit(text=…)` (text route → segment → _inbox) |
+| MCP: short-note gate (skip LLM split) | `mcp_server.create_note` → `_stage_note_as_is()` when `< INGEST_SPLIT_MIN_WORDS`(700); stages raw text in _inbox, note is its own source, zero tokens |
 | Routing rules | `router.py → ROUTE_TABLE` |
 | Whisper model / device | `WHISPER_MODEL` env / `extract_av._pick_device()` |
 | PDF diagram keep/drop | `keyframes.KEEP_PROMPTS / DROP_PROMPTS`, `extract_pdf._keep_diagrams()` |

@@ -327,13 +327,42 @@ def create_note(text: str, title: str = "") -> dict:
 
     Use for anything substantial (research, a synthesis, a long answer) — these are
     usually large, and one giant note is worse than a few well-scoped linked ones. Returns
-    the job descriptor; poll GET /ingest/{id}. `title` is an optional display hint."""
+    the job descriptor; poll GET /ingest/{id}. `title` is an optional display hint.
+
+    Gate: notes shorter than INGEST_SPLIT_MIN_WORDS (default 700) are staged in the Inbox
+    AS-IS — no LLM re-synthesis (splitting a short note is meaningless and double-spends
+    tokens). Such a note is its own source (the Inbox review shows the note itself)."""
     from ingest import jobs as ingest_jobs
 
     if not text or not text.strip():
         raise ValueError("text is empty")
+
+    split_min = int(os.environ.get("INGEST_SPLIT_MIN_WORDS", "700"))
+    if len(text.split()) < split_min:
+        return _stage_note_as_is(text.strip(), title)
+
     return ingest_jobs.submit("", None, text=text, source_type="text",
                               title=(title or None))
+
+
+def _stage_note_as_is(text: str, title: str = "") -> dict:
+    """Short-note path: stage the text in the Inbox with NO LLM (no split, no re-synthesis).
+    The note is its own source. Reuses the ingest publish helpers so it lands in the queue
+    exactly like a synthesized note, minus the token spend."""
+    from ingest import publish, synthesize
+    t = (title or "").strip() or _title_from_text(text)
+    bundle = {"source": {"ref": "", "title": t, "type": "text"}, "media": []}
+    note_md = synthesize.assemble(bundle, {"title": t, "tags": []}, [], text)
+    note_md = publish.stamp_inbox(note_md, "", publish.find_home(t))
+    publish.ensure_folder(publish.INBOX_FOLDER)
+    path = publish.create_note(publish.INBOX_FOLDER, synthesize.slugify(t), note_md)
+    return {"status": "DONE", "ingested": False, "words": len(text.split()),
+            "notes_created": [path]}
+
+
+def _title_from_text(text: str) -> str:
+    first = next((ln.strip().lstrip("# ").strip() for ln in text.splitlines() if ln.strip()), "")
+    return (first[:80] or "Note")
 
 
 # ---------------------------------------------------------------------------
