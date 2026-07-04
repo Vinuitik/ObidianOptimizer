@@ -105,6 +105,14 @@ public class CaptureController {
                 captureRepo.enqueue(captureId, "text", title, sourcePath, title);
             } else {
                 String ref = url.trim();
+                // Misclick / re-share guard: if this exact link/file is already in the pipeline,
+                // reject LOUDLY instead of making a duplicate set of notes.
+                if (captureRepo.existsLiveForSource(ref)) {
+                    log.info("[Capture] duplicate ignored: {}", ref);
+                    return ResponseEntity.status(409).body(Map.of(
+                        "error", "already captured", "duplicate", true,
+                        "message", "Already in your inbox — not capturing it again."));
+                }
                 captureRepo.enqueue(captureId, classifyUrl(ref), ref, null, ref);
             }
             ingestWorker.nudge();

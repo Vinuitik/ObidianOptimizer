@@ -118,6 +118,9 @@ function handleResult(res) {
     setStatus($('cap-status'), `${res.detail || 'Queued'} ✓`, 'ok');
     $('cap-input').value = '';
     $('cap-hint').textContent = '';
+  } else if (res?.duplicate) {
+    // Loud: you already captured this — a misclick / re-share, not an error to hide.
+    setStatus($('cap-status'), `⚠️ ${res.detail || 'Already in your inbox!'}`, 'err');
   } else if (res?.status === 401) {
     setStatus($('cap-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
   } else {

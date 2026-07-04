@@ -113,6 +113,11 @@ async function captureText(text, title) {
 async function capture(url) {
   const res = await json('/capture', 'POST', { url });
   if (res.status === 401) return { ok: false, status: 401 };
+  if (res.status === 409) {   // backend duplicate guard — already in the inbox
+    let msg = 'Already in your inbox — not capturing it again.';
+    try { msg = (await res.json()).message || msg; } catch { /* keep default */ }
+    return { ok: false, duplicate: true, status: 409, detail: msg };
+  }
   if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
   return { ok: true };
 }
@@ -268,11 +273,13 @@ async function capturePage({ url, tabId }) {
     // Just pass the link — the ingest pipeline downloads the video (into resources/, for
     // in-app playback + keyframes) as part of /capture. No separate /download grab.
     const cap = await capture(value);
+    if (cap.duplicate) return cap;
     if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL');
     return { ok: true, kind, detail: 'Generating notes + downloading video for playback' };
   }
   if (kind === 'media') {   // pdf / direct media file — ingest downloads it into resources/
     const cap = await capture(value);
+    if (cap.duplicate) return cap;
     if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL');
     return { ok: true, kind, detail: 'Generating notes + downloading file' };
   }

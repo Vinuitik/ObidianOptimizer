@@ -106,6 +106,17 @@ public class CaptureRepository {
             id) > 0;
     }
 
+    /** Is this exact source already in the inbox pipeline (queued/processing/ready)? Used to
+     *  reject a duplicate capture LOUDLY — re-sharing the same link/file that's already here.
+     *  A discarded/failed capture does NOT block (re-capturing after cleanup is fine). */
+    public boolean existsLiveForSource(String sourceRef) {
+        if (sourceRef == null || sourceRef.isBlank()) return false;
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM capture WHERE source_ref = ? AND status IN ('queued','processing','ready')",
+            Integer.class, sourceRef);
+        return n != null && n > 0;
+    }
+
     /** How many OTHER live (non-discarded) captures still reference this vault file as their
      *  source/original. Guards the cleanup sweep against trashing a file shared by a duplicate
      *  capture (same upload twice → same filename) whose sibling still has notes. */
