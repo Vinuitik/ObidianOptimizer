@@ -72,6 +72,15 @@ public class CaptureRepository {
         jdbc.update("UPDATE capture SET status = ? WHERE id = ?", status, id);
     }
 
+    /** Mark a capture failed ONLY if it's still processing — so a job that fails after a
+     *  successful submit stops being a silent 'processing' strand, without clobbering a
+     *  capture the user already filed/acknowledged. Returns true if it flipped. */
+    public boolean markFailed(String id) {
+        return jdbc.update(
+            "UPDATE capture SET status = 'failed' WHERE id = ? AND status = 'processing'",
+            id) > 0;
+    }
+
     /** Oldest-first batch of queued resources awaiting submission (FIFO fairness). */
     public List<Capture> findQueued(int limit) {
         return jdbc.query(

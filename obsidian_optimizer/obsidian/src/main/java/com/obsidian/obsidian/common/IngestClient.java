@@ -12,7 +12,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -47,6 +49,41 @@ public class IngestClient {
 
     @Value("${ingest.submit.timeout-ms:10000}")
     private long submitTimeoutMs;
+
+    /** A row from the embedder job registry (GET /ingest) — enough to spot failures and
+     *  map them back to their capture (AGENT_ESCALATION: failure visibility). */
+    public record JobView(String jobId, String captureId, String status, String error) {}
+
+    private static String txt(JsonNode n, String field) {
+        JsonNode v = n.path(field);
+        return (v.isMissingNode() || v.isNull()) ? null : v.asText();
+    }
+
+    /** Poll the embedder's in-memory job registry. Used to detect jobs that FAILED AFTER a
+     *  successful submit (the capture was left 'processing'), so they stop being silent drops.
+     *  Best-effort: any transport/parse error yields an empty list (no false failures). */
+    public List<JobView> listJobs() {
+        List<JobView> out = new ArrayList<>();
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(embedderUrl + "/ingest"))
+                .timeout(Duration.ofMillis(submitTimeoutMs))
+                .GET().build();
+            HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() != 200) return out;
+            JsonNode root = objectMapper.readTree(r.body());
+            JsonNode jobs = root.has("jobs") ? root.get("jobs") : root;
+            if (jobs != null && jobs.isArray()) {
+                for (JsonNode j : jobs) {
+                    out.add(new JobView(txt(j, "id"), txt(j, "capture_id"),
+                                        txt(j, "status"), txt(j, "error")));
+                }
+            }
+        } catch (Exception e) {
+            log.debug("[IngestClient] listJobs failed: {}", e.toString());
+        }
+        return out;
+    }
 
     /** Outcome of a submit. {@code ok} = the embedder accepted the job (HTTP 200);
      *  {@code jobId} is the embedder job id when present. A non-ok result is the

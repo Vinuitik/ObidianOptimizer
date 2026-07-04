@@ -96,6 +96,23 @@ public class CaptureIngestWorker {
         lane.trigger(this::drain);
     }
 
+    /** Failure visibility (AGENT_ESCALATION prerequisite): a job that FAILS after a successful
+     *  submit leaves its capture stranded at 'processing' forever — a silent drop. Poll the
+     *  embedder job registry and flip those captures to 'failed' so they surface (and become
+     *  the hook the escalation agent fires off). Best-effort; the embedder job carries capture_id.*/
+    @Scheduled(fixedDelayString = "${ingest.capture.poll-ms:20000}",
+               initialDelayString = "${ingest.capture.initial-delay-ms:20000}")
+    public void pollFailures() {
+        if (!ingestEnabled || !appReady) return;
+        for (IngestClient.JobView j : ingestClient.listJobs()) {
+            if ("FAILED".equals(j.status()) && j.captureId() != null
+                    && captureRepo.markFailed(j.captureId())) {
+                log.warn("[CaptureIngestWorker] capture {} ingest FAILED: {}",
+                    j.captureId(), j.error());
+            }
+        }
+    }
+
     /** Runs on the capture lane. Claim-and-submit each queued resource; a transient
      *  submit failure releases the row back to {@code queued} for the next tick, so a
      *  down embedder never loses a resource. */

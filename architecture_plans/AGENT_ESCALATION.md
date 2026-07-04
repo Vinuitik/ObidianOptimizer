@@ -41,27 +41,37 @@ Session (server owns state + singleton + queue):
 | `submit_resource(path\|bytes)` | upload found bytes → `/workspace/upload` → `/capture` | reuses existing ingest |
 | `get_logs()` | latest `GET /ingest/{id}` status/error | backend |
 
-## Open decisions (need your call before building)
-1. **Brain location.** *Recommended:* **backend owns the session** (conversation state, the
-   singleton lock, the queue, the LLM router) and sends tool commands to the extension, which
-   executes them. Rationale: singleton/queue/cost are server concerns; the LLM router already
-   lives server-side. Alternative: brain in the extension (simpler wiring, but the queue/expense
-   controls end up client-side and are easy to bypass).
-2. **Network visibility depth.** `performance.getEntries()` (URLs only, cheap, no bodies) vs a
-   `webRequest` recorder (headers too) vs devtools-protocol attach (bodies, heavy). Start cheap
-   (URLs + DOM) and escalate only if needed?
-3. **LLM runtime.** Needs **multi-turn tool-use**, which `host-wrapper /complete` (single-shot)
-   doesn't do. Options: claude-cli in agent mode, or a new stateful `/agent` chat endpoint.
-   Which model? (cost — this is the expensive path.)
-4. **Security scope.** The agent can fetch arbitrary URLs with the user's cookies and act in
-   their browser. Scope it: only the **active tab's origin**? an allowlist? a confirmation
-   step before it fetches/clicks? This is the biggest risk surface — decide the guardrails.
-5. **Trigger.** Auto on every failure, or only on user click ("try harder")? Auto is seamless
-   but spends tokens on permanent failures (e.g. "content too thin" that no agent can fix).
-   *Recommended:* mark failures visible + a per-capture **“Escalate to agent”** button (manual,
-   cost-controlled), auto only for a curated set of recoverable failure types.
-6. **Limits.** MAX_ITERS, wall-clock timeout, cost cap per session; what happens on give-up
-   (leave capture 'failed' with the agent's notes attached).
+## Decisions (LOCKED)
+1. **Brain location → embedder, with the other agents.** The escalation session (conversation
+   state, singleton lock, queue) lives in the **embedder**; it calls **host-wrapper** for the
+   LLM so it gets **claude-cli** (multi-turn). Same home as the existing ingest/synthesis agents.
+2. **Tool channel → extension-initiated WebSocket (on-demand request/response).** A browser
+   extension **cannot accept inbound connections**, so it opens a **persistent outbound
+   WebSocket** to the backend on startup; the embedder session sends `{tool,args}` down that
+   socket and the extension replies `{result}`. This gives on-demand DOM/network reads (NOT a
+   periodically-pushed stale cache). Constraints to handle: **MV3 service-worker can be killed**
+   (keep-alive / reconnect while a session is active); **WS must survive nginx + cloudflared**
+   (both proxy WebSockets — needs the `Upgrade` headers in `nginx.conf.template`). Target the
+   right client+tab by id in each command.
+3. **Network visibility → start cheap.** `performance.getEntries()` (resource URLs, no bodies) +
+   DOM inspection first; add a `webRequest` recorder only if URLs+DOM prove insufficient.
+4. **LLM runtime → host-wrapper → claude-cli**, multi-turn. The session accumulates the message
+   list server-side (embedder) and re-sends it each call; host-wrapper needs a chat/multi-turn
+   mode (today `/complete` is single-shot — extend it or add `/chat`).
+5. **Security → active-tab origin only.** Tools may read DOM / inspect network / `fetch` ONLY on
+   the **origin of the failed tab**. No roaming to other sites with the user's cookies.
+6. **Trigger → AUTO on failure**, but bounded: MAX_ITERS, wall-clock timeout, cost cap, and
+   **don't re-escalate a failure signature the agent already failed** (avoid token burn on the
+   permanently-broken). Singleton: one active session; others queue.
+
+## Agent fix-log → codify recurring fixes (user requirement)
+Every time the agent succeeds, it **appends a record of the fix** — `{failure signature (url
+pattern / error / site), the recipe that worked (the network call it found, the button, the
+rewrite)}` — to a dedicated **fix-log folder** (`AGENT_FIXES_DIR`, e.g. `_reports/agent-fixes/`
+or a repo folder). Purpose: we review these and **implement the recurring ones as deterministic
+code** (exactly like the Drive `captureDriveFile` special-case), so that failure type stops
+needing the (expensive) agent. The fix-log is the pipeline from "agent figured it out once" →
+"hardcoded, free, forever." Over time the agent handles only genuinely novel failures.
 
 ## Prerequisite (do first, small): failure visibility
 The agent is triggered by failures, but right now a job that fails **during processing** dies
