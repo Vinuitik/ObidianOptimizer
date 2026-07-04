@@ -14,7 +14,10 @@ export default function SourceSplicePanel({ item, onOrientation }) {
     () => parseSourceRegion(item?.content || '', item?.source),
     [item],
   );
-  const kind = item ? sourceKind(region.ref, item) : null;
+  // Prefer the locally-downloaded copy: its extension decides the viewer (a YouTube note
+  // with a downloaded .mp4 plays as local video, not an external iframe). Falls back to the
+  // external ref when there's no local copy yet.
+  const kind = item ? sourceKind(region.local || region.ref, item) : null;
 
   // Text sources default to RSVP (fast read); toggle to a rendered read view so the
   // user can eyeball the note themselves. Sticky across notes.
@@ -73,15 +76,16 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
     }
   }
   if (kind === 'video') {
-    const src = mediaUrl(region.ref) + (region.startSeconds ? `#t=${region.startSeconds}` : '');
+    const src = mediaUrl(region.local || region.ref) + (region.startSeconds ? `#t=${region.startSeconds}` : '');
     const onMeta = (e) => onOrientation?.(
       e.target.videoHeight > e.target.videoWidth ? 'portrait' : 'landscape');
     return <video key={src} className={styles.media} src={src} controls onLoadedMetadata={onMeta} />;
   }
   if (kind === 'pdf') {
     const page = region.pages[0] || 1;
-    return <embed key={region.ref} className={styles.media} type="application/pdf"
-                  src={`${mediaUrl(region.ref)}#page=${page}`} />;
+    const src = mediaUrl(region.local || region.ref);
+    return <embed key={src} className={styles.media} type="application/pdf"
+                  src={`${src}#page=${page}`} />;
   }
   if (kind === 'web') {
     return <iframe className={styles.frame} src={region.ref} title="source page" />;
@@ -110,9 +114,14 @@ function youtubeId(url) {
   return m ? m[1] : null;
 }
 
-// http(s) refs load directly; vault-relative resources go through the media endpoint.
+// http(s) refs load directly; vault-relative media is served by nginx (range-request
+// support): resources/… → /vault-media/…, _workspace/… → /workspace/…. Legacy bare image
+// names still go through the Java image endpoint.
 function mediaUrl(ref) {
   if (/^https?:\/\//.test(ref || '')) return ref;
+  const p = (ref || '').replace(/^\/+/, '');
+  if (p.startsWith('_workspace/')) return '/workspace/' + p.slice('_workspace/'.length);
+  if (p.startsWith('resources/'))  return '/vault-media/' + p.slice('resources/'.length);
   return `/api/images/${encodeURIComponent(ref || '')}`;
 }
 function hrefFor(ref) { return /^https?:\/\//.test(ref) ? ref : mediaUrl(ref); }
