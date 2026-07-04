@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchInbox, fileInboxNote, discardInboxNote, acknowledgeCapture } from '../../api/inbox';
 import { fetchChildren, updateNote } from '../../api/notes';
+import { sourceColor, groupBySource } from '../../utils/sourceColor';
 import useStore from '../../store/useStore';
 import LearnLayout from '../templates/LearnLayout';
 import NoteRenderer from '../molecules/NoteRenderer';
@@ -36,6 +37,9 @@ export default function InboxReview({ onCount }) {
 
   const current = items.find(i => i.path === selected) || null;
   const workingItem = current ? { ...current, content: draft } : null;
+
+  // Queue grouped by source so same-source notes sit together as a color band.
+  const orderedItems = useMemo(() => groupBySource(items), [items]);
 
   // Landscape video is wide → horizontal split (source on top); everything else vertical.
   const orientation = orient === 'landscape' ? 'horizontal' : 'vertical';
@@ -157,16 +161,21 @@ export default function InboxReview({ onCount }) {
             {!loading && !error && items.length === 0 && (
               <p className={styles.status}>Inbox is empty. Capture a resource and its proposed notes appear here.</p>
             )}
-            {items.map(it => (
-              <button key={it.path}
-                className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
-                onClick={() => select(it)} title={it.title}>
-                <span className={styles.rowTitle}>{it.title}</span>
-                {it.inPlace
-                  ? <span className={styles.rowTag}>in place</span>
-                  : it.captureSeq != null && <span className={styles.rowTag}>#{it.captureSeq + 1}</span>}
-              </button>
-            ))}
+            {orderedItems.map(it => {
+              const color = sourceColor(it.captureId);
+              return (
+                <button key={it.path}
+                  className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
+                  style={color ? { '--row-src': color } : undefined}
+                  onClick={() => select(it)} title={it.title}>
+                  {color && <span className={styles.srcDot} aria-hidden="true" />}
+                  <span className={styles.rowTitle}>{it.title}</span>
+                  {it.inPlace
+                    ? <span className={styles.rowTag}>in place</span>
+                    : it.captureSeq != null && <span className={styles.rowTag}>#{it.captureSeq + 1}</span>}
+                </button>
+              );
+            })}
           </div>
         )}
       </aside>

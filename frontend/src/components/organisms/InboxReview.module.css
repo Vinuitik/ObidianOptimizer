@@ -55,8 +55,18 @@
 }
 .row:hover { background: var(--color-card); }
 .rowActive { background: var(--color-accent-dim); color: var(--color-accent-soft); }
-.rowTitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rowTitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rowTag { flex: none; font-size: var(--text-xs); color: var(--color-text-2); }
+
+/* Source color-coding: a left bar + dot tie every row from the same capture together.
+   --row-src is set inline per row from utils/sourceColor.js. */
+.row { box-shadow: inset 3px 0 0 0 var(--row-src, transparent); }
+.srcDot {
+  flex: none;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--row-src, transparent);
+}
 
 /* ── main: split area (LearnLayout) + bottom bar ───────────────────────────── */
 .main {
