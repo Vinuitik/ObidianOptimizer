@@ -21,11 +21,15 @@ from typing import Callable
 import yt_dlp
 
 DOWNLOAD_DIR = os.environ.get("DOWNLOAD_DIR", "/workspace")
+# Permanent media store the ingest downloads into so notes can play the LOCAL file
+# (LOCAL_MEDIA_RETENTION stage 2). Writable sub-bind of the vault's resources/ — the
+# embedder's /vault is :ro, so this dedicated rw mount is how it persists there.
+RESOURCE_DIR = os.environ.get("RESOURCE_DIR", "/resources")
 
 
-def build_ydl_opts(progress_hook: Callable | None) -> dict:
+def build_ydl_opts(progress_hook: Callable | None, dest_dir: str | None = None) -> dict:
     opts = {
-        "outtmpl": f"{DOWNLOAD_DIR}/%(title)s.%(ext)s",
+        "outtmpl": f"{dest_dir or DOWNLOAD_DIR}/%(title)s.%(ext)s",
         "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "merge_output_format": "mp4",
         "quiet": True,
@@ -43,11 +47,14 @@ def _parse_percent(raw: str) -> float:
         return 0.0
 
 
-def download_sync(url: str, progress_hook: Callable | None = None) -> str:
-    """Download a video/playlist URL to DOWNLOAD_DIR. Returns the output path of
-    the (last) file. Blocking — callers run it on a worker thread (download/jobs)."""
-    Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
-    opts = build_ydl_opts(progress_hook)
+def download_sync(url: str, progress_hook: Callable | None = None,
+                  dest_dir: str | None = None) -> str:
+    """Download a video/playlist URL to `dest_dir` (default DOWNLOAD_DIR = _workspace).
+    Returns the output path of the (last) file. Blocking — callers run it on a worker
+    thread (download/jobs, or the ingest worker for the resources copy)."""
+    target = dest_dir or DOWNLOAD_DIR
+    Path(target).mkdir(parents=True, exist_ok=True)
+    opts = build_ydl_opts(progress_hook, dest_dir=target)
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         # Playlists return an "entries" list; report the last entry's file.

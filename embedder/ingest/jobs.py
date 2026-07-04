@@ -159,6 +159,13 @@ def _run(job: dict):
         job["status"] = "DONE"
         return
 
+    # LOCAL_MEDIA_RETENTION stage 2: persist a LOCAL copy of the source into the vault so
+    # notes play the file itself (not an external embed). Best-effort — never fails the job.
+    try:
+        _ensure_local_copy(job, bundle, resolved)
+    except Exception as e:
+        log.warning("local media copy skipped for %s: %s", job.get("ref"), e)
+
     job["stage"] = "synthesize"
     # v2 cutover (INGEST_V2, default off): segment.py picks boundaries, the LLM only
     # writes each Unit. Same publish/capture path; v1 stays the default until flipped.
@@ -198,6 +205,40 @@ def _store_media(bundle: dict) -> set[str]:
             publish.store_media(m["path"], m.pop("data_b64"))
         stored_names.add(m["path"].rsplit("/", 1)[-1])
     return stored_names
+
+
+def _vault_rel(p) -> str:
+    """Container path → vault-relative path used in note bodies (mediaUrl resolves these):
+    /resources/… → resources/… , /workspace/… → _workspace/… , /vault/… → …"""
+    s = str(p)
+    for prefix, rel in (("/resources/", "resources/"),
+                        ("/workspace/", "_workspace/"),
+                        ("/vault/", "")):
+        if s.startswith(prefix):
+            return rel + s[len(prefix):]
+    return s
+
+
+def _ensure_local_copy(job: dict, bundle: dict, resolved):
+    """Persist a local copy of the source so notes play the file, not an external embed
+    (LOCAL_MEDIA_RETENTION §2). Sets bundle['source']['local'] = vault-relative path.
+      • YouTube/video-platform URL → download the full video into resources/media/.
+      • A file already resolved in the vault (dropped/URL-saved) → just reference it.
+    Text/web have no playable media → nothing to do. Blocking download runs on the ingest
+    worker thread; the caller wraps this best-effort."""
+    from ingest import router
+    src = bundle.setdefault("source", {})
+    if src.get("local"):
+        return
+    ref = job.get("ref") or ""
+    if ref and router.route(ref) == "youtube":
+        from download import downloader
+        dest = os.path.join(os.environ.get("RESOURCE_DIR", "/resources"), "media")
+        job["stage"] = "download:resources"
+        path = downloader.download_sync(ref, dest_dir=dest)
+        src["local"] = _vault_rel(path)
+    elif resolved is not None:
+        src["local"] = _vault_rel(str(resolved))
 
 
 def _synthesize_and_inject(job: dict, bundle: dict):

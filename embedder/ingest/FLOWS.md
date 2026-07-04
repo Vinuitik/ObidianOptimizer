@@ -366,6 +366,7 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | v2 per-Unit WRITE draft | `synthesize.write_unit_body()` |
 | v2 in-place / standalone assembly | `synthesize.build_inplace_body_v2()` / `assemble()` via `_span_to_segs()` |
 | **Live v1 links (prev-chrono + probe-semantic, bare `[[]]` at note end)** | `jobs._synthesize_and_publish()` → `linking.semantic_link_stems()` (LLM probes → hybrid `search_notes` → top-N) + prev sibling; `linking.append_links()`. Env: `INGEST_SEMANTIC_LINKS`(2) / `INGEST_SEMANTIC_PROBES`(3) / `INGEST_SEMANTIC_SEARCH_LIMIT`(5) |
+| **Local media copy (`local:` in `## Source`)** | `jobs._ensure_local_copy()` — YouTube→`downloader.download_sync(dest=RESOURCE_DIR/media)`, local file→referenced; `synthesize._source_section()` stamps `local:`. Mount: `resources:/resources` (rw sub-bind), env `RESOURCE_DIR`. Spec: `architecture_plans/LOCAL_MEDIA_RETENTION.md` |
 | v2 SEQUENTIAL chrono links (prev/next) | `synthesize.chronology_block()`, injected in `jobs._synthesize_and_publish_v2` (order_index order) |
 | v2 SEMANTIC links (ANN → `## Related`) | `linking.related_links()` (reuses `mcp_server._vector_candidates` + `embed_texts`); `INGEST_SEMANTIC_FLOOR/MAX_PER_NOTE/CHUNK_CHARS` |
 | Proposed-note chunk/embed (searchable) | REUSED — existing Java `NoteEmbeddingWorker` embeds `_inbox/` notes; nothing v2-specific |

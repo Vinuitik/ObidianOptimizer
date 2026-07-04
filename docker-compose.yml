@@ -36,6 +36,11 @@ services:
       # read-only, so this writable bind to the _workspace subdir is what yt-dlp writes
       # through (DOWNLOAD_DIR=/workspace below). Replaces the old ./downloads mount.
       - ${HOST_VAULT_PATH}/_workspace:/workspace
+      # Permanent media store: ingest downloads video/audio/PDF here so notes can play
+      # the LOCAL file (LOCAL_MEDIA_RETENTION stage 2). /vault is :ro, so — same pattern
+      # as _workspace/_reports — this dedicated writable sub-bind is the embedder's door
+      # into resources/ (RESOURCE_DIR=/resources below). nginx serves it at /vault-media/.
+      - ${HOST_VAULT_PATH}/resources:/resources
     environment:
       - EMBED_MODEL=${EMBED_MODEL:-onnx-community/embeddinggemma-300m-ONNX}
       - MODEL_CACHE=/models
@@ -56,6 +61,7 @@ services:
       - SYNTH_MODEL=${SYNTH_MODEL:-haiku}
       - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
       - DOWNLOAD_DIR=/workspace
+      - RESOURCE_DIR=/resources
       - BACKEND_URL=${BACKEND_URL:-http://backend:8084}
     # Native Linux Docker doesn't provide host.docker.internal (only Docker
     # Desktop does). Map it to the host gateway so the embedder can reach the

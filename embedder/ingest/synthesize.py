@@ -319,6 +319,11 @@ def _loc_in_segments(loc: dict, segs: list[dict]) -> bool:
 def _source_section(src: dict, segs: list[dict]) -> str:
     ref = src.get("ref", "")
     lines = ["## Source", ref]
+    # Local copy the ingest persisted into the vault (LOCAL_MEDIA_RETENTION stage 2) →
+    # the review splice viewer plays THIS file instead of the external ref. Parsed back by
+    # frontend inboxParse.parseSourceRegion.
+    if src.get("local"):
+        lines.append(f"local: {src['local']}")
     ts = [s["loc"]["t_start"] for s in segs if "t_start" in s.get("loc", {})]
     pages = sorted({s["loc"]["page"] for s in segs if "page" in s.get("loc", {})})
     if ts and ref.startswith("http"):
