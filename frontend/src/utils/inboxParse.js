@@ -49,13 +49,21 @@ export function parseSourceRegion(content, source) {
     ? pagesM[1].split(',').map(s => parseInt(s, 10)).filter(Number.isFinite)
     : [];
 
-  let startSeconds = null;
-  const tM = /[?&](?:t|start)=(\d+)s?/.exec(body) || /[?&](?:t|start)=(\d+)s?/.exec(ref || '');
-  if (tM) {
-    startSeconds = parseInt(tM[1], 10);
+  // Bounded clip (seconds): `clip: START-END` — the note's exact video span, so the viewer
+  // plays only that fragment. Falls back to a start-only anchor (t=…s / "from MM:SS").
+  let startSeconds = null, endSeconds = null;
+  const clipM = /^\s*clip:\s*(\d+)\s*-\s*(\d+)/im.exec(body);
+  if (clipM) {
+    startSeconds = parseInt(clipM[1], 10);
+    endSeconds = parseInt(clipM[2], 10);
   } else {
-    const mm = /\bfrom\s+(\d+):(\d{2})/.exec(body);
-    if (mm) startSeconds = parseInt(mm[1], 10) * 60 + parseInt(mm[2], 10);
+    const tM = /[?&](?:t|start)=(\d+)s?/.exec(body) || /[?&](?:t|start)=(\d+)s?/.exec(ref || '');
+    if (tM) {
+      startSeconds = parseInt(tM[1], 10);
+    } else {
+      const mm = /\bfrom\s+(\d+):(\d{2})/.exec(body);
+      if (mm) startSeconds = parseInt(mm[1], 10) * 60 + parseInt(mm[2], 10);
+    }
   }
-  return { ref, pages, startSeconds, local };
+  return { ref, pages, startSeconds, endSeconds, local };
 }

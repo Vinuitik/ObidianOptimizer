@@ -325,6 +325,7 @@ def _source_section(src: dict, segs: list[dict]) -> str:
     if src.get("local"):
         lines.append(f"local: {src['local']}")
     ts = [s["loc"]["t_start"] for s in segs if "t_start" in s.get("loc", {})]
+    te = [s["loc"]["t_end"] for s in segs if "t_end" in s.get("loc", {})]
     pages = sorted({s["loc"]["page"] for s in segs if "page" in s.get("loc", {})})
     if ts and ref.startswith("http"):
         t0 = int(min(ts))
@@ -332,6 +333,13 @@ def _source_section(src: dict, segs: list[dict]) -> str:
         lines[1] = f"[{bundle_util._fmt_ts(t0)}]({ref}{sep}t={t0}s) · {ref}"
     elif ts:
         lines.append(f"from {bundle_util._fmt_ts(min(ts))}")
+    if ts:
+        # Machine-readable clip bounds in SECONDS so the splice viewer plays JUST this note's
+        # span of the video, not from the start to end-of-file. Parsed by parseSourceRegion.
+        t0 = int(min(ts))
+        t1 = int(max(te)) if te else None
+        if t1 and t1 > t0:
+            lines.append(f"clip: {t0}-{t1}")
     if pages:
         lines.append("pages: " + ", ".join(str(p) for p in pages))
     return "\n".join(lines)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { parseSourceRegion } from '../../utils/inboxParse';
 import RsvpReader from '../molecules/RsvpReader';
 import NoteRenderer from '../molecules/NoteRenderer';
@@ -76,10 +76,9 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
     }
   }
   if (kind === 'video') {
-    const src = mediaUrl(region.local || region.ref) + (region.startSeconds ? `#t=${region.startSeconds}` : '');
-    const onMeta = (e) => onOrientation?.(
-      e.target.videoHeight > e.target.videoWidth ? 'portrait' : 'landscape');
-    return <video key={src} className={styles.media} src={src} controls onLoadedMetadata={onMeta} />;
+    return <ClipVideo src={mediaUrl(region.local || region.ref)}
+                      start={region.startSeconds} end={region.endSeconds}
+                      onOrientation={onOrientation} />;
   }
   if (kind === 'pdf') {
     const page = region.pages[0] || 1;
@@ -96,6 +95,26 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
     return <div className={styles.readbox}><NoteRenderer content={item.content} resetKey={item.path} /></div>;
   }
   return <RsvpReader text={item.content} />;
+}
+
+// A video bounded to [start, end] — the note's own span. `#t=start,end` seeks to start;
+// the timeupdate guard pauses ONCE at end (media-fragment end isn't reliably enforced by
+// browsers). If the user hits play again from the end, we stop fighting them and let it run.
+function ClipVideo({ src, start, end, onOrientation }) {
+  const released = useRef(false);
+  const frag = start != null ? `#t=${start}${end != null ? ',' + end : ''}` : '';
+  const full = src + frag;
+  useEffect(() => { released.current = false; }, [full]);   // reset the clip guard per note
+  const onMeta = (e) => onOrientation?.(
+    e.target.videoHeight > e.target.videoWidth ? 'portrait' : 'landscape');
+  const onTime = (e) => {
+    if (end != null && !released.current && e.target.currentTime >= end) {
+      e.target.pause();
+      released.current = true;   // clip shown once; don't re-pause on manual replay
+    }
+  };
+  return <video key={full} className={styles.media} src={full} controls
+                onLoadedMetadata={onMeta} onTimeUpdate={onTime} />;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
