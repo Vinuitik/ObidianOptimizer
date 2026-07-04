@@ -51,13 +51,35 @@ public class PendingImageJobRepository {
     }
 
     public List<PendingImageJob> findPending(int batchSize) {
+        // Priority = the deadline (sr_due) of the note that embeds the image. Images
+        // now BLOCK flashcard generation (cards wait for captioning — see cards/FLOWS.md
+        // findNotesNeedingCards), so the soonest-due notes must drain first, mirroring
+        // how flashcards themselves prioritise by deadline. The INNER JOIN also drops
+        // orphan jobs whose note no longer exists ("images stored by no one" are never
+        // embedded; pruneOrphans() clears them daily). NULLS LAST: a note with no review
+        // date is lowest priority. created_at breaks ties (stable within a deadline).
         return jdbc.query("""
-            SELECT id, note_path, image_path, status, content_hash, created_at, processed_at
-            FROM pending_image_jobs
-            WHERE status = 'PENDING'
-            ORDER BY created_at
+            SELECT j.id, j.note_path, j.image_path, j.status, j.content_hash, j.created_at, j.processed_at
+            FROM pending_image_jobs j
+            JOIN notes n ON n.path = j.note_path
+            WHERE j.status = 'PENDING'
+            ORDER BY n.sr_due ASC NULLS LAST, j.created_at
             LIMIT ?
             """, new JobRowMapper(), batchSize);
+    }
+
+    /**
+     * Deletes PENDING/SKIPPED jobs whose note no longer exists ("images stored by
+     * no one"). A job row is derived state — if the note ever returns, ImageScanService
+     * re-inserts it — so we DELETE rather than mark SKIPPED, which the daily
+     * requeueSkipped() would otherwise revive. Returns rows removed.
+     */
+    public int pruneOrphans() {
+        return jdbc.update("""
+            DELETE FROM pending_image_jobs
+            WHERE status IN ('PENDING','SKIPPED')
+              AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.path = pending_image_jobs.note_path)
+            """);
     }
 
     public void markDone(String id) {

@@ -191,7 +191,14 @@ Queue table: `pending_image_jobs` (PENDING / DONE / SKIPPED).
 
 **Drained by** `ImageProcessingWorker` (`@Scheduled` every 30s):
 ```
-batch of PENDING rows → grouped by note_path → groups run in PARALLEL
+batch of PENDING rows, PRIORITISED by the embedding note's deadline —
+  findPending JOINs notes ON note_path, ORDER BY sr_due ASC NULLS LAST, created_at.
+  Images block flashcard generation (cards wait for captioning), so soonest-due
+  notes drain first, mirroring how flashcards prioritise by deadline. The INNER
+  JOIN also excludes ORPHAN jobs (note gone — "images stored by no one"): they are
+  never embedded and pruneOrphans() DELETES them daily (deleted, not SKIPPED, so
+  requeueSkipped can't revive them; re-created by registerImages if the note returns).
+→ grouped by note_path → groups run in PARALLEL
 (fixed pool, image.worker.parallelism=4) so the wrapper's LLM router shards
 images across providers (image A → Gemini while image B → Groq).
 Same-note images stay sequential — getNextChunkIndex() would collide otherwise.
@@ -201,6 +208,7 @@ per job: POST http://host.docker.internal:5001/process-image {image_path}
   → 404 (image file gone): SKIPPED
   → 503 / network error (LLM providers exhausted): stays PENDING — retried next 30s cycle
 SKIPPED rows get one retry per day: ImageProcessingWorker.requeueSkipped()
+  (which first calls jobRepo.pruneOrphans() to drop note-gone jobs)
 ```
 
 To change image prompt: `host-wrapper/main.py → IMAGE_PROMPT`  
@@ -274,6 +282,8 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 | Chunk size / overlap | `MarkdownPreprocessor` constants |
 | Image processing prompt | `host-wrapper/main.py → IMAGE_PROMPT` |
 | Image worker schedule | `ImageProcessingWorker @Scheduled` |
+| Image job priority (deadline) | `PendingImageJobRepository.findPending()` — JOIN notes, ORDER BY sr_due |
+| Orphan image job cleanup | `PendingImageJobRepository.pruneOrphans()` — called daily in `ImageProcessingWorker.requeueSkipped()` |
 | Note embedding batch/schedule | `NoteEmbeddingWorker.BATCH_SIZE / @Scheduled` |
 | Chunks per embed request | `EmbeddingService.EMBED_BATCH` (64) |
 | Embedding work list rule | `NoteIndexRepository.findNotesNeedingEmbedding()` |

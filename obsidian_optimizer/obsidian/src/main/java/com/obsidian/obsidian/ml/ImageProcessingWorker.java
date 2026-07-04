@@ -137,9 +137,15 @@ public class ImageProcessingWorker {
         }
     }
 
-    /** Safety net: SKIPPED jobs (permanent-looking failures) get one retry per day. */
+    /** Daily maintenance: drop orphan jobs (note gone → "stored by no one"), then
+     *  give the remaining SKIPPED jobs (permanent-looking failures) another retry.
+     *  Prune first so orphan SKIPPED rows aren't pointlessly requeued. */
     @Scheduled(fixedDelay = 86_400_000, initialDelay = 3_600_000)
     public void requeueSkipped() {
+        int pruned = jobRepo.pruneOrphans();
+        if (pruned > 0) {
+            log.info("[ImageProcessingWorker] pruned {} orphan image job(s) (embedding note gone)", pruned);
+        }
         int requeued = jobRepo.requeueSkipped();
         if (requeued > 0) {
             log.info("[ImageProcessingWorker] requeued {} SKIPPED image job(s) for daily retry", requeued);
