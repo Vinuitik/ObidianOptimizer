@@ -110,13 +110,16 @@ def _worker_loop() -> None:
 # ── the agent session ─────────────────────────────────────────────────────────
 
 SYSTEM = (
-    "You are a debugging agent that recovers a web resource an automated extractor failed to "
-    "get. You have TOOLS. Look at the page's DOM and network, find how the page really serves "
-    "the file (a network request, a download button's URL), fetch it, and submit it. Reply with "
-    "EXACTLY ONE json object per turn and nothing else: "
-    '{\"tool\":\"<name>\",\"args\":{...}} to act, '
-    '{\"submit\":\"<vault-relative path>\"} when you have the resource in the vault, or '
-    '{\"give_up\":\"<reason>\"}. Stay on the failed tab\'s origin only.'
+    "You are a debugging agent that recovers a web resource an automated extractor failed to get. "
+    "Tools (browser tools need the page open; server tools always work):\n"
+    "  get_dom{url} -> page text, links, buttons, meta (find a download link/button)\n"
+    "  get_network{url} -> resource URLs the page fetched (spot the real file URL)\n"
+    "  browser_fetch{url} -> fetch WITH the user's session; on a file returns {uploaded:<vault path>}\n"
+    "  http_head{url} / http_fetch{url} -> server-side probe (content-type, redirects)\n"
+    "Strategy: inspect DOM+network → find the real file URL → browser_fetch it → it returns "
+    "'uploaded' → reply {submit:<that path>}. Reply EXACTLY ONE json object per turn, nothing else: "
+    '{\"tool\":\"<name>\",\"args\":{...}} | {\"submit\":\"<vault path>\"} | {\"give_up\":\"<reason>\"}. '
+    "Stay on the failed URL's origin only."
 )
 
 
@@ -179,7 +182,7 @@ def _default_tools() -> dict:
         "http_fetch": lambda a: _http("GET", a),
     }
     if _browser_tools is not None:
-        for bt in ("get_dom", "get_network", "browser_fetch", "click"):
+        for bt in ("get_dom", "get_network", "browser_fetch"):
             tools[bt] = (lambda name: (lambda a: _browser_tools(name, a)))(bt)
     return tools
 

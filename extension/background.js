@@ -328,8 +328,98 @@ const HANDLERS = {
   capturePage,
   uploadFile,
   getConfig: () => getConfig(),
-  setConfig: (patch) => setConfig(patch).then(() => ({ ok: true })),
+  setConfig: (patch) => setConfig(patch).then(() => { connectAgentWs(); return { ok: true }; }),
 };
+
+// ── Agent-escalation browser tools (over the /agent-ws WebSocket) ────────────────
+// The escalation agent (embedder) sends {id, tool, args} down this socket; we run the tool
+// against the OPEN tab for the failed URL and reply {id, result}. Scoped to the failed tab's
+// origin (AGENT_ESCALATION.md security decision). Off unless an agentWsToken is configured.
+async function findTabForUrl(url) {
+  try {
+    const origin = new URL(url).origin;
+    const tabs = await api.tabs.query({});
+    return tabs.find(t => { try { return new URL(t.url).origin === origin; } catch { return false; } }) || null;
+  } catch { return null; }
+}
+
+function agentScanDom() {   // injected — self-contained
+  const cap = (s, n) => (s || '').trim().slice(0, n);
+  const links = [...document.querySelectorAll('a[href]')].slice(0, 80)
+    .map(a => ({ text: cap(a.innerText, 60), href: a.href }));
+  const buttons = [...document.querySelectorAll('button,[role=button],a[download]')].slice(0, 40)
+    .map(b => ({ text: cap(b.innerText || b.getAttribute('aria-label'), 60),
+                 download: b.getAttribute('download') || null, href: b.href || null }));
+  const meta = {};
+  document.querySelectorAll('meta[property^="og:"],meta[name^="twitter:"]')
+    .forEach(m => { meta[m.getAttribute('property') || m.getAttribute('name')] = m.content; });
+  return { title: document.title, url: location.href, text: cap(document.body?.innerText, 3000),
+           links, buttons, meta };
+}
+
+function agentScanNetwork() {   // injected — resource URLs the page fetched
+  return performance.getEntriesByType('resource').slice(0, 150)
+    .map(e => ({ name: e.name, type: e.initiatorType }));
+}
+
+async function agentGetDom({ url }) {
+  const tab = await findTabForUrl(url);
+  if (!tab) return { error: `no open tab for ${url} — the page must be open` };
+  const r = await api.scripting.executeScript({ target: { tabId: tab.id }, func: agentScanDom });
+  return r?.[0]?.result || { error: 'dom scan failed' };
+}
+async function agentGetNetwork({ url }) {
+  const tab = await findTabForUrl(url);
+  if (!tab) return { error: `no open tab for ${url}` };
+  const r = await api.scripting.executeScript({ target: { tabId: tab.id }, func: agentScanNetwork });
+  return { requests: r?.[0]?.result || [] };
+}
+// Fetch a resource with the USER'S session and upload it → returns the vault path the agent
+// then submits. Origin-scoped: refuses unless a tab on that origin is open.
+async function agentBrowserFetch({ url }) {
+  if (!(await findTabForUrl(url))) return { error: 'refused — no open tab on that origin (scope)' };
+  let res;
+  try { res = await fetch(url, { credentials: 'include' }); } catch (e) { return { error: String(e) }; }
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!res.ok || ct.includes('text/html')) return { status: res.status, content_type: ct, note: 'not a file (HTML/error)' };
+  const cd = res.headers.get('content-disposition') || '';
+  const fnm = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+  const name = (fnm ? decodeURIComponent(fnm[1].replace(/"/g, '')) : `agent_${Date.now()}`).trim();
+  const form = new FormData();
+  form.append('file', await res.blob(), name);
+  const up = await obsidian('/workspace/upload', { method: 'POST', body: form });
+  if (!up.ok) return { error: `upload failed ${up.status}` };
+  const { path } = await up.json();
+  return { uploaded: path, content_type: ct, filename: name };
+}
+
+const AGENT_TOOLS = { get_dom: agentGetDom, get_network: agentGetNetwork, browser_fetch: agentBrowserFetch };
+let agentWs = null, agentWsTimer = null;
+
+async function connectAgentWs() {
+  const { obsidianApi, agentWsToken } = await getConfig();
+  if (!agentWsToken) return;   // disabled until a token is set
+  const base = (obsidianApi || '').replace(/\/api\/?$/, '').replace(/^http/, 'ws');
+  try {
+    const ws = new WebSocket(`${base}/agent-ws?token=${encodeURIComponent(agentWsToken)}`);
+    agentWs = ws;
+    ws.onmessage = async (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      const fn = AGENT_TOOLS[m.tool];
+      let result;
+      try { result = fn ? await fn(m.args || {}) : { error: `unknown tool ${m.tool}` }; }
+      catch (e) { result = { error: String(e) }; }
+      if (ws.readyState === 1) ws.send(JSON.stringify({ id: m.id, result }));
+    };
+    ws.onclose = () => { agentWs = null; scheduleAgentReconnect(); };
+    ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
+  } catch { scheduleAgentReconnect(); }
+}
+function scheduleAgentReconnect() {
+  clearTimeout(agentWsTimer);
+  agentWsTimer = setTimeout(connectAgentWs, 15000);   // MV3: SW may sleep; reconnects when woken
+}
+connectAgentWs();
 
 api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   const handler = HANDLERS[msg?.type];
@@ -379,4 +469,4 @@ api.runtime.onInstalled.addListener((details) => {
 });
 
 // Firefox event pages can be torn down; rebuild menus on startup too.
-api.runtime.onStartup?.addListener(installMenus);
+api.runtime.onStartup?.addListener(() => { installMenus(); connectAgentWs(); });

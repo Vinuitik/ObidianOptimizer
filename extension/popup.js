@@ -132,6 +132,7 @@ function handleResult(res) {
 async function loadSettings() {
   const cfg = await getConfig();
   $('cfg-obsidian').value = cfg.obsidianApi;
+  $('cfg-agent-token').value = cfg.agentWsToken || '';
   // Prefill remembered credentials so the user never re-types (password managers don't
   // fire reliably in an extension popup — this is the reliable substitute).
   const { authUser, authPass } = await getCreds();
@@ -142,8 +143,11 @@ async function loadSettings() {
 }
 
 $('cfg-save').addEventListener('click', async () => {
-  await send('setConfig', { obsidianApi: $('cfg-obsidian').value.trim() });
-  setStatus($('settings-status'), 'Endpoint saved.', 'ok');
+  await send('setConfig', {
+    obsidianApi: $('cfg-obsidian').value.trim(),
+    agentWsToken: $('cfg-agent-token').value.trim(),
+  });
+  setStatus($('settings-status'), 'Settings saved.', 'ok');
 });
 
 async function doLogin() {

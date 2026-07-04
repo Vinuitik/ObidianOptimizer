@@ -28,6 +28,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Embedder", lifespan=lifespan)
 
+# Agent-escalation browser-tool bridge (/agent-ws) — extension connects here so the escalation
+# agent can inspect the failed page's DOM/network and fetch with the user's session.
+import agent_ws as _agent_ws
+_agent_ws.register(app)
+
 
 # ---------------------------------------------------------------------------
 # API models

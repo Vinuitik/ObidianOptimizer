@@ -9,9 +9,18 @@ Built + unit-tested (`embedder/ingest/escalation.py`, flag `AGENT_ESCALATION_ENA
 - ✅ **Fix-log** (`_write_fix` → `AGENT_FIXES_DIR/agent-fixes/fixes.jsonl`) — every success recorded
   as `{signature, ref, steps, resource}` → codify recurring ones into deterministic handlers.
 
-Remaining (the browser half): **stage 3** WebSocket bridge (`register_browser_tools`) so the
-extension serves `get_dom`/`get_network`/`browser_fetch`/`click`; the **extension WS client**;
-**host-wrapper multi-turn** refinement; **UI** to show failed captures + live sessions.
+✅ **Stage 3 — browser tools over WebSocket (built, browser-unverified):**
+- Embedder `/agent-ws` (`agent_ws.py`, registered in `main.py`) — thread↔asyncio bridge marshals
+  the agent's sync tool calls onto the loop, over the socket, and blocks for the reply.
+- nginx `/agent-ws?token=<AGENT_WS_TOKEN>` — SAME token-in-URL auth as `/mcp` (env
+  `AGENT_WS_TOKEN`, filter extended); WS upgrade proxied to the embedder.
+- Extension WS client (`background.js`) — connects when a token is set (⚙ Settings), runs
+  `get_dom`/`get_network`/`browser_fetch` **scoped to the failed tab's origin**, replies over the
+  socket; reconnects (MV3 SW-wake caveat).
+
+Remaining: **host-wrapper multi-turn** refinement (transcript-as-prompt works but is crude); a
+**UI** to surface failed captures + live agent sessions; end-to-end **live test** (needs the
+frontend rebuilt for the nginx route + Firefox + `AGENT_WS_TOKEN` set + `AGENT_ESCALATION_ENABLED=1`).
 
 ## Why
 Extraction fails on the long tail: JS-viewer wrappers (Google Drive), sites where the media

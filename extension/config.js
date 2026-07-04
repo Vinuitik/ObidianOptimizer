@@ -21,7 +21,7 @@ export const DEFAULTS = {
 };
 
 export async function getConfig() {
-  const stored = await api.storage.local.get(['obsidianApi']);
+  const stored = await api.storage.local.get(['obsidianApi', 'agentWsToken']);
   return { ...DEFAULTS, ...stored };
 }
 

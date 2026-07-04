@@ -79,6 +79,20 @@ server {
         client_max_body_size    10m;
     }
 
+    # Agent-escalation WebSocket (AGENT_ESCALATION.md). Same token-in-URL auth as /mcp — the
+    # extension connects to  wss://obsidianoptimizer.uk/agent-ws?token=<AGENT_WS_TOKEN>  so the
+    # escalation agent can drive its browser tools. WS upgrade proxied to the (loopback) embedder.
+    location /agent-ws {
+        if ($arg_token != "${AGENT_WS_TOKEN}") { return 401; }
+        proxy_pass          http://embedder:8000;
+        proxy_http_version  1.1;
+        proxy_set_header    Upgrade $http_upgrade;
+        proxy_set_header    Connection "upgrade";
+        proxy_set_header    Host $host;
+        proxy_read_timeout  3600s;
+        proxy_send_timeout  3600s;
+    }
+
     # ── Static media — served by nginx directly for range-request support ────────
     # vault/resources/ subdirs (images, videos, audio, pdf) → embedded note media
     location /vault-media/ {

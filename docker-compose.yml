@@ -160,7 +160,10 @@ services:
       # forwards to the embedder. FILTER pins substitution to this one var so
       # nginx's own $host/$uri/etc. survive templating. See frontend/nginx.conf.template.
       - MCP_API_TOKEN=${MCP_API_TOKEN:?set MCP_API_TOKEN in .env}
-      - NGINX_ENVSUBST_FILTER=MCP_API_TOKEN
+      # Agent-escalation WS token (nginx /agent-ws ?token= gate). Optional — blank disables the
+      # route (its `if` never matches, so /agent-ws always 401s until you set a token).
+      - AGENT_WS_TOKEN=${AGENT_WS_TOKEN:-}
+      - NGINX_ENVSUBST_FILTER=(MCP_API_TOKEN|AGENT_WS_TOKEN)
     volumes:
       # nginx serves these vault subdirs directly (range-request support, zero JVM involvement).
       # Derived from HOST_VAULT_PATH — no separate env vars needed.
