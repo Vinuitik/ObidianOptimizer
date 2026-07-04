@@ -1,6 +1,6 @@
 // Popup controller. UI only — every network call is delegated to background.js
 // via runtime.sendMessage so it runs with the extension's host permissions.
-import { getConfig, api } from './config.js';
+import { getConfig, getCreds, setCreds, clearCreds, api } from './config.js';
 
 const send = (type, payload) => api.runtime.sendMessage({ type, payload });
 const $ = (id) => document.getElementById(id);
@@ -129,6 +129,12 @@ function handleResult(res) {
 async function loadSettings() {
   const cfg = await getConfig();
   $('cfg-obsidian').value = cfg.obsidianApi;
+  // Prefill remembered credentials so the user never re-types (password managers don't
+  // fire reliably in an extension popup — this is the reliable substitute).
+  const { authUser, authPass } = await getCreds();
+  if (authUser) $('login-user').value = authUser;
+  if (authPass) $('login-pass').value = authPass;
+  $('login-remember').checked = !!authUser;
   refreshAuthLine();
 }
 
@@ -137,20 +143,27 @@ $('cfg-save').addEventListener('click', async () => {
   setStatus($('settings-status'), 'Endpoint saved.', 'ok');
 });
 
-$('login-btn').addEventListener('click', async () => {
+async function doLogin() {
   const username = $('login-user').value.trim();
   const password = $('login-pass').value;
   if (!username || !password) return setStatus($('settings-status'), 'Enter username and password.', 'err');
   setStatus($('settings-status'), 'Signing in…', 'info');
   const res = await send('login', { username, password });
   if (res?.ok) {
+    // Remember (or forget) so background.js can silently re-login on a lapsed session.
+    if ($('login-remember').checked) await setCreds(username, password);
+    else await clearCreds();
     setStatus($('settings-status'), 'Signed in ✓', 'ok');
-    $('login-pass').value = '';
     refreshAuthLine();
   } else {
     setStatus($('settings-status'), `Sign-in failed (${res?.status || res?.error || 'check endpoint'}).`, 'err');
   }
-});
+}
+
+$('login-btn').addEventListener('click', doLogin);
+// Enter in either field submits (native form submit doesn't fire without a <form>).
+['login-user', 'login-pass'].forEach(id =>
+  $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } }));
 
 async function refreshAuthLine() {
   const res = await send('checkAuth');

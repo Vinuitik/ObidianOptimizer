@@ -28,3 +28,20 @@ export async function getConfig() {
 export async function setConfig(patch) {
   await api.storage.local.set(patch);
 }
+
+// ── Remembered credentials (opt-in) ──────────────────────────────────────────────
+// The backend session is a short-lived in-memory Spring session that dies on every
+// server restart, so the cookie keeps going stale and the user re-logs in constantly.
+// With "Remember me" we stash the credentials in chrome.storage.local and background.js
+// silently re-logs in on any 401 — so a capture never fails just because the session
+// lapsed. Trade-off: the password sits in extension storage in plain text. Acceptable for
+// a single-user personal tool; clear it by unchecking "Remember me" (clearCreds).
+export async function getCreds() {
+  return await api.storage.local.get(['authUser', 'authPass']);
+}
+export async function setCreds(authUser, authPass) {
+  await api.storage.local.set({ authUser, authPass });
+}
+export async function clearCreds() {
+  await api.storage.local.remove(['authUser', 'authPass']);
+}

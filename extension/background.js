@@ -18,12 +18,33 @@
 //   POST /workspace/save   {url}      download a media/pdf URL into _workspace/
 //   POST /workspace/upload (multipart) store a dropped local file in _workspace/
 //   POST /download {url}              yt-dlp offline grab → _workspace/ (watchable)
-import { getConfig, setConfig, api } from './config.js';
+import { getConfig, setConfig, getCreds, api } from './config.js';
 
 // ── HTTP helper ────────────────────────────────────────────────────────────────
+// Self-healing auth: the backend session is in-memory and dies on server restart, so a
+// call can 401 even though the user "is" logged in. When that happens and we have
+// remembered credentials, silently re-login once and retry — the capture just works
+// instead of dumping the user back to the sign-in form.
 async function obsidian(path, opts = {}) {
   const { obsidianApi } = await getConfig();
-  return fetch(`${obsidianApi}${path}`, { credentials: 'include', ...opts });
+  const doFetch = () => fetch(`${obsidianApi}${path}`, { credentials: 'include', ...opts });
+  let res = await doFetch();
+  if (res.status === 401 && path !== '/login') {
+    if (await reloginFromStored(obsidianApi)) res = await doFetch();
+  }
+  return res;
+}
+
+async function reloginFromStored(obsidianApi) {
+  const { authUser, authPass } = await getCreds();
+  if (!authUser || !authPass) return false;
+  try {
+    const r = await fetch(`${obsidianApi}/login`, {
+      method: 'POST', credentials: 'include',
+      body: new URLSearchParams({ username: authUser, password: authPass }),
+    });
+    return r.ok;
+  } catch { return false; }
 }
 
 const json = (path, method, payload) => obsidian(path, {

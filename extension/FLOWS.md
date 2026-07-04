@@ -90,6 +90,15 @@ page). `contextMenus.onClicked` → `routeText(selectionText|linkUrl|pageUrl)` �
 `send('login')` → `POST /login` (form-encoded) sets the Spring session cookie;
 `refreshAuthLine()` hits `GET /me`.
 
+**Stay-signed-in (remember me).** The Spring session is in-memory and dies on every server
+restart, so the cookie keeps going stale → constant re-login. With the **Remember me** box
+(default on) the popup stashes `authUser/authPass` in `chrome.storage.local` (`config.setCreds`)
+and prefills them (`loadSettings` — the reliable substitute for a password manager, which
+doesn't fire in a popup). Then `background.obsidian()` **self-heals**: any `401` (except on
+`/login`) triggers `reloginFromStored()` and one retry — a capture never fails just because the
+session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>`). Uncheck to
+`clearCreds`. *Trade-off:* the password sits in extension storage in plain text (single-user tool).
+
 ## Technology Notes (constraints / failure modes)
 - **Cross-browser: done.** Chromium (service worker) + Firefox 121+ (event page via the
   build script + `browser_specific_settings`) both supported. Earlier docs said
@@ -118,6 +127,7 @@ page). `contextMenus.onClicked` → `routeText(selectionText|linkUrl|pageUrl)` �
 | Touch this | Where |
 |---|---|
 | Default endpoint | `config.js` `DEFAULTS.obsidianApi` |
+| Remembered creds / auto-relogin | `config.getCreds/setCreds/clearCreds`; `background.obsidian()` 401 self-heal (`reloginFromStored`); popup `#login-remember` + `doLogin` (Enter submits) |
 | API base override | popup ⚙ Settings → `chrome.storage.local` |
 | Smart page capture / scrape | `background.capturePage()` + `extractPageText()` (`#cap-page` button) |
 | Input classification / routing | `background.classify()` + `routeText()` |
