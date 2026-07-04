@@ -134,8 +134,42 @@ async function startDownload(url) {
   return { ok: true };
 }
 
+// Google Drive "view" links wrap the file in a JS viewer — no bytes in the HTML, so a
+// server-side scrape fails. But the EXTENSION has the user's Google session, so it can pull
+// the file straight from Drive's download endpoint (works for private files too), then hand
+// the real bytes to ingest. driveFileId → the file id from the common Drive URL shapes.
+const DRIVE_FILE_RE = /(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^#]*&)?id=|.*\/d\/)([\w-]{20,})/;
+function driveFileId(url) { const m = DRIVE_FILE_RE.exec(url || ''); return m ? m[1] : null; }
+
+async function captureDriveFile(url) {
+  const id = driveFileId(url);
+  if (!id) return { ok: false, error: 'not a drive file url' };
+  const dl = `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`;
+  let res;
+  try { res = await fetch(dl, { credentials: 'include' }); }
+  catch (e) { return { ok: false, error: `drive fetch failed: ${e}` }; }
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  // HTML back = virus-scan interstitial or an access wall — we didn't get the file.
+  if (!res.ok || ct.includes('text/html')) {
+    return { ok: false, error: `drive returned ${res.status} (${ct || 'no type'}) — file may be restricted` };
+  }
+  const cd = res.headers.get('content-disposition') || '';
+  const fnm = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+  const name = (fnm ? decodeURIComponent(fnm[1].replace(/"/g, '')) : `drive_${id}`).trim() || `drive_${id}`;
+  const blob = await res.blob();
+  const form = new FormData();
+  form.append('file', blob, name);
+  const up = await obsidian('/workspace/upload', { method: 'POST', body: form });
+  if (up.status === 401) return { ok: false, status: 401 };
+  if (!up.ok) return { ok: false, status: up.status, error: await up.text() };
+  const { path } = await up.json();
+  const cap = await capture(path);   // ingest the stored file → extract_pdf/av on the local bytes
+  return cap.ok ? { ok: true, kind: 'media', detail: `Pulled "${name}" from Drive + generating notes` } : cap;
+}
+
 // Route a single captured string (used by both popup and context menu).
 async function routeText(text) {
+  if (driveFileId(text)) return captureDriveFile(text.trim());
   const { kind, value } = classify(text);
   if (kind === 'text') return captureText(value);
 
@@ -227,6 +261,7 @@ async function capturePage({ url, tabId }) {
   if (!url || !URL_RE.test(url)) {
     return { ok: false, error: 'This page can’t be captured (not a web URL).' };
   }
+  if (driveFileId(url)) return captureDriveFile(url);   // pull the real file via the user's session
   const { kind, value } = classify(url);
 
   if (kind === 'video') {
