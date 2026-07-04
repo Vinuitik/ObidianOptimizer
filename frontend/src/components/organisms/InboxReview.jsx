@@ -25,7 +25,7 @@ export default function InboxReview({ onCount }) {
   const [selected, setSelected] = useState(null);   // path
   const [draft,    setDraft]    = useState('');
   const [dest,     setDest]     = useState('');
-  const [preview,  setPreview]  = useState(false);
+  const [preview,  setPreview]  = useState(true);   // default to rendered Preview, not Edit
   const [collapsed, setCollapsed] = useState(false);  // queue rail
   const [orient,   setOrient]   = useState(null);     // 'portrait' | 'landscape' | null
   const [picker,   setPicker]   = useState(null);
@@ -48,7 +48,7 @@ export default function InboxReview({ onCount }) {
     setSelected(item.path);
     setDraft(item.content);
     setDest(item.suggestedFolder || '');
-    setPreview(false);
+    setPreview(true);   // land on Preview each note; user opts into Edit
     setStatus('');
     setOrient(null);
   }, []);
