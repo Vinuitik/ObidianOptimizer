@@ -131,6 +131,13 @@ def _run(job: dict):
             job.get("source_type") or "text", job.get("ref") or "")
     else:
         kind = router.route(job["ref"])
+        # PDF / direct-media URLs need a LOCAL file — extract_pdf/extract_av don't fetch URLs.
+        # When the ref is an unresolved URL, download the bytes into resources/ FIRST so
+        # extraction has a file and the note gets a local: copy (LOCAL_MEDIA_RETENTION §2c).
+        # (youtube is separate: it transcribes from subtitles, no file needed here.)
+        if resolved is None and kind in ("pdf", "av") \
+                and job["ref"].startswith(("http://", "https://")):
+            resolved = _prefetch_to_resources(job, kind)
         job["stage"] = f"extract:{kind}"
         if kind in ("av", "youtube"):
             bundle = extract_av.extract(job["ref"], resolved, job["force_whisper"])
@@ -217,6 +224,32 @@ def _vault_rel(p) -> str:
         if s.startswith(prefix):
             return rel + s[len(prefix):]
     return s
+
+
+def _prefetch_to_resources(job: dict, kind: str) -> Path:
+    """Download a PDF / direct-media URL into resources/<kind>/ so the extractor has a local
+    file. Returns the local path (also becomes the note's local:). Raises on failure — for
+    these types there's nothing to extract without the bytes (LOCAL_MEDIA_RETENTION §2c)."""
+    import re as _re
+    from urllib.parse import unquote, urlparse
+    import httpx
+
+    ref = job["ref"]
+    sub = "pdf" if kind == "pdf" else "media"
+    dest_dir = os.path.join(os.environ.get("RESOURCE_DIR", "/resources"), sub)
+    os.makedirs(dest_dir, exist_ok=True)
+    name = _re.sub(r"[^\w.\-]", "_", os.path.basename(unquote(urlparse(ref).path)))[:120] or "download"
+    if kind == "pdf" and not name.lower().endswith(".pdf"):
+        name += ".pdf"
+    dest = os.path.join(dest_dir, name)
+    job["stage"] = f"download:{sub}"
+    with httpx.stream("GET", ref, follow_redirects=True, timeout=120.0) as r:
+        r.raise_for_status()
+        with open(dest, "wb") as f:
+            for chunk in r.iter_bytes():
+                f.write(chunk)
+    log.info("prefetched %s → %s", ref, dest)
+    return Path(dest)
 
 
 def _ensure_local_copy(job: dict, bundle: dict, resolved):

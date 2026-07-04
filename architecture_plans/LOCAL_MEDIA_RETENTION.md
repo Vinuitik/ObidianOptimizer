@@ -58,6 +58,15 @@ owner; note footers are for the UI.
    file to `_trash`. A **filed** note keeps its index row → file survives ("keep the source
    only if you kept a fragment"). Only touches `resources/…`/`_workspace/…`; external URLs are
    left alone. *Needs Docker verify.*
+2c. **PDF / direct-media URLs → resources.** ✅ DONE. `jobs._prefetch_to_resources()` downloads
+   the bytes into `resources/{pdf,media}/` BEFORE extraction (extract_pdf/av need a local file;
+   `main.ingest_submit` leaves URL refs unresolved). Note gets `local:` → renders in-app +
+   retention-managed. Extension drops `/workspace/save` for media (link-only). *Needs Docker verify.*
+2d. **Embedded page video — SHALLOW.** ✅ DONE. `extractPageText()` scans the page for
+   `<video>`/YouTube-iframe/`og:video`; the web branch captures each (as a SEPARATE video
+   ingest) alongside the page text. DEEP interleaving (one mixed text+video IR, v2 segmentation)
+   is still [NOT IMPLEMENTED] — needs `INGEST_V2` live + a mixed-IR web extractor + Docker.
+
 5. **PDF acquisition for viewer-wrapped sources (Drive etc.).** [NOT IMPLEMENTED — hard]
    Direct `.pdf` URLs + dropped files: tractable (fetch bytes → resources). Google Drive
    hides bytes behind a canvas viewer → needs the Drive download URL (`uc?export=download&

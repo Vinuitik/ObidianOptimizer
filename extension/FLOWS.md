@@ -51,8 +51,8 @@ cookie is sent (`credentials:'include'`). The popup never calls the network dire
 | Active tab (`classify(url)`) | Action |
 |---|---|
 | youtube/vimeo/… | `POST /capture` only — **ingest downloads the video itself** into `resources/media/` (playback + keyframes) + makes notes. No separate `/download`. |
-| pdf / media-file URL | `POST /workspace/save` **+** `POST /capture` (pdf not yet unified — see LOCAL_MEDIA_RETENTION stage 2c) |
-| web page | inject `extractPageText()` via `api.scripting.executeScript` → grab the **rendered** main text → `captureText()` (beats server-side scrape on logged-in/JS pages) |
+| pdf / media-file URL | `POST /capture` only — **ingest downloads the file** into `resources/` (§2c). No `/workspace/save`. |
+| web page | inject `extractPageText()` → grab the **rendered** main text **+ scan for embedded videos** (`<video>`/YouTube-iframe/`og:video`). Text → `captureText()`; each found video → `capture(normalizeVideoUrl)` → full video ingest (download+keyframes). |
 | **any of the above fails** (scrape < `MIN_SCRAPE_CHARS`, download errors) | **escalate**: `capture(url)` — hand the raw URL to the ingest agent to extract |
 
 Needs the `scripting` permission (in BOTH manifests). The rendered-text scrape is the key win
@@ -130,6 +130,7 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | Remembered creds / auto-relogin | `config.getCreds/setCreds/clearCreds`; `background.obsidian()` 401 self-heal (`reloginFromStored`); popup `#login-remember` + `doLogin` (Enter submits) |
 | API base override | popup ⚙ Settings → `chrome.storage.local` |
 | Smart page capture / scrape | `background.capturePage()` + `extractPageText()` (`#cap-page` button) |
+| Embedded-video detection (page) | `extractPageText()` video scan + `background.normalizeVideoUrl()` (YouTube-embed→watch, direct-media pass-through); web branch of `capturePage()` |
 | Input classification / routing | `background.classify()` + `routeText()` |
 | Escalate-to-agent fallback | `background.escalate()` (→ `capture(url)`) |
 | Live detection hint | `popup.detectLabel()` (mirror of `classify()`) |

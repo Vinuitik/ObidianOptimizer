@@ -145,9 +145,8 @@ async function routeText(text) {
   if (!captureRes.ok) return captureRes;
 
   if (kind === 'media') {
-    const keep = await workspaceSave(value);
-    return { ok: true, kind, detail: keep.ok
-      ? 'Saved to workspace + generating notes' : 'Generating notes (file save failed)' };
+    // Ingest downloads the pdf/media into resources/ itself (note-wired + retention). Link only.
+    return { ok: true, kind, detail: 'Generating notes + downloading file' };
   }
   if (kind === 'video') {
     // Ingest downloads the video itself (resources/ → playable in Learn). Link only.
@@ -165,8 +164,23 @@ const MIN_SCRAPE_CHARS = 200;
 // the RENDERED main text the user actually sees, which beats server-side scraping on
 // logged-in / SPA pages. Strips chrome (nav/scripts/etc).
 function extractPageText() {
+  // Scan for embedded videos FIRST (the text pass below strips iframes). Absolute URLs.
+  const videos = [];
+  const push = (u) => {
+    try { const a = new URL(u, location.href).href; if (a && !videos.includes(a)) videos.push(a); }
+    catch { /* skip malformed */ }
+  };
+  document.querySelectorAll('video').forEach(v =>
+    push(v.currentSrc || v.src || v.querySelector('source')?.src || ''));
+  document.querySelectorAll('iframe[src]').forEach(f => {
+    if (/(?:youtube(?:-nocookie)?\.com|youtu\.be|player\.vimeo\.com)/i.test(f.src)) push(f.src);
+  });
+  const og = document.querySelector(
+    'meta[property="og:video"],meta[property="og:video:url"],meta[property="og:video:secure_url"],meta[name="twitter:player"]');
+  if (og?.content) push(og.content);
+
   const pick = document.querySelector('article, main, [role="main"]') || document.body;
-  if (!pick) return { title: document.title || '', text: '' };
+  if (!pick) return { title: document.title || '', text: '', videos };
   const clone = pick.cloneNode(true);
   clone.querySelectorAll('script,style,noscript,nav,header,footer,aside,svg,button,form,iframe')
     .forEach(n => n.remove());
@@ -174,7 +188,19 @@ function extractPageText() {
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-  return { title: document.title || '', text };
+  return { title: document.title || '', text, videos };
+}
+
+// A scanned embed URL → a URL the ingest pipeline can actually handle, or null to skip.
+// YouTube embeds → canonical watch URL (router only recognizes watch/shorts/live); direct
+// media files pass through (ingest §2c downloads them). Others (e.g. vimeo player) skipped
+// for now — the ingest can't route them yet.
+function normalizeVideoUrl(u) {
+  const yt = /(?:youtube(?:-nocookie)?\.com)\/embed\/([\w-]{11})/.exec(u);
+  if (yt) return `https://www.youtube.com/watch?v=${yt[1]}`;
+  if (/(?:^|\.)(youtube\.com|youtu\.be)\b/i.test(u)) return u;
+  if (/\.(mp4|webm|mov|m4v|m4a|mp3)(?:[?#]|$)/i.test(u)) return u;
+  return null;
 }
 
 async function scrapeTab(tabId) {
@@ -210,18 +236,28 @@ async function capturePage({ url, tabId }) {
     if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL');
     return { ok: true, kind, detail: 'Generating notes + downloading video for playback' };
   }
-  if (kind === 'media') {   // pdf / direct media file
-    const keep = await workspaceSave(value);
-    const cap  = await capture(value);
-    if (!keep.ok && !cap.ok) return escalate(value, 'Save failed — agent will try the URL');
-    return { ok: true, kind, detail: keep.ok
-      ? 'Downloaded file + generating notes' : 'Generating notes (save failed)' };
+  if (kind === 'media') {   // pdf / direct media file — ingest downloads it into resources/
+    const cap = await capture(value);
+    if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL');
+    return { ok: true, kind, detail: 'Generating notes + downloading file' };
   }
 
-  // web page → scrape the rendered text client-side; thin/blocked → escalate.
+  // web page → scrape the rendered text client-side AND detect embedded videos.
   const scraped = tabId != null ? await scrapeTab(tabId) : null;
-  if (scraped && (scraped.text || '').length >= MIN_SCRAPE_CHARS) {
-    return captureText(scraped.text, scraped.title);
+  // Capture any embedded video(s) so they get the full ingest (download → resources +
+  // transcript + keyframes + bounded clips), same as a direct video capture. Deduped,
+  // capped so a gallery page can't fan out into dozens of jobs.
+  const foundVideos = [...new Set((scraped?.videos || []).map(normalizeVideoUrl).filter(Boolean))].slice(0, 4);
+  for (const v of foundVideos) await capture(v);
+
+  const hasText = scraped && (scraped.text || '').length >= MIN_SCRAPE_CHARS;
+  if (hasText) {
+    const res = await captureText(scraped.text, scraped.title);
+    if (foundVideos.length) res.detail = `Notes from page + ${foundVideos.length} embedded video(s)`;
+    return res;
+  }
+  if (foundVideos.length) {
+    return { ok: true, kind: 'video', detail: `Captured ${foundVideos.length} embedded video(s) from the page` };
   }
   return escalate(value, 'Page scrape was thin — agent extracting from the URL');
 }
