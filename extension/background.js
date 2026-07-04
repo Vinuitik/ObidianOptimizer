@@ -150,9 +150,8 @@ async function routeText(text) {
       ? 'Saved to workspace + generating notes' : 'Generating notes (file save failed)' };
   }
   if (kind === 'video') {
-    const keep = await startDownload(value);
-    return { ok: true, kind, detail: keep.ok
-      ? 'Downloading for offline + generating notes' : 'Generating notes (download failed)' };
+    // Ingest downloads the video itself (resources/ → playable in Learn). Link only.
+    return { ok: true, kind, detail: 'Generating notes + downloading video for playback' };
   }
   return { ok: true, kind, detail: 'Generating notes from the page' };
 }
@@ -205,11 +204,11 @@ async function capturePage({ url, tabId }) {
   const { kind, value } = classify(url);
 
   if (kind === 'video') {
-    const dl  = await startDownload(value);
+    // Just pass the link — the ingest pipeline downloads the video (into resources/, for
+    // in-app playback + keyframes) as part of /capture. No separate /download grab.
     const cap = await capture(value);
-    if (!dl.ok && !cap.ok) return escalate(value, 'Download failed — agent will try the URL');
-    return { ok: true, kind, detail: dl.ok
-      ? 'Downloading video + generating notes' : 'Generating notes (download failed)' };
+    if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL');
+    return { ok: true, kind, detail: 'Generating notes + downloading video for playback' };
   }
   if (kind === 'media') {   // pdf / direct media file
     const keep = await workspaceSave(value);

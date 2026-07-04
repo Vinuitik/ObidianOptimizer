@@ -50,8 +50,8 @@ cookie is sent (`credentials:'include'`). The popup never calls the network dire
 
 | Active tab (`classify(url)`) | Action |
 |---|---|
-| youtube/vimeo/… | `POST /download` (yt-dlp) **+** `POST /capture` (notes) |
-| pdf / media-file URL | `POST /workspace/save` **+** `POST /capture` |
+| youtube/vimeo/… | `POST /capture` only — **ingest downloads the video itself** into `resources/media/` (playback + keyframes) + makes notes. No separate `/download`. |
+| pdf / media-file URL | `POST /workspace/save` **+** `POST /capture` (pdf not yet unified — see LOCAL_MEDIA_RETENTION stage 2c) |
 | web page | inject `extractPageText()` via `api.scripting.executeScript` → grab the **rendered** main text → `captureText()` (beats server-side scrape on logged-in/JS pages) |
 | **any of the above fails** (scrape < `MIN_SCRAPE_CHARS`, download errors) | **escalate**: `capture(url)` — hand the raw URL to the ingest agent to extract |
 
@@ -68,7 +68,7 @@ over just sending the URL. *To change:* `background.capturePage()` / `extractPag
 | Plain text / markdown | `POST /notes` create+update (sr-due + #review) | a note in review |
 | Web page URL | `POST /capture` → embedder ingest | synthesized note → **Inbox** |
 | Media-file URL (`.pdf/.mp4/.mp3…`) | `POST /capture` **and** `POST /workspace/save` | notes + watchable file |
-| Video platform (youtube/vimeo/…) | `POST /capture` **and** `POST /download` (yt-dlp) | notes + offline video |
+| Video platform (youtube/vimeo/…) | `POST /capture` only (ingest downloads the video → `resources/media/`) | notes + local video (keyframes) |
 
 - Dropped file: `popup.js` reads it to base64 → `send('uploadFile')` →
   `background.uploadFile()` → `POST /workspace/upload` (multipart) → then `POST /capture`

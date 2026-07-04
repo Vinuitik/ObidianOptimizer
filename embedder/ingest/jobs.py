@@ -237,6 +237,10 @@ def _ensure_local_copy(job: dict, bundle: dict, resolved):
         job["stage"] = "download:resources"
         path = downloader.download_sync(ref, dest_dir=dest)
         src["local"] = _vault_rel(path)
+        # We now HAVE the video (transcription used subtitles only) → pull keyframes from it
+        # so YouTube notes get diagrams/screenshots, not just transcript. Best-effort inside.
+        if not bundle.get("media"):
+            _attach_keyframes(job, bundle, Path(path))
     elif resolved is not None:
         src["local"] = _vault_rel(str(resolved))
 
