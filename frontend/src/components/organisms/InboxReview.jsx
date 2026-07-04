@@ -34,6 +34,7 @@ export default function InboxReview({ onCount }) {
   const [busy,     setBusy]     = useState(false);
   const [error,    setError]    = useState(null);
   const [status,   setStatus]   = useState('');
+  const [checked,  setChecked]  = useState(() => new Set());  // paths selected for bulk delete
 
   const current = items.find(i => i.path === selected) || null;
   const workingItem = current ? { ...current, content: draft } : null;
@@ -130,6 +131,32 @@ export default function InboxReview({ onCount }) {
     finally { setBusy(false); }
   }
 
+  // ── bulk delete (email-style multi-select) ──────────────────────────────────
+  // Only standalone _inbox notes can be discarded (in-place notes are acknowledged, not
+  // deleted). Deleting a source's LAST note trashes its media too (backend Stage 4 retention).
+  const deletable = orderedItems.filter(i => !i.inPlace).map(i => i.path);
+  const allChecked = deletable.length > 0 && deletable.every(p => checked.has(p));
+
+  const toggleOne = (path) => setChecked(s => {
+    const n = new Set(s); n.has(path) ? n.delete(path) : n.add(path); return n;
+  });
+  const toggleAll = () => setChecked(allChecked ? new Set() : new Set(deletable));
+
+  async function deleteSelected() {
+    if (!checked.size) return;
+    if (!window.confirm(
+      `Delete ${checked.size} note(s)? A source whose notes are all deleted is cleaned up too.`)) return;
+    setBusy(true); setStatus(`Deleting ${checked.size}…`);
+    let failed = 0;
+    for (const p of checked) {
+      try { await discardInboxNote(p); } catch { failed++; }
+    }
+    setChecked(new Set());
+    setStatus(failed ? `Deleted with ${failed} error(s).` : '');
+    setBusy(false);
+    load();
+  }
+
   // ── panels ──────────────────────────────────────────────────────────────────
   const sourcePanel = <SourceSplicePanel item={workingItem} onOrientation={setOrient} />;
 
@@ -163,19 +190,40 @@ export default function InboxReview({ onCount }) {
             {!loading && !error && items.length === 0 && (
               <p className={styles.status}>Inbox is empty. Capture a resource and its proposed notes appear here.</p>
             )}
+            {deletable.length > 0 && (
+              <div className={styles.bulkBar}>
+                <label className={styles.selAll}>
+                  <input type="checkbox" checked={allChecked} onChange={toggleAll}
+                         ref={el => { if (el) el.indeterminate = checked.size > 0 && !allChecked; }} />
+                  Select all
+                </label>
+                {checked.size > 0 && (
+                  <button className={styles.bulkDel} onClick={deleteSelected} disabled={busy}>
+                    🗑 Delete {checked.size}
+                  </button>
+                )}
+              </div>
+            )}
             {orderedItems.map(it => {
               const color = sourceColors.get(it.captureId || it.path);
               return (
-                <button key={it.path}
-                  className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
-                  style={color ? { '--row-src': color } : undefined}
-                  onClick={() => select(it)} title={it.title}>
-                  {color && <span className={styles.srcDot} aria-hidden="true" />}
-                  <span className={styles.rowTitle}>{it.title}</span>
-                  {it.inPlace
-                    ? <span className={styles.rowTag}>in place</span>
-                    : it.captureSeq != null && <span className={styles.rowTag}>#{it.captureSeq + 1}</span>}
-                </button>
+                <div key={it.path} className={styles.rowWrap}
+                     style={color ? { '--row-src': color } : undefined}>
+                  {!it.inPlace && (
+                    <input type="checkbox" className={styles.rowCheck}
+                           checked={checked.has(it.path)} onChange={() => toggleOne(it.path)}
+                           aria-label={`Select ${it.title} for delete`} />
+                  )}
+                  <button
+                    className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
+                    onClick={() => select(it)} title={it.title}>
+                    {color && <span className={styles.srcDot} aria-hidden="true" />}
+                    <span className={styles.rowTitle}>{it.title}</span>
+                    {it.inPlace
+                      ? <span className={styles.rowTag}>in place</span>
+                      : it.captureSeq != null && <span className={styles.rowTag}>#{it.captureSeq + 1}</span>}
+                  </button>
+                </div>
               );
             })}
           </div>
