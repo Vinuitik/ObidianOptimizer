@@ -32,7 +32,7 @@ export default function ReviewPage() {
     try {
       const raw = await fetchNoteContent(fullPath);
       const title = fullPath.split(/[/\\]/).pop().replace(/\.md$/, '');
-      setInlineNote({ title, raw });
+      setInlineNote({ title, raw, fullPath });
     } catch {
       // fallback: if fetch fails just stay on current view
     }
@@ -88,17 +88,11 @@ export default function ReviewPage() {
       {/* Right — inline note view, flashcard test, or slideshow */}
       <div className={styles.sessionPane}>
         {inlineNote ? (
-          <div className={styles.inlineNote}>
-            <div className={styles.inlineNoteHeader}>
-              <button className={styles.inlineNoteBack} onClick={() => setInlineNote(null)}>
-                ← Back
-              </button>
-              <span className={styles.inlineNoteTitle}>{inlineNote.title}</span>
-            </div>
-            <div className={styles.inlineNoteBody}>
-              <NoteRenderer content={inlineNote.raw} resetKey={inlineNote.fullPath || inlineNote.title} />
-            </div>
-          </div>
+          <InlineNoteReview
+            note={inlineNote}
+            onBack={() => setInlineNote(null)}
+            onClose={handleClose}
+          />
         ) : activeNote ? (
           flashcardsEnabled ? (
             <FlashcardSession
@@ -129,14 +123,75 @@ export default function ReviewPage() {
   );
 }
 
-// ── Slideshow mode (flashcards off): read the note, self-rate with 4 bands ────
-
+// The four FSRS grade bands (cards/FLOWS.md → Review Flow). Shared by the
+// slideshow and the direct-note review. No "very hard" — HARD is the lowest.
 const BANDS = [
   { value: 'HARD',      label: 'Hard',      hint: 'review soon' },
   { value: 'GOOD',      label: 'Good',      hint: 'standard interval' },
   { value: 'EASY',      label: 'Easy',      hint: 'longer interval' },
   { value: 'VERY_EASY', label: 'Very easy', hint: 'longest interval' },
 ];
+
+// ── Direct-note review (no flashcards yet): read the note, self-grade to FSRS ──
+// Shown when a note has no cards — FlashcardSession's "Review note directly →"
+// routes here. The band buttons post to POST /api/reviews/grade, same as the
+// slideshow, so the note is actually rescheduled instead of being read-only.
+
+function InlineNoteReview({ note, onBack, onClose }) {
+  const dismissFromReview = useStore(s => s.dismissFromReview);
+  const showToast         = useStore(s => s.showToast);
+  const [graded, setGraded] = useState(null);
+
+  async function rate(band) {
+    try {
+      const result = await gradeNote(note.fullPath, band);
+      setGraded(result);
+      dismissFromReview(note.fullPath);
+    } catch (e) {
+      showToast(`Rating failed: ${e.message ?? e}`);
+    }
+  }
+
+  return (
+    <div className={styles.inlineNote}>
+      <div className={styles.inlineNoteHeader}>
+        <button className={styles.inlineNoteBack} onClick={onBack}>← Back</button>
+        <span className={styles.inlineNoteTitle}>{note.title}</span>
+      </div>
+      <div className={styles.inlineNoteBody}>
+        <NoteRenderer content={note.raw} resetKey={note.fullPath || note.title} />
+      </div>
+
+      {/* Grade bar — pins to the bottom of the pane so it's reachable after scrolling */}
+      <div className={styles.inlineGrade} data-testid="inline-grade">
+        {!graded ? (
+          <>
+            <span className={styles.inlineGradePrompt}>How well did you remember this note?</span>
+            <div className={styles.inlineGradeBtns} data-testid="band-buttons">
+              {BANDS.map(b => (
+                <button key={b.value} className={styles.inlineGradeBtn}
+                        onClick={() => rate(b.value)} data-testid={`band-${b.value}`}
+                        title={b.hint}>
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className={styles.inlineGraded} data-testid="inline-graded">
+            <span>
+              Graded <strong>{graded.band.replace('_', ' ')}</strong> — next review{' '}
+              {new Date(graded.due).toLocaleDateString()}
+            </span>
+            <button className={styles.inlineGradeBtn} onClick={onClose}>Next note →</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Slideshow mode (flashcards off): read the note, self-rate with 4 bands ────
 
 function SlideshowReview({ note, onReviewNote, onClose }) {
   const dismissFromReview = useStore(s => s.dismissFromReview);

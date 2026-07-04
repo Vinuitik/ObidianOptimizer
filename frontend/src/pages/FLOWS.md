@@ -122,8 +122,13 @@ To add a chart: section in DashboardPage + counter in `StatsController.java`
 ## ReviewPage
 
 Flashcard tests vs self-rated slideshow (see cards FLOWS + frontend/FLOWS.md). The inline
-"Open note →" view renders through the shared `molecules/NoteRenderer` (read-only Milkdown — the
-SAME pipeline as the main editor, so tables/images/math/code render identically), not raw `<pre>`.
+"Review note directly →" view (`InlineNoteReview`, shown when a note has no cards yet)
+renders through the shared `molecules/NoteRenderer` (read-only Milkdown — the SAME pipeline
+as the main editor, so tables/images/math/code render identically), not raw `<pre>`, AND
+carries a bottom grade bar: the four FSRS bands (`BANDS`: HARD/GOOD/EASY/VERY_EASY) →
+`gradeNote()` → `POST /api/reviews/grade` → `dismissFromReview` — so a note with no
+generated cards is still actually rescheduled, not just read. `inlineNote` must carry
+`fullPath` (set in `handleReviewNote`) for the grade call.
 (`molecules/MarkdownContent` is the older markdown-it renderer — kept for the mobile/lightweight
 path; the rich Milkdown reuse is `NoteRenderer`, since the main note surface is Milkdown, not
 markdown-it. `NoteViewer.jsx` is legacy/unused.)
