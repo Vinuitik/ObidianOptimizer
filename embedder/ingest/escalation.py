@@ -46,11 +46,29 @@ _worker_started = False
 BrowserToolFn = Callable[[str, dict], dict]
 _browser_tools: Optional[BrowserToolFn] = None
 
+# Status emitter — pushes lifecycle events (start / tool / done) to the extension over the WS
+# so the popup can show what the agent is doing. Fire-and-forget; set by the bridge on connect.
+StatusFn = Callable[[dict], None]
+_status_emit: Optional[StatusFn] = None
+
 
 def register_browser_tools(fn: Optional[BrowserToolFn]) -> None:
     """Called by the WebSocket bridge when the extension connects/disconnects (fn or None)."""
     global _browser_tools
     _browser_tools = fn
+
+
+def register_status_emitter(fn: Optional[StatusFn]) -> None:
+    global _status_emit
+    _status_emit = fn
+
+
+def _emit(event: dict) -> None:
+    if _status_emit is not None:
+        try:
+            _status_emit(event)
+        except Exception:
+            pass
 
 
 def signature(failure: dict) -> str:
@@ -132,6 +150,7 @@ def run_session(failure: dict, complete_fn=None, tools: Optional[dict] = None) -
     transcript = [f"FAILURE: {json.dumps({k: failure.get(k) for k in ('ref', 'error', 'stage')})}",
                   f"TOOLS: {', '.join(sorted(tools))}"]
     used: list[dict] = []
+    _emit({"event": "start", "ref": failure.get("ref"), "error": (failure.get("error") or "")[:80]})
     for _ in range(MAX_ITERS):
         try:
             step = _parse_step(complete_fn("\n".join(transcript), SYSTEM))
@@ -140,18 +159,22 @@ def run_session(failure: dict, complete_fn=None, tools: Optional[dict] = None) -
             continue
         if "give_up" in step:
             _dead_signatures.add(signature(failure))
+            _emit({"event": "done", "status": "gave_up", "detail": str(step["give_up"])[:120]})
             return {"status": "gave_up", "reason": step["give_up"]}
         if "submit" in step:
             recipe = {"signature": signature(failure), "ref": failure.get("ref"),
                       "steps": used, "resource": step["submit"], "at": time.time()}
             _write_fix(recipe)
             _resubmit(step["submit"], failure)
+            _emit({"event": "done", "status": "recovered", "detail": str(step["submit"])[:120]})
             return {"status": "recovered", "recipe": recipe}
         name, args = step.get("tool"), step.get("args", {})
+        _emit({"event": "tool", "tool": name, "arg": str(args.get("url") or "")[:80]})
         result = _run_tool(tools, name, args)
         used.append({"tool": name, "args": args})
         transcript.append(f"TOOL {name}({json.dumps(args)[:200]}) -> {json.dumps(result)[:600]}")
     _dead_signatures.add(signature(failure))
+    _emit({"event": "done", "status": "exhausted", "detail": f"{MAX_ITERS} steps, no luck"})
     return {"status": "exhausted"}
 
 

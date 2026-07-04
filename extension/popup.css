@@ -147,3 +147,15 @@ select.in { appearance: none; cursor: pointer; }
   cursor: pointer;
 }
 .remember input { accent-color: var(--color-accent); }
+
+/* Agent activity feed */
+.agent { margin-top: 10px; border: 1px solid var(--color-border); border-radius: 8px; padding: 6px 10px; }
+.agent > summary { cursor: pointer; font-size: 12px; color: var(--color-text-2); list-style: none; display: flex; align-items: center; gap: 8px; }
+.agent-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; }
+.agent-badge.run  { background: rgba(224,164,88,0.18); color: var(--color-amber); }
+.agent-badge.ok   { background: rgba(76,195,138,0.18); color: var(--color-success); }
+.agent-badge.fail { background: rgba(224,92,92,0.18); color: var(--color-danger); }
+.agent-feed { list-style: none; margin: 8px 0 2px; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 160px; overflow-y: auto; }
+.agent-feed li { font-size: 11px; line-height: 1.4; color: var(--color-text-2); font-family: var(--font-mono, monospace); }
+.agent-feed li.ev-ok   { color: var(--color-success); }
+.agent-feed li.ev-fail { color: var(--color-danger); }

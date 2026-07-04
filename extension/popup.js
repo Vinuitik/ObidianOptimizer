@@ -178,5 +178,40 @@ async function refreshAuthLine() {
     ? 'Signed in to ObsidianOptimizer ✓' : 'Sign in to ObsidianOptimizer';
 }
 
+// ── Agent activity feed ─────────────────────────────────────────────────────────
+function short(u) { try { return new URL(u).host; } catch { return (u || '').slice(0, 40); } }
+function agentEventLabel(e) {
+  if (e.event === 'start') return `▶ escalating ${short(e.ref)} — ${e.error || 'failed'}`;
+  if (e.event === 'tool')  return `🔧 ${e.tool}${e.arg ? ' · ' + short(e.arg) : ''}`;
+  if (e.event === 'done') {
+    if (e.status === 'recovered') return `✅ recovered → ${e.detail || ''}`;
+    if (e.status === 'gave_up')   return `🚫 gave up — ${e.detail || ''}`;
+    return `⌛ exhausted — ${e.detail || ''}`;
+  }
+  return JSON.stringify(e);
+}
+async function renderAgentFeed() {
+  const { agentLog = [] } = await api.storage.local.get('agentLog');
+  const panel = $('agent-panel'), feed = $('agent-feed'), badge = $('agent-badge');
+  panel.hidden = agentLog.length === 0;
+  if (!agentLog.length) return;
+  feed.innerHTML = '';
+  for (const e of agentLog.slice(-12).reverse()) {
+    const li = document.createElement('li');
+    li.textContent = agentEventLabel(e);
+    li.className = e.event === 'done'
+      ? (e.status === 'recovered' ? 'ev-ok' : 'ev-fail') : 'ev';
+    feed.appendChild(li);
+  }
+  const last = agentLog[agentLog.length - 1];
+  const running = last.event !== 'done';
+  badge.textContent = running ? '● working' : (last.status === 'recovered' ? '✓ fixed' : '✕ ' + last.status);
+  badge.className = `agent-badge ${running ? 'run' : (last.status === 'recovered' ? 'ok' : 'fail')}`;
+}
+api.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.agentLog) renderAgentFeed();
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 prefill();
+renderAgentFeed();

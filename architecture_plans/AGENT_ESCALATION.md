@@ -18,9 +18,15 @@ Built + unit-tested (`embedder/ingest/escalation.py`, flag `AGENT_ESCALATION_ENA
   `get_dom`/`get_network`/`browser_fetch` **scoped to the failed tab's origin**, replies over the
   socket; reconnects (MV3 SW-wake caveat).
 
+✅ **Activity UI + armed (deployed):** the embedder emits `start`/`tool`/`done` events over the
+socket (`escalation._emit` → `bridge.emit_sync`); the extension logs them (`recordAgentEvent` →
+`agentLog`) and the popup shows a live feed + a working/fixed/failed badge (`renderAgentFeed`).
+Deployed: `AGENT_ESCALATION_ENABLED=1` (embedder) + `AGENT_WS_TOKEN` (nginx) set in `.env`;
+`/agent-ws` verified through nginx (valid token connects, wrong 401s). **User step:** reload the
+Firefox extension + paste the token in ⚙ Settings.
+
 Remaining: **host-wrapper multi-turn** refinement (transcript-as-prompt works but is crude); a
-**UI** to surface failed captures + live agent sessions; end-to-end **live test** (needs the
-frontend rebuilt for the nginx route + Firefox + `AGENT_WS_TOKEN` set + `AGENT_ESCALATION_ENABLED=1`).
+richer **failed-captures** view; a real end-to-end run (agent recovering a live failure).
 
 ## Why
 Extraction fails on the long tail: JS-viewer wrappers (Google Drive), sites where the media

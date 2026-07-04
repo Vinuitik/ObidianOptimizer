@@ -393,6 +393,14 @@ async function agentBrowserFetch({ url }) {
   return { uploaded: path, content_type: ct, filename: name };
 }
 
+// Keep a short rolling log of the agent's lifecycle events so the popup can show what it's
+// doing (started / which tool / recovered-or-gave-up). Stored so the popup reads it live.
+async function recordAgentEvent(e) {
+  const { agentLog = [] } = await api.storage.local.get('agentLog');
+  agentLog.push({ ...e, ts: Date.now() });
+  await api.storage.local.set({ agentLog: agentLog.slice(-40) });
+}
+
 const AGENT_TOOLS = { get_dom: agentGetDom, get_network: agentGetNetwork, browser_fetch: agentBrowserFetch };
 let agentWs = null, agentWsTimer = null;
 
@@ -405,6 +413,7 @@ async function connectAgentWs() {
     agentWs = ws;
     ws.onmessage = async (ev) => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.event) { await recordAgentEvent(m); return; }   // status event (start/tool/done)
       const fn = AGENT_TOOLS[m.tool];
       let result;
       try { result = fn ? await fn(m.args || {}) : { error: `unknown tool ${m.tool}` }; }

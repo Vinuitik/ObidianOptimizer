@@ -62,6 +62,9 @@ services:
       - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
       - DOWNLOAD_DIR=/workspace
       - RESOURCE_DIR=/resources
+      # Escalation agent (AGENT_ESCALATION.md) — off unless set to 1. Fix-log lands in
+      # AGENT_FIXES_DIR (defaults to /reports = the mounted _reports/).
+      - AGENT_ESCALATION_ENABLED=${AGENT_ESCALATION_ENABLED:-0}
       - BACKEND_URL=${BACKEND_URL:-http://backend:8084}
     # Native Linux Docker doesn't provide host.docker.internal (only Docker
     # Desktop does). Map it to the host gateway so the embedder can reach the

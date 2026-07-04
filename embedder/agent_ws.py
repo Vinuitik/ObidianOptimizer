@@ -49,6 +49,14 @@ class _Bridge:
         except Exception as e:
             return {"error": f"browser tool '{tool}' failed: {e}"}
 
+    def emit_sync(self, event: dict) -> None:
+        """Fire-and-forget status event (start/tool/done) → extension, from the agent thread."""
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.ws.send_text(json.dumps(event)), self.loop)
+        except Exception:
+            pass
+
     def resolve(self, rid: str, result: dict) -> None:
         fut = self.pending.get(rid)
         if fut is not None and not fut.done():
@@ -61,6 +69,7 @@ def register(app) -> None:
         await ws.accept()
         bridge = _Bridge(ws, asyncio.get_running_loop())
         escalation.register_browser_tools(bridge.call_sync)
+        escalation.register_status_emitter(bridge.emit_sync)
         log.info("agent-ws: extension connected")
         try:
             while True:
@@ -73,4 +82,5 @@ def register(app) -> None:
             log.warning("agent-ws receive error: %s", e)
         finally:
             escalation.register_browser_tools(None)
+            escalation.register_status_emitter(None)
             log.info("agent-ws: extension disconnected")
