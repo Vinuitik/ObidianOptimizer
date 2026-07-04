@@ -97,12 +97,24 @@ def _worker_loop():
             log.exception("ingest job %s failed", job_id)
             job["status"] = "FAILED"
             job["error"] = str(e)[:500]
+            _maybe_escalate(job)   # AGENT_ESCALATION: hand recoverable failures to the agent
         finally:
             # Once the burst drains, release the bursty ingest models so VRAM/RAM
             # returns to the rest of the stack. Deferred until the queue is empty
             # so a batch of jobs doesn't reload CLIP between each one.
             if _queue.empty():
                 _evict_models()
+
+
+def _maybe_escalate(job: dict):
+    """Best-effort hand-off of a FAILED job to the escalation agent (no-op unless
+    AGENT_ESCALATION_ENABLED). Never let this interfere with the worker loop."""
+    try:
+        from ingest import escalation
+        escalation.escalate({"ref": job.get("ref"), "error": job.get("error"),
+                             "stage": job.get("stage"), "capture_id": job.get("capture_id")})
+    except Exception as e:
+        log.debug("escalation trigger skipped: %s", e)
 
 
 def _evict_models():

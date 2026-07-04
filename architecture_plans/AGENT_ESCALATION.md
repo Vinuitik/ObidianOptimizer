@@ -1,6 +1,17 @@
 # Agent Escalation — a stateful browser-agent that debugs extraction failures
 
-**Status: PLAN / [NOT IMPLEMENTED].** Design + open decisions below. Nothing built yet.
+**Status: FOUNDATION BUILT (flagged off), browser-tools bridge remaining.**
+Built + unit-tested (`embedder/ingest/escalation.py`, flag `AGENT_ESCALATION_ENABLED`, default off):
+- ✅ SINGLETON session + queue; **auto-trigger** on job failure (`jobs._maybe_escalate`).
+- ✅ Bounded tool-loop (`run_session`, MAX_ITERS) with a running transcript as the LLM's memory
+  (LLM = claude-cli via host-wrapper `_complete`); per-signature **give-up guard** (no token re-burn).
+- ✅ Server-side tools (`http_head`/`http_fetch`) + `submit`/`give_up`; recovered resource → `jobs.submit`.
+- ✅ **Fix-log** (`_write_fix` → `AGENT_FIXES_DIR/agent-fixes/fixes.jsonl`) — every success recorded
+  as `{signature, ref, steps, resource}` → codify recurring ones into deterministic handlers.
+
+Remaining (the browser half): **stage 3** WebSocket bridge (`register_browser_tools`) so the
+extension serves `get_dom`/`get_network`/`browser_fetch`/`click`; the **extension WS client**;
+**host-wrapper multi-turn** refinement; **UI** to show failed captures + live sessions.
 
 ## Why
 Extraction fails on the long tail: JS-viewer wrappers (Google Drive), sites where the media
