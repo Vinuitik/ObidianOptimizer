@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { parseSourceRegion } from '../../utils/inboxParse';
 import RsvpReader from '../molecules/RsvpReader';
+import NoteRenderer from '../molecules/NoteRenderer';
 import styles from './SourceSplicePanel.module.css';
 
 // Left panel of the review: the source, spliced to the region THIS note came from
@@ -14,6 +15,10 @@ export default function SourceSplicePanel({ item, onOrientation }) {
     [item],
   );
   const kind = item ? sourceKind(region.ref, item) : null;
+
+  // Text sources default to RSVP (fast read); toggle to a rendered read view so the
+  // user can eyeball the note themselves. Sticky across notes.
+  const [textMode, setTextMode] = useState('rsvp');   // 'rsvp' | 'read'
 
   // Report split orientation so the review layout matches the source shape (landscape
   // video → wide → horizontal split; portrait/other → vertical). YouTube is ~always
@@ -37,15 +42,23 @@ export default function SourceSplicePanel({ item, onOrientation }) {
         )}
         {region.startSeconds != null && <span className={styles.at}>from {fmt(region.startSeconds)}</span>}
         {region.pages.length > 0 && <span className={styles.at}>p. {region.pages.join(', ')}</span>}
+        {kind === 'text' && (
+          <div className={styles.toggle}>
+            <button className={`${styles.toggleBtn} ${textMode === 'rsvp' ? styles.toggleOn : ''}`}
+                    onClick={() => setTextMode('rsvp')}>RSVP</button>
+            <button className={`${styles.toggleBtn} ${textMode === 'read' ? styles.toggleOn : ''}`}
+                    onClick={() => setTextMode('read')}>Read</button>
+          </div>
+        )}
       </div>
       <div className={styles.viewer}>
-        <Viewer kind={kind} region={region} item={item} onOrientation={onOrientation} />
+        <Viewer kind={kind} region={region} item={item} textMode={textMode} onOrientation={onOrientation} />
       </div>
     </div>
   );
 }
 
-function Viewer({ kind, region, item, onOrientation }) {
+function Viewer({ kind, region, item, textMode, onOrientation }) {
   if (kind === 'youtube') {
     const id = youtubeId(region.ref);
     const start = region.startSeconds || 0;
@@ -73,7 +86,11 @@ function Viewer({ kind, region, item, onOrientation }) {
   if (kind === 'web') {
     return <iframe className={styles.frame} src={region.ref} title="source page" />;
   }
-  // text / unknown → read the note's prose fast; this IS the relevant region for text.
+  // text / unknown → default RSVP (fast read); 'read' renders the note so the user can
+  // scan it themselves (read-only Milkdown, the real renderer).
+  if (textMode === 'read') {
+    return <div className={styles.readbox}><NoteRenderer content={item.content} resetKey={item.path} /></div>;
+  }
   return <RsvpReader text={item.content} />;
 }
 
