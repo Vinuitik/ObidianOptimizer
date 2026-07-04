@@ -106,6 +106,17 @@ public class CaptureRepository {
             id) > 0;
     }
 
+    /** How many OTHER live (non-discarded) captures still reference this vault file as their
+     *  source/original. Guards the cleanup sweep against trashing a file shared by a duplicate
+     *  capture (same upload twice → same filename) whose sibling still has notes. */
+    public int countLiveReferencesToFile(String vaultRelPath, String excludeId) {
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM capture WHERE id <> ? AND status <> 'discarded' " +
+            "AND (source_ref = ? OR source_path = ?)",
+            Integer.class, excludeId, vaultRelPath, vaultRelPath);
+        return n == null ? 0 : n;
+    }
+
     /** Clear the source path once the original has been trashed on completion. */
     public void setSourcePath(String id, String sourcePath) {
         jdbc.update("UPDATE capture SET source_path = ? WHERE id = ?", sourcePath, id);

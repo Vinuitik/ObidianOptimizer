@@ -148,10 +148,14 @@ public class CaptureIngestWorker {
             if (active.contains(c.id())) continue;                          // still ingesting
             if (!noteIndex.findNotesByCapture(c.id()).isEmpty()) continue;  // still has children
             String file = localVaultFile(c);
-            if (file != null) trashVaultFile(file);
+            // Don't trash a file a DUPLICATE capture (same upload twice) still shares — its
+            // sibling may still have notes pointing at it. Only the last reference trashes it.
+            boolean trash = file != null && captureRepo.countLiveReferencesToFile(file, c.id()) == 0;
+            if (trash) trashVaultFile(file);
             captureRepo.updateStatus(c.id(), "discarded");
             log.info("[cleanup] capture {} has no notes → discarded{}",
-                c.id(), file != null ? " + trashed source " + file : "");
+                c.id(), trash ? " + trashed source " + file
+                              : (file != null ? " (source " + file + " kept — shared)" : ""));
         }
     }
 
