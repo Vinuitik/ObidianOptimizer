@@ -13,7 +13,7 @@ server {
     listen 8081;
 
     # ── Security headers ─────────────────────────────────────────────────────
-    add_header X-Frame-Options "DENY" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;   # allow our own pages to <embed> our PDFs; still blocks other sites
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
@@ -23,7 +23,7 @@ server {
     #   allow any https image host. Trade-off: the remote host sees your IP when the
     #   image loads (single-user personal tool → acceptable). Tighten if that matters.
     # object-src 'self': allows <embed> for inline PDF viewing from same-origin paths.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; object-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; object-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'" always;
     add_header Cache-Control "no-store, no-cache, must-revalidate" always;
 
     # ── Auth endpoint — strict brute-force limit (5/min per IP) ──────────────
