@@ -81,6 +81,16 @@ public class CaptureRepository {
             id) > 0;
     }
 
+    /** Captures still 'processing'/'failed' and older than a cutoff — candidates for the
+     *  orphan-source cleanup sweep (a source with no notes left → trash it). The age gate
+     *  keeps mid-ingest captures out. */
+    public List<Capture> findStaleActive(long olderThanEpochMillis) {
+        return jdbc.query(
+            "SELECT * FROM capture WHERE status IN ('processing','failed') AND created_at < ? " +
+            "ORDER BY created_at ASC",
+            CaptureRepository::map, olderThanEpochMillis);
+    }
+
     /** Oldest-first batch of queued resources awaiting submission (FIFO fairness). */
     public List<Capture> findQueued(int limit) {
         return jdbc.query(

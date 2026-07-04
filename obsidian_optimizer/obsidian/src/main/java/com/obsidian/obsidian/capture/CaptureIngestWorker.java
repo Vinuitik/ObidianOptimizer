@@ -2,6 +2,8 @@ package com.obsidian.obsidian.capture;
 
 import com.obsidian.obsidian.common.IngestClient;
 import com.obsidian.obsidian.common.WorkerLane;
+import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -15,7 +17,9 @@ import org.springframework.stereotype.Component;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Continuously drains the durable capture queue into the ingest pipeline. The user
@@ -45,7 +49,15 @@ public class CaptureIngestWorker {
     private final CaptureRepository captureRepo;
     private final IngestClient ingestClient;
     private final SettingsRepository settingsRepo;
+    private final NoteIndexRepository noteIndex;
+    private final FileRepository fileRepo;
     private final WorkerLane lane = new WorkerLane("capture-ingest");
+
+    // Orphan-source cleanup: a capture with no notes left, older than this, and not actively
+    // ingesting → its kept source file is trashed (the user's "no children → delete the
+    // source" rule). Generous age gate so a long in-flight ingest is never mistaken for orphaned.
+    @Value("${ingest.cleanup.min-age-ms:1800000}")   // 30 min
+    private long cleanupMinAgeMs;
 
     // Shared master switch with ResourceScanService: off → the whole ingest pipeline
     // is disabled, so leave queued resources untouched (they drain when re-enabled).
@@ -62,10 +74,13 @@ public class CaptureIngestWorker {
     private volatile boolean appReady = false;
 
     public CaptureIngestWorker(CaptureRepository captureRepo, IngestClient ingestClient,
-                               SettingsRepository settingsRepo) {
+                               SettingsRepository settingsRepo, NoteIndexRepository noteIndex,
+                               FileRepository fileRepo) {
         this.captureRepo = captureRepo;
         this.ingestClient = ingestClient;
         this.settingsRepo = settingsRepo;
+        this.noteIndex = noteIndex;
+        this.fileRepo = fileRepo;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -110,6 +125,50 @@ public class CaptureIngestWorker {
                 log.warn("[CaptureIngestWorker] capture {} ingest FAILED: {}",
                     j.captureId(), j.error());
             }
+        }
+    }
+
+    /** Orphan-source cleanup (the user's "once a source has no children we delete it" rule).
+     *  A capture whose proposed notes were ALL deleted leaves its kept original (uploaded PDF,
+     *  saved media) sitting in the vault. This sweep trashes it. Guards against nuking a source
+     *  mid-ingest: only captures older than {@code cleanupMinAgeMs} AND with no active embedder
+     *  job are considered. (Per-note deletes already clean up immediately via InboxController
+     *  Stage 4; this is the safety net for that + failed captures + restart-orphaned sources.) */
+    @Scheduled(fixedDelayString = "${ingest.cleanup.delay-ms:120000}",
+               initialDelayString = "${ingest.cleanup.initial-delay-ms:45000}")
+    public void cleanupOrphanSources() {
+        if (!ingestEnabled || !appReady) return;
+        Set<String> active = new HashSet<>();
+        for (IngestClient.JobView j : ingestClient.listJobs()) {
+            if (("QUEUED".equals(j.status()) || "RUNNING".equals(j.status())) && j.captureId() != null)
+                active.add(j.captureId());
+        }
+        long cutoff = System.currentTimeMillis() - cleanupMinAgeMs;
+        for (CaptureRepository.Capture c : captureRepo.findStaleActive(cutoff)) {
+            if (active.contains(c.id())) continue;                          // still ingesting
+            if (!noteIndex.findNotesByCapture(c.id()).isEmpty()) continue;  // still has children
+            String file = localVaultFile(c);
+            if (file != null) trashVaultFile(file);
+            captureRepo.updateStatus(c.id(), "discarded");
+            log.info("[cleanup] capture {} has no notes → discarded{}",
+                c.id(), file != null ? " + trashed source " + file : "");
+        }
+    }
+
+    /** The capture's kept original as a vault-local file, or null (external URL / nothing). */
+    private String localVaultFile(CaptureRepository.Capture c) {
+        for (String p : new String[]{ c.sourcePath(), c.sourceRef() }) {
+            if (p != null && (p.startsWith("_workspace/") || p.startsWith("resources/"))) return p;
+        }
+        return null;
+    }
+
+    private void trashVaultFile(String vaultRel) {
+        try {
+            String abs = Paths.get(settingsRepo.getVaultPath()).resolve(vaultRel).normalize().toString();
+            fileRepo.softDeleteFile(abs);   // idempotent — no-op if already gone
+        } catch (Exception e) {
+            log.warn("[cleanup] could not trash {}: {}", vaultRel, e.toString());
         }
     }
 
