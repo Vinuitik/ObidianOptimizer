@@ -88,3 +88,7 @@ the Learn Inbox lists (`InboxController`); `filed` is set when every child note 
 | Embedder URL / submit timeout | `embedder.url` / `ingest.submit.timeout-ms` env |
 | Master ingest on/off | `ingest.enabled` (shared with ResourceScanService) |
 | Capture lifecycle transitions | `queued`→`processing` here; `filed` in `inbox/InboxController` |
+| **Failure visibility** (job failed after submit) | `CaptureIngestWorker.pollFailures()` polls `IngestClient.listJobs()` → `CaptureRepository.markFailed()` (stranded `processing`→`failed`) |
+| **Orphan-source cleanup** ("no children → trash source") | `CaptureIngestWorker.cleanupOrphanSources()` (age + no-active-job + `countLiveReferencesToFile` guards) → `FileRepository.softDeleteFile`; env `ingest.cleanup.min-age-ms` |
+| **Duplicate-capture guard** (409) | `CaptureController.capture()` → `CaptureRepository.existsLiveForSource()`; extension shows ⚠️ |
+| Per-note retention (last note deleted → trash media) | `inbox/InboxController.discard()` (`local:` + `trashLocalMedia`; LOCAL_MEDIA_RETENTION §4) |

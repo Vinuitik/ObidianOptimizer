@@ -32,6 +32,8 @@ Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notl
 | [Download FLOWS](embedder/download/FLOWS.md) | Flows | yt-dlp captions + offline media downloads (salvaged VideoManager core) |
 | [Inbox FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/inbox/FLOWS.md) | Flows | Learn Inbox triage: `_inbox/` staging, file/discard, review exclusion |
 | [Capture Architecture](architecture_plans/CAPTURE_ARCH.md) | Architecture | Capture model: resource → ordered proposed notes → Learn queue (phases 1–2 shipped; see STATUS table) |
+| [Local Media + Retention](architecture_plans/LOCAL_MEDIA_RETENTION.md) | Architecture | Ingest downloads media → `resources/`, notes carry `local:`, retention trashes orphaned sources (stages 1–4 + 2b/2c DONE; deep page-video pending) |
+| [Agent Escalation](architecture_plans/AGENT_ESCALATION.md) | Architecture | Stateful browser-agent debugs extraction failures (session+fix-log+WS bridge+extension tools+activity UI BUILT, flag `AGENT_ESCALATION_ENABLED`; host-wrapper multi-turn + richer UI pending) |
 | [Extension Media Capture](architecture_plans/EXTENSION_MEDIA_CAPTURE_ARCH.md) | Architecture | "What's on this page?" DOM scanner + candidate picker [NOT IMPLEMENTED] |
 | [Sync Retention Plan](architecture_plans/SYNC_RETENTION_PLAN.md) | Architecture | Drive delete propagation, orphan janitor, quota visibility [NOT IMPLEMENTED] |
 | [PWA Mobile Architecture](architecture_plans/PWA_MOBILE_ARCH.md) | Architecture | Installable offline PWA; P1–P4 built but dormant in `frontend/src/pwa/` |

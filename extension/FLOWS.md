@@ -84,6 +84,21 @@ over just sending the URL. *To change:* `background.capturePage()` / `extractPag
 page). `contextMenus.onClicked` → `routeText(selectionText|linkUrl|pageUrl)` →
 `flashBadge()` paints a ✓/! on the toolbar icon (fire-and-forget feedback, no popup).
 
+## Flow — escalation agent (browser tools over WebSocket)
+When ingest FAILS on a URL, the embedder's escalation agent (AGENT_ESCALATION.md) drives browser
+tools *here*. `background.connectAgentWs()` opens `wss://…/agent-ws?token=<agentWsToken>` (set in
+⚙ Settings; token-in-URL auth like `/mcp`). Incoming `{id,tool,args}` → `AGENT_TOOLS`
+(`agentGetDom`/`agentGetNetwork`/`agentBrowserFetch`, **scoped to the failed tab's origin** via
+`findTabForUrl`) → reply `{id,result}`. Incoming `{event}` (start/tool/done) → `recordAgentEvent`
+→ `chrome.storage.agentLog` → popup `renderAgentFeed()` (live feed + working/fixed/failed badge).
+*Off unless `agentWsToken` is set.* MV3 caveat: the SW can sleep → the WS drops; it reconnects on
+wake (`scheduleAgentReconnect`) / `setConfig` / startup. *To change tools:* `AGENT_TOOLS`.
+
+## Flow — duplicate guard
+`background.capture()` surfaces the backend's **409** (`existsLiveForSource`) as
+`{duplicate:true}`; `routeText`/`capturePage` propagate it; `popup.handleResult` shows it LOUD
+(⚠️). Re-sharing a link/file already in the inbox is rejected, not re-ingested.
+
 ## Flow — auth + config (⚙ Settings)
 `config.js` holds the one editable endpoint (`obsidianApi`, default
 `https://obsidianoptimizer.uk/api`) in `chrome.storage.local`. Sign-in →
@@ -128,6 +143,10 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 |---|---|
 | Default endpoint | `config.js` `DEFAULTS.obsidianApi` |
 | Remembered creds / auto-relogin | `config.getCreds/setCreds/clearCreds`; `background.obsidian()` 401 self-heal (`reloginFromStored`); popup `#login-remember` + `doLogin` (Enter submits) |
+| Google Drive file capture | `background.captureDriveFile()` (fetch via user's session → upload → ingest); `driveFileId` / `DRIVE_FILE_RE` |
+| Agent WS client / browser tools | `background.connectAgentWs()` + `AGENT_TOOLS` (`agentGetDom/agentGetNetwork/agentBrowserFetch`); token = ⚙ Settings `#cfg-agent-token` → `config.agentWsToken` |
+| Agent activity feed (popup) | `background.recordAgentEvent` → `chrome.storage.agentLog`; popup `renderAgentFeed()` / `#agent-panel` |
+| Duplicate-capture warning | `background.capture()` 409 → `{duplicate}`; `popup.handleResult` (⚠️) |
 | API base override | popup ⚙ Settings → `chrome.storage.local` |
 | Smart page capture / scrape | `background.capturePage()` + `extractPageText()` (`#cap-page` button) |
 | Embedded-video detection (page) | `extractPageText()` video scan + `background.normalizeVideoUrl()` (YouTube-embed→watch, direct-media pass-through); web branch of `capturePage()` |
