@@ -25,6 +25,15 @@ One codebase, one diverging file: the **background declaration**. Chrome MV3 req
 so every `await api.*` call is promise-based in both engines. To add a WebExtension API
 call, use `api.*` (imported from `config.js`), never `chrome.*` directly.
 
+> **RULE — the two manifests do NOT sync.** `build-firefox-extension.sh` **swaps** the whole
+> manifest (`manifest.firefox.json` → `extension-firefox/manifest.json`), it does **not** merge.
+> So any manifest change that isn't the `background` block — **permissions, host_permissions,
+> icons, version, name, commands** — MUST be edited in **BOTH** `manifest.json` (Chrome) AND
+> `manifest.firefox.json` (Firefox), then re-run the build script. Editing only Chrome's
+> manifest silently ships Firefox without the change. (Only the JS is shared verbatim.)
+> `extension-firefox/` is a generated artifact — **gitignored**, rebuilt by the script; never
+> edit it by hand.
+
 ## Architecture (why a background worker)
 ```
 popup.js (UI) ─┐
@@ -35,8 +44,23 @@ All `fetch` lives in `background.js`: it runs with the extension's `host_permiss
 so the page's CORS/CSP/mixed-content rules don't apply, and the ObsidianOptimizer session
 cookie is sent (`credentials:'include'`). The popup never calls the network directly.
 
-## Flow — capture (the one box)
-`popup.js submit()` (or a context-menu click) → `send('routeText', {text})` →
+## Flow — smart "Capture this page" (one click)
+`popup.js capturePage()` (button `#cap-page`) or the **right-click → Send this page** menu →
+`send('capturePage', {url, tabId})` → `background.capturePage()`:
+
+| Active tab (`classify(url)`) | Action |
+|---|---|
+| youtube/vimeo/… | `POST /download` (yt-dlp) **+** `POST /capture` (notes) |
+| pdf / media-file URL | `POST /workspace/save` **+** `POST /capture` |
+| web page | inject `extractPageText()` via `api.scripting.executeScript` → grab the **rendered** main text → `captureText()` (beats server-side scrape on logged-in/JS pages) |
+| **any of the above fails** (scrape < `MIN_SCRAPE_CHARS`, download errors) | **escalate**: `capture(url)` — hand the raw URL to the ingest agent to extract |
+
+Needs the `scripting` permission (in BOTH manifests). The rendered-text scrape is the key win
+over just sending the URL. *To change:* `background.capturePage()` / `extractPageText()` /
+`MIN_SCRAPE_CHARS`.
+
+## Flow — paste/drop capture (the box)
+`popup.js submit()` (or a context-menu selection/link) → `send('routeText', {text})` →
 `background.routeText(text)` classifies and routes:
 
 | Input (`classify()`) | Route | Lands in |
@@ -95,7 +119,9 @@ page). `contextMenus.onClicked` → `routeText(selectionText|linkUrl|pageUrl)` �
 |---|---|
 | Default endpoint | `config.js` `DEFAULTS.obsidianApi` |
 | API base override | popup ⚙ Settings → `chrome.storage.local` |
+| Smart page capture / scrape | `background.capturePage()` + `extractPageText()` (`#cap-page` button) |
 | Input classification / routing | `background.classify()` + `routeText()` |
+| Escalate-to-agent fallback | `background.escalate()` (→ `capture(url)`) |
 | Live detection hint | `popup.detectLabel()` (mirror of `classify()`) |
 | Raw-text note template | `background.saveText()` |
 | File-upload path | `background.uploadFile()` → backend `/workspace/upload` |
