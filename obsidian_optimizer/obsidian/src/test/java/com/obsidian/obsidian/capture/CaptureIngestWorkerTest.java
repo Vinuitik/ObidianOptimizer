@@ -1,6 +1,8 @@
 package com.obsidian.obsidian.capture;
 
 import com.obsidian.obsidian.common.IngestClient;
+import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,8 @@ class CaptureIngestWorkerTest {
     private CaptureRepository repo;
     private IngestClient ingest;
     private SettingsRepository settings;
+    private NoteIndexRepository noteIndex;
+    private FileRepository fileRepo;
     private CaptureIngestWorker worker;
 
     private static CaptureRepository.Capture url(String id) {
@@ -36,7 +40,9 @@ class CaptureIngestWorkerTest {
         repo = mock(CaptureRepository.class);
         ingest = mock(IngestClient.class);
         settings = mock(SettingsRepository.class);
-        worker = new CaptureIngestWorker(repo, ingest, settings);
+        noteIndex = mock(NoteIndexRepository.class);
+        fileRepo = mock(FileRepository.class);
+        worker = new CaptureIngestWorker(repo, ingest, settings, noteIndex, fileRepo);
         ReflectionTestUtils.setField(worker, "ingestEnabled", true);
         ReflectionTestUtils.setField(worker, "batchLimit", 25);
         ReflectionTestUtils.setField(worker, "appReady", true);
