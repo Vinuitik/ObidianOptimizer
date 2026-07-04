@@ -1,25 +1,29 @@
-// Deterministic color per capture/source, so every note the ingest agent produced
-// from ONE source shares a hue in the inbox queue (InboxReview). Curated to sit on the
-// dark amethyst theme (styles/tokens.css) — distinct hues beat shades of one purple for
-// telling many sources apart at a glance. Hashing captureId keeps a source's color
-// stable across reloads. To change the palette / grouping: edit PALETTE below.
-const PALETTE = [
-  '#7c5cff', // violet (the accent)
-  '#4cc9f0', // sky
-  '#4cc38a', // green
-  '#e0a458', // amber
-  '#e05c9e', // magenta
-  '#8a7bff', // periwinkle
-  '#5ad1c8', // teal
-  '#f2799e', // rose
-];
+// Color-code inbox notes by their source (capture), so every note the ingest agent produced
+// from ONE source shares a hue and reads as a band in the queue (InboxReview).
+//
+// Strategy: assign hues by the source's FIRST-APPEARANCE order using the golden angle
+// (~137.5°). Consecutive sources land far apart on the wheel — no two adjacent groups look
+// alike (the old hash-into-fixed-palette let near-duplicates like violet/periwinkle collide).
+// Fixed S/L tuned to sit on the dark amethyst theme (styles/tokens.css). To retune spacing/
+// vividness: GOLDEN_ANGLE / SAT / LIGHT below.
+const GOLDEN_ANGLE = 137.508;
+const SAT = 72;    // %
+const LIGHT = 63;  // % — bright enough to read as a 3px bar + 8px dot on #0e0d15
 
-// Stable hash → palette index. Same key always maps to the same color.
-export function sourceColor(key) {
-  if (!key) return null;
-  let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
-  return PALETTE[Math.abs(h) % PALETTE.length];
+// Map of source key → color, keyed on captureId (falls back to path for un-captured items).
+// Built from an ordered list so the i-th distinct source gets hue = i * goldenAngle.
+export function buildSourceColors(items) {
+  const colors = new Map();
+  let i = 0;
+  for (const it of items) {
+    const key = it.captureId || it.path;
+    if (!colors.has(key)) {
+      const hue = Math.round((i * GOLDEN_ANGLE) % 360);
+      colors.set(key, `hsl(${hue} ${SAT}% ${LIGHT}%)`);
+      i++;
+    }
+  }
+  return colors;
 }
 
 // Reorder so notes from the same source are contiguous (color bands read as groups),
@@ -43,5 +47,3 @@ export function groupBySource(items) {
     })
     .map(x => x.it);
 }
-
-export { PALETTE };

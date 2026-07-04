@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchInbox, fileInboxNote, discardInboxNote, acknowledgeCapture } from '../../api/inbox';
 import { fetchChildren, updateNote } from '../../api/notes';
-import { sourceColor, groupBySource } from '../../utils/sourceColor';
+import { buildSourceColors, groupBySource } from '../../utils/sourceColor';
 import useStore from '../../store/useStore';
 import LearnLayout from '../templates/LearnLayout';
 import NoteRenderer from '../molecules/NoteRenderer';
@@ -38,8 +38,10 @@ export default function InboxReview({ onCount }) {
   const current = items.find(i => i.path === selected) || null;
   const workingItem = current ? { ...current, content: draft } : null;
 
-  // Queue grouped by source so same-source notes sit together as a color band.
+  // Queue grouped by source so same-source notes sit together as a color band, each source
+  // a well-spaced hue (golden-angle) so adjacent groups never look alike.
   const orderedItems = useMemo(() => groupBySource(items), [items]);
+  const sourceColors = useMemo(() => buildSourceColors(orderedItems), [orderedItems]);
 
   // Landscape video is wide → horizontal split (source on top); everything else vertical.
   const orientation = orient === 'landscape' ? 'horizontal' : 'vertical';
@@ -162,7 +164,7 @@ export default function InboxReview({ onCount }) {
               <p className={styles.status}>Inbox is empty. Capture a resource and its proposed notes appear here.</p>
             )}
             {orderedItems.map(it => {
-              const color = sourceColor(it.captureId);
+              const color = sourceColors.get(it.captureId || it.path);
               return (
                 <button key={it.path}
                   className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
