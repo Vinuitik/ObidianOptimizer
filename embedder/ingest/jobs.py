@@ -365,7 +365,7 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
 
 
 def _synthesize_and_publish(job: dict, bundle: dict):
-    from ingest import publish, synthesize
+    from ingest import linking, publish, synthesize
     from ingest import bundle as bundle_util
 
     # store media first so embeds resolve at validation time
@@ -381,6 +381,11 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     source_ref = bundle["source"].get("ref", "")
     publish.ensure_folder(publish.INBOX_FOLDER)
     capture_id = job.get("capture_id")
+    # Deterministic links are appended at the very end of each note (linking.py):
+    #   CHRONO — every note links to the PREVIOUS one from this same source (first has none).
+    #   SEMANTIC — LLM probes → hybrid search_notes → top-N existing notes.
+    titles = [p["title"] for p in plans]
+    sibling_stems = [synthesize.slugify(t) for t in titles]   # exclude self + same-source
     created, failures = [], []
     # enumerate → capture-seq: plans arrive in source order (outline windows run in
     # order), so seq preserves chapter/segment ordering for the Learn queue.
@@ -393,6 +398,11 @@ def _synthesize_and_publish(job: dict, bundle: dict):
             note_md = publish.stamp_inbox(note_md, source_ref, suggested)
             if capture_id:
                 note_md = publish.stamp_capture(note_md, capture_id, seq)
+            # Append links LAST so they sit at the very end of the note, verbatim.
+            prev_stem = sibling_stems[seq - 1] if seq > 0 else None
+            semantic = linking.semantic_link_stems(
+                plan["title"], note_md, exclude_stems=sibling_stems)
+            note_md = linking.append_links(note_md, ([prev_stem] if prev_stem else []) + semantic)
             path = publish.create_note(publish.INBOX_FOLDER,
                                        synthesize.slugify(plan["title"]), note_md)
             created.append(path)

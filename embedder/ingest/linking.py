@@ -126,3 +126,113 @@ def related_block(stems: list[str]) -> str:
     if not stems:
         return ""
     return "## Related\n\n" + " · ".join(f"[[{s}]]" for s in stems)
+
+
+# ── probe-driven semantic linking (live v1 path) ──────────────────────────────
+# The user's spec (differs from related_links above, which is the v2 ANN variant):
+#   per note → LLM writes a few QUESTIONS/STATEMENTS about it → each is a QUERY run
+#   through the HYBRID search (search_notes: BM25 + pgvector, RRF) → take the top N
+#   results overall → append as bare [[wikilinks]] at the very end of the note.
+# Adjustable: INGEST_SEMANTIC_LINKS (how many links), INGEST_SEMANTIC_PROBES (how
+# many queries). Best-effort: any failure (LLM/DB down) → no links, note still saved.
+SEMANTIC_LINKS = int(os.environ.get("INGEST_SEMANTIC_LINKS", "2"))
+SEMANTIC_PROBES = int(os.environ.get("INGEST_SEMANTIC_PROBES", "3"))
+SEMANTIC_SEARCH_LIMIT = int(os.environ.get("INGEST_SEMANTIC_SEARCH_LIMIT", "5"))
+
+CompleteFn = Callable[[str, str], str]
+SearchFn = Callable[[str, int], list]
+
+
+def _parse_str_array(text: str) -> list[str]:
+    """Pull a JSON array of strings out of an LLM reply (tolerates ``` fences / prose)."""
+    import json
+    t = text.strip()
+    lo, hi = t.find("["), t.rfind("]")
+    if not (0 <= lo < hi):
+        return []
+    try:
+        arr = json.loads(t[lo:hi + 1])
+    except json.JSONDecodeError:
+        return []
+    return [str(x).strip() for x in arr if isinstance(x, (str, int, float)) and str(x).strip()]
+
+
+def generate_probes(title: str, body: str, n: Optional[int] = None,
+                    complete_fn: Optional[CompleteFn] = None) -> list[str]:
+    """LLM → up to `n` short questions/statements about the note, used ONLY as search
+    queries (never linked directly). `complete_fn` injectable for tests."""
+    n = SEMANTIC_PROBES if n is None else n
+    if n <= 0:
+        return []
+    prose = strip_for_query(body)
+    if not prose:
+        return []
+    if complete_fn is None:
+        from ingest.synthesize import _complete
+        complete_fn = _complete
+    system = ("You generate concise SEARCH QUERIES to find related existing notes in a "
+              "knowledge vault. Output ONLY a JSON array of strings — each a short question "
+              "or statement capturing a key idea of the note. No prose, no code fences.")
+    prompt = (f"Note title: {title}\n\nNote body:\n{prose[:2000]}\n\n"
+              f"Return {n} search queries as a JSON array of strings.")
+    try:
+        return _parse_str_array(complete_fn(prompt, system))[:n]
+    except Exception as e:   # LLM/wrapper down — links are optional, never fatal
+        log.warning("probe generation skipped (%s)", e)
+        return []
+
+
+def semantic_link_stems(title: str, body: str, exclude_stems=(), cap: Optional[int] = None,
+                        complete_fn: Optional[CompleteFn] = None,
+                        search_fn: Optional[SearchFn] = None) -> list[str]:
+    """Note → up to `cap` link STEMS: LLM probes → hybrid `search_notes` per probe →
+    aggregate by best (lowest) rank across probes → top `cap` after excluding self +
+    same-source siblings. `search_fn`/`complete_fn` injectable for tests."""
+    cap = SEMANTIC_LINKS if cap is None else cap
+    if cap <= 0:
+        return []
+    exclude = {s.lower() for s in exclude_stems}
+    probes = generate_probes(title, body, complete_fn=complete_fn)
+    if not probes:
+        return []
+    if search_fn is None:
+        from mcp_server import search_notes
+        search_fn = search_notes
+
+    best_rank: dict[str, int] = {}   # note_path → best position seen across all probes
+    for q in probes:
+        try:
+            hits = search_fn(q, SEMANTIC_SEARCH_LIMIT)
+        except Exception as e:   # DB/index down — skip this probe, keep going
+            log.warning("semantic search skipped for %r (%s)", q, e)
+            continue
+        for rank, hit in enumerate(hits):
+            path = (hit.get("notePath") or hit.get("note_path")) if isinstance(hit, dict) else None
+            if not path:
+                continue
+            if path not in best_rank or rank < best_rank[path]:
+                best_rank[path] = rank
+
+    out: list[str] = []
+    for path, _ in sorted(best_rank.items(), key=lambda kv: kv[1]):
+        stem = PurePosixPath(path).stem
+        low = stem.lower()
+        if low in exclude or any(low == o.lower() for o in out):
+            continue
+        out.append(stem)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def append_links(note_md: str, link_stems) -> str:
+    """Append bare `[[stem]]` links, one per line, at the VERY END of the note (after
+    everything, including #review) — deterministic, verbatim, deduped. No-op if empty."""
+    seen, uniq = set(), []
+    for s in link_stems:
+        if s and s.lower() not in seen:
+            seen.add(s.lower())
+            uniq.append(s)
+    if not uniq:
+        return note_md
+    return note_md.rstrip() + "\n\n" + "\n".join(f"[[{s}]]" for s in uniq) + "\n"
