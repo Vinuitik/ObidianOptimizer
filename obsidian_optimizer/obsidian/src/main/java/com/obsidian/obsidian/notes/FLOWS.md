@@ -189,6 +189,17 @@ Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String>
 `NotesController.deleteNote(DeleteNoteRequest{path})`  
 → `FileRepository.softDeleteNote()` → move to `ROOT_FILE/_trash/` → `NoteIndexRepository.delete()` → `NoteLinkRepository.deleteSource()`
 
+## DELETE /folders — Recursive Soft Delete
+
+`NotesController.deleteFolder(DeleteFolderRequest{path})`
+→ `FileRepository.softDeleteFolder()`:
+1. Guards: `requireInsideVault`, must exist + be a directory, not the vault root, not `_trash`.
+2. Purge index for every indexed note under the folder (absolute-path prefix match over
+   `NoteIndexRepository.getAllPaths()`): `noteIndex.delete` + `noteLinkRepo.deleteSource` +
+   `syncQueueRepo.tombstone` — same bookkeeping as `softDeleteNote`, done BEFORE the move.
+3. `folder.renameTo(_trash/<name>)` as a unit (collision-suffixed) — subfolders + non-note
+   files ride along. Frontend refetches the parent so the folder vanishes from the tree.
+
 ### softDeleteFile (non-note siblings)
 `FileRepository.softDeleteFile(path)` — same `_trash/` move, but **no** note-index /
 link / sync bookkeeping (the target was never indexed). Used by the Inbox to trash a
@@ -211,6 +222,7 @@ file is a no-op (acknowledge can be retried). Collision-suffixes on name clash.
 |---|---|
 | Excluded dirs in BFS | `FileRepository.EXCLUDED_DIRS` (incl. `_workspace`, `_reports`, `_sources`) |
 | Soft-delete a non-note file | `FileRepository.softDeleteFile()` (Inbox capture snapshots) |
+| Recursive folder delete → trash | `FileRepository.softDeleteFolder()` / `DELETE /folders` (`NotesController.deleteFolder`) |
 | Initial note frontmatter | `FileRepository.createNote()` |
 | Review sort order | `NoteIndexRepository.getReviewNotesPaged()` ORDER BY |
 | Frontmatter keys indexed | `FrontmatterParser.parse()` + `NoteIndexRepository` schema + `upsert()` |

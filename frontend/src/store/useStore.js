@@ -5,7 +5,7 @@ import {
   checkAuth, login as apiLogin, logout as apiLogout,
   createNote as apiCreate, patchNote as apiPatch,
   renameNote as apiRename, deleteNote as apiDelete,
-  createFolder as apiCreateFolder,
+  createFolder as apiCreateFolder, deleteFolder as apiDeleteFolder,
   moveNote as apiMoveNote,
   fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings,
   uploadFile as apiUploadFile,
@@ -500,6 +500,51 @@ const useStore = create((set, get) => ({
     try {
       await apiCreateFolder(parentPath, name);
       await get().fetchChildrenOf(parentPath);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) get().sessionExpired();
+      else throw e;
+    }
+  },
+
+  // ── Delete folder (recursive → trash) ──────────────────────────────────────
+
+  deleteFolder: async (path) => {
+    try {
+      await apiDeleteFolder(path);
+      const parentFolder = getParentPath(path);
+      const underFolder = p => p === path || p.startsWith(path + '/') || p.startsWith(path + '\\');
+
+      // Close any open tabs for notes that lived inside the deleted folder.
+      const { tabs, activeTabIndex } = get();
+      const activePath = tabs[activeTabIndex]?.path;
+      const newTabs = tabs.filter(t => !underFolder(t.path));
+
+      if (newTabs.length !== tabs.length) {
+        if (activePath && underFolder(activePath)) {
+          set({
+            tabs: newTabs,
+            activeTabIndex: -1,
+            currentNoteRaw: '',
+            currentNotePath: null,
+            pendingRaw: '',
+            pendingFrontmatter: '',
+            pendingTitle: '',
+            isMutable: false,
+            centerMode: 'view',
+          });
+          if (newTabs.length > 0) {
+            set({ activeTabIndex: 0 });
+            await get().switchTab(0);
+          }
+        } else {
+          // Active note survives — recompute its index in the filtered list.
+          set({ tabs: newTabs, activeTabIndex: newTabs.findIndex(t => t.path === activePath) });
+        }
+      }
+
+      await get().fetchChildrenOf(parentFolder);
+      get().fetchNoteNames();
+      get().fetchReviewNotes(get().reviewOffset);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) get().sessionExpired();
       else throw e;

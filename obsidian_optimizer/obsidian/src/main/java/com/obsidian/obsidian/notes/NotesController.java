@@ -144,9 +144,22 @@ public class NotesController {
         }
     }
 
+    @DeleteMapping("folders")
+    public ResponseEntity<?> deleteFolder(@RequestBody DeleteFolderRequest req) {
+        log.info("[deleteFolder] path={}", req.path());
+        try {
+            repository.softDeleteFolder(req.path());
+            return ResponseEntity.ok().build();
+        } catch (IOException e) {
+            log.error("[deleteFolder] failed path={}: {}", req.path(), e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
     record CreateFolderRequest(String parentPath, String name) {}
+    record DeleteFolderRequest(String path) {}
     record CreateNoteRequest(String folder, String name) {}
     record UpdateNoteRequest(String path, String content) {}
     record PatchNoteRequest(String path, List<FileRepository.PatchHunk> hunks) {}

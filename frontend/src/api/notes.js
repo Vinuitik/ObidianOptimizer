@@ -118,6 +118,15 @@ export async function createFolder(parentPath, name) {
   return res.json();
 }
 
+// Moves a folder AND all its contents to _trash/ (recursive soft-delete).
+export async function deleteFolder(path) {
+  await req(`${BASE}/folders`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+}
+
 export async function moveNote(sourcePath, targetFolder) {
   const res = await req(`${BASE}/notes/move`, {
     method: 'PATCH',

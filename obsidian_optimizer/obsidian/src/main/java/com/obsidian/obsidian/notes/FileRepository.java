@@ -390,6 +390,54 @@ public class FileRepository {
         if (!file.renameTo(dest)) throw new IOException("Failed to move file to trash: " + path);
     }
 
+    /**
+     * Soft-delete a whole folder (and everything under it) into _trash/. Mirrors
+     * softDeleteNote's bookkeeping for every indexed note beneath the folder:
+     * purge from the note index + link graph, and tombstone in the Drive-sync
+     * queue so the deletion propagates. The folder is moved (renamed) as a unit,
+     * so nested subfolders and non-note files ride along untouched.
+     *
+     * Guards: must be inside the vault, must exist, and cannot be the vault root
+     * or the _trash folder itself.
+     */
+    public void softDeleteFolder(String path) throws IOException {
+        Path candidate = requireInsideVault(path);
+        File folder = new File(path);
+        if (!folder.exists() || !folder.isDirectory()) {
+            throw new IOException("Folder not found: " + path);
+        }
+
+        Path vaultRoot = Paths.get(ROOT_FILE).toAbsolutePath().normalize();
+        if (candidate.equals(vaultRoot)) {
+            throw new IOException("Cannot delete the vault root");
+        }
+        File trashDir = new File(ROOT_FILE, "_trash");
+        if (candidate.equals(trashDir.getAbsoluteFile().toPath().normalize())) {
+            throw new IOException("Cannot delete the trash folder");
+        }
+        if (!trashDir.exists()) trashDir.mkdirs();
+
+        // 1. Purge index/links/sync for every indexed note under this folder,
+        //    BEFORE the move (paths are absolute, so a prefix match is exact).
+        String prefix = folder.getAbsolutePath() + File.separator;
+        for (String notePath : noteIndex.getAllPaths()) {
+            if (notePath.startsWith(prefix)) {
+                noteIndex.delete(notePath);
+                noteLinkRepo.deleteSource(notePath);
+                syncQueueRepo.tombstone(toRelative(notePath));
+            }
+        }
+
+        // 2. Move the folder into _trash as a unit (collision-suffixed).
+        File dest = new File(trashDir, folder.getName());
+        if (dest.exists()) {
+            dest = new File(trashDir, folder.getName() + "_" + System.currentTimeMillis());
+        }
+        if (!folder.renameTo(dest)) {
+            throw new IOException("Failed to move folder to trash: " + path);
+        }
+    }
+
     private String toRelative(String absPath) {
         return Paths.get(ROOT_FILE).relativize(Paths.get(absPath)).toString().replace('\\', '/');
     }

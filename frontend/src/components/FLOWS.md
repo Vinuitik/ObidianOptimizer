@@ -98,6 +98,11 @@ Vault tree lazily loaded by folder. `fetchRootChildren()` on startup → `GET /a
 Folder expand → `fetchChildrenOf(path)` → `GET /api/children?folder=...`.  
 `noteIndex` — `Map<basename.lower, fullPath>`, rebuilt after create/rename.
 
+Folder rows carry three hover actions via `NavItem`: new-subfolder (`onAddFolder`),
+new-note (`onAdd`), and **delete → trash** (`onDelete`, 🗑) — the last confirms then calls
+`store.deleteFolder(fullPath)` → `DELETE /folders` (recursive soft-delete). File rows keep
+only 🗑 (`deleteNote`).
+
 ### Drag-and-Drop Move
 
 `DRAG_TYPE = 'application/obsidian-note'` — namespaced, rejects unrelated browser drags.

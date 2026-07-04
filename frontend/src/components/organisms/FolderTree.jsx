@@ -30,6 +30,7 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
   const openTab         = useStore(s => s.openTab);
   const startNewNote    = useStore(s => s.startNewNote);
   const deleteNote      = useStore(s => s.deleteNote);
+  const deleteFolder    = useStore(s => s.deleteFolder);
   const moveNote        = useStore(s => s.moveNote);
   const createFolder    = useStore(s => s.createFolder);
   const fetchChildrenOf = useStore(s => s.fetchChildrenOf);
@@ -149,6 +150,11 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
         onClick={handleToggle}
         onAddFolder={handleAddFolder}
         onAdd={() => startNewNote(node.fullPath)}
+        onDelete={() => {
+          if (window.confirm(`Move folder "${name}" and everything inside it to trash?`)) {
+            deleteFolder(node.fullPath);
+          }
+        }}
       >
         {creatingFolder && (
           <form
