@@ -49,12 +49,15 @@ owner; note footers are for the UI.
    and return the path. Removes the extension's separate `/download` call for these types
    (kills the "fetched twice" + the note/file disconnect). *Big change to the live pipeline —
    needs Docker smoke-test; can't verify in sandbox.*
-3. **Capture row stores `local_path`.** [NOT IMPLEMENTED] Java: add `local_path` to the
-   capture record; `/capture` (or the internal capture create) persists it.
-4. **Retention sweep executor.** [NOT IMPLEMENTED] On capture **acknowledge/file** → if any
-   resulting note (or a user `KeptFragment`) references the file, keep it; on **discard / no
-   keep** → move `resources/<file>` to `_trash` via the tracked `local_path`. Consumes
-   `retention.RetentionPlan`. O(1) delete off `capture.local_path`.
+3. **Capture row stores `local_path`.** ✅ **FOLDED IN — no DB column needed.** The `local:`
+   pointer already lives in every note (stage 2), and `notes.capture_id` is indexed, so Java
+   reads the path off the note at triage time. No migration, no embedder→Java plumbing.
+4. **Retention sweep executor.** ✅ DONE. `InboxController.discard()`: read the note's
+   `local:` + `capture-id` → `softDeleteNote` (de-indexes) → if `findNotesByCapture()` is now
+   **empty** (every proposed note discarded, none filed) → `trashLocalMedia()` soft-deletes the
+   file to `_trash`. A **filed** note keeps its index row → file survives ("keep the source
+   only if you kept a fragment"). Only touches `resources/…`/`_workspace/…`; external URLs are
+   left alone. *Needs Docker verify.*
 5. **PDF acquisition for viewer-wrapped sources (Drive etc.).** [NOT IMPLEMENTED — hard]
    Direct `.pdf` URLs + dropped files: tractable (fetch bytes → resources). Google Drive
    hides bytes behind a canvas viewer → needs the Drive download URL (`uc?export=download&

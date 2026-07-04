@@ -184,10 +184,47 @@ public class InboxController {
             return ResponseEntity.badRequest().body("inbox path required");
         }
         try {
-            repository.softDeleteNote(req.path());
+            // Read BEFORE deleting: we need the capture + the local media path off the note.
+            String content = repository.getText(req.path());
+            String captureId = emptyToNull(frontmatterValue(content, "capture-id"));
+            String local = localMediaValue(content);
+
+            repository.softDeleteNote(req.path());   // de-indexes the note (drops its notes row)
+
+            // LOCAL_MEDIA_RETENTION §4: if this was the capture's LAST surviving note (every
+            // proposed note discarded, none filed), its downloaded media is orphaned → trash
+            // it too. A filed note keeps its index row, so findNotesByCapture stays non-empty
+            // and the file survives — "keep the source only if you kept a fragment of it".
+            if (captureId != null && local != null
+                    && noteIndex.findNotesByCapture(captureId).isEmpty()) {
+                trashLocalMedia(local);
+            }
             return ResponseEntity.ok().build();
         } catch (IOException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /** The `local: …` pointer the ingest stamps into a note's `## Source` (LOCAL_MEDIA §2) —
+     *  the downloaded file the note plays. Body scalar, not frontmatter. */
+    private static String localMediaValue(String content) {
+        var m = java.util.regex.Pattern
+            .compile("(?m)^[ \\t]*local:[ \\t]*(\\S.*)$").matcher(content);
+        return m.find() ? m.group(1).trim() : null;
+    }
+
+    /** Soft-delete an orphaned downloaded media file into _trash. Only touches vault-local
+     *  media (resources/… or _workspace/…); external URLs have nothing to trash. */
+    private void trashLocalMedia(String local) {
+        String l = local.trim();
+        if (l.startsWith("http://") || l.startsWith("https://")) return;
+        if (!(l.startsWith("resources/") || l.startsWith("_workspace/"))) return;
+        try {
+            String abs = Paths.get(settingsRepo.getVaultPath()).resolve(l).normalize().toString();
+            repository.softDeleteFile(abs);
+            log.info("[inbox] trashed orphaned local media {}", l);
+        } catch (IOException e) {
+            log.warn("[inbox] could not trash local media {}: {}", l, e.getMessage());
         }
     }
 
