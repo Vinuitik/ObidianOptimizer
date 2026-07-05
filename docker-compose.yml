@@ -135,6 +135,10 @@ services:
       - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-}
       - SYNC_UPLOAD_CRON=${SYNC_UPLOAD_CRON:-0 0 */6 * * *}
       - SYNC_JANITOR_CRON=${SYNC_JANITOR_CRON:-0 0 4 * * SUN}
+      # Parallel Drive uploads. Keep low (3-4): one Drive account 403-throttles sustained
+      # bulk creates above that even with backoff. Retries per file before dead-lettering.
+      - SYNC_UPLOAD_CONCURRENCY=${SYNC_UPLOAD_CONCURRENCY:-3}
+      - SYNC_UPLOAD_MAX_RETRIES=${SYNC_UPLOAD_MAX_RETRIES:-5}
       - MCP_API_TOKEN=${MCP_API_TOKEN:-}   # internal agent API token (embedder → backend)
       # Memory-tight host: G1 periodic GC uncommits idle heap back to the OS
       # (no hard -Xmx cap — caps risk OOM-kills; this just stops the JVM hoarding).

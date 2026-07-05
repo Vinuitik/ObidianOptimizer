@@ -39,9 +39,9 @@ public class SyncService {
     /** Janitor won't touch Drive files uploaded within this many days (rename race guard). */
     static final int GRACE_DAYS = 30;
 
-    /** Concurrent Drive uploads. 8 is well under Drive's per-user write limit; the
-     *  DriveService retry/backoff absorbs any bursts that do get throttled. */
-    @Value("${sync.upload.concurrency:8}")
+    /** Concurrent Drive uploads. Kept modest: a single Drive account 403-throttles
+     *  sustained bulk creates above ~3-4 even with backoff. Tune via SYNC_UPLOAD_CONCURRENCY. */
+    @Value("${sync.upload.concurrency:3}")
     private int uploadConcurrency;
 
     /** FAILED rows are retried until retry_count reaches this cap, then dead-lettered. */

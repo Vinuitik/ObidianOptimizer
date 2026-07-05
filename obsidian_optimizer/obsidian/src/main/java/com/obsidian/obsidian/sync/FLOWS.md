@@ -76,31 +76,38 @@ Paths are vault-relative with forward slashes: `folder/note.md`, `resources/imag
 
 ## Upload Flow
 
-`SyncWorker @Scheduled(cron)` → `SyncService.uploadPending()`:
+Both triggers run on the **`sync` WorkerLane** (single-flight, off the caller thread):
+`SyncWorker.scheduledUpload()` (cron) and `SyncWorker.triggerManualUpload()` (manual
+button) → `lane.trigger(() -> SyncService.uploadPending())`. The manual REST endpoint
+returns **202 immediately** — it never blocks on the drain. To change concurrency:
+`SYNC_UPLOAD_CONCURRENCY` env (default 3).
 
 ```
-syncQueueRepo.findByStatus("PENDING")
-for each entry:
-  readFile(vaultRoot + entry.path)          — UTF-8 string for .md, raw bytes for resources
-  actualHash = sha256(plaintext)            — hash of what is ACTUALLY uploaded (not queue-time hash)
-  VaultEncryptionService.encrypt(plaintext)
-    → gzip(plaintext)
-    → random 12B IV
-    → AES-256-GCM encrypt(compressed)
-    → [12B IV][ciphertext+tag]
-  DriveService.uploadFile(relativePath, bytes, actualHash, deviceId, existingFileId)
-    → ensureFolderPath (creates Drive folders, cached in folderIdCache)
-    → files().update(existingFileId) if known, else files().create()
-    → stores appProperties: {vault_path, content_hash, device_id, uploaded_at}
-  syncQueueRepo.markDoneIfHashMatches(path, driveFileId, entry.contentHash)
-    → conditional UPDATE (WHERE content_hash matches): if the note was edited
-      mid-upload (row re-marked PENDING with a new hash), DONE is refused and
-      the newer content uploads next pass — closes the lost-edit race
+uploadable = syncQueueRepo.findUploadable(maxRetries)   — PENDING ∪ (FAILED, retry_count < cap)
+processTombstones()                                     — DELETE_PENDING → Drive trash (before uploads)
+uploadRunning=true; uploadTotal=|uploadable|            — /sync/status progress snapshot
+ExecutorService pool(SYNC_UPLOAD_CONCURRENCY, default 3):
+  submit uploadOne(entry) per row, then await all; uploadDone counter ticks per task
+  uploadOne(entry):
+    readFile(vaultRoot + entry.path)        — UTF-8 for .md, raw bytes for resources
+    actualHash = sha256(plaintext)          — hash of what is ACTUALLY uploaded (not queue-time hash)
+    VaultEncryptionService.encrypt(plaintext) → gzip → 12B IV → AES-256-GCM → [IV][ct+tag]
+    DriveService.uploadFile(relativePath, bytes, actualHash, deviceId, existingFileId)
+      → ensureFolderPath → getOrCreateFolder (per-folder LOCK: concurrent uploads never
+        double-create the same folder; cache hit is lock-free)
+      → withRetry(...): files().update(existingFileId) or files().create(); exp backoff +
+        jitter (0.5→8s, maxRetries attempts) on 429 / 5xx / 403-rate-limit
+      → appProperties: {vault_path, content_hash, device_id, uploaded_at}
+    syncQueueRepo.markDoneIfHashMatches(path, driveFileId, entry.contentHash)
+      → conditional UPDATE (WHERE content_hash matches): note edited mid-upload → DONE
+        refused, newer content uploads next pass (closes the lost-edit race)
+    on Exception → syncQueueRepo.markFailed(path)  (retry_count++; re-tried next pass until cap)
 ```
 
 Drive file name: `<original-filename>.enc` (e.g. `note.md.enc`, `photo.png.enc`).  
-To trigger immediately: `POST /api/sync/upload`  
-To change schedule: `SYNC_UPLOAD_CRON` env var / `sync.upload.cron` property
+Progress while running: `GET /api/sync/status` → `{uploading, uploadDone, uploadTotal}`.  
+To trigger immediately: `POST /api/sync/upload` (202, `{started}`)  
+To change schedule: `SYNC_UPLOAD_CRON` env / `sync.upload.cron`; concurrency: `SYNC_UPLOAD_CONCURRENCY`
 
 ---
 
@@ -197,8 +204,8 @@ the proxy — fixed 2026-07-02.)
 
 | Method | Browser path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/api/sync/status` | session | Queue counts, deviceId, enabled, mode (oauth/service-account/none), clientConfigured, connected, accountEmail, config flags |
-| `POST` | `/api/sync/upload` | session | Immediately drain PENDING queue |
+| `GET` | `/api/sync/status` | session | Queue counts (`pendingCount`/`doneCount`/`failedCount`), live upload progress (`uploading`/`uploadDone`/`uploadTotal`), deviceId, enabled, mode, clientConfigured, connected, accountEmail, config flags |
+| `POST` | `/api/sync/upload` | session | Kick the drain on the sync lane; **returns 202 immediately** (`{started}`) — poll `/status` for progress |
 | `POST` | `/api/sync/download` | session | Pull all Drive files, write newer ones |
 | `GET` | `/api/sync/oauth/url?origin=` | session | Google consent URL (Settings "Connect") |
 | `GET` | `/api/sync/oauth/callback` | session | Code exchange; 302 → `/settings?drive=…` |
@@ -216,12 +223,17 @@ Drive API call — the panel fetches status on mount, don't poll it).
 sync_queue(
   path           TEXT PRIMARY KEY,  -- vault-relative forward-slash path
   content_hash   TEXT NOT NULL,     -- SHA-256 of plaintext content
-  status         TEXT,              -- PENDING / DONE / FAILED
+  status         TEXT,              -- PENDING / DONE / FAILED / DELETE_PENDING
   last_synced_at BIGINT,            -- epoch ms of last successful upload
   drive_file_id  TEXT,              -- Drive file ID for update-vs-create
   retry_count    INT                -- incremented on FAILED; reset to 0 on PENDING
 )
 ```
+
+`findUploadable(maxRetries)` drives each pass: `PENDING` plus `FAILED` rows still under
+the retry cap (self-healing — a transient Drive error no longer strands a file). Once
+`retry_count` reaches `SYNC_UPLOAD_MAX_RETRIES` (default 5) a `FAILED` row is dead-lettered
+(skipped) until the file is edited again (which resets it to PENDING).
 
 ---
 
@@ -247,6 +259,18 @@ sync_queue(
 - **Fixed PBKDF2 salt**: acceptable for a single-passphrase personal tool. If the codebase becomes public or multi-tenant, switch to a random salt stored in Drive (`.sync-salt` file) — all devices read it on first sync.
 - **Drive `appProperties`**: app-only key-value metadata, not visible in Drive UI. Max 30 properties, 124B per key+value. `content_hash` enables hash comparison without downloading ciphertext.
 - **No Drive-side delete**: renamed and soft-deleted files leave orphan `.enc` files on Drive. They're harmless but waste storage. Add `DriveService.deleteFile(fileId)` + call from rename/softDelete flows in V2.
+- **Drive rate-limits sustained bulk creates**: a single Google Drive account starts
+  returning `403 Forbidden` (often with an EMPTY reason — Google's edge throttle, not a
+  parsed `userRateLimitExceeded`) once concurrent creates run too hot. Measured: at
+  `SYNC_UPLOAD_CONCURRENCY=8` a large backfill degrades from partial to ~0% success as
+  the account trips a cooldown; **3–4 is the safe ceiling** even with backoff. `withRetry`
+  treats an unlabelled 403 as transient (backoff) and only excludes known-permanent
+  reasons (`insufficientPermissions`, `storageQuotaExceeded`, …) — see `DriveService.isTransient`.
+  If a big drain still stalls on 403s, lower concurrency and/or wait ~a few minutes for the
+  per-user window to reset. Retries that exhaust the cap dead-letter the row (see sync_queue).
+- **Concurrency correctness**: uploads run on a fixed pool (`SYNC_UPLOAD_CONCURRENCY`).
+  Per-row DB writes are connection-pool-safe. Folder creation is guarded by a per-key lock
+  (`DriveService.folderLocks`) so two threads never double-create the same Drive folder.
 - **Folder ID cache**: `DriveService.folderCache` is in-memory, cleared on restart. On restart the first upload to each folder makes 1–2 extra API calls to re-discover existing folder IDs.
 - **Large resource files**: no chunking — a 100MB video is encrypted in-memory as a single byte[]. If this becomes a problem, split into chunks before encryption.
 - **Scheduled upload only, no download**: `SyncWorker` auto-uploads but never auto-downloads. Download is manual (`POST /api/sync/download`). Add a second `@Scheduled` worker if you want auto pull.
@@ -258,6 +282,13 @@ sync_queue(
 | Thing to change | Where |
 |---|---|
 | Upload cron schedule | `SYNC_UPLOAD_CRON` env / `sync.upload.cron` property |
+| Upload concurrency | `SYNC_UPLOAD_CONCURRENCY` env / `sync.upload.concurrency` (default 3) |
+| Upload retry cap (dead-letter) | `SYNC_UPLOAD_MAX_RETRIES` env / `sync.upload.max-retries` (default 5) |
+| Which Drive errors retry | `DriveService.isTransient()` + `withRetry()` backoff |
+| Folder double-create guard | `DriveService.folderLocks` (per-key lock in `getOrCreateFolder`) |
+| Manual upload = async 202 | `SyncController.triggerUpload()` → `SyncWorker.triggerManualUpload()` |
+| Live upload progress | `SyncService.uploadProgress()` → `/sync/status` |
+| Uploadable selection (self-heal) | `SyncQueueRepository.findUploadable()` |
 | Janitor schedule | `SYNC_JANITOR_CRON` env / `sync.janitor.cron` (default Sun 4am) |
 | Janitor grace period | `SyncService.GRACE_DAYS` (30) |
 | Tombstone lifecycle | `SyncQueueRepository.tombstone()` + `SyncService.processTombstones()` |
