@@ -10,6 +10,7 @@ import Chip from '../atoms/Chip';
 import Icon from '../atoms/Icon';
 import ReviewRating from '../molecules/ReviewRating';
 import TabBar from '../molecules/TabBar';
+import { useIsMobile } from '../../utils/useMediaQuery';
 import styles from './SplitLayout.module.css';
 
 const MIN_PANEL_WIDTH = 160;
@@ -93,6 +94,16 @@ export default function SplitLayout() {
   const [leftWidth, onLeftHandleDown] = useResize(DEFAULT_WIDTH);
   const [rightWidth, onRightHandleDown] = useResize(DEFAULT_WIDTH);
 
+  // On mobile the side panels float over the editor as drawers; a scrim behind
+  // the open drawer dismisses it on tap-outside (native-feeling, and the only
+  // way to close it besides the header chevron).
+  const isMobile = useIsMobile();
+  const drawerOpen = isMobile && (!leftCollapsed || (showRight && !rightCollapsed));
+  const closeDrawers = () => {
+    if (!leftCollapsed) toggleLeft();
+    if (showRight && !rightCollapsed) toggleRight();
+  };
+
   const title = noteTitle(currentNotePath);
   const folderHint = noteFolderHint(currentNotePath);
   const titleIsPlaceholder = centerMode === 'view' && !title;
@@ -108,6 +119,10 @@ export default function SplitLayout() {
 
   return (
     <div className={styles.layout}>
+      {drawerOpen && (
+        <div className={styles.scrim} onClick={closeDrawers} aria-hidden="true" />
+      )}
+
       {/* Left — Folder Tree */}
       <div
         className={`${styles.panel} ${styles.panelLeft} ${leftCollapsed ? styles.collapsed : ''}`}

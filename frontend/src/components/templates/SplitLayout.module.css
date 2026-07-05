@@ -207,4 +207,18 @@
     padding: 0 var(--sp-3);
     gap: var(--sp-2);
   }
+
+  /* Backdrop behind an open drawer — tap to dismiss. */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 40;                 /* under the drawer (50), over the editor */
+    background: rgba(0, 0, 0, 0.4);
+    animation: scrimIn 160ms ease;
+  }
+}
+
+@keyframes scrimIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
