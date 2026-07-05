@@ -154,6 +154,30 @@
 .statusError { color: var(--color-danger); font-size: var(--text-sm); padding: var(--sp-2); }
 .emptyMain { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--color-text-2); }
 
-@media (max-width: 720px) {
-  .queue:not(.queueCollapsed) { width: 160px; }
+/* ── Mobile: stack the whole thing. The queue is a full-width top strip (not a
+   side rail), the split area below is single-view (LearnLayout toggle), and the
+   action bar sticks to the bottom in the thumb zone. ───────────────────────── */
+@media (max-width: 768px) {
+  .review { flex-direction: column; }
+
+  .queue,
+  .queue:not(.queueCollapsed) {
+    width: 100%;
+    max-height: 32vh;
+    flex: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .queueCollapsed { max-height: 44px; }
+  .collapseBtn { align-self: flex-start; }
+
+  .main { flex: 1; }
+
+  .bottomBar {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+  }
+  .folderBtn { max-width: 60vw; }
+  .barStatus { width: 100%; margin-left: 0; }
 }

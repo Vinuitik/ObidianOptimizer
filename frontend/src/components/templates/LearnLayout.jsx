@@ -1,14 +1,29 @@
 import { useRef, useState, useCallback } from 'react';
+import { useIsMobile } from '../../utils/useMediaQuery';
 import styles from './LearnLayout.module.css';
 
 // orientation: 'vertical' (left|right) | 'horizontal' (top|bottom)
 // Default slot A = resource, slot B = note.
 // swapped flips which slot renders in which position.
-export default function LearnLayout({ orientation = 'vertical', slotA, slotB }) {
+//
+// Desktop: adjustable, swappable split (drag divider). Mobile: a phone can't
+// usefully show two panes at once, so instead of a squished split we render ONE
+// pane at a time with a segmented [labelA | labelB] toggle. Same slots, different
+// display logic — driven by useIsMobile (jsdom has no matchMedia → desktop path
+// under test, so the existing split tests stay valid).
+export default function LearnLayout({
+  orientation = 'vertical',
+  slotA,
+  slotB,
+  labelA = 'Source',
+  labelB = 'Note',
+}) {
   const [swapped, setSwapped]     = useState(false);
   const [splitPct, setSplitPct]   = useState(50);
+  const [activeSlot, setActive]   = useState('A');   // mobile single-view selection
   const dragging = useRef(false);
   const containerRef = useRef(null);
+  const isMobile = useIsMobile();
 
   const first  = swapped ? slotB : slotA;
   const second = swapped ? slotA : slotB;
@@ -40,6 +55,36 @@ export default function LearnLayout({ orientation = 'vertical', slotA, slotB }) 
     window.addEventListener('mouseup', onUp);
   }, [orientation]);
 
+  // ── Mobile: single pane + segmented toggle ────────────────────────────────
+  if (isMobile) {
+    return (
+      <div className={`${styles.container} ${styles.mobile}`} data-testid="learn-layout">
+        <div className={styles.segmented} role="tablist" aria-label="View">
+          <button
+            role="tab"
+            aria-selected={activeSlot === 'A'}
+            className={`${styles.seg} ${activeSlot === 'A' ? styles.segOn : ''}`}
+            onClick={() => setActive('A')}
+          >
+            {labelA}
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeSlot === 'B'}
+            className={`${styles.seg} ${activeSlot === 'B' ? styles.segOn : ''}`}
+            onClick={() => setActive('B')}
+          >
+            {labelB}
+          </button>
+        </div>
+        <div className={`${styles.pane} ${styles.paneSecond}`} data-testid="learn-pane-active">
+          {activeSlot === 'A' ? slotA : slotB}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Desktop: adjustable split ─────────────────────────────────────────────
   const isVertical = orientation === 'vertical';
 
   return (

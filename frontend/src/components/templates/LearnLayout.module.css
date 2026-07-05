@@ -98,44 +98,45 @@
   border-color: var(--color-accent-border);
 }
 
-/* ── Responsive: always stack panes vertically on mobile ──────────────────
-   Side-by-side panes don't fit a phone. Inline styles set the pane width in
-   'vertical' orientation, hence the !important overrides. The divider stays
-   as a visual separator + swap button, but drag-resize is pointer-disabled
-   (its math assumes the desktop orientation). */
-@media (max-width: 768px) {
-  .vertical {
-    flex-direction: column;
-  }
+/* ── Mobile: single-view with a segmented toggle ──────────────────────────
+   A phone can't show two panes usefully, so LearnLayout renders ONE pane at a
+   time (JS branch on useIsMobile) and this styles the [Source | Note] switch.
+   No divider, no drag — the toggle replaces both. */
+.mobile {
+  flex-direction: column;
+}
 
-  .vertical > .pane {
-    width: 100% !important;
-    height: 45%;
-  }
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  flex-shrink: 0;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
 
-  .vertical > .paneSecond {
-    height: auto;
-    flex: 1;
-  }
+.seg {
+  flex: 1;
+  padding: 10px 12px;
+  min-height: 44px;                 /* thumb-friendly hit target */
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-page);
+  color: var(--color-text-2);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ease-fast), color var(--ease-fast), border-color var(--ease-fast);
+}
 
-  .dividerV {
-    width: auto;
-    height: 14px;
-    flex-direction: row;
-    cursor: default;
-    pointer-events: none;
-  }
+.segOn {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+  border-color: var(--color-accent-border);
+}
 
-  .dividerV::before {
-    left: 0;
-    right: 0;
-    top: 5px;
-    bottom: auto;
-    width: auto;
-    height: 4px;
-  }
-
-  .swapBtn {
-    pointer-events: auto;
-  }
+.mobile > .pane {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
 }

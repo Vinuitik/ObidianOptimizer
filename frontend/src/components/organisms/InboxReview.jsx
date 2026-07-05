@@ -233,7 +233,7 @@ export default function InboxReview({ onCount }) {
       {current ? (
         <div className={styles.main}>
           <div className={styles.splitArea}>
-            <LearnLayout orientation={orientation} slotA={sourcePanel} slotB={notePanel} />
+            <LearnLayout orientation={orientation} slotA={sourcePanel} slotB={notePanel} labelA="Source" labelB="Note" />
           </div>
 
           <div className={styles.bottomBar}>
