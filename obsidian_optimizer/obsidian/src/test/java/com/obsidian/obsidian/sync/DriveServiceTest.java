@@ -21,12 +21,25 @@ class DriveServiceTest {
     }
 
     @Test
-    void permanentErrorsAreNotTransient() {
+    void unlabelledBurst403IsTransient() {
+        // Drive rate-limits a concurrent burst with a bare "403 Forbidden" (no reason).
+        // These MUST back off, not fail immediately — the bug this uploader had.
+        assertThat(DriveService.isTransient(403, null)).isTrue();
+        assertThat(DriveService.isTransient(403, "")).isTrue();
+        assertThat(DriveService.isTransient(403, "someUnknownReason")).isTrue();
+    }
+
+    @Test
+    void permanent403ReasonsAreNotTransient() {
+        assertThat(DriveService.isTransient(403, "storageQuotaExceeded")).isFalse();
+        assertThat(DriveService.isTransient(403, "insufficientFilePermissions")).isFalse();
+        assertThat(DriveService.isTransient(403, "appNotAuthorizedToFile")).isFalse();
+    }
+
+    @Test
+    void otherClientErrorsAreNotTransient() {
         assertThat(DriveService.isTransient(404, "notFound")).isFalse();
         assertThat(DriveService.isTransient(401, "authError")).isFalse();
         assertThat(DriveService.isTransient(400, "badRequest")).isFalse();
-        // 403 that is NOT rate-limiting (e.g. storageQuotaExceeded) must not spin
-        assertThat(DriveService.isTransient(403, "storageQuotaExceeded")).isFalse();
-        assertThat(DriveService.isTransient(403, null)).isFalse();
     }
 }

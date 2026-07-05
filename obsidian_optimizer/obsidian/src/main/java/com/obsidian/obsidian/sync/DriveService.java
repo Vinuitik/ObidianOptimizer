@@ -245,7 +245,14 @@ public class DriveService {
             try {
                 return call.run();
             } catch (GoogleJsonResponseException e) {
-                if (!isTransient(e.getStatusCode(), reasonOf(e)) || ++attempt >= maxRetries) throw e;
+                String reason = reasonOf(e);
+                if (!isTransient(e.getStatusCode(), reason) || ++attempt >= maxRetries) {
+                    if (e.getStatusCode() == 403 || e.getStatusCode() == 429) {
+                        log.warn("[DriveService] giving up after {} attempt(s): {} reason='{}'",
+                            attempt, e.getStatusCode(), reason);
+                    }
+                    throw e;
+                }
                 sleepBackoff(attempt);
             } catch (java.net.SocketTimeoutException | java.net.UnknownHostException e) {
                 if (++attempt >= maxRetries) throw e;
@@ -264,15 +271,22 @@ public class DriveService {
 
     /**
      * Which Drive write failures are worth retrying: 429 (too many requests), any 5xx,
-     * and 403 only when the reason is rate-limiting. Everything else (404, auth, storage
-     * quota exceeded, bad request) is permanent and rethrows immediately. Pure so it can
-     * be unit-tested without constructing a live Drive exception.
+     * and 403 UNLESS it carries a known-permanent reason. Drive rate-limits a concurrent
+     * burst with a 403 whose reason is often empty/unparsed ("403 Forbidden"), so 403 is
+     * treated as retryable by default and only the genuinely permanent reasons (bad
+     * permissions, storage full, disabled app) are excluded. Everything else (404, 401,
+     * 400) is permanent. Pure so it can be unit-tested without a live Drive exception.
      */
     static boolean isTransient(int statusCode, String reason) {
         if (statusCode == 429 || statusCode >= 500) return true;
         if (statusCode == 403) {
-            return reason != null
-                && (reason.contains("rateLimitExceeded") || reason.contains("userRateLimitExceeded"));
+            if (reason == null || reason.isBlank()) return true;   // unlabelled burst 403 → back off
+            return !(reason.contains("insufficientPermissions")
+                  || reason.contains("insufficientFilePermissions")
+                  || reason.contains("storageQuotaExceeded")
+                  || reason.contains("appNotAuthorizedToFile")
+                  || reason.contains("domainPolicy")
+                  || reason.contains("sharingRateLimitExceeded"));
         }
         return false;
     }
