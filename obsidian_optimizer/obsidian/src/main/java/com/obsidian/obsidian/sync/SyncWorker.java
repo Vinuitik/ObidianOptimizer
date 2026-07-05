@@ -28,6 +28,23 @@ public class SyncWorker {
     @PreDestroy
     void stopLane() { lane.shutdown(); }
 
+    /**
+     * Manual upload (POST /api/sync/upload). Runs the drain on the sync lane, off the
+     * HTTP request thread, so the endpoint returns immediately. Single-flight: if a
+     * drain is already in progress this is a no-op.
+     *
+     * @return true if a fresh drain was started; false if one was already running.
+     */
+    public boolean triggerManualUpload() {
+        return lane.trigger(() -> {
+            log.info("[SyncWorker] manual upload triggered");
+            syncService.uploadPending();
+        });
+    }
+
+    /** True while an upload/janitor drain is running on the sync lane. */
+    public boolean isBusy() { return lane.isRunning(); }
+
     // The Settings toggle gates only this automatic cron; the manual
     // POST /api/sync/upload button works regardless (explicit user action).
     @Scheduled(cron = "${sync.upload.cron:0 0 */6 * * *}")

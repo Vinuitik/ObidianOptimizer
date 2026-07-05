@@ -40,6 +40,10 @@ public class DriveService {
     @Value("${sync.google.service-account-json:placeholder}")
     private String serviceAccountJson;
 
+    /** Max attempts for a single Drive write before giving up (transient errors only). */
+    @Value("${sync.upload.max-retries:5}")
+    private int maxRetries;
+
     private final SettingsRepository settingsRepo;
 
     // Built lazily so credentials added via the Settings UI take effect without a
@@ -210,7 +214,7 @@ public class DriveService {
         if (existingFileId != null) {
             try {
                 File meta = new File().setName(encName).setAppProperties(props);
-                d.files().update(existingFileId, meta, content).setFields("id").execute();
+                withRetry(() -> d.files().update(existingFileId, meta, content).setFields("id").execute());
                 return existingFileId;
             } catch (GoogleJsonResponseException e) {
                 if (e.getStatusCode() != 404) throw e;
@@ -222,7 +226,67 @@ public class DriveService {
             .setName(encName)
             .setParents(Collections.singletonList(folderId))
             .setAppProperties(props);
-        return d.files().create(meta, content).setFields("id").execute().getId();
+        return withRetry(() -> d.files().create(meta, content).setFields("id").execute()).getId();
+    }
+
+    /**
+     * Run a single Drive write with exponential backoff + jitter on transient failures
+     * (403 rateLimitExceeded/userRateLimitExceeded, 429, 5xx). Non-transient errors
+     * (404, auth, quota-exceeded storage, etc.) rethrow immediately. Needed because the
+     * uploader runs many concurrent writes and Drive will rate-limit bursts.
+     */
+    private <T> T withRetry(DriveCall<T> call) throws IOException {
+        int attempt = 0;
+        while (true) {
+            try {
+                return call.run();
+            } catch (GoogleJsonResponseException e) {
+                if (!isTransient(e.getStatusCode(), reasonOf(e)) || ++attempt >= maxRetries) throw e;
+                sleepBackoff(attempt);
+            } catch (java.net.SocketTimeoutException | java.net.UnknownHostException e) {
+                if (++attempt >= maxRetries) throw e;
+                sleepBackoff(attempt);
+            }
+        }
+    }
+
+    private static String reasonOf(GoogleJsonResponseException e) {
+        if (e.getDetails() != null && e.getDetails().getErrors() != null
+                && !e.getDetails().getErrors().isEmpty()) {
+            return String.valueOf(e.getDetails().getErrors().get(0).getReason());
+        }
+        return "";
+    }
+
+    /**
+     * Which Drive write failures are worth retrying: 429 (too many requests), any 5xx,
+     * and 403 only when the reason is rate-limiting. Everything else (404, auth, storage
+     * quota exceeded, bad request) is permanent and rethrows immediately. Pure so it can
+     * be unit-tested without constructing a live Drive exception.
+     */
+    static boolean isTransient(int statusCode, String reason) {
+        if (statusCode == 429 || statusCode >= 500) return true;
+        if (statusCode == 403) {
+            return reason != null
+                && (reason.contains("rateLimitExceeded") || reason.contains("userRateLimitExceeded"));
+        }
+        return false;
+    }
+
+    private static void sleepBackoff(int attempt) {
+        // 0.5s, 1s, 2s, 4s … + up to 250ms jitter, capped at 8s.
+        long base = Math.min(8000L, 500L * (1L << (attempt - 1)));
+        long delay = base + (long) (Math.random() * 250);
+        try {
+            Thread.sleep(delay);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @FunctionalInterface
+    private interface DriveCall<T> {
+        T run() throws IOException;
     }
 
     // ── Download ──────────────────────────────────────────────────────────────
@@ -280,6 +344,16 @@ public class DriveService {
      * sync root and return the ID of the immediate parent folder.
      * e.g. "notes/folder/note.md" → ensures notes/ and notes/folder/ exist.
      */
+    /**
+     * Pre-create (and cache) the whole folder chain for a file path. Call serially,
+     * once per distinct directory, BEFORE launching concurrent uploads — otherwise two
+     * upload threads racing {@link #getOrCreateFolder} both see "missing" and each
+     * creates a duplicate Drive folder.
+     */
+    public void prewarmFolder(String relativePath) throws IOException {
+        ensureFolderPath(relativePath);
+    }
+
     private String ensureFolderPath(String relativePath) throws IOException {
         String[] parts = relativePath.split("/");
         String current = rootFolderId();

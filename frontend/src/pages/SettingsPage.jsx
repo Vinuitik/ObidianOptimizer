@@ -485,6 +485,13 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
 
   useEffect(() => { if (isAuthenticated) refreshStatus(); }, [isAuthenticated, refreshStatus]);
 
+  // While an upload drain runs on the backend, poll status so the progress line ticks.
+  useEffect(() => {
+    if (!sync?.uploading) return undefined;
+    const id = setInterval(refreshStatus, 2000);
+    return () => clearInterval(id);
+  }, [sync?.uploading, refreshStatus]);
+
   // Prefill the client id from saved settings once they load.
   useEffect(() => { setClientId(settings.syncClientId ?? ''); }, [settings.syncClientId]);
 
@@ -536,7 +543,8 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
 
   const connected = Boolean(sync?.connected);
   const queueLine = sync
-    ? `${sync.pending ?? 0} pending · ${sync.done ?? 0} synced · ${sync.failed ?? 0} failed`
+    ? `${sync.pendingCount ?? 0} pending · ${sync.doneCount ?? 0} synced · ${sync.failedCount ?? 0} failed`
+      + (sync.uploading ? ` · uploading ${sync.uploadDone ?? 0}/${sync.uploadTotal ?? 0}…` : '')
     : '—';
 
   return (
@@ -693,10 +701,12 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
           <>
             <button
               className={styles.saveBtn}
-              disabled={busy != null}
+              disabled={busy != null || sync?.uploading}
               onClick={() => run('upload', triggerSyncUpload)}
             >
-              {busy === 'upload' ? 'Uploading…' : 'Sync now'}
+              {sync?.uploading
+                ? `Uploading ${sync.uploadDone ?? 0}/${sync.uploadTotal ?? 0}…`
+                : (busy === 'upload' ? 'Starting…' : 'Sync now')}
             </button>
             <button
               className={styles.saveBtn}

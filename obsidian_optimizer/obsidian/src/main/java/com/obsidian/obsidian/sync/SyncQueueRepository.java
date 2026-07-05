@@ -128,6 +128,30 @@ public class SyncQueueRepository {
             status);
     }
 
+    /**
+     * Rows an upload pass should attempt: all PENDING, plus FAILED rows still under the
+     * retry cap (self-healing — a transient Drive error no longer strands a file forever).
+     * Once retry_count reaches maxRetries a FAILED row is skipped = dead-letter.
+     */
+    public List<SyncEntry> findUploadable(int maxRetries) {
+        return jdbc.query("""
+            SELECT path, content_hash, status, last_synced_at, drive_file_id, retry_count
+            FROM sync_queue
+            WHERE status = 'PENDING'
+               OR (status = 'FAILED' AND retry_count < ?)
+            ORDER BY path
+            """,
+            (rs, __) -> new SyncEntry(
+                rs.getString("path"),
+                rs.getString("content_hash"),
+                rs.getString("status"),
+                (Long) rs.getObject("last_synced_at"),
+                rs.getString("drive_file_id"),
+                rs.getInt("retry_count")
+            ),
+            maxRetries);
+    }
+
     public SyncEntry findByPath(String path) {
         List<SyncEntry> rows = jdbc.query("""
             SELECT path, content_hash, status, last_synced_at, drive_file_id, retry_count

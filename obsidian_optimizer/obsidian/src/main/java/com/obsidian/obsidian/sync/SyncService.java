@@ -10,6 +10,7 @@ import com.obsidian.obsidian.sync.DriveService.DriveFileInfo;
 import com.obsidian.obsidian.sync.SyncQueueRepository.SyncEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -20,9 +21,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class SyncService {
@@ -31,6 +40,21 @@ public class SyncService {
 
     /** Janitor won't touch Drive files uploaded within this many days (rename race guard). */
     static final int GRACE_DAYS = 30;
+
+    /** Concurrent Drive uploads. 8 is well under Drive's per-user write limit; the
+     *  DriveService retry/backoff absorbs any bursts that do get throttled. */
+    @Value("${sync.upload.concurrency:8}")
+    private int uploadConcurrency;
+
+    /** FAILED rows are retried until retry_count reaches this cap, then dead-lettered. */
+    @Value("${sync.upload.max-retries:5}")
+    private int maxRetries;
+
+    // Live progress for the Settings UI. Written by the single upload drain (one at a
+    // time via the sync WorkerLane), read by GET /sync/status.
+    private volatile boolean uploadRunning = false;
+    private volatile int     uploadTotal   = 0;
+    private final AtomicInteger uploadDone  = new AtomicInteger(0);
 
     private final SyncQueueRepository   syncQueueRepo;
     private final VaultEncryptionService encryptionService;
@@ -131,45 +155,108 @@ public class SyncService {
 
         String vaultRoot = settingsRepo.getVaultPath();
         String deviceId  = deviceIdentityService.getDeviceId();
-        List<SyncEntry> pending = syncQueueRepo.findByStatus("PENDING");
-
-        if (pending.isEmpty()) {
-            log.debug("[SyncService.uploadPending] nothing to upload");
-            processTombstones();
-            return;
-        }
+        // PENDING plus FAILED rows still under the retry cap (self-healing).
+        List<SyncEntry> uploadable = syncQueueRepo.findUploadable(maxRetries);
 
         processTombstones();
 
-        int uploaded = 0, failed = 0;
-        for (SyncEntry entry : pending) {
-            try {
-                String absPath = Paths.get(vaultRoot, entry.path()).toString();
-                byte[] plaintext = readFile(absPath, entry.path());
-                byte[] encrypted = encryptionService.encrypt(plaintext);
+        if (uploadable.isEmpty()) {
+            log.debug("[SyncService.uploadPending] nothing to upload");
+            return;
+        }
 
-                // Hash what was actually read — Drive metadata must describe the
-                // uploaded bytes, not the (possibly stale) hash from queue time.
-                String actualHash = ContentHashing.sha256(plaintext);
-                String driveFileId = driveService.uploadFile(
-                    entry.path(), encrypted, actualHash, deviceId, entry.driveFileId());
+        // Pre-create the folder tree serially so concurrent uploads never race
+        // getOrCreateFolder into making duplicate Drive folders.
+        prewarmFolders(uploadable);
 
-                // Conditional on the queue-time hash: if an edit re-marked the row
-                // PENDING while we were uploading, it stays PENDING and the newer
-                // content goes out on the next pass.
-                boolean done = syncQueueRepo.markDoneIfHashMatches(
-                    entry.path(), driveFileId, entry.contentHash());
-                if (!done) {
-                    log.info("[SyncService.uploadPending] {} changed during upload — stays PENDING", entry.path());
+        int concurrency = Math.max(1, uploadConcurrency);
+        log.info("[SyncService.uploadPending] start — {} file(s), concurrency={}",
+            uploadable.size(), concurrency);
+
+        uploadRunning = true;
+        uploadTotal   = uploadable.size();
+        uploadDone.set(0);
+        AtomicInteger uploaded = new AtomicInteger();
+        AtomicInteger failed   = new AtomicInteger();
+
+        ExecutorService pool = Executors.newFixedThreadPool(concurrency, r -> {
+            Thread t = new Thread(r, "sync-upload");
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            List<Future<?>> futures = new java.util.ArrayList<>(uploadable.size());
+            for (SyncEntry entry : uploadable) {
+                futures.add(pool.submit(() -> {
+                    uploadOne(entry, vaultRoot, deviceId, uploaded, failed);
+                    uploadDone.incrementAndGet();
+                }));
+            }
+            for (Future<?> f : futures) {
+                try { f.get(); } catch (Exception ignored) { /* per-task errors already handled */ }
+            }
+        } finally {
+            pool.shutdown();
+            try { pool.awaitTermination(30, TimeUnit.SECONDS); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            uploadRunning = false;
+        }
+        log.info("[SyncService.uploadPending] uploaded={}, failed={}", uploaded.get(), failed.get());
+    }
+
+    /** Upload a single queue row; marks DONE (hash-conditional) or FAILED. Runs on a pool thread. */
+    private void uploadOne(SyncEntry entry, String vaultRoot, String deviceId,
+                           AtomicInteger uploaded, AtomicInteger failed) {
+        try {
+            String absPath   = Paths.get(vaultRoot, entry.path()).toString();
+            byte[] plaintext = readFile(absPath, entry.path());
+            byte[] encrypted = encryptionService.encrypt(plaintext);
+
+            // Hash what was actually read — Drive metadata must describe the
+            // uploaded bytes, not the (possibly stale) hash from queue time.
+            String actualHash = ContentHashing.sha256(plaintext);
+            String driveFileId = driveService.uploadFile(
+                entry.path(), encrypted, actualHash, deviceId, entry.driveFileId());
+
+            // Conditional on the queue-time hash: if an edit re-marked the row
+            // PENDING while we were uploading, it stays PENDING and the newer
+            // content goes out on the next pass.
+            boolean done = syncQueueRepo.markDoneIfHashMatches(
+                entry.path(), driveFileId, entry.contentHash());
+            if (!done) {
+                log.info("[SyncService.uploadPending] {} changed during upload — stays PENDING", entry.path());
+            }
+            uploaded.incrementAndGet();
+        } catch (Exception e) {
+            log.error("[SyncService.uploadPending] failed for {}: {}", entry.path(), e.getMessage());
+            syncQueueRepo.markFailed(entry.path());
+            failed.incrementAndGet();
+        }
+    }
+
+    /** Create every parent folder chain once (deduped by directory) before parallel upload. */
+    private void prewarmFolders(List<SyncEntry> entries) {
+        Set<String> seenDirs = new HashSet<>();
+        for (SyncEntry entry : entries) {
+            String path = entry.path();
+            int slash = path.lastIndexOf('/');
+            String dir = slash < 0 ? "" : path.substring(0, slash);
+            if (seenDirs.add(dir)) {
+                try {
+                    driveService.prewarmFolder(path);
+                } catch (IOException e) {
+                    log.warn("[SyncService.prewarmFolders] {}: {}", dir, e.getMessage());
                 }
-                uploaded++;
-            } catch (Exception e) {
-                log.error("[SyncService.uploadPending] failed for {}: {}", entry.path(), e.getMessage());
-                syncQueueRepo.markFailed(entry.path());
-                failed++;
             }
         }
-        log.info("[SyncService.uploadPending] uploaded={}, failed={}", uploaded, failed);
+    }
+
+    /** Live upload progress for GET /sync/status. */
+    public Map<String, Object> uploadProgress() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("uploading",   uploadRunning);
+        m.put("uploadDone",  uploadDone.get());
+        m.put("uploadTotal", uploadTotal);
+        return m;
     }
 
     // ── Download ──────────────────────────────────────────────────────────────

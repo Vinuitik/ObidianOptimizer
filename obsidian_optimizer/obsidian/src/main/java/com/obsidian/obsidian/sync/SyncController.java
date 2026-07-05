@@ -33,6 +33,7 @@ public class SyncController {
     private final DriveService           driveService;
     private final SyncOAuthService       oauthService;
     private final SettingsRepository     settingsRepo;
+    private final SyncWorker             syncWorker;
 
     public SyncController(SyncService syncService,
                           SyncQueueRepository syncQueueRepo,
@@ -40,7 +41,8 @@ public class SyncController {
                           VaultEncryptionService encryptionService,
                           DriveService driveService,
                           SyncOAuthService oauthService,
-                          SettingsRepository settingsRepo) {
+                          SettingsRepository settingsRepo,
+                          SyncWorker syncWorker) {
         this.syncService           = syncService;
         this.syncQueueRepo         = syncQueueRepo;
         this.deviceIdentityService = deviceIdentityService;
@@ -48,6 +50,7 @@ public class SyncController {
         this.driveService          = driveService;
         this.oauthService          = oauthService;
         this.settingsRepo          = settingsRepo;
+        this.syncWorker            = syncWorker;
     }
 
     /** GET /api/sync/status — queue counts + configuration/connection state + quota */
@@ -58,6 +61,7 @@ public class SyncController {
         body.put("enabled",              settingsRepo.isSyncEnabled());
         body.put("encryptionConfigured", encryptionService.isConfigured());
         body.put("driveConfigured",      driveService.isConfigured());
+        body.putAll(syncService.uploadProgress());   // uploading / uploadDone / uploadTotal
         body.putAll(oauthService.statusFragment());
         // Quota is one Drive API call; the panel fetches status on mount, not on a poll.
         if (driveService.isConfigured() && oauthService.isConnected()) {
@@ -93,12 +97,19 @@ public class SyncController {
         }
     }
 
-    /** POST /api/sync/upload — immediately drain the PENDING queue */
+    /**
+     * POST /api/sync/upload — drain the queue on the sync worker lane (off the request
+     * thread) and return immediately. The Settings panel then polls /sync/status for
+     * live progress. Single-flight: a second press while a drain runs is a no-op.
+     */
     @PostMapping("/upload")
     public ResponseEntity<Map<String, Object>> triggerUpload() {
-        log.info("[SyncController] manual upload triggered");
-        syncService.uploadPending();
-        return ResponseEntity.ok(syncQueueRepo.getStatusSummary());
+        boolean started = syncWorker.triggerManualUpload();
+        log.info("[SyncController] manual upload {}", started ? "started" : "already running");
+        Map<String, Object> body = new LinkedHashMap<>(syncQueueRepo.getStatusSummary());
+        body.put("started", started);
+        body.putAll(syncService.uploadProgress());
+        return ResponseEntity.accepted().body(body);
     }
 
     /** POST /api/sync/download — pull all Drive files and write newer ones to disk */

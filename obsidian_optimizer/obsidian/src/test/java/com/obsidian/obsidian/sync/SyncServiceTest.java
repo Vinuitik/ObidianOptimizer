@@ -22,10 +22,12 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -92,7 +94,7 @@ class SyncServiceTest {
         writeVaultFile("folder/note.md", content);
         String actualHash = ContentHashing.sha256(
             content.getBytes(StandardCharsets.UTF_8));
-        when(queueRepo.findByStatus("PENDING"))
+        when(queueRepo.findUploadable(anyInt()))
             .thenReturn(List.of(pending("folder/note.md", actualHash)));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("drive-id-9");
@@ -114,7 +116,7 @@ class SyncServiceTest {
         String staleQueueHash  = "stale-hash";
         String actualHash = ContentHashing.sha256(
             "edited content".getBytes(StandardCharsets.UTF_8));
-        when(queueRepo.findByStatus("PENDING"))
+        when(queueRepo.findUploadable(anyInt()))
             .thenReturn(List.of(pending("note.md", staleQueueHash)));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("id");
@@ -132,7 +134,7 @@ class SyncServiceTest {
 
     @Test
     void uploadMarksFailedWhenFileUnreadable() throws Exception {
-        when(queueRepo.findByStatus("PENDING"))
+        when(queueRepo.findUploadable(anyInt()))
             .thenReturn(List.of(pending("ghost.md", "h")));
 
         service.uploadPending();
@@ -144,7 +146,7 @@ class SyncServiceTest {
     @Test
     void uploadFailureOnOneFileDoesNotStopTheBatch() throws Exception {
         writeVaultFile("ok.md", "fine");
-        when(queueRepo.findByStatus("PENDING"))
+        when(queueRepo.findUploadable(anyInt()))
             .thenReturn(List.of(pending("ghost.md", "h1"), pending("ok.md", "h2")));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("id-ok");
@@ -159,7 +161,7 @@ class SyncServiceTest {
     void uploadReusesExistingDriveFileId() throws Exception {
         writeVaultFile("note.md", "v2");
         SyncEntry entry = new SyncEntry("note.md", "h", "PENDING", null, "existing-id", 1);
-        when(queueRepo.findByStatus("PENDING")).thenReturn(List.of(entry));
+        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(entry));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("existing-id");
 
@@ -167,6 +169,48 @@ class SyncServiceTest {
 
         verify(drive).uploadFile(eq("note.md"), any(), anyString(), anyString(),
             eq("existing-id"));
+    }
+
+    @Test
+    void uploadDrivesFailedRowsReturnedByFindUploadable() throws Exception {
+        // Self-healing: a previously-FAILED row still under the retry cap is retried.
+        writeVaultFile("retry.md", "second chance");
+        SyncEntry failedRow = new SyncEntry("retry.md", "h", "FAILED", null, null, 2);
+        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(failedRow));
+        when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
+            .thenReturn("id-retry");
+
+        service.uploadPending();
+
+        verify(drive).uploadFile(eq("retry.md"), any(), anyString(), anyString(), any());
+        verify(queueRepo).markDoneIfHashMatches(eq("retry.md"), eq("id-retry"), anyString());
+    }
+
+    @Test
+    void uploadPrewarmsEachDistinctFolderOnceBeforeUploading() throws Exception {
+        writeVaultFile("a/x.md", "1");
+        writeVaultFile("a/y.md", "2");
+        writeVaultFile("b/z.md", "3");
+        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(
+            pending("a/x.md", "h1"), pending("a/y.md", "h2"), pending("b/z.md", "h3")));
+
+        service.uploadPending();
+
+        // one prewarm per distinct directory — never per file (would race duplicate folders)
+        verify(drive, times(2)).prewarmFolder(anyString());
+    }
+
+    @Test
+    void uploadProgressIsIdleByDefaultAndClearsAfterRun() throws Exception {
+        assertThat(service.uploadProgress()).containsEntry("uploading", false);
+
+        writeVaultFile("p.md", "x");
+        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(pending("p.md", "h")));
+        service.uploadPending();
+
+        // drain finished — not stuck "uploading", and total reflects the batch
+        assertThat(service.uploadProgress()).containsEntry("uploading", false);
+        assertThat(service.uploadProgress()).containsEntry("uploadTotal", 1);
     }
 
     // ── downloadAll ───────────────────────────────────────────────────────
@@ -314,7 +358,7 @@ class SyncServiceTest {
     void tombstonesAreTrashedAndRowsRemoved() throws Exception {
         SyncEntry doomed = new SyncEntry("gone.md", "h", "DELETE_PENDING", 1L, "fid-gone", 0);
         when(queueRepo.findByStatus("DELETE_PENDING")).thenReturn(List.of(doomed));
-        when(queueRepo.findByStatus("PENDING")).thenReturn(List.of());
+        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of());
 
         service.uploadPending();
 
@@ -326,7 +370,7 @@ class SyncServiceTest {
     void tombstoneStaysWhenTrashFails() throws Exception {
         SyncEntry doomed = new SyncEntry("gone.md", "h", "DELETE_PENDING", 1L, "fid-gone", 0);
         when(queueRepo.findByStatus("DELETE_PENDING")).thenReturn(List.of(doomed));
-        when(queueRepo.findByStatus("PENDING")).thenReturn(List.of());
+        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of());
         org.mockito.Mockito.doThrow(new IOException("boom")).when(drive).trashFile("fid-gone");
 
         service.uploadPending();
