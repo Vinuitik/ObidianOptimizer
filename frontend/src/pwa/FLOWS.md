@@ -1,28 +1,40 @@
 # PWA / Mobile — FLOWS
-Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, MobileNotesPage.jsx, MobileSearchPage.jsx, CapturePage.jsx, useMediaQuery.js, useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, registerSW.js, vite-pwa.config.js, ../../public/sw.js, ../../public/manifest.webmanifest
+Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, SyncPage.jsx, CapturePage.jsx, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, registerSW.js, vite-pwa.config.js, ../../public/sw.js, ../../public/manifest.webmanifest
+> Unused (dropped from the narrow PWA, kept in-tree): MobileNotesPage.jsx, MobileSearchPage.jsx.
 
-> Turns the existing React app into an installable, offline-capable Android PWA by
-> reusing every leaf component and adding only a shell + an offline data seam.
-> Plan of record: `architecture_plans/PWA_MOBILE_ARCH.md`. Whole feature is
-> **additive** — desktop code is untouched until you flip the two wiring lines below.
+> The installed PWA is a **narrow, offline-capable app** — three jobs: **Review**
+> (flashcards), **Learn** (ingest triage), **Capture** (share-sheet → ingest) + a
+> **Sync** tab. It is NOT the whole website; everything else (editor, folder tree,
+> search, dashboard, settings) lives on the **full responsive site**, opened as a
+> link in a browser. Both are ONE codebase — a fix in a reused leaf lands on both.
+> Plan of record: `architecture_plans/PWA_MOBILE_ARCH.md`.
+> **Status (2026-07-05): ACTIVATED.** `main.jsx` renders `ResponsiveApp` + registers
+> the SW. **Still pending:** the offline **read/grade** seam (store/ReviewPage → `offlineApi`)
+> is NOT wired — online review works in the PWA, but true offline review needs that
+> swap **plus** consistent outbox-flush so desktop doesn't silently queue grades. The
+> offline **Learn** lane (`/api/learn/bundle`) is also unbuilt. See arch plan §P3/§P3b.
 
-## Activation (the only edits to existing files needed to go live)
-`src/main.jsx` — swap the root + register the SW:
-```js
-import ResponsiveApp from './pwa/ResponsiveApp';
-import { registerServiceWorker } from './pwa/registerSW';
-registerServiceWorker();
-createRoot(...).render(<StrictMode><ResponsiveApp /></StrictMode>);
-```
-Optional (full offline review, P3): point the store's review calls at the offline
-seam — in `src/store/useStore.js` import `fetchReviewOffline` / `fetchNoteContentOffline`
-/ `gradeNoteOffline` from `./pwa/offlineApi` instead of `../api/notes`.
-To change the desktop/mobile breakpoint: `ResponsiveApp.jsx` `useMediaQuery('(max-width: 768px)')`.
+## The seam — installed app vs. browser tab (NOT viewport width)
+`main.jsx` → `ResponsiveApp` picks by **how the app was opened**:
+- `matchMedia('(display-mode: standalone)')` (or iOS `navigator.standalone`) → installed
+  from the home screen → **`PwaApp`** (the narrow app, `MobileApp.jsx`).
+- otherwise (any browser tab, phone or desktop) → **`App`** (the full responsive site).
+- Test override: **`?pwa=1`** forces the app shell, **`?pwa=0`** forces the full site,
+  on any device (you can't reinstall to flip modes while developing).
+Why display-mode, not `max-width`: the phone needs BOTH — the focused offline app via
+the icon AND the full site via a link. Width can't tell them apart; launch mode can.
 
-## Flow — layout switch
-`main.jsx` → `ResponsiveApp` → `useMediaQuery` → desktop `App` (unchanged) **OR** `MobileApp`
-- `MobileApp` = `BrowserRouter` → `MobileLayout` (shell + `BottomNav`) → route → leaf page.
+## Flow — the narrow app
+`ResponsiveApp` → `PwaApp` = `BrowserRouter` → `MobileLayout` (shell + offline banner +
+`BottomNav` + `LoginModal`) → route → leaf page:
+- `/` → redirect `/review`; `/review` → `ReviewPage`; `/learn` → `LearnPage`;
+  `/capture` → `CapturePage`; `/settings` → `SyncPage`.
+- `ReviewPage`/`LearnPage` are the **same** desktop components (reused). `LearnPage`'s
+  `InboxReview` renders its **mobile single-view** ([Source | Note] toggle) automatically
+  (`LearnLayout` branches on `useIsMobile`) — see components/FLOWS.md.
 - To add a tab: `BottomNav.TABS` entry + `MobileApp` `<Route>`.
+- `MobileLayout` flushes the outbox on reconnect (`online` → `flushOutbox()`); harmless
+  no-op until the grade seam lands (only captures queue today).
 
 ## Flow — install + offline shell (P1)
 `registerServiceWorker()` → `navigator.serviceWorker.register('/sw.js')` → `requestPersistentStorage()`
@@ -55,16 +67,20 @@ Backend: `CaptureController.capture()` → embedder `POST /ingest {ref:url}` (st
 - **Session cookie in PWA context.** Capture/grade rely on the same-origin Spring session cookie surviving the installed-PWA context. If it doesn't, requests 401 → everything queues until re-login. CSP `connect-src 'self'` is fine (same-origin only).
 - **`navigator.onLine` is a hint, not truth.** It only knows the device has *a* network, not that the server is reachable; the offline layer still falls back to IDB whenever a `fetch` actually throws.
 - **Icons are SVG** (`/icons/icon.svg`, `icon-maskable.svg`). Modern Chrome accepts SVG for installability; older engines want 192/512 PNG. If install is refused, add PNGs and update `manifest.webmanifest` + `vite-pwa.config.js`.
-- **Mobile is view-only (v1).** No Milkdown editing on phone — `MobileNotesPage` renders read-only via `utils/markdown.renderMarkdown()`. Editing stays desktop (deliberate scope cut).
+- **The installed app is narrow by design.** No note-browsing/search/editor in the PWA — those are on the full site (open the link). `MobileNotesPage`/`MobileSearchPage` are the vestige of the old "whole-app-on-mobile" scaffold; unused, kept in-tree.
+- **`display-mode` is the switch.** `matchMedia('(display-mode: standalone)')` is reliable for installed-PWA-launch vs browser-tab; iOS uses `navigator.standalone`. jsdom has no `matchMedia` → `ResponsiveApp` renders `App` under test.
+- **Sync tab needs the tunnel.** `SyncPage` "Download for offline" (`syncForOffline`) runs only online and only where the SW is active — the self-signed `:8443` blocks the SW, so download over the real-cert tunnel domain.
 - **nginx strips `/api/`** (trailing-slash `proxy_pass`), so backend mappings are relative (`capture`, `review/bundle`) — matches NotesController.
 
 ## Change Index
 | Touch this | Where |
 |---|---|
-| Desktop/mobile breakpoint | `ResponsiveApp.jsx` → `useMediaQuery('(max-width: 768px)')` |
-| Add a mobile tab | `BottomNav.jsx` `TABS` + `MobileApp.jsx` `<Route>` |
-| Activate PWA | `src/main.jsx` (import `ResponsiveApp` + `registerServiceWorker()`) |
-| Activate offline review | `src/store/useStore.js` import from `pwa/offlineApi` |
+| App vs full-site seam | `ResponsiveApp.jsx` → `matchMedia('(display-mode: standalone)')` (+ `?pwa=` override) |
+| App tabs / scope | `BottomNav.jsx` `TABS` + `MobileApp.jsx` `<Route>` |
+| PWA activation (live) | `src/main.jsx` (`ResponsiveApp` + `registerServiceWorker()`) |
+| Download-for-offline / sync UI | `SyncPage.jsx` (`syncForOffline`, `flushOutbox`) |
+| Activate offline review [PENDING] | swap store `fetchReview`/`fetchNoteContent` + `ReviewPage`/`ReviewRating` `gradeNote` → `pwa/offlineApi`, AND flush outbox in `App` too |
+| Shared viewport hook | `src/utils/useMediaQuery.js` (`useIsMobile`, `MOBILE_QUERY`) |
 | Shell precache list | `public/sw.js` `SHELL_URLS` |
 | Media cache name | `public/sw.js` + `syncOffline.js` `MEDIA_CACHE = 'obsopt-media'` |
 | IndexedDB schema | `db.js` + mirror in `public/sw.js` `openDB()` |

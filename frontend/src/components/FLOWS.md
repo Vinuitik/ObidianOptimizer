@@ -202,13 +202,14 @@ Single breakpoint: `@media (max-width: 768px)` everywhere (documented in `styles
 
 - `App.module.css .shell` — `100dvh` (visible viewport; `100vh` fallback) + `safe-area-inset-bottom`
 - `NavBar.module.css` — two-row wrap (see NavBar above); `safe-area-inset-top`
-- `SplitLayout.module.css` — side panels become absolute overlay **drawers** (`z-index: 50`, `min(85vw, 320px)`), not `display:none`; collapsed = hidden. **JS touch:** `useStore.js` initializes `leftCollapsed`/`rightCollapsed` via `matchMedia` so drawers start closed on phones (guarded — jsdom has no `matchMedia`). Open/close via existing "▶ Files"/"Review ◀" header buttons.
-- `LearnLayout.module.css` — panes always stack vertically; divider drag disabled (`pointer-events: none`; its math assumes desktop orientation), swap button still active
+- `SplitLayout` — side panels become absolute overlay **drawers** (`z-index: 50`, `min(85vw, 320px)`), not `display:none`; collapsed = hidden. **JS touches:** `useStore.js` inits `leftCollapsed`/`rightCollapsed` via `matchMedia` so drawers start closed on phones; `SplitLayout.jsx` renders a **tap-to-dismiss `.scrim`** (`useIsMobile`, `z-index: 40`) behind an open drawer → `closeDrawers()`. Open via header "▶ Files"/"Review ◀".
+- `LearnLayout` — **display logic changes on mobile, not just CSS:** `LearnLayout.jsx` branches on `useIsMobile` → renders ONE pane at a time with a segmented **[labelA | labelB]** toggle (`.segmented`) instead of the desktop drag-split. Slots unchanged; `InboxReview` passes `labelA="Source" labelB="Note"`. Desktop split path (and its tests) untouched.
+- `InboxReview` — mobile stacks: queue rail → full-width top strip (`max-height: 32vh`), split area single-view, action bar `position: sticky; bottom`.
 - `ReviewPage.module.css` — one pane at a time: list full-screen ↔ session full-screen. **JS touch:** `ReviewPage.jsx` sets `.hasSession` class when a session/inline note is open
 - `ResourcePanel/InboxPanel .module.css` — fixed sidebars → `min(40-45vw, …)`
 - `DashboardPage/SettingsPage .module.css` — tighter gutters
 
-[NOT IMPLEMENTED]: drawer backdrop/swipe-to-close; live re-collapse when resizing desktop→mobile (initial-load only).
+Drawer backdrop (tap-to-close) DONE (`SplitLayout.jsx .scrim`). [NOT IMPLEMENTED]: swipe-to-close; live re-collapse when resizing desktop→mobile (initial-load only).
 
 ---
 

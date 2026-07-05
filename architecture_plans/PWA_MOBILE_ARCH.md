@@ -3,6 +3,18 @@
 > Handoff doc. Goal: turn the existing React frontend into an installable, offline-capable
 > PWA on Android, reusing the current codebase maximally so **a fix made once applies to both
 > desktop and phone**. Implementation happens in a later fresh session from this plan.
+>
+> **⇐ SCOPE REVISION (2026-07-05, user).** Two tracks, cleanly separated by *how the app
+> is opened*, not by viewport width (§7 recommendation is superseded on this point):
+>  (1) **Full responsive website** — opened as a link in any browser (incl. phone). Genuine
+>      layout changes, not squished panels: Learn = single-view [Source|Note] toggle (not the
+>      drag-split), Notes = overlay drawers + scrim. Mostly shipped (2026-07-02 + 2026-07-05).
+>  (2) **Installed PWA** — launched from the home-screen icon (`display-mode: standalone`).
+>      **NARROW**: Review · Learn · Capture + Sync only. Not the whole site.
+> The seam is now `ResponsiveApp` → `matchMedia('(display-mode: standalone)')` (+ `?pwa=`
+> override), NOT `max-width`. ACTIVATED 2026-07-05 (`main.jsx` renders `ResponsiveApp` + SW).
+> Still pending: offline read/grade seam (§P3) + offline Learn lane `/api/learn/bundle` (§P3b).
+>
 > Status (2026-07-02 audit): **P1–P4 BUILT but DORMANT; backend §8 SHIPPED.**
 > All PWA code exists in `frontend/src/pwa/` (see its FLOWS.md — shell, MobileLayout,
 > offline review seam, share-target capture, hand-written `public/sw.js`) but is NOT
