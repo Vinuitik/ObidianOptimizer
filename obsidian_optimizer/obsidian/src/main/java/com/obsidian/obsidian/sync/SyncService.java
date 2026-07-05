@@ -21,11 +21,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -165,10 +163,6 @@ public class SyncService {
             return;
         }
 
-        // Pre-create the folder tree serially so concurrent uploads never race
-        // getOrCreateFolder into making duplicate Drive folders.
-        prewarmFolders(uploadable);
-
         int concurrency = Math.max(1, uploadConcurrency);
         log.info("[SyncService.uploadPending] start — {} file(s), concurrency={}",
             uploadable.size(), concurrency);
@@ -230,23 +224,6 @@ public class SyncService {
             log.error("[SyncService.uploadPending] failed for {}: {}", entry.path(), e.getMessage());
             syncQueueRepo.markFailed(entry.path());
             failed.incrementAndGet();
-        }
-    }
-
-    /** Create every parent folder chain once (deduped by directory) before parallel upload. */
-    private void prewarmFolders(List<SyncEntry> entries) {
-        Set<String> seenDirs = new HashSet<>();
-        for (SyncEntry entry : entries) {
-            String path = entry.path();
-            int slash = path.lastIndexOf('/');
-            String dir = slash < 0 ? "" : path.substring(0, slash);
-            if (seenDirs.add(dir)) {
-                try {
-                    driveService.prewarmFolder(path);
-                } catch (IOException e) {
-                    log.warn("[SyncService.prewarmFolders] {}: {}", dir, e.getMessage());
-                }
-            }
         }
     }
 

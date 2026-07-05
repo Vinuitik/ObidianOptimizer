@@ -54,6 +54,9 @@ public class DriveService {
     /** Cache: "parentFolderId/name" → child folder ID. Avoids redundant list API calls. */
     private final Map<String, String> folderCache = new ConcurrentHashMap<>();
 
+    /** Per-folder-key locks so concurrent uploads never double-create the same folder. */
+    private final Map<String, Object> folderLocks = new ConcurrentHashMap<>();
+
     public DriveService(SettingsRepository settingsRepo) {
         this.settingsRepo = settingsRepo;
     }
@@ -110,6 +113,7 @@ public class DriveService {
         drive = null;
         activeMode = "none";
         folderCache.clear();
+        folderLocks.clear();
     }
 
     /** oauth | service-account | none — which credential source WOULD be used. */
@@ -345,15 +349,8 @@ public class DriveService {
      * e.g. "notes/folder/note.md" → ensures notes/ and notes/folder/ exist.
      */
     /**
-     * Pre-create (and cache) the whole folder chain for a file path. Call serially,
-     * once per distinct directory, BEFORE launching concurrent uploads — otherwise two
-     * upload threads racing {@link #getOrCreateFolder} both see "missing" and each
-     * creates a duplicate Drive folder.
+     * Ensures all intermediate folders exist and returns the immediate parent's ID.
      */
-    public void prewarmFolder(String relativePath) throws IOException {
-        ensureFolderPath(relativePath);
-    }
-
     private String ensureFolderPath(String relativePath) throws IOException {
         String[] parts = relativePath.split("/");
         String current = rootFolderId();
@@ -365,31 +362,45 @@ public class DriveService {
         return current;
     }
 
+    /**
+     * Find-or-create a child folder. Thread-safe: the concurrent uploader hits this from
+     * many threads, so the find-or-create is serialized per (parent/name) key — otherwise
+     * two threads both see "missing" and each creates a DUPLICATE Drive folder. A cache
+     * hit (the common case) is lock-free; only a first miss for a given folder blocks, and
+     * only other threads wanting that same folder.
+     */
     private String getOrCreateFolder(String name, String parentId) throws IOException {
         String cacheKey = parentId + "/" + name;
         String cached = folderCache.get(cacheKey);
         if (cached != null) return cached;
 
-        Drive d = requireClient();
-        String q = "name = '" + name.replace("'", "\\'") + "'"
-            + " and '" + parentId + "' in parents"
-            + " and mimeType = '" + FOLDER_MIME + "'"
-            + " and trashed = false";
-        FileList result = d.files().list()
-            .setQ(q).setFields("files(id)").setPageSize(1).execute();
+        Object lock = folderLocks.computeIfAbsent(cacheKey, k -> new Object());
+        synchronized (lock) {
+            // Re-check: another thread may have created it while we waited.
+            String again = folderCache.get(cacheKey);
+            if (again != null) return again;
 
-        String id;
-        if (!result.getFiles().isEmpty()) {
-            id = result.getFiles().get(0).getId();
-        } else {
-            File folder = new File()
-                .setName(name)
-                .setMimeType(FOLDER_MIME)
-                .setParents(Collections.singletonList(parentId));
-            id = d.files().create(folder).setFields("id").execute().getId();
+            Drive d = requireClient();
+            String q = "name = '" + name.replace("'", "\\'") + "'"
+                + " and '" + parentId + "' in parents"
+                + " and mimeType = '" + FOLDER_MIME + "'"
+                + " and trashed = false";
+            FileList result = d.files().list()
+                .setQ(q).setFields("files(id)").setPageSize(1).execute();
+
+            String id;
+            if (!result.getFiles().isEmpty()) {
+                id = result.getFiles().get(0).getId();
+            } else {
+                File folder = new File()
+                    .setName(name)
+                    .setMimeType(FOLDER_MIME)
+                    .setParents(Collections.singletonList(parentId));
+                id = d.files().create(folder).setFields("id").execute().getId();
+            }
+            folderCache.put(cacheKey, id);
+            return id;
         }
-        folderCache.put(cacheKey, id);
-        return id;
     }
 
     // ── Utilities ─────────────────────────────────────────────────────────────

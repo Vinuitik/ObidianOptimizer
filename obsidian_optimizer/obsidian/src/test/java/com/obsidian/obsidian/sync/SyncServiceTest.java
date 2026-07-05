@@ -187,17 +187,19 @@ class SyncServiceTest {
     }
 
     @Test
-    void uploadPrewarmsEachDistinctFolderOnceBeforeUploading() throws Exception {
+    void uploadProcessesEveryFileConcurrently() throws Exception {
         writeVaultFile("a/x.md", "1");
         writeVaultFile("a/y.md", "2");
         writeVaultFile("b/z.md", "3");
         when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(
             pending("a/x.md", "h1"), pending("a/y.md", "h2"), pending("b/z.md", "h3")));
+        when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
+            .thenReturn("id");
 
         service.uploadPending();
 
-        // one prewarm per distinct directory — never per file (would race duplicate folders)
-        verify(drive, times(2)).prewarmFolder(anyString());
+        // every queued file is uploaded (folder-safety is handled inside DriveService)
+        verify(drive, times(3)).uploadFile(anyString(), any(), anyString(), anyString(), any());
     }
 
     @Test
