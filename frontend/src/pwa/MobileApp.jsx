@@ -1,27 +1,33 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import MobileLayout from './MobileLayout';
-import MobileNotesPage from './MobileNotesPage';
-import MobileSearchPage from './MobileSearchPage';
 import CapturePage from './CapturePage';
+import SyncPage from './SyncPage';
 import ReviewPage from '../pages/ReviewPage';
-import SettingsPage from '../pages/SettingsPage';
+import LearnPage from '../pages/LearnPage';
 
-// Mobile root. Same store, same leaf components — only the shell + navigation
-// differ from desktop. Routes mirror the bottom-nav tabs in BottomNav.jsx.
+// The installed PWA — deliberately NARROW (not the whole website). Three jobs:
+//   • Review   — do flashcards (offline once the offline seam lands), grades sync back.
+//   • Learn    — triage the ingest inbox (online; offline learn lane is the next step).
+//   • Capture  — Android share-sheet target → ingest pipeline (+ manual paste).
+//   • Sync     — download the review subset for offline; replay the outbox.
+// Everything else (full note editor, folder tree, search, dashboard, settings) lives
+// on the full site, reached by opening the link in a browser. See ResponsiveApp.
 //
-// Note: /share-target is handled entirely by the service worker (it 303-redirects
-// to /capture?shared=…), so there is no React route for it.
-export default function MobileApp() {
+// Leaf reuse: ReviewPage / LearnPage are the SAME components the desktop renders — a
+// fix there lands on both. Only the shell (MobileLayout + BottomNav) and Sync/Capture
+// are PWA-specific. /share-target has no React route (the service worker 303s it to
+// /capture?shared=…).
+export default function PwaApp() {
   return (
     <BrowserRouter>
       <Routes>
         <Route element={<MobileLayout />}>
-          <Route path="/" element={<MobileNotesPage />} />
+          <Route path="/" element={<Navigate to="/review" replace />} />
           <Route path="/review" element={<ReviewPage />} />
-          <Route path="/search" element={<MobileSearchPage />} />
+          <Route path="/learn" element={<LearnPage />} />
           <Route path="/capture" element={<CapturePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/settings" element={<SyncPage />} />
+          <Route path="*" element={<Navigate to="/review" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -1,19 +1,28 @@
 import App from '../App';
-import MobileApp from './MobileApp';
+import PwaApp from './MobileApp';
 import useMediaQuery from './useMediaQuery';
 
-// The single viewport switch. Desktop renders the EXISTING App untouched; phones
-// render the mobile shell. Both drive the same Zustand store and reuse the same
-// leaf components — a fix in FlashcardSession/ReviewPage lands on both surfaces.
+// The layout seam. Two SEPARATE experiences, chosen by HOW the app was opened —
+// not by screen width:
+//   • Installed to the home screen (display-mode: standalone) → the narrow, offline
+//     PWA (flashcards · learn · capture). This is "the app".
+//   • Opened as a link in a browser (phone OR desktop) → the full responsive site
+//     (App), which reflows on small screens (drawers, single-view Learn, etc.).
+// So on a phone you get the full site via a link AND the focused app via the icon,
+// from ONE codebase / one deploy.
 //
-// To activate, swap the root in src/main.jsx:
-//   import ResponsiveApp from './pwa/ResponsiveApp';
-//   import { registerServiceWorker } from './pwa/registerSW';
-//   registerServiceWorker();
-//   createRoot(...).render(<StrictMode><ResponsiveApp /></StrictMode>);
-//
-// To change the breakpoint, edit the query below.
+// Override for testing (you can't reinstall to flip modes): ?pwa=1 forces the app
+// shell, ?pwa=0 forces the full site — on any device.
 export default function ResponsiveApp() {
-  const isMobile = useMediaQuery('(max-width: 768px)');
-  return isMobile ? <MobileApp /> : <App />;
+  const standalone = useMediaQuery('(display-mode: standalone)');
+  const iosStandalone = typeof navigator !== 'undefined' && navigator.standalone === true;
+
+  let usePwa = standalone || iosStandalone;
+  if (typeof window !== 'undefined') {
+    const forced = new URLSearchParams(window.location.search).get('pwa');
+    if (forced === '1') usePwa = true;
+    if (forced === '0') usePwa = false;
+  }
+
+  return usePwa ? <PwaApp /> : <App />;
 }
