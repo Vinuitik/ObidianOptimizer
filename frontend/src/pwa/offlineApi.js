@@ -15,8 +15,17 @@ import {
   completeAssignment as netCompleteAssignment,
   ApiError,
 } from '../api/notes';
-import { getAllReviewNotes, getReviewNote, getAssignmentByNote } from './db';
-import { enqueueGrade, enqueueCapture, enqueueAssignment, flush } from './outbox';
+import {
+  fetchInbox as netFetchInbox,
+  fileInboxNote as netFileInbox,
+  discardInboxNote as netDiscardInbox,
+  acknowledgeCapture as netAcknowledge,
+} from '../api/inbox';
+import { getAllReviewNotes, getReviewNote, getAssignmentByNote, getMeta, setMeta } from './db';
+import {
+  enqueueGrade, enqueueCapture, enqueueAssignment,
+  enqueueFile, enqueueDiscard, enqueueAcknowledge, flush,
+} from './outbox';
 import { isOnline } from './connectivity';
 
 // Drive mode: the installed PWA reads its review set from the Drive-pulled IndexedDB
@@ -131,6 +140,42 @@ export async function completeAssignmentOffline(assignmentId) {
   offlineAnswers = {};
   offlineCtx = null;
   return { notes: [], deferred: true, queued: true };
+}
+
+// ── Offline Learn inbox (triage from the Drive-pulled bundle) ─────────────────
+// driveMode: read the inbox from the pulled set (meta 'inboxItems'); file/discard/
+// acknowledge queue as mailbox events and optimistically drop the item locally so the
+// list reflects the action offline. Online/desktop → straight to the server.
+async function pulledInbox() { return (await getMeta('inboxItems')) || []; }
+async function dropFromInbox(pred) {
+  const items = await pulledInbox();
+  await setMeta('inboxItems', items.filter(pred));
+}
+
+export async function fetchInboxOffline() {
+  if (driveMode) return pulledInbox();
+  return netFetchInbox();
+}
+
+export async function fileInboxOffline(path, targetFolder, content) {
+  if (!driveMode) return netFileInbox(path, targetFolder, content);
+  await enqueueFile(path, targetFolder, content);
+  await dropFromInbox(i => i.path !== path);
+  return { path, queued: true };
+}
+
+export async function discardInboxOffline(path) {
+  if (!driveMode) return netDiscardInbox(path);
+  await enqueueDiscard(path);
+  await dropFromInbox(i => i.path !== path);
+  return { queued: true };
+}
+
+export async function acknowledgeOffline(captureId) {
+  if (!driveMode) return netAcknowledge(captureId);
+  await enqueueAcknowledge(captureId);
+  await dropFromInbox(i => i.captureId !== captureId);
+  return { queued: true };
 }
 
 // Replay the outbox — call on reconnect (and after re-login).

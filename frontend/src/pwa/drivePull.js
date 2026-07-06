@@ -9,6 +9,7 @@ import { putReviewNotes, putAssignments, setMeta } from './db';
 
 const REVIEW_BUNDLE = 'review-bundle.json.enc';
 const CARDS_BUNDLE = 'cards.json.enc';
+const INBOX_BUNDLE = 'inbox.json.enc';
 
 // sr-due lives in the note's own frontmatter → the phone can compute due-ness itself.
 function dueOf(content) {
@@ -72,9 +73,21 @@ export async function pullReviewFromDrive() {
     }
   } catch { /* keep self-rated review working */ }
 
+  // Best-effort: pull the Learn inbox too (offline triage). Stored in meta as a plain
+  // array; file/discard/acknowledge mutate it optimistically and queue mailbox events.
+  let inbox = 0;
+  try {
+    const inboxFile = await findOfflineFile(token, creds.driveFolderId, INBOX_BUNDLE);
+    if (inboxFile) {
+      const ib = JSON.parse(await decryptText(key, await driveDownload(token, inboxFile.id)));
+      await setMeta('inboxItems', ib.items || []);
+      inbox = (ib.items || []).length;
+    }
+  } catch { /* Learn offline is optional */ }
+
   await setMeta('lastSync', Date.now());
   await setMeta('driveSource', true);
-  return { notes: records.length, cards, generatedAt: bundle.generatedAt };
+  return { notes: records.length, cards, inbox, generatedAt: bundle.generatedAt };
 }
 
 // Ask the server (while it's up) to rebuild the bundle, then pull it. Used at home so the

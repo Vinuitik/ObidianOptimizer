@@ -2,6 +2,7 @@ package com.obsidian.obsidian.pwa;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.cards.AssignmentService;
+import com.obsidian.obsidian.inbox.InboxController;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.sync.DriveService;
 import com.obsidian.obsidian.sync.VaultEncryptionService;
@@ -35,6 +36,7 @@ public class OfflineExportService {
     private static final Logger log = LoggerFactory.getLogger(OfflineExportService.class);
     static final String REVIEW_BUNDLE = "review-bundle.json.enc";
     static final String CARDS_BUNDLE = "cards.json.enc";
+    static final String INBOX_BUNDLE = "inbox.json.enc";
     private static final int DEFAULT_LIMIT = 200;
     private static final int SESSION_POINTS = 10;   // matches the online FlashcardSession budget
     private static final int CARDS_NOTE_LIMIT = 50; // pre-build assignments for this many due notes
@@ -43,16 +45,19 @@ public class OfflineExportService {
     private final VaultEncryptionService encryption;
     private final DriveService drive;
     private final AssignmentService assignmentService;
+    private final InboxController inbox;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public OfflineExportService(FileRepository repository,
                                 VaultEncryptionService encryption,
                                 DriveService drive,
-                                AssignmentService assignmentService) {
+                                AssignmentService assignmentService,
+                                InboxController inbox) {
         this.repository = repository;
         this.encryption = encryption;
         this.drive = drive;
         this.assignmentService = assignmentService;
+        this.inbox = inbox;
     }
 
     /** Build + encrypt + upload the due-notes bundle. Returns the note count. */
@@ -114,10 +119,29 @@ public class OfflineExportService {
         return assignments.size();
     }
 
-    /** Both bundles — used by the boot/nightly/manual triggers. */
+    /** The Learn inbox → _offline/inbox.json.enc, so triage works offline. Reuses the
+     *  same list the desktop Learn view shows (InboxController.listItems). */
+    public int exportInbox() throws Exception {
+        if (!drive.isConfigured())      throw new IllegalStateException("Drive not connected");
+        if (!encryption.isConfigured()) throw new IllegalStateException("Sync passphrase not set");
+
+        List<?> items = inbox.listItems();
+        Map<String, Object> bundle = new LinkedHashMap<>();
+        bundle.put("generatedAt", System.currentTimeMillis());
+        bundle.put("items", items == null ? List.of() : items);
+
+        byte[] encrypted = encryption.encrypt(mapper.writeValueAsBytes(bundle));
+        drive.uploadOffline(INBOX_BUNDLE, encrypted);
+        int n = items == null ? 0 : items.size();
+        log.info("[OfflineExport] exported {} inbox items → _offline/{}", n, INBOX_BUNDLE);
+        return n;
+    }
+
+    /** All bundles — used by the boot/nightly/manual triggers. */
     public void exportAll() throws Exception {
         exportReviewBundle(DEFAULT_LIMIT);
         exportCards(CARDS_NOTE_LIMIT);
+        exportInbox();
     }
 
     @Scheduled(cron = "${offline.export.cron:0 30 3 * * *}")

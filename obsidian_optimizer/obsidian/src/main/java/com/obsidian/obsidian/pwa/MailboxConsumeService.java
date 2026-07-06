@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.cards.AssignmentRepository;
 import com.obsidian.obsidian.cards.AssignmentService;
 import com.obsidian.obsidian.cards.ReviewService;
+import com.obsidian.obsidian.inbox.InboxController;
 import com.obsidian.obsidian.sync.DriveService;
 import com.obsidian.obsidian.sync.DriveService.MailboxFile;
 import com.obsidian.obsidian.sync.VaultEncryptionService;
@@ -42,6 +43,7 @@ public class MailboxConsumeService {
     private final ReviewService reviewService;
     private final AssignmentService assignmentService;
     private final AssignmentRepository assignmentRepo;
+    private final InboxController inbox;
     private final ConsumedEventRepository consumed;
     private final OfflineExportService offlineExport;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -51,6 +53,7 @@ public class MailboxConsumeService {
                                  ReviewService reviewService,
                                  AssignmentService assignmentService,
                                  AssignmentRepository assignmentRepo,
+                                 InboxController inbox,
                                  ConsumedEventRepository consumed,
                                  OfflineExportService offlineExport) {
         this.drive = drive;
@@ -58,6 +61,7 @@ public class MailboxConsumeService {
         this.reviewService = reviewService;
         this.assignmentService = assignmentService;
         this.assignmentRepo = assignmentRepo;
+        this.inbox = inbox;
         this.consumed = consumed;
         this.offlineExport = offlineExport;
     }
@@ -117,8 +121,12 @@ public class MailboxConsumeService {
             if (eventId != null && consumed.alreadyConsumed(eventId)) continue;
             try {
                 switch (kind) {
-                    case "grade"      -> applyGrade(ev);
-                    case "assignment" -> applyAssignment(ev);
+                    case "grade"       -> applyGrade(ev);
+                    case "assignment"  -> applyAssignment(ev);
+                    case "file"        -> inbox.fileNote(ev.path("path").asText(),
+                                              ev.path("targetFolder").asText(), ev.path("content").asText(null));
+                    case "discard"     -> inbox.discardNote(ev.path("path").asText());
+                    case "acknowledge" -> inbox.acknowledgeCapture(ev.path("captureId").asText());
                     default -> {
                         allCommitted = false; // unknown kind → keep the file for a newer server
                         continue;

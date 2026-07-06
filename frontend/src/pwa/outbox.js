@@ -18,6 +18,18 @@ export function enqueueAssignment(assignmentId, notePath, answers) {
   return addToOutbox({ kind: 'assignment', assignmentId, notePath, answers, eventId: newId() });
 }
 
+export function enqueueFile(path, targetFolder, content) {
+  return addToOutbox({ kind: 'file', path, targetFolder, content, eventId: newId() });
+}
+
+export function enqueueDiscard(path) {
+  return addToOutbox({ kind: 'discard', path, eventId: newId() });
+}
+
+export function enqueueAcknowledge(captureId) {
+  return addToOutbox({ kind: 'acknowledge', captureId, eventId: newId() });
+}
+
 // Replay everything. Returns { sent, failed }. A 401 leaves items queued (the
 // caller should prompt login via the existing LoginModal, then flush again).
 export async function flush() {

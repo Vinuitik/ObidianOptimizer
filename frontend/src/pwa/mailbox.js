@@ -12,21 +12,18 @@ export async function pushMailbox() {
   if (!creds?.driveFolderId) return { pushed: 0 };
 
   const all = await getOutbox();
-  // Server consume handles grade + assignment (P3/P4). Other kinds stay for the
-  // server-direct path until their consumer lands.
-  const sendable = all.filter(e => e.kind === 'grade' || e.kind === 'assignment');
+  // Server consume handles these kinds (P3/P4/P5). Others stay for the server-direct path.
+  const KINDS = new Set(['grade', 'assignment', 'file', 'discard', 'acknowledge']);
+  const sendable = all.filter(e => KINDS.has(e.kind));
   if (!sendable.length) return { pushed: 0 };
 
   const token = await getAccessToken(creds);
   const folderId = await findOrCreateFolder(token, '_mailbox', creds.driveFolderId);
   const key = await deriveKey(creds.passphrase);
 
-  const events = sendable.map(e => {
-    if (e.kind === 'assignment') {
-      return { kind: 'assignment', assignmentId: e.assignmentId, notePath: e.notePath, answers: e.answers, eventId: e.eventId, ts: e.ts };
-    }
-    return { kind: 'grade', notePath: e.notePath, band: e.band, eventId: e.eventId, ts: e.ts };
-  });
+  // Send each event as-is (minus the local IDB autoincrement id) — the server dispatches
+  // by `kind` and reads whatever fields that kind carries.
+  const events = sendable.map(({ id, ...ev }) => ev);
   const enc = await encryptText(key, JSON.stringify({ deviceId: creds.deviceId, events }));
 
   // Name sorts by ts on the server (device-<ts>-<seq>) so events replay in order.

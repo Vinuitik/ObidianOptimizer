@@ -56,7 +56,7 @@ public class InboxController {
         this.captureRepo = captureRepo;
     }
 
-    record InboxItem(String path, String title, String source,
+    public record InboxItem(String path, String title, String source,
                      String suggestedFolder, String content,
                      String captureId, Integer captureSeq, boolean inPlace) {}
 
@@ -264,4 +264,27 @@ public class InboxController {
     record FileRequest(String path, String targetFolder, String content) {}
     record DiscardRequest(String path) {}
     record AcknowledgeRequest(String captureId) {}
+
+    // ── Programmatic API for the offline PWA (export + mailbox consume) ──────────
+    // Thin delegates to the endpoint methods above, so all the triage logic + private
+    // helpers stay in one place. Used by pwa/OfflineExportService + MailboxConsumeService.
+
+    public List<InboxItem> listItems() {
+        return list().getBody();
+    }
+
+    public void fileNote(String path, String targetFolder, String content) throws IOException {
+        ResponseEntity<?> r = file(new FileRequest(path, targetFolder, content));
+        if (!r.getStatusCode().is2xxSuccessful()) throw new IOException("file: " + r.getBody());
+    }
+
+    public void discardNote(String path) throws IOException {
+        ResponseEntity<?> r = discard(new DiscardRequest(path));
+        if (!r.getStatusCode().is2xxSuccessful()) throw new IOException("discard: " + r.getBody());
+    }
+
+    public void acknowledgeCapture(String captureId) throws IOException {
+        ResponseEntity<?> r = acknowledge(new AcknowledgeRequest(captureId));
+        if (!r.getStatusCode().is2xxSuccessful()) throw new IOException("acknowledge: " + r.getBody());
+    }
 }

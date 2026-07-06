@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { fetchInbox, fileInboxNote, discardInboxNote, acknowledgeCapture } from '../../api/inbox';
+import {
+  fetchInboxOffline as fetchInbox,
+  fileInboxOffline as fileInboxNote,
+  discardInboxOffline as discardInboxNote,
+  acknowledgeOffline as acknowledgeCapture,
+} from '../../pwa/offlineApi';
 import { fetchChildren, updateNote } from '../../api/notes';
 import { buildSourceColors, groupBySource } from '../../utils/sourceColor';
 import useStore from '../../store/useStore';
@@ -116,7 +121,9 @@ export default function InboxReview({ onCount }) {
     if (!current) return;
     setBusy(true); setStatus('Saving…');
     try {
-      if (draft !== current.content) await updateNote(current.path, draft);
+      // Best-effort: offline this hits no server — the acknowledge still queues. (Filing
+      // carries edited content in its event; in-place edits offline are the rare gap.)
+      if (draft !== current.content) { try { await updateNote(current.path, draft); } catch {} }
       await acknowledgeCapture(current.captureId);
       setStatus(''); load();
     } catch (e) { setStatus(`Failed: ${e.message || e}`); }
