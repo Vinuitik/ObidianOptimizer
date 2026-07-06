@@ -5,9 +5,10 @@ import { getCreds } from './setup';
 import { getAccessToken, driveList, driveDownload } from './drive';
 import { deriveKey, decryptText } from './crypto';
 import { splitFrontmatter, parseFrontmatterFields } from '../utils/frontmatter';
-import { putReviewNotes, setMeta } from './db';
+import { putReviewNotes, putAssignments, setMeta } from './db';
 
 const REVIEW_BUNDLE = 'review-bundle.json.enc';
+const CARDS_BUNDLE = 'cards.json.enc';
 
 // sr-due lives in the note's own frontmatter → the phone can compute due-ness itself.
 function dueOf(content) {
@@ -52,9 +53,28 @@ export async function pullReviewFromDrive() {
     srDue: dueOf(n.content),
   }));
   await putReviewNotes(records);
+
+  // Best-effort: pull the pre-built flashcard assignments too (offline card tests).
+  // Absent bundle → self-rated review still works, so never fail the whole pull on it.
+  let cards = 0;
+  try {
+    const cardsFile = await findOfflineFile(token, creds.driveFolderId, CARDS_BUNDLE);
+    if (cardsFile) {
+      const cbundle = JSON.parse(await decryptText(key, await driveDownload(token, cardsFile.id)));
+      const assignments = (cbundle.assignments || []).map(a => ({
+        notePath: a.notePath,
+        assignmentId: a.assignmentId,
+        cards: a.cards,
+        variants: a.variants,
+      }));
+      await putAssignments(assignments);
+      cards = assignments.length;
+    }
+  } catch { /* keep self-rated review working */ }
+
   await setMeta('lastSync', Date.now());
   await setMeta('driveSource', true);
-  return { notes: records.length, generatedAt: bundle.generatedAt };
+  return { notes: records.length, cards, generatedAt: bundle.generatedAt };
 }
 
 // Ask the server (while it's up) to rebuild the bundle, then pull it. Used at home so the

@@ -80,8 +80,9 @@ public class PwaController {
     @PostMapping("export")
     public ResponseEntity<?> export() {
         try {
-            int n = offlineExport.exportReviewBundle(200);
-            return ResponseEntity.ok(Map.of("exported", n));
+            int notes = offlineExport.exportReviewBundle(200);
+            int assignments = offlineExport.exportCards(50);
+            return ResponseEntity.ok(Map.of("notes", notes, "assignments", assignments));
         } catch (IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
         } catch (Exception e) {

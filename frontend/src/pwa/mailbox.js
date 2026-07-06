@@ -12,16 +12,21 @@ export async function pushMailbox() {
   if (!creds?.driveFolderId) return { pushed: 0 };
 
   const all = await getOutbox();
-  const grades = all.filter(e => e.kind === 'grade');
-  if (!grades.length) return { pushed: 0 };
+  // Server consume handles grade + assignment (P3/P4). Other kinds stay for the
+  // server-direct path until their consumer lands.
+  const sendable = all.filter(e => e.kind === 'grade' || e.kind === 'assignment');
+  if (!sendable.length) return { pushed: 0 };
 
   const token = await getAccessToken(creds);
   const folderId = await findOrCreateFolder(token, '_mailbox', creds.driveFolderId);
   const key = await deriveKey(creds.passphrase);
 
-  const events = grades.map(g => ({
-    kind: 'grade', notePath: g.notePath, band: g.band, eventId: g.eventId, ts: g.ts,
-  }));
+  const events = sendable.map(e => {
+    if (e.kind === 'assignment') {
+      return { kind: 'assignment', assignmentId: e.assignmentId, notePath: e.notePath, answers: e.answers, eventId: e.eventId, ts: e.ts };
+    }
+    return { kind: 'grade', notePath: e.notePath, band: e.band, eventId: e.eventId, ts: e.ts };
+  });
   const enc = await encryptText(key, JSON.stringify({ deviceId: creds.deviceId, events }));
 
   // Name sorts by ts on the server (device-<ts>-<seq>) so events replay in order.
@@ -29,6 +34,6 @@ export async function pushMailbox() {
   const name = `${creds.deviceId}-${Date.now()}-${seq}.enc`;
   await driveCreateFile(token, { name, parents: [folderId], appProperties: { device_id: creds.deviceId } }, enc);
 
-  for (const g of grades) await deleteFromOutbox(g.id);
+  for (const e of sendable) await deleteFromOutbox(e.id);
   return { pushed: events.length };
 }

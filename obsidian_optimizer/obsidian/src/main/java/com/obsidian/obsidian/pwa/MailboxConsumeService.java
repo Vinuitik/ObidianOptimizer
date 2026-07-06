@@ -2,10 +2,16 @@ package com.obsidian.obsidian.pwa;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.obsidian.obsidian.cards.AssignmentRepository;
+import com.obsidian.obsidian.cards.AssignmentService;
 import com.obsidian.obsidian.cards.ReviewService;
 import com.obsidian.obsidian.sync.DriveService;
 import com.obsidian.obsidian.sync.DriveService.MailboxFile;
 import com.obsidian.obsidian.sync.VaultEncryptionService;
+
+import java.util.Iterator;
+import java.util.Map;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -34,6 +40,8 @@ public class MailboxConsumeService {
     private final DriveService drive;
     private final VaultEncryptionService encryption;
     private final ReviewService reviewService;
+    private final AssignmentService assignmentService;
+    private final AssignmentRepository assignmentRepo;
     private final ConsumedEventRepository consumed;
     private final OfflineExportService offlineExport;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -41,11 +49,15 @@ public class MailboxConsumeService {
     public MailboxConsumeService(DriveService drive,
                                  VaultEncryptionService encryption,
                                  ReviewService reviewService,
+                                 AssignmentService assignmentService,
+                                 AssignmentRepository assignmentRepo,
                                  ConsumedEventRepository consumed,
                                  OfflineExportService offlineExport) {
         this.drive = drive;
         this.encryption = encryption;
         this.reviewService = reviewService;
+        this.assignmentService = assignmentService;
+        this.assignmentRepo = assignmentRepo;
         this.consumed = consumed;
         this.offlineExport = offlineExport;
     }
@@ -101,28 +113,59 @@ public class MailboxConsumeService {
         int applied = 0;
         for (JsonNode ev : events) {
             String kind = ev.path("kind").asText("");
-            if (!"grade".equals(kind)) {
-                allCommitted = false; // unknown kind → keep the file for a newer server
-                continue;
-            }
             String eventId = ev.path("eventId").asText(null);
             if (eventId != null && consumed.alreadyConsumed(eventId)) continue;
             try {
-                ReviewService.Band band = ReviewService.Band.valueOf(
-                    ev.path("band").asText("").toUpperCase().replace(' ', '_'));
-                reviewService.grade(ev.path("notePath").asText(), band);
+                switch (kind) {
+                    case "grade"      -> applyGrade(ev);
+                    case "assignment" -> applyAssignment(ev);
+                    default -> {
+                        allCommitted = false; // unknown kind → keep the file for a newer server
+                        continue;
+                    }
+                }
                 if (eventId != null) consumed.markConsumed(eventId);
                 applied++;
             } catch (Exception e) {
-                allCommitted = false; // bad band / missing note → retry next pass
-                log.warn("[Mailbox] grade event failed ({}): {}", ev.path("notePath").asText(), e.getMessage());
+                allCommitted = false; // transient (embedder/judge down) or bad data → retry next pass
+                log.warn("[Mailbox] {} event failed: {}", kind, e.getMessage());
             }
         }
 
         if (allCommitted) {
             drive.deleteFile(f.fileId());
-            log.info("[Mailbox] consumed {} ({} grades)", f.name(), applied);
+            log.info("[Mailbox] consumed {} ({} events)", f.name(), applied);
         }
         return applied;
+    }
+
+    private void applyGrade(JsonNode ev) {
+        ReviewService.Band band = ReviewService.Band.valueOf(
+            ev.path("band").asText("").toUpperCase().replace(' ', '_'));
+        reviewService.grade(ev.path("notePath").asText(), band);
+    }
+
+    /** Deferred grading: replay the offline flashcard answers through the real engine, then
+     *  finalize FSRS. Idempotent — skips cards already attempted and an already-completed
+     *  assignment, so a retried file is safe. */
+    private void applyAssignment(JsonNode ev) {
+        UUID assignmentId = UUID.fromString(ev.path("assignmentId").asText());
+        Map<String, Object> assignment = assignmentRepo.findAssignment(assignmentId);
+        if (assignment == null) {
+            // Assignment expired/cleaned — nothing to grade; treat as done so we don't loop.
+            log.warn("[Mailbox] assignment {} not found — skipping", assignmentId);
+            return;
+        }
+        if (assignment.get("completed_at") == null) {
+            JsonNode answers = ev.path("answers");   // { cardId: answer }
+            for (Iterator<String> it = answers.fieldNames(); it.hasNext(); ) {
+                String cardId = it.next();
+                UUID cid = UUID.fromString(cardId);
+                if (!assignmentRepo.attemptExists(assignmentId, cid)) {
+                    assignmentService.submitAttempt(assignmentId, cid, answers.get(cardId).asText());
+                }
+            }
+            assignmentService.complete(assignmentId);
+        }
     }
 }

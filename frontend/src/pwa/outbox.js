@@ -14,6 +14,10 @@ export function enqueueCapture(url) {
   return addToOutbox({ kind: 'capture', url, eventId: newId() });
 }
 
+export function enqueueAssignment(assignmentId, notePath, answers) {
+  return addToOutbox({ kind: 'assignment', assignmentId, notePath, answers, eventId: newId() });
+}
+
 // Replay everything. Returns { sent, failed }. A 401 leaves items queued (the
 // caller should prompt login via the existing LoginModal, then flush again).
 export async function flush() {

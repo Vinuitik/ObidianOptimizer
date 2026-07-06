@@ -10,10 +10,13 @@ import {
   fetchReview as netFetchReview,
   fetchNoteContent as netFetchNoteContent,
   gradeNote as netGradeNote,
+  buildAssignment as netBuildAssignment,
+  submitAttempt as netSubmitAttempt,
+  completeAssignment as netCompleteAssignment,
   ApiError,
 } from '../api/notes';
-import { getAllReviewNotes, getReviewNote } from './db';
-import { enqueueGrade, enqueueCapture, flush } from './outbox';
+import { getAllReviewNotes, getReviewNote, getAssignmentByNote } from './db';
+import { enqueueGrade, enqueueCapture, enqueueAssignment, flush } from './outbox';
 import { isOnline } from './connectivity';
 
 // Drive mode: the installed PWA reads its review set from the Drive-pulled IndexedDB
@@ -22,6 +25,7 @@ import { isOnline } from './connectivity';
 // its behaviour is unchanged. MobileLayout flips it on.
 let driveMode = false;
 export function setDriveMode(on) { driveMode = on; }
+export function isDriveMode() { return driveMode; }
 
 // Review list — network when online, downloaded IDB subset when offline.
 export async function fetchReviewOffline(offset = 0, limit = 40) {
@@ -94,6 +98,39 @@ export async function captureUrl(url) {
   }
   await enqueueCapture(url);
   return { queued: true };
+}
+
+// ── Offline flashcard tests (deferred grading) ────────────────────────────────
+// In driveMode the phone runs a PRE-BUILT assignment from IndexedDB (server export),
+// records the raw answers, and the server grades them on mailbox consume. Online (or
+// desktop) these pass straight through to the real endpoints.
+let offlineAnswers = {};        // { [cardId]: answer } for the in-progress test
+let offlineCtx = null;          // { assignmentId, notePath }
+
+export async function buildAssignmentOffline(scope, points) {
+  if (!driveMode) return netBuildAssignment(scope, points);
+  const a = await getAssignmentByNote(scope);
+  if (!a) throw new Error('No offline test downloaded for this note.');
+  offlineAnswers = {};
+  offlineCtx = { assignmentId: a.assignmentId, notePath: scope };
+  return { id: a.assignmentId, scope, targetPoints: points, cards: a.cards, variants: a.variants };
+}
+
+export async function submitAttemptOffline(assignmentId, cardId, answer) {
+  if (!driveMode) return netSubmitAttempt(assignmentId, cardId, answer);
+  // Record the raw answer; the server is authoritative and grades on consume. No local
+  // verdict (open/exercise need the model) — the UI shows "recorded", score arrives on sync.
+  offlineAnswers[cardId] = answer ?? '';
+  return { verdict: 'RECORDED', pointsEarned: 0, maxPoints: 0, deferred: true };
+}
+
+export async function completeAssignmentOffline(assignmentId) {
+  if (!driveMode) return netCompleteAssignment(assignmentId);
+  const ctx = offlineCtx || { assignmentId, notePath: null };
+  await enqueueAssignment(ctx.assignmentId, ctx.notePath, offlineAnswers);
+  offlineAnswers = {};
+  offlineCtx = null;
+  return { notes: [], deferred: true, queued: true };
 }
 
 // Replay the outbox — call on reconnect (and after re-login).

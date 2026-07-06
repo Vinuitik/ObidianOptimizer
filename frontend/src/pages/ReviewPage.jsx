@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import { gradeNoteOffline as gradeNote, fetchNoteContentOffline as fetchNoteContent } from '../pwa/offlineApi';
+import { gradeNoteOffline as gradeNote, fetchNoteContentOffline as fetchNoteContent, isDriveMode } from '../pwa/offlineApi';
 import useOffline from '../pwa/useOffline';
 import FlashcardSession from '../components/organisms/FlashcardSession';
 import NoteRenderer from '../components/molecules/NoteRenderer';
@@ -15,9 +15,9 @@ export default function ReviewPage() {
   const isAuthenticated   = useStore(s => s.isAuthenticated);
   const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
   const online            = useOffline();
-  // Flashcard tests need the server (build/grade/complete assignments). Offline we
-  // fall back to the self-rated review of the cached note — the grade queues + syncs.
-  const useFlashcards     = flashcardsEnabled && online;
+  // Flashcards work offline in Drive mode via pre-built assignments (server grades on
+  // sync). Non-Drive offline (desktop blip) falls back to self-rated review of the note.
+  const useFlashcards     = flashcardsEnabled && (online || isDriveMode());
 
   const [activeNote, setActiveNote] = useState(null); // { shortName, fullPath }
   const [sessionKey, setSessionKey] = useState(0);    // bumped to reset session

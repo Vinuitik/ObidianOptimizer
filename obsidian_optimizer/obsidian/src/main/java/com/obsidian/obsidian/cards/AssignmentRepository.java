@@ -145,6 +145,15 @@ public class AssignmentRepository {
         jdbc.update("UPDATE assignments SET completed_at = now() WHERE id = ?", id);
     }
 
+    /** Has this card already been attempted in this assignment? Lets the mailbox consumer
+     *  replay an assignment event idempotently (a retried file re-submits nothing). */
+    public boolean attemptExists(UUID assignmentId, UUID cardId) {
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM attempts WHERE assignment_id = ? AND card_id = ?",
+            Integer.class, assignmentId, cardId);
+        return n != null && n > 0;
+    }
+
     public void insertAttempt(UUID cardId, UUID assignmentId, String answer,
                               String verdict, boolean judgeUsed, int pointsEarned) {
         jdbc.update("""

@@ -2,12 +2,13 @@
 // store schema inlined in public/sw.js; keep the two in sync if you change it.
 //
 // Stores:
-//   reviewNotes  keyPath 'path'  — { path, shortName, content, media:[urls], due }
-//   outbox       autoIncrement   — { id, kind:'grade'|'capture', ...payload, ts }
-//   meta         keyPath 'key'   — { key, value }  (e.g. lastSync timestamp)
+//   reviewNotes  keyPath 'path'     — { path, shortName, content, media:[urls], srDue }
+//   assignments  keyPath 'notePath' — { notePath, assignmentId, cards, variants }  (offline flashcards)
+//   outbox       autoIncrement      — { id, kind:'grade'|'capture'|'assignment', ...payload, eventId, ts }
+//   meta         keyPath 'key'      — { key, value }  (lastSync, driveCreds, doneDate, …)
 
 const DB_NAME = 'obsopt-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 2;   // bumped for the 'assignments' store — keep public/sw.js openDB in sync
 
 let dbPromise = null;
 
@@ -18,6 +19,7 @@ export function openDB() {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('reviewNotes')) db.createObjectStore('reviewNotes', { keyPath: 'path' });
+      if (!db.objectStoreNames.contains('assignments')) db.createObjectStore('assignments', { keyPath: 'notePath' });
       if (!db.objectStoreNames.contains('outbox'))      db.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
       if (!db.objectStoreNames.contains('meta'))        db.createObjectStore('meta', { keyPath: 'key' });
     };
@@ -52,6 +54,13 @@ export const getAllReviewNotes = () =>
 
 export const getReviewNote = (path) =>
   tx('reviewNotes', 'readonly', (s) => reqValue(s.get(path), {}));
+
+// ── assignments (offline flashcards) ──────────────────────────────────────────
+export const putAssignments = (list) =>
+  tx('assignments', 'readwrite', (s) => { s.clear(); list.forEach(a => s.put(a)); });
+
+export const getAssignmentByNote = (notePath) =>
+  tx('assignments', 'readonly', (s) => reqValue(s.get(notePath), {}));
 
 // ── outbox ───────────────────────────────────────────────────────────────────
 export const addToOutbox = (entry) =>

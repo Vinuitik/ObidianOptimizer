@@ -24,7 +24,7 @@ const SHELL_URLS = ['/', '/index.html', '/manifest.webmanifest'];
 
 // ── IndexedDB outbox (mirrors src/pwa/db.js — kept inline so the SW is standalone) ──
 const DB_NAME = 'obsopt-offline';
-const DB_VERSION = 1;
+const DB_VERSION = 2;   // keep in sync with src/pwa/db.js (added 'assignments' store)
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -32,6 +32,7 @@ function openDB() {
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('reviewNotes')) db.createObjectStore('reviewNotes', { keyPath: 'path' });
+      if (!db.objectStoreNames.contains('assignments')) db.createObjectStore('assignments', { keyPath: 'notePath' });
       if (!db.objectStoreNames.contains('outbox'))      db.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
       if (!db.objectStoreNames.contains('meta'))        db.createObjectStore('meta', { keyPath: 'key' });
     };
