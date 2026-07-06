@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import useStore from '../store/useStore';
 import useOffline from './useOffline';
 import { flushOutbox, setDriveMode } from './offlineApi';
+import { pushMailbox } from './mailbox';
 import { hasCreds } from './setup';
 import LoginModal from '../components/organisms/LoginModal';
 import BottomNav from './BottomNav';
@@ -30,10 +31,15 @@ export default function MobileLayout() {
   // IndexedDB (not the server). Unlinked → falls back to the server path (still works online).
   useEffect(() => { hasCreds().then(setDriveMode).catch(() => {}); }, []);
 
-  // Reconnect → replay anything captured while offline (grade outbox is empty until
-  // the offline-review seam lands; flush is a no-op when there's nothing queued).
+  // Reconnect → sync the outbox. Drive-linked: grades go to the Drive mailbox (works with
+  // the laptop off); anything left (e.g. captures) still tries the server. Unlinked: just
+  // the server-direct flush. All no-ops when the outbox is empty.
   useEffect(() => {
-    if (online) flushOutbox().catch(() => {});
+    if (!online) return;
+    (async () => {
+      if (await hasCreds().catch(() => false)) await pushMailbox().catch(() => {});
+      await flushOutbox().catch(() => {});
+    })();
   }, [online]);
 
   return (

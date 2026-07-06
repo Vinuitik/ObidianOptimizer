@@ -3,12 +3,15 @@
 import { addToOutbox, getOutbox, deleteFromOutbox } from './db';
 import { gradeNote } from '../api/notes';
 
+// eventId makes mailbox replay idempotent — the server dedupes on it (consumed_events).
+const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+
 export function enqueueGrade(notePath, band) {
-  return addToOutbox({ kind: 'grade', notePath, band });
+  return addToOutbox({ kind: 'grade', notePath, band, eventId: newId() });
 }
 
 export function enqueueCapture(url) {
-  return addToOutbox({ kind: 'capture', url });
+  return addToOutbox({ kind: 'capture', url, eventId: newId() });
 }
 
 // Replay everything. Returns { sent, failed }. A 401 leaves items queued (the

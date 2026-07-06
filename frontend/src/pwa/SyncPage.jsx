@@ -6,6 +6,7 @@ import { flushOutbox } from './offlineApi';
 import { getMeta } from './db';
 import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
 import { refreshAndPull, pullReviewFromDrive } from './drivePull';
+import { pushMailbox } from './mailbox';
 import styles from './MobilePages.module.css';
 
 // The PWA's Sync tab. "Download for offline" seeds the review subset (notes + text
@@ -69,13 +70,18 @@ export default function SyncPage() {
   async function download() {
     setBusy(true); setStatus(null); setProgress(null);
     try {
-      await flushOutbox().catch(() => {});
       if (linked) {
-        // Drive path: works even if the laptop is off (pulls the last exported bundle).
+        // Push my grades to the Drive mailbox first (server drains them on its next boot),
+        // then pull the freshest bundle. Works even with the laptop off.
+        const up = await pushMailbox().catch(() => ({ pushed: 0 }));
         const res = online ? await refreshAndPull() : await pullReviewFromDrive();
         setLastSync(Date.now());
-        setStatus({ text: `Pulled ${res.notes} notes from Drive for offline.`, tone: 'ok' });
+        setStatus({
+          text: `${up.pushed ? `Synced ${up.pushed} grade(s) · ` : ''}Pulled ${res.notes} notes from Drive.`,
+          tone: 'ok',
+        });
       } else {
+        await flushOutbox().catch(() => {});
         const res = await syncForOffline({ onProgress: setProgress });
         setLastSync(Date.now());
         setStatus({ text: `Downloaded ${res.notes} notes · ${res.media} media for offline.`, tone: 'ok' });
