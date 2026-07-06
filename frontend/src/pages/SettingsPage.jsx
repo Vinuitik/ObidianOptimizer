@@ -6,8 +6,7 @@ import {
 } from '../api/notes';
 import {
   fetchSyncStatus, fetchOAuthUrl, disconnectDrive,
-  triggerSyncUpload, triggerSyncDownload, runJanitor,
-  triggerDbBackup, triggerDbRestore,
+  triggerFullBackup, triggerDbRestore,
 } from '../api/sync';
 import FolderPicker from '../components/organisms/FolderPicker';
 import styles from './SettingsPage.module.css';
@@ -471,7 +470,6 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
   const [error, setError]       = useState(null);
   const [notice, setNotice]     = useState(null);
   const [editCreds, setEditCreds]     = useState(false); // un-hide saved fields to fix a typo
-  const [janitorReport, setJanitorReport] = useState(null); // last dry-run / clean result
 
   // Fields are hidden once satisfied (from .env seed or a previous save).
   const clientIdSet   = Boolean(settings.syncClientId);
@@ -677,13 +675,6 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
 
       {error  && <span className={styles.errorMsg}>{error}</span>}
       {notice && !error && <span className={styles.savedMsg}>{notice}</span>}
-      {janitorReport && !error && (
-        <p className={styles.hint} style={{ marginTop: '8px' }}>
-          {janitorReport.dryRun
-            ? `Orphan check: ${janitorReport.orphans} of ${janitorReport.scanned} Drive files have no local twin (${fmtBytes(janitorReport.freedBytes)}).`
-            : `Moved ${janitorReport.orphans} orphan(s) to Drive trash — freed ${fmtBytes(janitorReport.freedBytes)} (recoverable for 30 days).`}
-        </p>
-      )}
 
       {/* Setup actions (Save creds / Connect) — only before the account is linked. */}
       {(!connected || showFields) && (
@@ -714,73 +705,32 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
         </div>
       )}
 
-      {/* Connected: full-width buttons stacked vertically, grouped by purpose. */}
+      {/* Connected: 3 full-width buttons — Full Backup, Restore, Disconnect. */}
       {connected && (
         <div className={styles.actionGroups}>
           <div className={styles.actionGroup}>
-            <span className={styles.actionGroupLabel}>Files</span>
             <button
               className={styles.saveBtn}
-              disabled={busy != null || sync?.uploading}
-              onClick={() => run('upload', triggerSyncUpload)}
+              disabled={busy != null || sync?.uploading || sync?.dbBackupRunning || sync?.dbRestoring}
+              onClick={() => run('backup', triggerFullBackup)}
+              title="Upload all vault files to Drive, then dump the database (embeddings, cards, OCR, review state) — encrypted."
             >
               {sync?.uploading
                 ? `Uploading ${sync.uploadDone ?? 0}/${sync.uploadTotal ?? 0}…`
-                : (busy === 'upload' ? 'Starting…' : 'Sync now')}
+                : sync?.dbBackupRunning
+                  ? 'Backing up database…'
+                  : (busy === 'backup' ? 'Starting…' : 'Full Backup')}
             </button>
             <button
               className={styles.saveBtn}
-              disabled={busy != null}
-              onClick={() => run('download', triggerSyncDownload)}
-            >
-              {busy === 'download' ? 'Pulling…' : 'Pull from Drive'}
-            </button>
-          </div>
-
-          <div className={styles.actionGroup}>
-            <span className={styles.actionGroupLabel}>Database</span>
-            <button
-              className={styles.saveBtn}
-              disabled={busy != null || sync?.dbBackupRunning || sync?.dbRestoring}
-              onClick={() => run('dbbackup', triggerDbBackup)}
-              title="pg_dump the whole database (embeddings, cards, OCR, review state) → encrypted → Drive _db/"
-            >
-              {sync?.dbBackupRunning ? 'Backing up DB…' : (busy === 'dbbackup' ? 'Starting…' : 'Back up DB now')}
-            </button>
-            <button
-              className={styles.saveBtn}
-              disabled={busy != null || sync?.dbRestoring || sync?.dbBackupRunning || !sync?.dbBackup?.exists}
+              disabled={busy != null || sync?.dbRestoring || sync?.dbBackupRunning || sync?.uploading || !sync?.dbBackup?.exists}
               onClick={restoreDb}
-              title="Download the latest DB backup + all vault files (no reprocessing). For moving to a new device."
+              title="Restore the database and all vault files from Drive (no reprocessing). For moving to a new device."
             >
               {sync?.dbRestoring
                 ? `Restoring… ${sync.dbRestorePhase || ''}`
-                : (busy === 'restore' ? 'Starting…' : 'Restore from Drive')}
+                : (busy === 'restore' ? 'Starting…' : 'Restore')}
             </button>
-          </div>
-
-          <div className={styles.actionGroup}>
-            <span className={styles.actionGroupLabel}>Maintenance</span>
-            <button
-              className={styles.saveBtn}
-              disabled={busy != null}
-              onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(true)))}
-            >
-              {busy === 'janitor' ? 'Scanning…' : 'Check orphans'}
-            </button>
-            {janitorReport?.dryRun && janitorReport.orphans > 0 && (
-              <button
-                className={styles.saveBtn}
-                disabled={busy != null}
-                onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(false)))}
-              >
-                Trash {janitorReport.orphans} orphan(s)
-              </button>
-            )}
-          </div>
-
-          <div className={styles.actionGroup}>
-            <span className={styles.actionGroupLabel}>Account</span>
             <button
               className={styles.saveBtn}
               disabled={busy != null}

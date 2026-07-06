@@ -253,7 +253,8 @@ the proxy — fixed 2026-07-02.)
 | `GET` | `/api/sync/oauth/callback` | session | Code exchange; 302 → `/settings?drive=…` |
 | `POST` | `/api/sync/disconnect` | session | Revoke + forget the Google connection |
 | `POST` | `/api/sync/janitor?dryRun=` | session | Orphan sweep (dryRun=true default: report only) |
-| `POST` | `/api/sync/db/backup` | session | pg_dump → encrypt → Drive `_db/`; **202**, runs on sync lane |
+| `POST` | `/api/sync/backup` | session | **Full Backup** (UI): upload pending files THEN dump DB; **202**, one lane task |
+| `POST` | `/api/sync/db/backup` | session | DB-only dump → encrypt → Drive `_db/`; **202** (nightly cron uses this path) |
 | `POST` | `/api/sync/db/restore?force=` | session | Restore latest dump + vault files; **400** if blocked (not-empty/no-passphrase/no-backup), else **202** |
 
 `/status` additionally returns `quota {usedBytes, limitBytes}` when connected (one

@@ -140,6 +140,14 @@ public class SyncController {
         return ResponseEntity.accepted().body(Map.of("started", started));
     }
 
+    /** POST /api/sync/backup — Full Backup: upload pending files THEN dump the DB (202). */
+    @PostMapping("/backup")
+    public ResponseEntity<Map<String, Object>> fullBackup() {
+        boolean started = syncWorker.triggerFullBackup();
+        log.info("[SyncController] full backup {}", started ? "started" : "already running");
+        return ResponseEntity.accepted().body(Map.of("started", started));
+    }
+
     /**
      * POST /api/sync/db/restore?force= — restore latest Drive dump then materialize vault
      * files. Synchronous precheck returns 400 with a reason; the heavy work runs on the

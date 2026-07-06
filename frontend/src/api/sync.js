@@ -52,6 +52,11 @@ export function triggerDbBackup() {
   return req('/sync/db/backup', { method: 'POST' });
 }
 
+// Full Backup: upload pending vault files THEN dump the DB. Returns immediately (202).
+export function triggerFullBackup() {
+  return req('/sync/backup', { method: 'POST' });
+}
+
 // DB restore: pull latest dump + materialize vault files. force=true overwrites a
 // non-empty DB (destructive — confirm first). 400 with {error} if blocked.
 export function triggerDbRestore(force = false) {

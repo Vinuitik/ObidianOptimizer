@@ -72,6 +72,16 @@ public class SyncWorker {
         });
     }
 
+    /** Manual "Full Backup" — push vault files to Drive, THEN dump the DB (so the dump's
+     *  sync_queue matches what's on Drive). One lane task. @return true if started. */
+    public boolean triggerFullBackup() {
+        return lane.trigger(() -> {
+            log.info("[SyncWorker] full backup triggered (files + DB)");
+            syncService.uploadPending();
+            dbBackupService.backupNow();
+        });
+    }
+
     /** Manual "Restore from Drive". @return true if started, false if the lane was busy. */
     public boolean triggerDbRestore(boolean force) {
         return lane.trigger(() -> {
