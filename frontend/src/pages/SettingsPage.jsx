@@ -714,7 +714,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
         </div>
       )}
 
-      {/* Connected: grouped action rows (primary vs secondary vs destructive). */}
+      {/* Connected: full-width buttons stacked vertically, grouped by purpose. */}
       {connected && (
         <div className={styles.actionGroups}>
           <div className={styles.actionGroup}>
@@ -729,7 +729,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
                 : (busy === 'upload' ? 'Starting…' : 'Sync now')}
             </button>
             <button
-              className={styles.browseBtn}
+              className={styles.saveBtn}
               disabled={busy != null}
               onClick={() => run('download', triggerSyncDownload)}
             >
@@ -740,7 +740,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
           <div className={styles.actionGroup}>
             <span className={styles.actionGroupLabel}>Database</span>
             <button
-              className={styles.browseBtn}
+              className={styles.saveBtn}
               disabled={busy != null || sync?.dbBackupRunning || sync?.dbRestoring}
               onClick={() => run('dbbackup', triggerDbBackup)}
               title="pg_dump the whole database (embeddings, cards, OCR, review state) → encrypted → Drive _db/"
@@ -748,7 +748,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
               {sync?.dbBackupRunning ? 'Backing up DB…' : (busy === 'dbbackup' ? 'Starting…' : 'Back up DB now')}
             </button>
             <button
-              className={sync?.dbEmpty ? styles.saveBtn : styles.dangerBtn}
+              className={styles.saveBtn}
               disabled={busy != null || sync?.dbRestoring || sync?.dbBackupRunning || !sync?.dbBackup?.exists}
               onClick={restoreDb}
               title="Download the latest DB backup + all vault files (no reprocessing). For moving to a new device."
@@ -762,7 +762,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
           <div className={styles.actionGroup}>
             <span className={styles.actionGroupLabel}>Maintenance</span>
             <button
-              className={styles.browseBtn}
+              className={styles.saveBtn}
               disabled={busy != null}
               onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(true)))}
             >
@@ -770,7 +770,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
             </button>
             {janitorReport?.dryRun && janitorReport.orphans > 0 && (
               <button
-                className={styles.dangerBtn}
+                className={styles.saveBtn}
                 disabled={busy != null}
                 onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(false)))}
               >
@@ -782,7 +782,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
           <div className={styles.actionGroup}>
             <span className={styles.actionGroupLabel}>Account</span>
             <button
-              className={styles.dangerBtn}
+              className={styles.saveBtn}
               disabled={busy != null}
               onClick={() => run('disconnect', disconnectDrive)}
             >
