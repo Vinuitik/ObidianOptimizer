@@ -130,14 +130,28 @@ To change KDF/params: keep in lockstep with `VaultEncryptionService` (fixed salt
 ## 5. OAuth — the phone must be the SAME client
 
 `drive.file` scope = an app sees only files **it** created. For the phone to see the
-server's `.enc` files (and vice-versa for `_mailbox/`), the PWA must authenticate as the
-**same OAuth client id** as the server, doing its own consent → its own refresh token.
-- Reuse `GOOGLE_OAUTH_CLIENT_ID`; register the PWA origin's redirect URI.
-- The token can be obtained in-PWA (Google Identity Services token flow) OR minted by the
-  server once and handed to the phone. **Recommend in-PWA token flow** so the phone never
-  needs the server. Store the refresh/access token in IndexedDB.
+server's `.enc` files (and vice-versa for `_mailbox/`), the PWA must act as the **same OAuth
+client** as the server — same `client_id`, same created-files namespace.
+
+**DECISION (2026-07-06): share the credentials at install.** Instead of a separate consent
+on the phone, the one-time PWA setup **fetches the server's credentials over the tunnel**
+(server is up when you install at home), then the phone is server-independent forever after:
+```
+Install PWA → SyncPage "Link this device" → GET /api/pwa/setup (session-authed)  [NEW, B?]
+  → { clientId, clientSecret, refreshToken, driveFolderId, passphrase, deviceId }
+  → store in IndexedDB (meta)
+Thereafter (no server needed):
+  access token: POST oauth2.googleapis.com/token (refresh_token grant) directly from the PWA
+  Drive + decrypt: use that token + passphrase
+```
+- Security: the phone now holds the OAuth client secret + refresh token + vault passphrase —
+  same trust level as the laptop. Acceptable for this single-user tool; document it. A
+  lost/unlocked phone can read the vault. Add a "Unlink device" (server revoke + phone wipe).
 - Risk: "Testing"-status OAuth clients expire refresh tokens ~7 days — set the client to
   **In production** (already noted in sync/FLOWS Technology Notes).
+- Token refresh from a browser hits Google's token endpoint; if CORS blocks the refresh
+  grant, fall back to a thin server-proxied refresh (needs server) OR a PWA PKCE public
+  client. Verify during P1.
 
 ---
 
@@ -232,8 +246,9 @@ intended.
 
 ## 11. Open decisions / risks
 
-- **Token in the PWA** (§5): in-PWA Google token flow (server-independent, recommended) vs
-  server-minted token handed to the phone (simpler consent, but needs the server once).
+- **Token in the PWA** (§5): RESOLVED — share credentials at install (`/api/pwa/setup`),
+  phone refreshes access tokens against Google directly. Verify browser CORS on the refresh
+  grant in P1 (fallback: server-proxied refresh).
 - **Pull scope**: due-now + next N days (over-fetch as staleness insurance). Pick N.
 - **Media quota**: images/PDF in the pull; video excluded by default (Cache Storage is
   evictable — `navigator.storage.persist()` best-effort). Big vaults may need a cap.

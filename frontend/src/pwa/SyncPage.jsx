@@ -4,6 +4,7 @@ import useOffline from './useOffline';
 import { syncForOffline } from './syncOffline';
 import { flushOutbox } from './offlineApi';
 import { getMeta } from './db';
+import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
 import styles from './MobilePages.module.css';
 
 // The PWA's Sync tab. "Download for offline" seeds the review subset (notes + text
@@ -29,8 +30,40 @@ export default function SyncPage() {
   const [busy, setBusy]         = useState(false);
   const [progress, setProgress] = useState(null); // { done, total }
   const [status, setStatus]     = useState(null);  // { text, tone }
+  const [linked, setLinked]     = useState(false);
+  const [driveMsg, setDriveMsg] = useState(null);  // { text, tone }
 
-  useEffect(() => { getMeta('lastSync').then(v => setLastSync(v || null)).catch(() => {}); }, []);
+  useEffect(() => {
+    getMeta('lastSync').then(v => setLastSync(v || null)).catch(() => {});
+    hasCreds().then(setLinked).catch(() => {});
+  }, []);
+
+  async function link() {
+    setBusy(true); setDriveMsg(null);
+    try {
+      await linkDevice();
+      setLinked(true);
+      setDriveMsg({ text: 'Linked. This device can now read Drive without the server.', tone: 'ok' });
+    } catch (e) {
+      setDriveMsg({ text: `${e.message ?? e}`, tone: 'err' });
+    } finally { setBusy(false); }
+  }
+
+  async function unlink() {
+    await unlinkDevice();
+    setLinked(false);
+    setDriveMsg({ text: 'Unlinked — credentials wiped from this device.', tone: 'warn' });
+  }
+
+  async function testDrive() {
+    setBusy(true); setDriveMsg({ text: 'Reading a note from Drive…', tone: null });
+    try {
+      const r = await proofReadNote();
+      setDriveMsg({ text: `✓ Decrypted “${r.path}” (${r.total} files on Drive): ${r.preview}`, tone: 'ok' });
+    } catch (e) {
+      setDriveMsg({ text: `Drive read failed: ${e.message ?? e}`, tone: 'err' });
+    } finally { setBusy(false); }
+  }
 
   async function download() {
     setBusy(true); setStatus(null); setProgress(null);
@@ -82,6 +115,33 @@ export default function SyncPage() {
         Tip: install this app and open it over the tunnel domain once on wifi, then hit
         Download — after that Review works with no connection.
       </p>
+
+      {/* ── Drive link (server-independent offline) ─────────────────────────── */}
+      <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>Drive link</h2>
+      <p className={styles.hint}>
+        Link once to read your vault straight from Google Drive — then the phone works
+        even when the laptop is off.
+      </p>
+
+      {!linked ? (
+        <button className={styles.captureBtn} onClick={link} disabled={busy || !online || !isAuthenticated}
+                style={{ marginTop: 12, width: '100%', padding: '12px 16px' }}>
+          {isAuthenticated ? 'Link this device' : 'Sign in to link'}
+        </button>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button className={styles.captureBtn} onClick={testDrive} disabled={busy}
+                  style={{ flex: 1, padding: '12px 16px' }}>
+            Test: read a note from Drive
+          </button>
+          <button className={styles.captureBtn} onClick={unlink} disabled={busy}
+                  style={{ padding: '12px 14px', background: 'transparent', border: '1px solid var(--color-border, #262a35)', color: 'var(--color-muted, #8a90a0)' }}>
+            Unlink
+          </button>
+        </div>
+      )}
+
+      {driveMsg && <p className={`${styles.hint} ${styles[driveMsg.tone] || ''}`}>{driveMsg.text}</p>}
     </div>
   );
 }
