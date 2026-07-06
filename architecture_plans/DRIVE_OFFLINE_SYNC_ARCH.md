@@ -231,6 +231,14 @@ intended.
 
 ## 10. Phases (ordered, each shippable)
 
+> **Status 2026-07-06: P1–P3 BUILT** (commits c5ab4f1, 3c39b5a, 7efa137; compile-verified,
+> browser/Drive-UNVERIFIED — no host node, needs a real phone + connected Drive). Backend:
+> `pwa/` package (PwaController, OfflineExportService, MailboxConsumeService,
+> ConsumedEventRepository) + `sync/DriveService` `_offline`/`_mailbox` ops. Frontend:
+> `pwa/{crypto,drive,setup,drivePull,mailbox}.js` + `offlineApi` driveMode + SyncPage.
+> P4–P6 pending. NOTE: capture/file/discard/assignment events are NOT yet consumed
+> (grade only) — the mailbox leaves unknown-kind files intact until P4/P5.
+
 - **P1 — Crypto + Drive read proof** (F1,F2): in the PWA, connect Google (same client),
   list + decrypt one real note from Drive. *Smallest proof the whole model works.*
 - **P2 — Offline self-rated review from Drive** (F3,F4,F6 + due-from-frontmatter): pull
