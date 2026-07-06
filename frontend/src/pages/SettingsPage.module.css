@@ -226,23 +226,31 @@ select.input option {
 .actionGroups {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
   padding: var(--sp-4) var(--sp-5);
   background: var(--color-surface);
 }
 .actionGroup {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--sp-2);
 }
+/* Full-width buttons, uniform height — one rectangle stacked over the next. */
+.actionGroup > button {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+  padding: 10px var(--sp-4);
+  font-size: var(--text-sm);
+}
 .actionGroupLabel {
-  flex: 0 0 76px;
   font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 600;
   color: var(--color-muted);
+  margin-bottom: 2px;
 }
 .dangerBtn {
   flex-shrink: 0;
