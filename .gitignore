@@ -21,5 +21,10 @@ frontend/.vite/
 
 # Generated Firefox extension build (see build-firefox-extension.ps1)
 extension-firefox/
+
+# Signed .xpi + updates.json published by deploy-extension.sh (served at /ext/)
+ext-dist/
+# npx/web-ext download cache reused across signings (keeps re-signs fast)
+.web-ext-cache/
 *.bak
 *.bak.*

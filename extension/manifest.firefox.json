@@ -28,7 +28,8 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "obsidian-optimizer@obsidianoptimizer.uk",
-      "strict_min_version": "121.0"
+      "strict_min_version": "121.0",
+      "update_url": "https://obsidianoptimizer.uk/ext/updates.json"
     }
   }
 }

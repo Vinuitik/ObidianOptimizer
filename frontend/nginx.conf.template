@@ -104,6 +104,18 @@ server {
         alias /workspace/;
     }
 
+    # ── Self-hosted Firefox extension auto-update ────────────────────────────────
+    # Serves the signed .xpi + updates.json that Firefox polls via the add-on's
+    # browser_specific_settings.gecko.update_url (→ /ext/updates.json). Files are
+    # dropped here by linux_scripts/deploy-extension.sh into the host ./ext-dist
+    # dir, mounted :ro at /ext-dist. Publishing a new version needs NO rebuild —
+    # only changing THIS block does. .xpi needs its own mime type or Firefox 406s.
+    location /ext/ {
+        alias /ext-dist/;
+        types { application/x-xpinstall xpi; application/json json; }
+        default_type application/octet-stream;
+    }
+
     location / {
         root       /usr/share/nginx/html;
         try_files  $uri $uri/ /index.html;

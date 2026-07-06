@@ -179,6 +179,10 @@ services:
       # Derived from HOST_VAULT_PATH — no separate env vars needed.
       - ${HOST_VAULT_PATH}/resources:/vault-resources:ro
       - ${HOST_VAULT_PATH}/_workspace:/workspace:ro
+      # Signed Firefox .xpi + updates.json for self-hosted extension auto-update
+      # (nginx /ext/ ← linux_scripts/deploy-extension.sh writes here). :ro — nginx
+      # only reads; new versions appear live without recreating the container.
+      - ./ext-dist:/ext-dist:ro
     depends_on:
       - backend
 
