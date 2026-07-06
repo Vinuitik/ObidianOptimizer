@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import {
   ApiError,
-  fetchNames, fetchChildren, fetchReview, fetchNoteContent,
+  fetchNames, fetchChildren,
   checkAuth, login as apiLogin, logout as apiLogout,
   createNote as apiCreate, patchNote as apiPatch,
   renameNote as apiRename, deleteNote as apiDelete,
@@ -10,6 +10,13 @@ import {
   fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings,
   uploadFile as apiUploadFile,
 } from '../api/notes';
+// Offline-aware drop-ins: identical to the api/notes versions when online (they
+// just delegate), but fall back to the downloaded IndexedDB subset when offline.
+// This is what makes review work with no network — see pwa/offlineApi.js.
+import {
+  fetchReviewOffline as fetchReview,
+  fetchNoteContentOffline as fetchNoteContent,
+} from '../pwa/offlineApi';
 import { setPendingBlobs } from '../utils/obsidianImagePlugin';
 import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';

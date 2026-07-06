@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import useStore from '../../store/useStore';
-import { gradeNote } from '../../api/notes';
+import { gradeNoteOffline as gradeNote } from '../../pwa/offlineApi';
 import styles from './ReviewRating.module.css';
 
 const OPTIONS = [

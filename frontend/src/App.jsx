@@ -10,6 +10,8 @@ import NavBar from './components/organisms/NavBar';
 import LoginModal from './components/organisms/LoginModal';
 import Toast from './components/atoms/Toast';
 import useStore from './store/useStore';
+import { flushOutbox } from './pwa/offlineApi';
+import { onConnectivityChange } from './pwa/connectivity';
 import styles from './App.module.css';
 
 const pageVariants = {
@@ -55,6 +57,14 @@ export default function App() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [checkAuth]);
+
+  // Grades/captures made during a network blip queue to the outbox (offlineApi).
+  // Replay them on load and whenever connectivity returns, so nothing is stranded
+  // on the full site either (no-op when the outbox is empty).
+  useEffect(() => {
+    flushOutbox().catch(() => {});
+    return onConnectivityChange(on => { if (on) flushOutbox().catch(() => {}); });
+  }, []);
 
   return (
     <BrowserRouter>

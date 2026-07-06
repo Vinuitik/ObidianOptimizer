@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import { gradeNote, fetchNoteContent } from '../api/notes';
+import { gradeNoteOffline as gradeNote, fetchNoteContentOffline as fetchNoteContent } from '../pwa/offlineApi';
+import useOffline from '../pwa/useOffline';
 import FlashcardSession from '../components/organisms/FlashcardSession';
 import NoteRenderer from '../components/molecules/NoteRenderer';
 import cardStyles from '../components/organisms/FlashcardSession.module.css';
@@ -13,6 +14,10 @@ export default function ReviewPage() {
   const loadMoreReview    = useStore(s => s.loadMoreReview);
   const isAuthenticated   = useStore(s => s.isAuthenticated);
   const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
+  const online            = useOffline();
+  // Flashcard tests need the server (build/grade/complete assignments). Offline we
+  // fall back to the self-rated review of the cached note — the grade queues + syncs.
+  const useFlashcards     = flashcardsEnabled && online;
 
   const [activeNote, setActiveNote] = useState(null); // { shortName, fullPath }
   const [sessionKey, setSessionKey] = useState(0);    // bumped to reset session
@@ -94,7 +99,7 @@ export default function ReviewPage() {
             onClose={handleClose}
           />
         ) : activeNote ? (
-          flashcardsEnabled ? (
+          useFlashcards ? (
             <FlashcardSession
               key={sessionKey}
               notePath={activeNote.fullPath}
@@ -112,9 +117,11 @@ export default function ReviewPage() {
         ) : (
           <div className={styles.emptySession}>
             <p className={styles.emptySessionText}>
-              {flashcardsEnabled
+              {useFlashcards
                 ? 'Select a note from the list to start a flashcard test.'
-                : 'Select a note from the list to review and self-rate it.'}
+                : online
+                  ? 'Select a note from the list to review and self-rate it.'
+                  : 'Offline — select a downloaded note to self-rate it. Grades sync when you reconnect.'}
             </p>
           </div>
         )}
@@ -180,8 +187,10 @@ function InlineNoteReview({ note, onBack, onClose }) {
         ) : (
           <div className={styles.inlineGraded} data-testid="inline-graded">
             <span>
-              Graded <strong>{graded.band.replace('_', ' ')}</strong> — next review{' '}
-              {new Date(graded.due).toLocaleDateString()}
+              Graded <strong>{graded.band.replace('_', ' ')}</strong>
+              {graded.queued
+                ? ' — queued, will sync when you reconnect'
+                : ` — next review ${new Date(graded.due).toLocaleDateString()}`}
             </span>
             <button className={styles.inlineGradeBtn} onClick={onClose}>Next note →</button>
           </div>
@@ -231,8 +240,10 @@ function SlideshowReview({ note, onReviewNote, onClose }) {
           </>
         ) : (
           <p className={cardStyles.lockedNote} data-testid="slideshow-graded">
-            Graded <strong>{graded.band.replace('_', ' ')}</strong> — next review{' '}
-            {new Date(graded.due).toLocaleDateString()}
+            Graded <strong>{graded.band.replace('_', ' ')}</strong>
+            {graded.queued
+              ? ' — queued, will sync when you reconnect'
+              : ` — next review ${new Date(graded.due).toLocaleDateString()}`}
           </p>
         )}
       </div>
