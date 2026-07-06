@@ -55,6 +55,11 @@ class GenerateCardsRequest(BaseModel):
     note_path: str
     content: str | None = None      # omitted → read from the /vault mount
     source_hash: str | None = None  # omitted → sha256(content)
+    # Feedback-aware regen (nightly refill of user-flagged cards): generate about
+    # target_count fresh cards, steering the agent with the flag reasons so the
+    # replacements avoid the same flaws. Omitted → normal full-set generation.
+    target_count: int | None = None
+    feedback: list[str] | None = None
 
 
 class RollRequest(BaseModel):
@@ -138,7 +143,8 @@ def generate_cards(req: GenerateCardsRequest):
 
     source_hash = req.source_hash or hashlib.sha256(content.encode("utf-8")).hexdigest()
     try:
-        return card_gen.generate_for_note(req.note_path, content, source_hash)
+        return card_gen.generate_for_note(req.note_path, content, source_hash,
+                                          target_count=req.target_count, feedback=req.feedback)
     except card_gen.LLMUnavailable as e:
         # No LLM answered (wrapper down or all providers exhausted). Fail loud —
         # a 200 "0 cards" here would silently hide a missing/unreachable LLM.

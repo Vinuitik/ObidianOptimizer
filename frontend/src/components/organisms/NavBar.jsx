@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import ObsidianMark from '../atoms/ObsidianMark';
@@ -20,21 +21,35 @@ export default function NavBar() {
   const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
   const items = NAV_ITEMS.filter(it => !it.flashcardsOnly || flashcardsEnabled);
 
+  // Mobile: the links row is collapsed behind a hamburger so the header stays a
+  // single slim strip (brand + auth) instead of eating a quarter of the screen.
+  // Desktop ignores this — the .menuBtn is display:none and .links is always shown.
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <nav className={styles.nav}>
       <div className={styles.brand}>
+        <button
+          className={styles.menuBtn}
+          onClick={() => setMenuOpen(o => !o)}
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+        >
+          {menuOpen ? '✕' : '☰'}
+        </button>
         <ObsidianMark size={22} glow={false} />
         <span className={styles.brandText}>
           Obsidian<span className={styles.brandAccent}> Optimizer</span>
         </span>
       </div>
 
-      <div className={styles.links}>
+      <div className={`${styles.links} ${menuOpen ? styles.linksOpen : ''}`}>
         {items.map(({ to, label }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
+            onClick={() => setMenuOpen(false)}
             className={({ isActive }) =>
               `${styles.link} ${isActive ? styles.linkActive : ''}`
             }

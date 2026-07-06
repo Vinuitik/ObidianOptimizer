@@ -29,13 +29,37 @@ public class CardRepository {
               difficulty    INT NOT NULL CHECK (difficulty BETWEEN 1 AND 5),
               card_hash     TEXT NOT NULL,
               source_hash   TEXT NOT NULL,
-              status        TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED')),
+              status        TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED','FLAGGED')),
               drawn_cycle   INT NOT NULL DEFAULT 0,
               created_at    TIMESTAMP NOT NULL DEFAULT now(),
               UNIQUE (note_path, card_hash)
             )
             """);
+        // Widen the status CHECK to allow FLAGGED (user-quarantined bad cards).
+        // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraint, so
+        // pre-existing installs keep the 2-value CHECK until this idempotent migration
+        // runs. FLAGGED cards leave the ACTIVE draw pool but are NOT resurrected by
+        // regeneration (embedder _store preserves FLAGGED on card_hash conflict).
+        jdbc.execute("ALTER TABLE cards DROP CONSTRAINT IF EXISTS cards_status_check");
+        jdbc.execute("ALTER TABLE cards ADD CONSTRAINT cards_status_check "
+            + "CHECK (status IN ('ACTIVE','ARCHIVED','FLAGGED'))");
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_cards_note ON cards(note_path) WHERE status = 'ACTIVE'");
+        // Flag ledger: one row per user flag, carrying WHY the card is bad. The
+        // nightly regen reads unserviced flags per note, generates one replacement
+        // per flag (feedback-aware, so the agent avoids the same flaw), then marks
+        // them serviced so a note isn't refilled twice for the same flags.
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS card_flags (
+              id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              card_id     UUID NOT NULL,
+              note_path   TEXT NOT NULL,
+              reason      TEXT,
+              created_at  TIMESTAMP NOT NULL DEFAULT now(),
+              serviced_at TIMESTAMP
+            )
+            """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_card_flags_pending "
+            + "ON card_flags(note_path) WHERE serviced_at IS NULL");
         // Attempt ledger: a note whose generation yields nothing must not be
         // retried every cycle — that burns CLI credits. One attempt per
         // (note_path, source_hash); a real edit changes the hash and re-arms it.
@@ -116,6 +140,49 @@ public class CardRepository {
             FROM cards WHERE note_path = ? AND status = 'ACTIVE'
             ORDER BY difficulty, created_at
             """, notePath);
+    }
+
+    /**
+     * Flag a card as bad: quarantine it out of the ACTIVE draw pool and record the
+     * user's reason for the nightly feedback-aware regen. Returns false if the card
+     * doesn't exist / is already flagged (nothing quarantined).
+     */
+    public boolean flag(java.util.UUID cardId, String reason) {
+        String notePath = jdbc.query(
+            "SELECT note_path FROM cards WHERE id = ? AND status <> 'FLAGGED'",
+            rs -> rs.next() ? rs.getString(1) : null, cardId);
+        if (notePath == null) return false;
+        jdbc.update("UPDATE cards SET status = 'FLAGGED' WHERE id = ?", cardId);
+        jdbc.update("INSERT INTO card_flags(card_id, note_path, reason) VALUES (?, ?, ?)",
+            cardId, notePath, reason);
+        return true;
+    }
+
+    /**
+     * Notes with unserviced flags: one row per note carrying the flag count (=
+     * replacement cards to generate) and the reasons to feed the regen agent.
+     * body_hash comes along so the regen records against the current note version.
+     */
+    public List<Map<String, Object>> findNotesWithPendingFlags() {
+        return jdbc.queryForList("""
+            SELECT f.note_path,
+                   n.body_hash,
+                   COUNT(*)                                        AS flag_count,
+                   ARRAY_AGG(f.reason) FILTER (WHERE f.reason IS NOT NULL
+                                               AND f.reason <> '') AS reasons
+            FROM card_flags f
+            JOIN notes n ON n.path = f.note_path
+            WHERE f.serviced_at IS NULL
+              AND n.body_hash IS NOT NULL
+            GROUP BY f.note_path, n.body_hash
+            """);
+    }
+
+    /** Mark a note's pending flags serviced once its replacements have been generated. */
+    public int markFlagsServiced(String notePath) {
+        return jdbc.update(
+            "UPDATE card_flags SET serviced_at = now() WHERE note_path = ? AND serviced_at IS NULL",
+            notePath);
     }
 
     public Map<String, Object> stats() {

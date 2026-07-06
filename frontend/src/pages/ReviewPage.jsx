@@ -33,11 +33,16 @@ export default function ReviewPage() {
     setSessionKey(k => k + 1);
   }
 
-  async function handleReviewNote(fullPath) {
+  // canGrade: show the self-rate band bar only when the note was NOT already graded.
+  // The no-cards path (FlashcardSession error → "Review note directly") passes true —
+  // there's no test, so the inline note IS the grading surface. After a completed test
+  // (result phase) or in slideshow mode (graded by its own bands) it's false, so
+  // "Review note directly" just re-opens the note read-only instead of re-prompting.
+  async function handleReviewNote(fullPath, canGrade = false) {
     try {
       const raw = await fetchNoteContent(fullPath);
       const title = fullPath.split(/[/\\]/).pop().replace(/\.md$/, '');
-      setInlineNote({ title, raw, fullPath });
+      setInlineNote({ title, raw, fullPath, canGrade });
     } catch {
       // fallback: if fetch fails just stay on current view
     }
@@ -148,6 +153,7 @@ function InlineNoteReview({ note, onBack, onClose }) {
   const dismissFromReview = useStore(s => s.dismissFromReview);
   const showToast         = useStore(s => s.showToast);
   const [graded, setGraded] = useState(null);
+  const canGrade = note.canGrade ?? false;
 
   async function rate(band) {
     try {
@@ -169,7 +175,14 @@ function InlineNoteReview({ note, onBack, onClose }) {
         <NoteRenderer content={note.raw} resetKey={note.fullPath || note.title} />
       </div>
 
-      {/* Grade bar — pins to the bottom of the pane so it's reachable after scrolling */}
+      {/* Grade bar — only when this note is the grading surface (no test done).
+          After a completed flashcard test the note is already scheduled, so we
+          just show a "Next note" bar instead of re-asking how hard it was. */}
+      {!canGrade ? (
+        <div className={styles.inlineGrade} data-testid="inline-grade">
+          <button className={styles.inlineGradeBtn} onClick={onClose}>Next note →</button>
+        </div>
+      ) : (
       <div className={styles.inlineGrade} data-testid="inline-grade">
         {!graded ? (
           <>
@@ -196,6 +209,7 @@ function InlineNoteReview({ note, onBack, onClose }) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

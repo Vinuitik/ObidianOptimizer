@@ -17,6 +17,25 @@
   flex-shrink: 0;
 }
 
+/* Hamburger — only surfaces on mobile (see @media below); collapses the links row. */
+.menuBtn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-card);
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.menuBtn:hover {
+  border-color: var(--color-border-hover);
+}
+
 .brandText {
   font-family: var(--font-heading);
   font-size: 16px;
@@ -135,25 +154,33 @@
     display: none;
   }
 
-  .links {
-    order: 3;
-    flex-basis: 100%;
-    gap: var(--sp-1);
-    overflow-x: auto;
-    border-top: 1px solid var(--color-border);
-    scrollbar-width: none;
+  .menuBtn {
+    display: flex;
   }
 
-  .links::-webkit-scrollbar {
+  /* Collapsed by default: the links row is removed from the header until the
+     hamburger opens it (.linksOpen). Keeps the bar a single slim strip. */
+  .links {
     display: none;
+    order: 3;
+    flex-basis: 100%;
+    flex-direction: column;
+    gap: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .linksOpen {
+    display: flex;
   }
 
   .link {
     display: flex;
     align-items: center;
+    width: 100%;
     min-height: 44px;
     padding: 0 var(--sp-3);
     border-radius: 0;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .authBtn {

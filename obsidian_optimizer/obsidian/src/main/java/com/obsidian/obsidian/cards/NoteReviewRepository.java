@@ -50,7 +50,12 @@ public class NoteReviewRepository {
             (rs, i) -> new ReviewRow(
                 rs.getString("note_path"), rs.getDouble("stability"), rs.getDouble("difficulty"),
                 rs.getInt("reps"), rs.getTimestamp("last_review"), rs.getTimestamp("due"),
-                rs.getString("pending_bucket"), (Double) rs.getObject("pending_arm")),
+                rs.getString("pending_bucket"),
+                // pending_arm is a Postgres REAL → JDBC hands back a java.lang.Float,
+                // so a straight (Double) cast throws ClassCastException whenever the
+                // arm is set (which is every note that's been reviewed once). Widen
+                // through Number so both null and Float are handled.
+                rs.getObject("pending_arm") instanceof Number n ? n.doubleValue() : null),
             notePath);
         return rows.isEmpty() ? null : rows.get(0);
     }

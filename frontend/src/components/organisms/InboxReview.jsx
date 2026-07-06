@@ -8,6 +8,7 @@ import {
 import { fetchChildren, updateNote } from '../../api/notes';
 import { buildSourceColors, groupBySource } from '../../utils/sourceColor';
 import useStore from '../../store/useStore';
+import { useIsMobile } from '../../utils/useMediaQuery';
 import LearnLayout from '../templates/LearnLayout';
 import NoteRenderer from '../molecules/NoteRenderer';
 import SourceSplicePanel from './SourceSplicePanel';
@@ -25,6 +26,7 @@ const dirName  = p => p.replace(/[/\\]+$/, '').replace(/[/\\][^/\\]*$/, '');
 // animated folder tree (FolderPicker). Filing moves the note into its folder + FSRS queue.
 export default function InboxReview({ onCount }) {
   const isAuthenticated = useStore(s => s.isAuthenticated);
+  const isMobile = useIsMobile();
 
   const [items,    setItems]    = useState([]);
   const [selected, setSelected] = useState(null);   // path
@@ -40,6 +42,7 @@ export default function InboxReview({ onCount }) {
   const [error,    setError]    = useState(null);
   const [status,   setStatus]   = useState('');
   const [checked,  setChecked]  = useState(() => new Set());  // paths selected for bulk delete
+  const [barOpen,  setBarOpen]  = useState(() => !isMobile);  // mobile: collapse the action bar
 
   const current = items.find(i => i.path === selected) || null;
   const workingItem = current ? { ...current, content: draft } : null;
@@ -243,20 +246,36 @@ export default function InboxReview({ onCount }) {
             <LearnLayout orientation={orientation} slotA={sourcePanel} slotB={notePanel} labelA="Source" labelB="Note" />
           </div>
 
-          <div className={styles.bottomBar}>
-            {current.inPlace ? (
-              <button className={styles.primary} onClick={acknowledge} disabled={busy}>Save &amp; acknowledge</button>
-            ) : (
-              <>
-                <span className={styles.barLabel}>Proposed folder</span>
-                <button className={styles.folderBtn} onClick={openFolderPicker} title={dest}>
-                  📁 {dest || 'Choose a folder'} ▸
-                </button>
-                <button className={styles.primary} onClick={file} disabled={busy}>Save &amp; file</button>
-                <button className={styles.ghost} onClick={discard} disabled={busy}>Discard</button>
-              </>
+          <div className={`${styles.bottomBar} ${barOpen ? '' : styles.bottomBarCollapsed}`}>
+            <button
+              className={styles.barToggle}
+              onClick={() => setBarOpen(o => !o)}
+              aria-expanded={barOpen}
+              title={barOpen ? 'Hide actions' : 'Show actions'}
+            >
+              <span className={styles.barToggleLabel}>
+                {current.inPlace ? 'Actions' : `📁 ${dest ? baseName(dest) : 'No folder'}`}
+              </span>
+              <span aria-hidden="true">{barOpen ? '▾' : '▸'}</span>
+            </button>
+
+            {barOpen && (
+              <div className={styles.barControls}>
+                {current.inPlace ? (
+                  <button className={styles.primary} onClick={acknowledge} disabled={busy}>Save &amp; acknowledge</button>
+                ) : (
+                  <>
+                    <span className={styles.barLabel}>Proposed folder</span>
+                    <button className={styles.folderBtn} onClick={openFolderPicker} title={dest}>
+                      📁 {dest || 'Choose a folder'} ▸
+                    </button>
+                    <button className={styles.primary} onClick={file} disabled={busy}>Save &amp; file</button>
+                    <button className={styles.ghost} onClick={discard} disabled={busy}>Discard</button>
+                  </>
+                )}
+                {status && <span className={styles.barStatus}>{status}</span>}
+              </div>
             )}
-            {status && <span className={styles.barStatus}>{status}</span>}
           </div>
         </div>
       ) : (

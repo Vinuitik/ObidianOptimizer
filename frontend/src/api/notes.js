@@ -272,6 +272,16 @@ export async function completeAssignment(assignmentId) {
   return res.json();
 }
 
+// Flag a bad card. reason: optional user note on WHY it's bad (fed to the nightly
+// regen agent). Quarantines the card out of the draw pool immediately.
+export async function flagCard(cardId, reason) {
+  await req(`${BASE}/cards/${cardId}/flag`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: reason ?? '' }),
+  });
+}
+
 // ── Chrono ────────────────────────────────────────────────────────────────────
 
 // Returns { lastRunDate: string }.

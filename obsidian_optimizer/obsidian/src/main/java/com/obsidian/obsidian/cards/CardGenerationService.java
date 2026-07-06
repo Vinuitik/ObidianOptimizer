@@ -35,14 +35,32 @@ public class CardGenerationService {
 
     /** Returns the embedder's result summary, or null on failure (logged). */
     public JsonNode generateFor(String notePath, String sourceHash) {
+        return post(objectMapper.createObjectNode()
+            .put("note_path", notePath).put("source_hash", sourceHash), notePath);
+    }
+
+    /**
+     * Feedback-aware replacement generation (nightly regen for flagged cards): asks
+     * the agent for {@code targetCount} fresh cards, feeding it the user's flag
+     * reasons so the replacements avoid the same flaws. Keeps a note's card count
+     * consistent — one replacement per flagged card. Returns null on failure.
+     */
+    public JsonNode regenerate(String notePath, String sourceHash, int targetCount, java.util.List<String> feedback) {
+        var body = objectMapper.createObjectNode()
+            .put("note_path", notePath).put("source_hash", sourceHash)
+            .put("target_count", Math.max(1, targetCount));
+        var arr = body.putArray("feedback");
+        if (feedback != null) feedback.stream().filter(r -> r != null && !r.isBlank()).forEach(arr::add);
+        return post(body, notePath);
+    }
+
+    private JsonNode post(com.fasterxml.jackson.databind.node.ObjectNode body, String notePath) {
         try {
-            String body = objectMapper.writeValueAsString(
-                Map.of("note_path", notePath, "source_hash", sourceHash));
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(embedderUrl + "/flashcards/generate"))
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofMinutes(10))   // 3 CLI calls worst case
-                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                 .build();
             HttpResponse<String> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofString());

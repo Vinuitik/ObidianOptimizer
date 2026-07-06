@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.chrono;
 
+import com.obsidian.obsidian.cards.FlaggedCardRegenService;
 import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.common.WorkerLane;
 import com.obsidian.obsidian.ml.ImageScanService;
@@ -45,12 +46,14 @@ public class ChronoService {
     private final NoteIndexRepository noteIndex;
     private final ImageScanService   imageScanService;
     private final SyncQueueRepository syncQueueRepo;
+    private final FlaggedCardRegenService flaggedCardRegen;
 
     public ChronoService(FileMoverService fileMover,
                          BankruptcyService bankruptcy, SpreadService spread,
                          SettingsRepository settingsRepo, FileRepository fileRepo,
                          NoteIndexRepository noteIndex, ImageScanService imageScanService,
-                         SyncQueueRepository syncQueueRepo) {
+                         SyncQueueRepository syncQueueRepo,
+                         FlaggedCardRegenService flaggedCardRegen) {
         this.fileMover        = fileMover;
         this.bankruptcy       = bankruptcy;
         this.spread           = spread;
@@ -59,6 +62,7 @@ public class ChronoService {
         this.noteIndex        = noteIndex;
         this.imageScanService = imageScanService;
         this.syncQueueRepo    = syncQueueRepo;
+        this.flaggedCardRegen = flaggedCardRegen;
     }
 
     public record ChronoResult(
@@ -110,6 +114,11 @@ public class ChronoService {
         SpreadService.SpreadResult spreadResult =
             spread.run(mdFiles, settingsRepo.getMaxDailyReviews());
 
+        // Refill user-flagged bad cards: one feedback-aware replacement per flag,
+        // so notes whose garbage cards were quarantined don't stay thin. LLM-bound
+        // (minutes) — fine here, the chrono lane is off the scheduler thread.
+        FlaggedCardRegenService.RegenResult regen = flaggedCardRegen.run();
+
         fileRepo.triggerDeltaSync();
 
         // Detect changed files by comparing SHA-256 hashes. This catches both
@@ -142,9 +151,9 @@ public class ChronoService {
 
         String today = LocalDate.now().toString();
         settingsRepo.set("chronoLastRunDate", today);
-        log.info("[ChronoService] Complete for {}. moved={} chronic={} bankrupt={} shifted={}",
+        log.info("[ChronoService] Complete for {}. moved={} chronic={} bankrupt={} shifted={} cardsRefilled={}/{}",
             today, filesMoved, bankruptcyResult.chronicNeglected(),
-            bankruptcyResult.declared(), spreadResult.moved());
+            bankruptcyResult.declared(), spreadResult.moved(), regen.stored(), regen.replacementsRequested());
 
         return new ChronoResult(today, filesMoved, bankruptcyResult, spreadResult);
     }

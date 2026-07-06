@@ -1,6 +1,6 @@
 # Cards Domain Flows
 
-Files: CardRepository.java, CardGenerationService.java, CardJobWorker.java, CardController.java, FsrsService.java, BanditService.java, ReviewService.java, ReviewController.java, NoteReviewRepository.java, FsrsStateWriter.java, ReviewPreparationService.java
+Files: CardRepository.java, CardGenerationService.java, CardJobWorker.java, CardController.java, FsrsService.java, BanditService.java, ReviewService.java, ReviewController.java, NoteReviewRepository.java, FsrsStateWriter.java, ReviewPreparationService.java, FlaggedCardRegenService.java
 Python agent: embedder/flashcards/generate.py, validate.py, solver_sandbox.py
 Architecture: architecture_plans/FLASHCARDS_ARCH.md, architecture_plans/FSRS_REWORK_PLAN.md
 
@@ -69,6 +69,15 @@ review system. It gates BOTH the UI and card generation:
   the card's difficulty stays in the score denominator — a skip would drop it and
   inflate the score. On complete, FlashcardSession calls `dismissFromReview(notePath)`
   so the rescheduled note leaves the due list (mirrors SlideshowReview.rate()).
+  **This dismissal only runs if `/complete` returns 200** — the frontend `catch`
+  swallows failures, so a 500 there leaves the note stuck in the list. That was the
+  symptom of the `NoteReviewRepository.find` bug: `pending_arm` is a Postgres `REAL`
+  → JDBC hands back a `Float`, and the old `(Double)` cast threw `ClassCastException`
+  on every already-reviewed note, 500-ing `/complete`. Fixed by widening through
+  `Number` (`rs.getObject(...) instanceof Number n ? n.doubleValue() : null`).
+  After a test, "Review note directly →" opens the note **read-only** (`canGrade=false`
+  in ReviewPage) — the self-rate band bar only appears on the no-cards path, where the
+  inline note IS the grading surface.
 - OFF: ReviewPage → SlideshowReview (in ReviewPage.jsx) — four band buttons →
   POST /reviews/grade. ReviewRating.jsx (list dropdown) posts the same.
 
@@ -167,6 +176,32 @@ POST /api/assignments/{id}/complete
   → ReviewService.Band.fromScore → grade() → FSRS + bandit → due dates
 ```
 
+## Flag + regen (bad-card quarantine → nightly feedback-aware refill)
+
+```
+POST /api/cards/{id}/flag {reason}            (FlashcardSession result breakdown → 🚩)
+  → CardRepository.flag(id, reason):
+      cards.status = 'FLAGGED'  (leaves the ACTIVE draw pool immediately)
+      INSERT card_flags(card_id, note_path, reason)   — one row per flag, unserviced
+
+Nightly (ChronoService step 3b) → FlaggedCardRegenService.run():
+  gate: cards.enabled && flashcardsEnabled (else flags stay pending)
+  CardRepository.findNotesWithPendingFlags()  → per note: {body_hash, flag_count, reasons[]}
+  per note: CardGenerationService.regenerate(path, body_hash, flag_count, reasons)
+      → embedder /flashcards/generate {..., target_count, feedback[]}
+        generate.py _regen_preamble(): "REPLACING low-quality cards, make ~N, AVOID: <reasons>"
+        prepends the normal GEN_PROMPT; valid[:target_count] caps stored → count stays consistent
+  markFlagsServiced(path) ONLY if the embedder answered (result != null) — a wrapper
+    outage leaves flags pending for the next run (mirrors CardJobWorker.recordAttempt gating)
+```
+
+**FLAGGED is never resurrected.** `generate.py _store` ON CONFLICT sets
+`status = CASE WHEN cards.status='FLAGGED' THEN 'FLAGGED' ELSE 'ACTIVE' END`, so if
+the agent regenerates the identical bad card it stays out of the pool. Reactivation
+is deliberately only ARCHIVED→ACTIVE. The 3-value status CHECK is migrated onto
+existing tables by `CardRepository.initSchema` (`ALTER ... cards_status_check`) — a
+`CREATE TABLE IF NOT EXISTS` alone won't widen a pre-existing table's constraint.
+
 ## REST Endpoints (session auth)
 
 | Method | Path | Does |
@@ -174,6 +209,7 @@ POST /api/assignments/{id}/complete
 | GET | `/api/cards?notePath=` | ACTIVE cards for a note |
 | GET | `/api/cards/stats` | active/archived/notes-with-cards counts |
 | POST | `/api/cards/generate {notePath}` | force generation now, synchronous |
+| POST | `/api/cards/{id}/flag {reason}` | quarantine a bad card (→ FLAGGED) + record reason |
 | GET | `/api/reviews/due` | notes due per FSRS (+bandit), most overdue first |
 | POST | `/api/reviews/grade {notePath, band}` | manual grade (slideshow mode) |
 | POST | `/api/assignments {scope, points}` | build a session |
@@ -221,6 +257,13 @@ AFTER answering, so it teaches the reasoning without leaking answers mid-test.
 | Eligibility rule | `CardRepository.findNotesNeedingCards()` WHERE clause |
 | Card diff key (body_hash) | set: `ImageScanService.registerImages` via `MarkdownPreprocessor.stripFrontmatter`; read: `findNotesNeedingCards` |
 | Card archiving | none — never auto-archived (`generate.py _store`); removal is user-only (delete) |
+| Flag a bad card | `POST /api/cards/{id}/flag` → `CardRepository.flag` (status FLAGGED + card_flags row) |
+| FLAGGED never resurrected | `generate.py _store` ON CONFLICT `CASE ... status='FLAGGED'` |
+| status CHECK widening (existing DBs) | `CardRepository.initSchema` `ALTER ... cards_status_check` |
+| Nightly flag refill | `FlaggedCardRegenService.run` (ChronoService step 3b) |
+| Feedback-aware regen prompt | `generate.py _regen_preamble` / `target_count` cap in `generate_for_note` |
+| pending_arm Float→Double cast | `NoteReviewRepository.find` (widen through `Number`) |
+| Post-test read-only note view | `ReviewPage.handleReviewNote(path, canGrade)` / `InlineNoteReview` |
 | Desired retention | `fsrs.desired-retention` property (default 0.9) |
 | FSRS weights | `FsrsService.W` (FSRS-6 defaults — regenerate test refs if changed) |
 | Lapse / forget math | `FsrsService.forget()` (w11-w14) |

@@ -123,12 +123,35 @@
 /* bottom bar: proposed folder (tree picker) + actions */
 .bottomBar {
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4);
   border-top: 1px solid var(--color-border);
   background: var(--color-surface);
+}
+.barControls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* Collapse handle — hidden on desktop (bar is always expanded), a tap target on mobile. */
+.barToggle {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.barToggleLabel {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .barLabel { font-size: var(--text-sm); color: var(--color-text-2); }
 .folderBtn {
@@ -178,6 +201,8 @@
     bottom: 0;
     z-index: 5;
   }
+  .barToggle { display: flex; }
+  .bottomBarCollapsed { padding-top: var(--sp-2); padding-bottom: var(--sp-2); }
   .folderBtn { max-width: 60vw; }
   .barStatus { width: 100%; margin-left: 0; }
 }

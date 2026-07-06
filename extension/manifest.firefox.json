@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Obsidian Optimizer — Send to Learn",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Capture anything — text, a link, a YouTube video, a PDF — into your Learn queue to review later.",
   "icons": {
     "16": "icons/icon-16.png",

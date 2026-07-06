@@ -1,6 +1,7 @@
 # Chrono Domain Flows
 
 Files: ChronoService.java, ChronoController.java, FileMoverService.java, BankruptcyService.java, SpreadService.java, FrontmatterRewriter.java
+Also invoked here: cards/FlaggedCardRegenService.java (step 3b — see cards/FLOWS.md "Flag + regen")
 
 ---
 
@@ -26,6 +27,9 @@ ChronoService.runAllJobs()
         limit       from SettingsRepository.getBankruptcyLimit()
         neglectDays from SettingsRepository.getChronicNeglectDays()
   3. SpreadService.run(mdFiles, max)              — max from SettingsRepository.getMaxDailyReviews()
+  3b. FlaggedCardRegenService.run()               — refill user-flagged bad cards (cards/FLOWS.md
+        "Flag + regen"): one feedback-aware replacement per flag. LLM-bound; gated on
+        cards.enabled + flashcardsEnabled. Marks flags serviced only when the embedder answered.
   4. FileRepository.triggerDeltaSync()            — delta resync so DB reflects modified files
   5. Hash loop: sha256(file) vs notes.content_hash — for every changed file
      (chrono rewrites from steps 2-3 AND external Obsidian edits):

@@ -165,11 +165,14 @@ def ensure_schema(conn) -> None:
           difficulty    INT NOT NULL CHECK (difficulty BETWEEN 1 AND 5),
           card_hash     TEXT NOT NULL,
           source_hash   TEXT NOT NULL,
-          status        TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED')),
+          status        TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED','FLAGGED')),
           drawn_cycle   INT NOT NULL DEFAULT 0,
           created_at    TIMESTAMP NOT NULL DEFAULT now(),
           UNIQUE (note_path, card_hash)
         )""")
+    # The FLAGGED status widening is migrated on an existing table by the Java side
+    # (CardRepository.initSchema ALTER); this inline DDL only matters when the
+    # embedder creates the table on a fresh install.
 
 
 def _store(note_path: str, source_hash: str, cards: list[dict]) -> dict:
@@ -187,7 +190,10 @@ def _store(note_path: str, source_hash: str, cards: list[dict]) -> dict:
                 INSERT INTO cards (note_path, type, payload, difficulty, card_hash, source_hash)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (note_path, card_hash) DO UPDATE SET
-                  source_hash = EXCLUDED.source_hash, status = 'ACTIVE'
+                  source_hash = EXCLUDED.source_hash,
+                  -- Never resurrect a user-flagged card: if the agent regenerates the
+                  -- identical bad question, it stays FLAGGED (out of the draw pool).
+                  status = CASE WHEN cards.status = 'FLAGGED' THEN 'FLAGGED' ELSE 'ACTIVE' END
                 """, (note_path, card["type"], json.dumps(card), card["difficulty"], ch, source_hash))
             inserted += cur.rowcount
         conn.commit()
@@ -229,9 +235,27 @@ def _with_image_descriptions(note_path: str, content: str) -> str:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def generate_for_note(note_path: str, content: str, source_hash: str) -> dict:
+def _regen_preamble(target_count: int, feedback: list[str] | None) -> str:
+    """Prompt prefix for feedback-aware regen: ask for ~target_count fresh cards and
+    tell the agent WHY the previous cards were flagged so it doesn't repeat them."""
+    lines = [f"You are REPLACING low-quality flashcards. Generate about {target_count} "
+             "NEW, high-quality card(s) — a mix of types that fits the material, ignoring "
+             "the per-type counts below (they are only schema references)."]
+    reasons = [r.strip() for r in (feedback or []) if r and r.strip()]
+    if reasons:
+        lines.append("The previous cards for this note were flagged as bad for these reasons — "
+                     "avoid every one of these problems:")
+        lines += [f"- {r}" for r in reasons]
+    return "\n".join(lines) + "\n\n"
+
+
+def generate_for_note(note_path: str, content: str, source_hash: str,
+                      target_count: int | None = None,
+                      feedback: list[str] | None = None) -> dict:
     content = _with_image_descriptions(note_path, content)
     prompt = GEN_PROMPT.format(n_mcq=N_MCQ, n_open=N_OPEN, n_ex=N_EX, content=content)
+    if target_count and target_count > 0:
+        prompt = _regen_preamble(target_count, feedback) + prompt
     rep = AgentReport("flashcards", note_path)
     rep.input("note_content (post image-enrichment)", content)
     rep.input("prompt", prompt)
@@ -269,6 +293,10 @@ def generate_for_note(note_path: str, content: str, source_hash: str) -> dict:
     before = len(valid)
     valid = _self_check(valid)
     rep.add("self-check", {"kept": len(valid), "dropped": before - len(valid)})
+    # Regen mode: keep the note's card count consistent — store at most one
+    # replacement per flagged card, even if the agent produced extras.
+    if target_count and target_count > 0:
+        valid = valid[:target_count]
     result = _store(note_path, source_hash, valid)
     result.update({"note_path": note_path,
                    "self_check_dropped": before - len(valid),
