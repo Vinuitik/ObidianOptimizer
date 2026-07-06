@@ -17,25 +17,30 @@ client → same `drive.file` namespace). 409 if Drive not connected / passphrase
   `PwaController.PwaSetup`.
 
 ## Export (server → phone) — `OfflineExportService`
-`exportReviewBundle(limit)` → `repository.getReviewNotesPaged(0,limit)` (due notes, same as
-`/api/review/bundle`) + `getText` → JSON → `VaultEncryptionService.encrypt` →
-`DriveService.uploadOffline("review-bundle.json.enc")` (singleton in `_offline/`, overwritten).
-Triggers (laptop is often OFF, so belt-and-suspenders): `@EventListener(ApplicationReadyEvent)`
-(on boot), `@Scheduled(${offline.export.cron:0 30 3 * * *})`, and `POST /pwa/export`.
-- To change the exported set: `exportReviewBundle` (add cards in P4, inbox in P5).
-- To change cadence: `offline.export.cron` env / property.
+`exportAll()` writes three singleton `_offline/*.enc` files (encrypted, overwritten each run):
+- `exportReviewBundle` → `review-bundle.json.enc` — due notes + text (self-rated review).
+- `exportCards` → `cards.json.enc` — a pre-built `AssignmentService.build` per due note
+  (real persisted assignment, so consume grades via the same engine). Capped `CARDS_NOTE_LIMIT`.
+- `exportInbox` → `inbox.json.enc` — `InboxController.listItems()` (Learn triage offline).
+Triggers (laptop often OFF, so belt-and-suspenders): `@EventListener(ApplicationReadyEvent)`,
+`@Scheduled(${offline.export.cron:0 30 3 * * *})`, and `POST /pwa/export`.
+- To change the exported set / limits: the three `export*` methods.
+- To change cadence: `offline.export.cron`.
 
 ## Consume (phone → server) — `MailboxConsumeService`
 `consumeAll()` → `DriveService.listMailbox()` (`_mailbox/*.enc`, ts-sorted) → per file:
 `downloadFile` → `VaultEncryptionService.decrypt` → JSON `{deviceId, events[]}` →
-per event dispatch (P3: `grade` → `ReviewService.grade(path, Band)`), idempotent via
-`ConsumedEventRepository` (eventId) → **delete the file ONLY if every event committed**
-(`allCommitted`), else leave it for retry. After any apply → re-export the bundle.
-Triggers: on boot + `@Scheduled(${mailbox.consume.cron:0 */15 * * * *})`. `synchronized` =
-single-flight.
-- Unsupported event kind → file left un-deleted (no data loss) until a newer server handles it.
-- To add event kinds (file/discard/assignment): extend `consumeFile` dispatch + phone
-  `pwa/mailbox.js`.
+per event dispatch, idempotent via `ConsumedEventRepository` (eventId) → **delete the file
+ONLY if every event committed** (`allCommitted`), else leave it for retry. After any apply →
+re-export. Triggers: on boot + `@Scheduled(${mailbox.consume.cron:0 */15 * * * *})`.
+`synchronized` = single-flight. Kinds handled:
+- `grade` → `ReviewService.grade(path, Band)` (P3)
+- `assignment` → replay `AssignmentService.submitAttempt` per answer + `complete` (P4);
+  idempotent via `AssignmentRepository.attemptExists` + `assignments.completed_at`
+- `file`/`discard`/`acknowledge` → `InboxController.fileNote/discardNote/acknowledgeCapture` (P5)
+- `capture` → [NOT IMPLEMENTED] (A-1); unsupported kinds leave the file intact (no data loss).
+- To add a kind: `consumeFile` switch + phone `pwa/mailbox.js` (client sends it).
+- ⚠️ A permanently-failing event loops (file never deletes) — needs a retry cap/dead-letter (P6).
 
 ## Technology Notes
 - **Delete-after-success is the correctness hinge**: a mailbox file is removed only when all
