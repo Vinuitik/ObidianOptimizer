@@ -222,6 +222,43 @@ select.input option {
   cursor: not-allowed;
 }
 
+/* Drive panel — grouped action rows instead of one flat wall of buttons. */
+.actionGroups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--color-surface);
+}
+.actionGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.actionGroupLabel {
+  flex: 0 0 76px;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--color-muted);
+}
+.dangerBtn {
+  flex-shrink: 0;
+  padding: 7px var(--sp-3);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm2);
+  color: var(--color-danger);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color var(--ease-fast);
+}
+.dangerBtn:hover:not(:disabled) { border-color: var(--color-danger); }
+.dangerBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+
 .savedMsg {
   font-size: var(--text-xs);
   color: var(--color-success);

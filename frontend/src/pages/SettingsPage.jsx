@@ -685,31 +685,40 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
         </p>
       )}
 
-      <div className={styles.sectionFooter}>
-        {!connected && !(clientIdSet && secretSet) && (
-          <span className={styles.hint}>
-            Connect needs the OAuth client id + secret saved (fields above or .env).
-          </span>
-        )}
-        {showFields && (
-          <button
-            className={styles.saveBtn}
-            disabled={!loaded || busy != null || !credsDirty}
-            onClick={saveCreds}
-          >
-            {busy === 'save' ? 'Saving…' : 'Save'}
-          </button>
-        )}
-        {!connected ? (
-          <button
-            className={styles.saveBtn}
-            disabled={!loaded || busy != null || !(clientIdSet && secretSet)}
-            onClick={connect}
-          >
-            {busy === 'connect' ? 'Redirecting…' : 'Connect Google Drive'}
-          </button>
-        ) : (
-          <>
+      {/* Setup actions (Save creds / Connect) — only before the account is linked. */}
+      {(!connected || showFields) && (
+        <div className={styles.sectionFooter}>
+          {!connected && !(clientIdSet && secretSet) && (
+            <span className={styles.hint}>
+              Connect needs the OAuth client id + secret saved (fields above or .env).
+            </span>
+          )}
+          {showFields && (
+            <button
+              className={styles.saveBtn}
+              disabled={!loaded || busy != null || !credsDirty}
+              onClick={saveCreds}
+            >
+              {busy === 'save' ? 'Saving…' : 'Save'}
+            </button>
+          )}
+          {!connected && (
+            <button
+              className={styles.saveBtn}
+              disabled={!loaded || busy != null || !(clientIdSet && secretSet)}
+              onClick={connect}
+            >
+              {busy === 'connect' ? 'Redirecting…' : 'Connect Google Drive'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Connected: grouped action rows (primary vs secondary vs destructive). */}
+      {connected && (
+        <div className={styles.actionGroups}>
+          <div className={styles.actionGroup}>
+            <span className={styles.actionGroupLabel}>Files</span>
             <button
               className={styles.saveBtn}
               disabled={busy != null || sync?.uploading}
@@ -720,30 +729,18 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
                 : (busy === 'upload' ? 'Starting…' : 'Sync now')}
             </button>
             <button
-              className={styles.saveBtn}
+              className={styles.browseBtn}
               disabled={busy != null}
               onClick={() => run('download', triggerSyncDownload)}
             >
               {busy === 'download' ? 'Pulling…' : 'Pull from Drive'}
             </button>
+          </div>
+
+          <div className={styles.actionGroup}>
+            <span className={styles.actionGroupLabel}>Database</span>
             <button
-              className={styles.saveBtn}
-              disabled={busy != null}
-              onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(true)))}
-            >
-              {busy === 'janitor' ? 'Scanning…' : 'Check orphans'}
-            </button>
-            {janitorReport?.dryRun && janitorReport.orphans > 0 && (
-              <button
-                className={styles.saveBtn}
-                disabled={busy != null}
-                onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(false)))}
-              >
-                Trash {janitorReport.orphans} orphan(s)
-              </button>
-            )}
-            <button
-              className={styles.saveBtn}
+              className={styles.browseBtn}
               disabled={busy != null || sync?.dbBackupRunning || sync?.dbRestoring}
               onClick={() => run('dbbackup', triggerDbBackup)}
               title="pg_dump the whole database (embeddings, cards, OCR, review state) → encrypted → Drive _db/"
@@ -751,7 +748,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
               {sync?.dbBackupRunning ? 'Backing up DB…' : (busy === 'dbbackup' ? 'Starting…' : 'Back up DB now')}
             </button>
             <button
-              className={styles.saveBtn}
+              className={sync?.dbEmpty ? styles.saveBtn : styles.dangerBtn}
               disabled={busy != null || sync?.dbRestoring || sync?.dbBackupRunning || !sync?.dbBackup?.exists}
               onClick={restoreDb}
               title="Download the latest DB backup + all vault files (no reprocessing). For moving to a new device."
@@ -760,16 +757,40 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
                 ? `Restoring… ${sync.dbRestorePhase || ''}`
                 : (busy === 'restore' ? 'Starting…' : 'Restore from Drive')}
             </button>
+          </div>
+
+          <div className={styles.actionGroup}>
+            <span className={styles.actionGroupLabel}>Maintenance</span>
             <button
-              className={styles.saveBtn}
+              className={styles.browseBtn}
+              disabled={busy != null}
+              onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(true)))}
+            >
+              {busy === 'janitor' ? 'Scanning…' : 'Check orphans'}
+            </button>
+            {janitorReport?.dryRun && janitorReport.orphans > 0 && (
+              <button
+                className={styles.dangerBtn}
+                disabled={busy != null}
+                onClick={() => run('janitor', async () => setJanitorReport(await runJanitor(false)))}
+              >
+                Trash {janitorReport.orphans} orphan(s)
+              </button>
+            )}
+          </div>
+
+          <div className={styles.actionGroup}>
+            <span className={styles.actionGroupLabel}>Account</span>
+            <button
+              className={styles.dangerBtn}
               disabled={busy != null}
               onClick={() => run('disconnect', disconnectDrive)}
             >
               {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
             </button>
-          </>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
 
       {connected && (
         <p className={styles.hint} style={{ marginTop: '8px' }}>
