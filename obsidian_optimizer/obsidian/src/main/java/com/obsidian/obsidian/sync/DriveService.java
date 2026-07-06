@@ -37,6 +37,11 @@ public class DriveService {
     /** Name of the auto-created sync root in the user's Drive (OAuth mode only). */
     private static final String DEFAULT_ROOT_NAME = "ObsidianOptimizer";
 
+    /** Sub-folder under the sync root holding encrypted DB dumps. Deliberately NOT a
+     *  vault path: excluded from listRecursive so the janitor never trashes it and
+     *  downloadAll never treats a dump as a note. */
+    private static final String DB_BACKUP_FOLDER = "_db";
+
     @Value("${sync.google.service-account-json:placeholder}")
     private String serviceAccountJson;
 
@@ -336,6 +341,10 @@ public class DriveService {
 
             for (File f : page.getFiles()) {
                 if (FOLDER_MIME.equals(f.getMimeType())) {
+                    // Never descend into _db/ — those are DB dumps, not vault files.
+                    // (Keeps the janitor from trashing backups and downloadAll from
+                    //  trying to decrypt a pg_dump as a note.)
+                    if (DB_BACKUP_FOLDER.equals(f.getName())) continue;
                     listRecursive(f.getId(), acc);
                 } else if (f.getName().endsWith(".enc")) {
                     Map<String, String> props = f.getAppProperties();
@@ -354,6 +363,70 @@ public class DriveService {
             pageToken = page.getNextPageToken();
         } while (pageToken != null);
     }
+
+    // ── DB backups (_db/) ───────────────────────────────────────────────────────
+
+    /** Upload an encrypted pg_dump into the _db/ folder. Returns the Drive file ID. */
+    public String uploadDbBackup(byte[] bytes, String name, String pgVersion, String deviceId)
+            throws IOException {
+        String folderId = getOrCreateFolder(DB_BACKUP_FOLDER, rootFolderId());
+        Map<String, String> props = new HashMap<>();
+        props.put("type",        "db-dump");
+        props.put("pg_version",  pgVersion == null ? "" : pgVersion);
+        props.put("created_at",  String.valueOf(System.currentTimeMillis()));
+        props.put("device_id",   deviceId == null ? "" : deviceId);
+        File meta = new File()
+            .setName(name)
+            .setParents(Collections.singletonList(folderId))
+            .setAppProperties(props);
+        ByteArrayContent content = new ByteArrayContent("application/octet-stream", bytes);
+        Drive d = requireClient();
+        return withRetry(() -> d.files().create(meta, content).setFields("id").execute()).getId();
+    }
+
+    /** All DB dumps in _db/, newest first (by created_at appProperty, then name). */
+    public List<DbBackupInfo> listDbBackups() throws IOException {
+        List<DbBackupInfo> out = new ArrayList<>();
+        String folderId = getOrCreateFolder(DB_BACKUP_FOLDER, rootFolderId());
+        String pageToken = null;
+        do {
+            Drive.Files.List req = requireClient().files().list()
+                .setQ("'" + folderId + "' in parents and trashed = false")
+                .setFields("nextPageToken, files(id, name, size, appProperties)")
+                .setPageSize(1000);
+            if (pageToken != null) req.setPageToken(pageToken);
+            FileList page = req.execute();
+            for (File f : page.getFiles()) {
+                if (!f.getName().endsWith(".enc")) continue;
+                Map<String, String> props = f.getAppProperties();
+                long created = props != null ? parseLong(props.getOrDefault("created_at", "0")) : 0L;
+                out.add(new DbBackupInfo(f.getId(), f.getName(), created,
+                    f.getSize() == null ? 0L : f.getSize()));
+            }
+            pageToken = page.getNextPageToken();
+        } while (pageToken != null);
+        out.sort((a, b) -> {
+            int c = Long.compare(b.createdAt(), a.createdAt());
+            return c != 0 ? c : b.name().compareTo(a.name());
+        });
+        return out;
+    }
+
+    public java.util.Optional<DbBackupInfo> latestDbBackup() throws IOException {
+        List<DbBackupInfo> all = listDbBackups();
+        return all.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(all.get(0));
+    }
+
+    /** Hard-delete an old dump (rotation) — bypasses trash so retention actually frees quota. */
+    public void deleteDbBackup(String fileId) throws IOException {
+        try {
+            requireClient().files().delete(fileId).execute();
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() != 404) throw e;
+        }
+    }
+
+    public record DbBackupInfo(String fileId, String name, long createdAt, long sizeBytes) {}
 
     // ── Folder helpers ────────────────────────────────────────────────────────
 

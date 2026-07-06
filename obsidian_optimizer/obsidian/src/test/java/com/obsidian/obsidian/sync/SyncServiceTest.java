@@ -319,6 +319,39 @@ class SyncServiceTest {
         verifyNoInteractions(drive);
     }
 
+    @Test
+    void quietDownloadWritesBytesButNeverReprocesses() throws Exception {
+        // Restore path: files land on disk, but NO index/link/image work is triggered
+        // (the just-restored DB already holds all that — re-running would re-embed everything).
+        String note = "# restored note\n[[Some Link]]";
+        String hash = ContentHashing.sha256(note);
+        when(drive.listAllFiles()).thenReturn(List.of(driveFile("restored.md", hash)));
+        when(drive.downloadFile("fid-restored.md"))
+            .thenReturn(note.getBytes(StandardCharsets.UTF_8));
+
+        int written = service.downloadAllQuiet();
+
+        assertThat(written).isEqualTo(1);
+        assertThat(vault.resolve("restored.md")).hasContent(note);
+        verifyNoInteractions(noteIndex);
+        verifyNoInteractions(linkRepo);
+        verifyNoInteractions(imageScan);
+        verify(queueRepo, never()).markSynced(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void quietDownloadSkipsFilesAlreadyOnDisk() throws Exception {
+        String content = "identical";
+        writeVaultFile("same.md", content);
+        when(drive.listAllFiles())
+            .thenReturn(List.of(driveFile("same.md", ContentHashing.sha256(content))));
+
+        int written = service.downloadAllQuiet();
+
+        assertThat(written).isZero();
+        verify(drive, never()).downloadFile(anyString());
+    }
+
     // ── initialScan ───────────────────────────────────────────────────────
 
     @Test

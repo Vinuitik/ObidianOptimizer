@@ -34,6 +34,7 @@ public class SyncController {
     private final SyncOAuthService       oauthService;
     private final SettingsRepository     settingsRepo;
     private final SyncWorker             syncWorker;
+    private final DbBackupService        dbBackupService;
 
     public SyncController(SyncService syncService,
                           SyncQueueRepository syncQueueRepo,
@@ -42,7 +43,8 @@ public class SyncController {
                           DriveService driveService,
                           SyncOAuthService oauthService,
                           SettingsRepository settingsRepo,
-                          SyncWorker syncWorker) {
+                          SyncWorker syncWorker,
+                          DbBackupService dbBackupService) {
         this.syncService           = syncService;
         this.syncQueueRepo         = syncQueueRepo;
         this.deviceIdentityService = deviceIdentityService;
@@ -51,6 +53,7 @@ public class SyncController {
         this.oauthService          = oauthService;
         this.settingsRepo          = settingsRepo;
         this.syncWorker            = syncWorker;
+        this.dbBackupService       = dbBackupService;
     }
 
     /** GET /api/sync/status — queue counts + configuration/connection state + quota */
@@ -62,6 +65,7 @@ public class SyncController {
         body.put("encryptionConfigured", encryptionService.isConfigured());
         body.put("driveConfigured",      driveService.isConfigured());
         body.putAll(syncService.uploadProgress());   // uploading / uploadDone / uploadTotal
+        body.putAll(dbBackupService.statusFragment()); // dbBackup / dbEmpty / dbRestoring
         body.putAll(oauthService.statusFragment());
         // Quota is one Drive API call; the panel fetches status on mount, not on a poll.
         if (driveService.isConfigured() && oauthService.isConnected()) {
@@ -124,6 +128,34 @@ public class SyncController {
             return ResponseEntity.internalServerError()
                 .body(Map.of("error", e.getMessage()));
         }
+    }
+
+    // ── DB backup / restore ──────────────────────────────────────────────────
+
+    /** POST /api/sync/db/backup — pg_dump → encrypt → Drive _db/, on the sync lane (202). */
+    @PostMapping("/db/backup")
+    public ResponseEntity<Map<String, Object>> dbBackup() {
+        boolean started = syncWorker.triggerDbBackup();
+        log.info("[SyncController] DB backup {}", started ? "started" : "already running");
+        return ResponseEntity.accepted().body(Map.of("started", started));
+    }
+
+    /**
+     * POST /api/sync/db/restore?force= — restore latest Drive dump then materialize vault
+     * files. Synchronous precheck returns 400 with a reason; the heavy work runs on the
+     * lane (202). Destructive (pg_restore --clean) — the UI confirms before calling.
+     */
+    @PostMapping("/db/restore")
+    public ResponseEntity<Map<String, Object>> dbRestore(
+            @RequestParam(defaultValue = "false") boolean force) {
+        String blocked = dbBackupService.restoreBlockedReason(force);
+        if (blocked != null) {
+            log.warn("[SyncController] DB restore refused: {}", blocked);
+            return ResponseEntity.badRequest().body(Map.of("error", blocked));
+        }
+        boolean started = syncWorker.triggerDbRestore(force);
+        log.info("[SyncController] DB restore {}", started ? "started" : "already running");
+        return ResponseEntity.accepted().body(Map.of("started", started));
     }
 
     // ── OAuth (Connect Google Drive) ─────────────────────────────────────────

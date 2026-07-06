@@ -296,6 +296,51 @@ public class SyncService {
         log.info("[SyncService.downloadAll] downloaded={}, skipped={}, keptLocal={}", downloaded, skipped, kept);
     }
 
+    /**
+     * Restore-only file materialization: write every Drive .enc file to disk as raw
+     * decrypted bytes, WITHOUT any processing (no noteIndex/links/images/embedding
+     * re-queue). Used right after a DB restore — the restored DB already holds the
+     * derived data, and re-running the pipeline here would re-embed/re-caption
+     * everything, defeating the whole point of the backup. Idempotent: skips files
+     * whose local content already matches Drive.
+     */
+    public int downloadAllQuiet() throws IOException {
+        if (!encryptionService.isConfigured()) {
+            log.warn("[SyncService.downloadAllQuiet] encryption not configured — skipping");
+            return 0;
+        }
+        if (!driveService.isConfigured()) {
+            log.warn("[SyncService.downloadAllQuiet] Drive not configured — skipping");
+            return 0;
+        }
+        Path vaultRootPath = Paths.get(settingsRepo.getVaultPath()).toAbsolutePath().normalize();
+        List<DriveFileInfo> driveFiles = driveService.listAllFiles();
+        int written = 0, skipped = 0, failed = 0;
+
+        for (DriveFileInfo df : driveFiles) {
+            try {
+                Path target = vaultRootPath.resolve(df.vaultPath()).normalize();
+                if (!target.startsWith(vaultRootPath)) {
+                    log.error("[SyncService.downloadAllQuiet] rejected path escaping vault: {}", df.vaultPath());
+                    continue;
+                }
+                if (df.contentHash().equals(computeLocalHash(target.toString(), df.vaultPath()))) {
+                    skipped++;
+                    continue;
+                }
+                byte[] plaintext = encryptionService.decrypt(driveService.downloadFile(df.fileId()));
+                Files.createDirectories(target.getParent());
+                Files.write(target, plaintext);
+                written++;
+            } catch (Exception e) {
+                log.error("[SyncService.downloadAllQuiet] failed for {}: {}", df.vaultPath(), e.getMessage());
+                failed++;
+            }
+        }
+        log.info("[SyncService.downloadAllQuiet] written={}, skipped={}, failed={}", written, skipped, failed);
+        return written;
+    }
+
     // ── Delete propagation (tombstones → Drive trash) ────────────────────────
 
     /** Drain DELETE_PENDING rows: move the Drive copy to trash, drop the row. */

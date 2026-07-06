@@ -46,3 +46,14 @@ export function triggerSyncDownload() {
 export function runJanitor(dryRun = true) {
   return req(`/sync/janitor?dryRun=${dryRun}`, { method: 'POST' });
 }
+
+// DB backup: pg_dump → encrypt → Drive _db/. Returns immediately (202); poll status.
+export function triggerDbBackup() {
+  return req('/sync/db/backup', { method: 'POST' });
+}
+
+// DB restore: pull latest dump + materialize vault files. force=true overwrites a
+// non-empty DB (destructive — confirm first). 400 with {error} if blocked.
+export function triggerDbRestore(force = false) {
+  return req(`/sync/db/restore?force=${force}`, { method: 'POST' });
+}

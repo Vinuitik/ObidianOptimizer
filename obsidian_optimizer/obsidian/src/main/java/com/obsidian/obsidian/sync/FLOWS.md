@@ -1,6 +1,6 @@
 # Sync Domain Flows
 
-Files: SyncController.java, SyncOAuthService.java, SyncService.java, SyncWorker.java, SyncQueueRepository.java, VaultEncryptionService.java, DriveService.java, DeviceIdentityService.java
+Files: SyncController.java, SyncOAuthService.java, SyncService.java, SyncWorker.java, SyncQueueRepository.java, VaultEncryptionService.java, DriveService.java, DeviceIdentityService.java, DbBackupService.java
 
 ---
 
@@ -171,6 +171,48 @@ Version history/rollback is Drive-native: updated files keep prior revisions ~30
 
 ---
 
+## DB Backup & Restore (`DbBackupService`)
+
+The per-file sync covers vault FILES; this covers the **Postgres DB** — the expensive
+derived data (embeddings in `note_chunks`, `cards`, image OCR, review state). So moving to
+a new device doesn't re-run the GPU/LLM/vision pipeline. Runs `pg_dump`/`pg_restore` via the
+`postgresql18-client` baked into the backend image.
+
+**Backup** (`SyncWorker.scheduledDbBackup` nightly / `triggerDbBackup` manual → sync lane):
+```
+pg_dump -Fc -h postgres -U … -d obsidian  — ProcessBuilder + PGPASSWORD → temp file
+  (no file drain — the 6h upload cron keeps Drive current; Sync first for a perfect snapshot)
+VaultEncryptionService.encrypt(bytes)     — gzip+AES-GCM, same passphrase as file sync
+DriveService.uploadDbBackup(enc, "obsidian-db-<ts>.pgdump.enc", pgVersion, deviceId)
+  → _db/ folder (EXCLUDED from listRecursive → janitor never trashes it)
+prune()                                    — hard-delete dumps beyond SYNC_DBBACKUP_KEEP (3)
+```
+
+**Restore** (`triggerDbRestore(force)` → sync lane; one-click "Restore from Drive"):
+```
+restoreBlockedReason(force)   — synchronous 400 guard: passphrase set? Drive connected?
+                                DB empty (unless force)? a backup exists?
+DriveService.latestDbBackup() → downloadFile → decrypt → temp file
+pg_restore --clean --if-exists --no-owner -h postgres -U … -d obsidian <dump>
+encryptionService.reload()                 — passphrase may live in the restored settings
+syncService.downloadAllQuiet()             — write vault file bytes to disk, NO reprocessing
+                                             (restored DB is authoritative; boot reconcile
+                                              sees matching hashes → no re-embed/re-caption)
+→ restart recommended (dbRestorePhase surfaces this in the UI)
+```
+
+Both run on the **same sync `WorkerLane`** as file uploads (single-flight — a backup/restore
+never races a drain). Manual endpoints return 202; the Settings panel polls `/sync/status`
+(`dbBackupRunning` / `dbRestoring` / `dbRestorePhase` / `dbBackup{exists,lastBackupAt,…}` / `dbEmpty`).
+
+**Fresh-device bootstrap ordering** (chicken-and-egg — passphrase + refresh token live in
+`app_settings` INSIDE the DB you're restoring): (1) OAuth-connect Drive fresh, (2) set the
+SAME passphrase (env `SYNC_PASSPHRASE` or Settings), (3) Restore. The dump's `app_settings`
+then overwrites those — fine because the passphrase must match anyway. If the dumped refresh
+token is stale, reconnect Drive after restore.
+
+---
+
 ## Encryption Detail
 
 `VaultEncryptionService`:
@@ -211,6 +253,8 @@ the proxy — fixed 2026-07-02.)
 | `GET` | `/api/sync/oauth/callback` | session | Code exchange; 302 → `/settings?drive=…` |
 | `POST` | `/api/sync/disconnect` | session | Revoke + forget the Google connection |
 | `POST` | `/api/sync/janitor?dryRun=` | session | Orphan sweep (dryRun=true default: report only) |
+| `POST` | `/api/sync/db/backup` | session | pg_dump → encrypt → Drive `_db/`; **202**, runs on sync lane |
+| `POST` | `/api/sync/db/restore?force=` | session | Restore latest dump + vault files; **400** if blocked (not-empty/no-passphrase/no-backup), else **202** |
 
 `/status` additionally returns `quota {usedBytes, limitBytes}` when connected (one
 Drive API call — the panel fetches status on mount, don't poll it).
@@ -268,6 +312,18 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
   reasons (`insufficientPermissions`, `storageQuotaExceeded`, …) — see `DriveService.isTransient`.
   If a big drain still stalls on 403s, lower concurrency and/or wait ~a few minutes for the
   per-user window to reset. Retries that exhaust the cap dead-letter the row (see sync_queue).
+- **DB backup format is logical (`pg_dump -Fc`), not a volume tar**: the `postgres` service
+  is `paradedb/paradedb:latest` (unpinned) — a physical PGDATA restore breaks on any PG-major
+  bump; a logical dump restores across versions. Cost: `pg_restore` rebuilds indexes (incl.
+  pgvector), a few minutes on restore. **The backend image pins `postgresql18-client`** — it
+  MUST be ≥ the server major; bump it in the Dockerfile whenever the `postgres` image jumps major.
+- **Restore is destructive + fresh-device oriented**: `pg_restore --clean` drops existing
+  objects, so it's gated to an empty DB unless `force=true` (UI double-confirms). Running it
+  under a live app works but a **restart is recommended** afterward (beans/caches read stale
+  pre-restore rows); the UI says so via `dbRestorePhase`. Backups are FULL each night (147 MB
+  DB → tens of MB compressed) — no incremental/WAL; fine at this size.
+- **`_db/` is invisible to the file layer**: `DriveService.listRecursive` skips it, so the
+  janitor never trashes dumps and `downloadAll`/`downloadAllQuiet` never treat a dump as a note.
 - **Concurrency correctness**: uploads run on a fixed pool (`SYNC_UPLOAD_CONCURRENCY`).
   Per-row DB writes are connection-pool-safe. Folder creation is guarded by a per-key lock
   (`DriveService.folderLocks`) so two threads never double-create the same Drive folder.
@@ -283,6 +339,13 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 |---|---|
 | Upload cron schedule | `SYNC_UPLOAD_CRON` env / `sync.upload.cron` property |
 | Upload concurrency | `SYNC_UPLOAD_CONCURRENCY` env / `sync.upload.concurrency` (default 3) |
+| DB backup schedule | `SYNC_DBBACKUP_CRON` env / `sync.dbbackup.cron` (default nightly 3am) |
+| DB dumps retained | `SYNC_DBBACKUP_KEEP` env / `sync.dbbackup.keep` (default 3) |
+| pg_dump / pg_restore logic | `DbBackupService.backupNow()` / `restore()` |
+| Restore guard (empty/force) | `DbBackupService.restoreBlockedReason()` |
+| Quiet file materialization | `SyncService.downloadAllQuiet()` |
+| Drive `_db/` ops + janitor skip | `DriveService.uploadDbBackup/listDbBackups/latestDbBackup`, `listRecursive` skip |
+| pg client version | `obsidian/Dockerfile` `postgresql18-client` (match server major) |
 | Upload retry cap (dead-letter) | `SYNC_UPLOAD_MAX_RETRIES` env / `sync.upload.max-retries` (default 5) |
 | Which Drive errors retry | `DriveService.isTransient()` + `withRetry()` backoff |
 | Folder double-create guard | `DriveService.folderLocks` (per-key lock in `getOrCreateFolder`) |

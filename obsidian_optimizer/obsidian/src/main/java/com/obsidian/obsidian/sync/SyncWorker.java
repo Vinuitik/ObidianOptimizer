@@ -14,14 +14,18 @@ public class SyncWorker {
     private static final Logger log = LoggerFactory.getLogger(SyncWorker.class);
 
     private final SyncService syncService;
+    private final DbBackupService dbBackupService;
     private final SettingsRepository settingsRepo;
 
     // Own lane: a Drive upload is network-bound and can run for a while; keep it
-    // off the shared scheduler thread like every other background worker.
+    // off the shared scheduler thread like every other background worker. DB
+    // backup/restore share this lane too, so they never race a file drain.
     private final WorkerLane lane = new WorkerLane("sync");
 
-    public SyncWorker(SyncService syncService, SettingsRepository settingsRepo) {
+    public SyncWorker(SyncService syncService, DbBackupService dbBackupService,
+                      SettingsRepository settingsRepo) {
         this.syncService = syncService;
+        this.dbBackupService = dbBackupService;
         this.settingsRepo = settingsRepo;
     }
 
@@ -44,6 +48,37 @@ public class SyncWorker {
 
     /** True while an upload/janitor drain is running on the sync lane. */
     public boolean isBusy() { return lane.isRunning(); }
+
+    // ── DB backup / restore (same lane — never races a file drain) ───────────
+
+    /** Nightly DB dump → Drive (gated on syncEnabled, like scheduled upload). */
+    @Scheduled(cron = "${sync.dbbackup.cron:0 0 3 * * *}")
+    public void scheduledDbBackup() {
+        if (!settingsRepo.isSyncEnabled()) {
+            log.debug("[SyncWorker] sync disabled — skipping scheduled DB backup");
+            return;
+        }
+        lane.trigger(() -> {
+            log.info("[SyncWorker] scheduled DB backup triggered");
+            dbBackupService.backupNow();
+        });
+    }
+
+    /** Manual "Back up DB now". @return true if started, false if the lane was busy. */
+    public boolean triggerDbBackup() {
+        return lane.trigger(() -> {
+            log.info("[SyncWorker] manual DB backup triggered");
+            dbBackupService.backupNow();
+        });
+    }
+
+    /** Manual "Restore from Drive". @return true if started, false if the lane was busy. */
+    public boolean triggerDbRestore(boolean force) {
+        return lane.trigger(() -> {
+            log.info("[SyncWorker] DB restore triggered (force={})", force);
+            dbBackupService.restore(force);
+        });
+    }
 
     // The Settings toggle gates only this automatic cron; the manual
     // POST /api/sync/upload button works regardless (explicit user action).

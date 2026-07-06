@@ -7,6 +7,7 @@ import {
 import {
   fetchSyncStatus, fetchOAuthUrl, disconnectDrive,
   triggerSyncUpload, triggerSyncDownload, runJanitor,
+  triggerDbBackup, triggerDbRestore,
 } from '../api/sync';
 import FolderPicker from '../components/organisms/FolderPicker';
 import styles from './SettingsPage.module.css';
@@ -485,12 +486,13 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
 
   useEffect(() => { if (isAuthenticated) refreshStatus(); }, [isAuthenticated, refreshStatus]);
 
-  // While an upload drain runs on the backend, poll status so the progress line ticks.
+  // While an upload drain / DB backup / DB restore runs, poll status so progress ticks.
+  const inFlight = Boolean(sync?.uploading || sync?.dbBackupRunning || sync?.dbRestoring);
   useEffect(() => {
-    if (!sync?.uploading) return undefined;
+    if (!inFlight) return undefined;
     const id = setInterval(refreshStatus, 2000);
     return () => clearInterval(id);
-  }, [sync?.uploading, refreshStatus]);
+  }, [inFlight, refreshStatus]);
 
   // Prefill the client id from saved settings once they load.
   useEffect(() => { setClientId(settings.syncClientId ?? ''); }, [settings.syncClientId]);
@@ -539,6 +541,15 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
     return run('connect', async () => {
       window.location.href = await fetchOAuthUrl();
     });
+  }
+
+  function restoreDb() {
+    const empty = Boolean(sync?.dbEmpty);
+    const msg = empty
+      ? 'Restore the latest backup from Drive?\n\nThis pulls the database (embeddings, cards, review state) and all vault files. A restart is recommended afterward.'
+      : '⚠ This database is NOT empty.\n\nRestoring REPLACES everything with the Drive backup — current data is dropped and cannot be recovered.\n\nContinue?';
+    if (!window.confirm(msg)) return;
+    return run('restore', () => triggerDbRestore(!empty));
   }
 
   const connected = Boolean(sync?.connected);
@@ -733,6 +744,24 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
             )}
             <button
               className={styles.saveBtn}
+              disabled={busy != null || sync?.dbBackupRunning || sync?.dbRestoring}
+              onClick={() => run('dbbackup', triggerDbBackup)}
+              title="pg_dump the whole database (embeddings, cards, OCR, review state) → encrypted → Drive _db/"
+            >
+              {sync?.dbBackupRunning ? 'Backing up DB…' : (busy === 'dbbackup' ? 'Starting…' : 'Back up DB now')}
+            </button>
+            <button
+              className={styles.saveBtn}
+              disabled={busy != null || sync?.dbRestoring || sync?.dbBackupRunning || !sync?.dbBackup?.exists}
+              onClick={restoreDb}
+              title="Download the latest DB backup + all vault files (no reprocessing). For moving to a new device."
+            >
+              {sync?.dbRestoring
+                ? `Restoring… ${sync.dbRestorePhase || ''}`
+                : (busy === 'restore' ? 'Starting…' : 'Restore from Drive')}
+            </button>
+            <button
+              className={styles.saveBtn}
               disabled={busy != null}
               onClick={() => run('disconnect', disconnectDrive)}
             >
@@ -741,6 +770,18 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
           </>
         )}
       </div>
+
+      {connected && (
+        <p className={styles.hint} style={{ marginTop: '8px' }}>
+          {sync?.dbBackup?.exists
+            ? `Last DB backup: ${dbAgo(sync.dbBackup.lastBackupAt)}`
+              + (sync.dbBackup.sizeBytes ? ` · ${fmtBytes(sync.dbBackup.sizeBytes)}` : '')
+              + ` · ${sync.dbBackup.count} kept`
+            : 'No DB backup yet — “Back up DB now” saves embeddings, cards & review state to Drive.'}
+          {sync?.dbEmpty && sync?.dbBackup?.exists &&
+            ' · This DB looks empty — “Restore from Drive” will rebuild it.'}
+        </p>
+      )}
     </div>
   );
 }
@@ -751,6 +792,16 @@ function fmtBytes(n) {
   if (n >= 1e6) return (n / 1e6).toFixed(1) + ' MB';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + ' KB';
   return n + ' B';
+}
+
+function dbAgo(ts) {
+  if (!ts) return 'never';
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} h ago`;
+  return `${Math.round(hrs / 24)} d ago`;
 }
 
 // ── Vault recreation overlay ────────────────────────────────────────────────────
