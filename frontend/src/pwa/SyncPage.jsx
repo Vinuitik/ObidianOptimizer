@@ -5,6 +5,7 @@ import { syncForOffline } from './syncOffline';
 import { flushOutbox } from './offlineApi';
 import { getMeta } from './db';
 import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
+import { refreshAndPull, pullReviewFromDrive } from './drivePull';
 import styles from './MobilePages.module.css';
 
 // The PWA's Sync tab. "Download for offline" seeds the review subset (notes + text
@@ -69,9 +70,16 @@ export default function SyncPage() {
     setBusy(true); setStatus(null); setProgress(null);
     try {
       await flushOutbox().catch(() => {});
-      const res = await syncForOffline({ onProgress: setProgress });
-      setLastSync(Date.now());
-      setStatus({ text: `Downloaded ${res.notes} notes · ${res.media} media for offline.`, tone: 'ok' });
+      if (linked) {
+        // Drive path: works even if the laptop is off (pulls the last exported bundle).
+        const res = online ? await refreshAndPull() : await pullReviewFromDrive();
+        setLastSync(Date.now());
+        setStatus({ text: `Pulled ${res.notes} notes from Drive for offline.`, tone: 'ok' });
+      } else {
+        const res = await syncForOffline({ onProgress: setProgress });
+        setLastSync(Date.now());
+        setStatus({ text: `Downloaded ${res.notes} notes · ${res.media} media for offline.`, tone: 'ok' });
+      }
     } catch (e) {
       setStatus({ text: `Sync failed: ${e.message ?? e}`, tone: 'err' });
     } finally {

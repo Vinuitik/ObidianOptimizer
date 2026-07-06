@@ -2,7 +2,8 @@ import { Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import useStore from '../store/useStore';
 import useOffline from './useOffline';
-import { flushOutbox } from './offlineApi';
+import { flushOutbox, setDriveMode } from './offlineApi';
+import { hasCreds } from './setup';
 import LoginModal from '../components/organisms/LoginModal';
 import BottomNav from './BottomNav';
 import styles from './MobileLayout.module.css';
@@ -24,6 +25,10 @@ export default function MobileLayout() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [checkAuth]);
+
+  // If this device is linked to Drive, the PWA reads its review set from the Drive-pulled
+  // IndexedDB (not the server). Unlinked → falls back to the server path (still works online).
+  useEffect(() => { hasCreds().then(setDriveMode).catch(() => {}); }, []);
 
   // Reconnect → replay anything captured while offline (grade outbox is empty until
   // the offline-review seam lands; flush is a no-op when there's nothing queued).

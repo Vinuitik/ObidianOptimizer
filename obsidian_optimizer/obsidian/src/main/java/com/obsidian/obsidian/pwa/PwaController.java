@@ -5,8 +5,11 @@ import com.obsidian.obsidian.sync.DeviceIdentityService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
 
 /**
  * One-time install handshake for the installed PWA. The phone calls this ONCE over the
@@ -28,10 +31,13 @@ public class PwaController {
 
     private final SettingsRepository settings;
     private final DeviceIdentityService deviceIdentity;
+    private final OfflineExportService offlineExport;
 
-    public PwaController(SettingsRepository settings, DeviceIdentityService deviceIdentity) {
+    public PwaController(SettingsRepository settings, DeviceIdentityService deviceIdentity,
+                         OfflineExportService offlineExport) {
         this.settings = settings;
         this.deviceIdentity = deviceIdentity;
+        this.offlineExport = offlineExport;
     }
 
     public record PwaSetup(
@@ -69,5 +75,20 @@ public class PwaController {
             clientId, clientSecret, refreshToken, folderId, passphrase, deviceIdentity.getDeviceId()));
     }
 
+    /** "Prep offline set" — rebuild the encrypted review bundle on Drive now. Runs while
+     *  the server is up (nightly + on-boot cover the rest). */
+    @PostMapping("export")
+    public ResponseEntity<?> export() {
+        try {
+            int n = offlineExport.exportReviewBundle(200);
+            return ResponseEntity.ok(Map.of("exported", n));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
+    }
+
     private static boolean isBlank(String s) { return s == null || s.isBlank(); }
 }
+

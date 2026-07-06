@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,12 @@ public class DriveService {
      *  vault path: excluded from listRecursive so the janitor never trashes it and
      *  downloadAll never treats a dump as a note. */
     private static final String DB_BACKUP_FOLDER = "_db";
+
+    /** Sub-folders for the PWA offline sync (DRIVE_OFFLINE_SYNC_ARCH). Like _db/, these are
+     *  NOT vault paths — excluded from listRecursive so the janitor/downloadAll ignore them.
+     *  _offline/ = server→phone exports (review bundle, cards); _mailbox/ = phone→server events. */
+    private static final String OFFLINE_FOLDER = "_offline";
+    private static final String MAILBOX_FOLDER = "_mailbox";
 
     @Value("${sync.google.service-account-json:placeholder}")
     private String serviceAccountJson;
@@ -344,7 +351,9 @@ public class DriveService {
                     // Never descend into _db/ — those are DB dumps, not vault files.
                     // (Keeps the janitor from trashing backups and downloadAll from
                     //  trying to decrypt a pg_dump as a note.)
-                    if (DB_BACKUP_FOLDER.equals(f.getName())) continue;
+                    if (DB_BACKUP_FOLDER.equals(f.getName())
+                        || OFFLINE_FOLDER.equals(f.getName())
+                        || MAILBOX_FOLDER.equals(f.getName())) continue;
                     listRecursive(f.getId(), acc);
                 } else if (f.getName().endsWith(".enc")) {
                     Map<String, String> props = f.getAppProperties();
@@ -489,6 +498,61 @@ public class DriveService {
             return id;
         }
     }
+
+    // ── PWA offline sync (_offline/ exports, _mailbox/ events) ──────────────────
+
+    /** Upsert a singleton file into _offline/ (overwrite so exports don't accumulate). */
+    public String uploadOffline(String name, byte[] bytes) throws IOException {
+        String folderId = getOrCreateFolder(OFFLINE_FOLDER, rootFolderId());
+        String existingId = findInFolder(folderId, name);
+        ByteArrayContent content = new ByteArrayContent("application/octet-stream", bytes);
+        Drive d = requireClient();
+        if (existingId != null) {
+            return withRetry(() -> d.files().update(existingId, new File(), content).setFields("id").execute()).getId();
+        }
+        File meta = new File().setName(name).setParents(Collections.singletonList(folderId));
+        return withRetry(() -> d.files().create(meta, content).setFields("id").execute()).getId();
+    }
+
+    /** List encrypted event files the phone dropped in _mailbox/, oldest name first. */
+    public List<MailboxFile> listMailbox() throws IOException {
+        String folderId = getOrCreateFolder(MAILBOX_FOLDER, rootFolderId());
+        List<MailboxFile> out = new ArrayList<>();
+        String pageToken = null;
+        do {
+            Drive.Files.List req = requireClient().files().list()
+                .setQ("'" + folderId + "' in parents and trashed = false")
+                .setFields("nextPageToken, files(id, name)")
+                .setPageSize(1000);
+            if (pageToken != null) req.setPageToken(pageToken);
+            FileList page = req.execute();
+            for (File f : page.getFiles()) {
+                if (f.getName().endsWith(".enc")) out.add(new MailboxFile(f.getId(), f.getName()));
+            }
+            pageToken = page.getNextPageToken();
+        } while (pageToken != null);
+        out.sort(Comparator.comparing(MailboxFile::name)); // names are <device>-<ts>-<seq> → ts order
+        return out;
+    }
+
+    /** HARD delete (not trash) a consumed mailbox file — these are transient, not vault data. */
+    public void deleteFile(String fileId) throws IOException {
+        try {
+            requireClient().files().delete(fileId).execute();
+        } catch (GoogleJsonResponseException e) {
+            if (e.getStatusCode() != 404) throw e; // already gone = done
+        }
+    }
+
+    private String findInFolder(String folderId, String name) throws IOException {
+        FileList result = requireClient().files().list()
+            .setQ("name = '" + name.replace("'", "\\'") + "' and '" + folderId
+                + "' in parents and trashed = false")
+            .setFields("files(id)").setPageSize(1).execute();
+        return result.getFiles().isEmpty() ? null : result.getFiles().get(0).getId();
+    }
+
+    public record MailboxFile(String fileId, String name) {}
 
     // ── Utilities ─────────────────────────────────────────────────────────────
 

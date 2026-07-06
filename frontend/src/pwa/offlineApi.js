@@ -16,8 +16,21 @@ import { getAllReviewNotes, getReviewNote } from './db';
 import { enqueueGrade, enqueueCapture, flush } from './outbox';
 import { isOnline } from './connectivity';
 
+// Drive mode: the installed PWA reads its review set from the Drive-pulled IndexedDB
+// (drivePull.js), never the server — the laptop may be off. Grades always queue (the
+// Drive mailbox / server replays them later). The desktop full site never sets this, so
+// its behaviour is unchanged. MobileLayout flips it on.
+let driveMode = false;
+export function setDriveMode(on) { driveMode = on; }
+
 // Review list — network when online, downloaded IDB subset when offline.
 export async function fetchReviewOffline(offset = 0, limit = 40) {
+  if (driveMode) {
+    // The bundle the server exported already contains only due notes.
+    const all = await getAllReviewNotes();
+    const page = all.slice(offset, offset + limit);
+    return { notes: page.map(n => n.path), hasMore: offset + limit < all.length };
+  }
   if (isOnline()) {
     try { return await netFetchReview(offset, limit); }
     catch (e) { if (!(e instanceof TypeError)) throw e; } // network blip → fall through
@@ -29,6 +42,11 @@ export async function fetchReviewOffline(offset = 0, limit = 40) {
 
 // Note text — network when online, downloaded copy when offline.
 export async function fetchNoteContentOffline(fullPath) {
+  if (driveMode) {
+    const rec = await getReviewNote(fullPath);
+    if (rec?.content != null) return rec.content;
+    throw new ApiError(503); // not in the pulled set
+  }
   if (isOnline()) {
     try { return await netFetchNoteContent(fullPath); }
     catch (e) { if (!(e instanceof TypeError)) throw e; }
@@ -40,6 +58,11 @@ export async function fetchNoteContentOffline(fullPath) {
 
 // Grade — POST when online; otherwise optimistic + queue for replay on reconnect.
 export async function gradeNoteOffline(notePath, band) {
+  if (driveMode) {
+    // Never hit the server directly in Drive mode — queue for the mailbox / later replay.
+    await enqueueGrade(notePath, band);
+    return { notePath, band, queued: true, due: null };
+  }
   if (isOnline()) {
     try { return await netGradeNote(notePath, band); }
     catch (e) {
