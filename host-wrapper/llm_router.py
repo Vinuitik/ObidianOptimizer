@@ -205,6 +205,21 @@ class Router:
                         f"{ACQUIRE_DEADLINE_S}s: "
                         + ", ".join(f"{p.name}(cooldown {max(0, int(p.cooldown_until - now))}s,"
                                     f" in_flight {p.in_flight})" for p in chain))
+                # Fail fast when provably doomed: no candidate is in flight (so no
+                # release can free one early) and every candidate's earliest
+                # availability lies beyond the deadline. Without this, a request
+                # arriving while all providers sit on long Retry-After benches
+                # (e.g. daily caps) blocks the caller the full ACQUIRE_DEADLINE_S
+                # before failing — pure dead air.
+                if not any(p.in_flight for p in chain):
+                    soonest = min(max(p.cooldown_until, p.next_start) for p in chain)
+                    if soonest > deadline:
+                        raise RouterError(
+                            f"all '{capability}' providers cooling past the "
+                            f"{ACQUIRE_DEADLINE_S}s acquire deadline (soonest in "
+                            f"{int(soonest - now)}s): "
+                            + ", ".join(f"{p.name}(cooldown {max(0, int(p.cooldown_until - now))}s)"
+                                        for p in chain))
                 self._cv.wait(timeout=0.25)
 
     def _release(self, provider, ok, retry_after=None):
