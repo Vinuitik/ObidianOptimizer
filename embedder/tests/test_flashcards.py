@@ -119,7 +119,8 @@ def test_validate_exercise_rejects_crashing_solver():
     card = {"type": "exercise", "template": "What is 1/{n}?",
             "params": {"n": {"kind": "int", "min": 0, "max": 0}},  # division by zero
             "solver": "def solve(n):\n    return 1 / n",
-            "answer_kind": "numeric", "difficulty": 2}
+            "answer_kind": "numeric", "difficulty": 2,
+            "explanation": "1 divided by n."}
     errors = validate.validate_card(card)
     assert any("solver failed" in e for e in errors)
 
@@ -128,7 +129,8 @@ def test_validate_exercise_rejects_template_param_mismatch():
     card = {"type": "exercise", "template": "Value of {missing}?",
             "params": {"n": {"kind": "int", "min": 1, "max": 3}},
             "solver": "def solve(n):\n    return n",
-            "answer_kind": "numeric", "difficulty": 1}
+            "answer_kind": "numeric", "difficulty": 1,
+            "explanation": "Returns n."}
     errors = validate.validate_card(card)
     assert any("template render failed" in e for e in errors)
 
@@ -142,7 +144,8 @@ def test_validate_exercise_rejects_literal_braces_without_crashing():
             "template": "Answer is } for a set of {n} items",   # lone '}' → ValueError
             "params": {"n": {"kind": "int", "min": 1, "max": 3}},
             "solver": "def solve(n):\n    return n",
-            "answer_kind": "numeric", "difficulty": 1}
+            "answer_kind": "numeric", "difficulty": 1,
+            "explanation": "Returns n."}
     errors = validate.validate_card(card)        # must NOT raise
     assert any("template render failed" in e for e in errors)
 

@@ -54,3 +54,32 @@ class _StubYoutubeDL:
         return info.get("_filename", "stub.mp4")
 
 ytdlp_mod.YoutubeDL = _StubYoutubeDL
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_ingest_jobs():
+    """Isolate the module-global ingest job registry between tests.
+
+    `ingest.jobs` keeps an in-memory `_jobs` dict drained by ONE worker thread
+    (MAX_CONCURRENT_JOBS=1). A job a prior test left QUEUED sits ahead of this
+    test's job in the single worker, starving its 5s poll — the source of the
+    flaky `QUEUED != DONE` on test_ingest when it runs after the MCP suite.
+    Clear the registry and drain the queue before each test so every test starts
+    with an empty pipeline. Import lazily: the ML stubs above must land first.
+    """
+    try:
+        from ingest import jobs
+    except Exception:
+        yield
+        return
+    with jobs._lock:
+        jobs._jobs.clear()
+    try:
+        while True:
+            jobs._queue.get_nowait()
+    except Exception:
+        pass
+    yield

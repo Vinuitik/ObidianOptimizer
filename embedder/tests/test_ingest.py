@@ -149,7 +149,10 @@ def test_job_failure_is_captured_not_fatal(stub_extract, monkeypatch):
 
 
 def test_private_fields_not_exposed(stub_extract):
-    job = ingest_jobs.submit("resources/audio/x.mp3", None)
+    # extract_only: this test only inspects the public view's keys, but a full
+    # job would wedge the single worker on publish's httpx call to an unreachable
+    # BACKEND_URL (60s), starving the next test's poll. See conftest _reset_ingest_jobs.
+    job = ingest_jobs.submit("resources/audio/x.mp3", None, extract_only=True)
     assert not any(k.startswith("_") for k in job)
     assert not any(k.startswith("_") for k in ingest_jobs.get(job["id"]))
 
