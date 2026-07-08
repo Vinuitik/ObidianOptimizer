@@ -56,7 +56,8 @@ describe('FlashcardSession — loading', () => {
     render(<FlashcardSession notePath="/vault/note.md" onReviewNote={onReviewNote} onClose={noop} />);
     await waitFor(() => expect(screen.getByTestId('flashcard-error')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /review note directly/i }));
-    expect(onReviewNote).toHaveBeenCalledWith('/vault/note.md');
+    // no-cards fallback: the inline note IS the grading surface → canGrade=true
+    expect(onReviewNote).toHaveBeenCalledWith('/vault/note.md', true);
   });
 });
 

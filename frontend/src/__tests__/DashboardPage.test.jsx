@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import DashboardPage from '../pages/DashboardPage';
 import * as statsApi from '../api/stats';
+import useStore from '../store/useStore';
 
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }) => <div>{children}</div>,
@@ -24,7 +25,13 @@ const STATS = {
   },
 };
 
-afterEach(() => vi.restoreAllMocks());
+// the page auth-gates before polling — sign the store in for every test
+beforeEach(() => useStore.setState({ isAuthenticated: true }));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  useStore.setState({ isAuthenticated: false });
+});
 
 describe('DashboardPage', () => {
   it('renders chart sections from polled stats', async () => {

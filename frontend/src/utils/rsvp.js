@@ -16,6 +16,7 @@ export function toReadableText(md) {
   const kept = [];
   for (const line of src.split('\n')) {
     if (SCAFFOLD.test(line)) break;   // scaffolding is always appended at the end
+    if (/^#{1,6}\s/.test(line)) continue;  // headings are structure, not prose
     kept.push(line);
   }
   return kept.join('\n')
@@ -23,6 +24,7 @@ export function toReadableText(md) {
     .replace(/!\[\[[^\]]*\]\]/g, ' ')                                   // media embeds
     .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, a, b) => b || a.split(/[/\\]/).pop())
     .replace(/[*_`>#]/g, ' ')                                           // md markers
+    .replace(/\s+/g, ' ')                                               // single-space prose
     .trim();
 }
 

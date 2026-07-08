@@ -28,3 +28,6 @@ ext-dist/
 .web-ext-cache/
 *.bak
 *.bak.*
+
+# Unified test runner outputs (linux_scripts/test.sh)
+test-results/

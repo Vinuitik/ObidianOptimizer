@@ -30,6 +30,10 @@
 	<properties>
 		<java.version>21</java.version>
 		<postgresql.version>42.7.5</postgresql.version>
+		<!-- Spring Boot 3.4.0 manages 1.20.4, whose shaded docker-java speaks Docker
+		     API 1.32 — Docker Engine 29 (this host) requires >= 1.40 and 400s every
+		     Testcontainers IT. 1.21.4 is the Engine-29-compatible release. -->
+		<testcontainers.version>1.21.4</testcontainers.version>
 	</properties>
 	<dependencies>
 		<dependency>

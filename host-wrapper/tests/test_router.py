@@ -91,13 +91,19 @@ def test_rate_spacing_blocks_back_to_back_starts(router):
 # ── benching / backoff ───────────────────────────────────────────────────
 
 def test_bench_exponential_backoff_and_cap():
+    # Policy: fast recovery — floor 1s, doubling per CONSECUTIVE failure (1,2,4,8…),
+    # capped at 1h. (The old 30s floor benched a provider for half a minute over a
+    # one-second rate blip — see Provider.bench docstring.)
     p = llm_router.Provider("x", "openai", "k", url="http://x", text_model="m")
     p.bench()
     first = p.cooldown_until - time.time()
-    assert 25 <= first <= 31  # 30 * 2^0
+    assert 0.5 <= first <= 1.1  # 2^0 = 1s floor
     p.bench()
     second = p.cooldown_until - time.time()
-    assert 55 <= second <= 61  # 30 * 2^1
+    assert 1.5 <= second <= 2.1  # 2^1
+    p.bench()
+    third = p.cooldown_until - time.time()
+    assert 3.5 <= third <= 4.1  # 2^2
     p.consecutive_failures = 20
     p.bench()
     assert p.cooldown_until - time.time() <= 3601  # capped at 1h
