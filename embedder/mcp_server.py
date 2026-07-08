@@ -318,24 +318,31 @@ def split_note(note_path: str) -> dict:
 
 
 @mcp.tool()
-def create_note(text: str, title: str = "") -> dict:
-    """Create note(s) from text YOU authored, by running it through the SAME ingest
-    pipeline resources use (async job). Don't hand-write a note file — pass the whole
-    body here: it's treated as a *source* and deterministically segmented into one or
-    more self-contained concept notes (kept as a single note when short), chronologically
-    + semantically linked, and staged in the Learn Inbox for the user to review and file.
+def create_note(text: str, title: str = "", already_processed: bool = True) -> dict:
+    """Create a note from text YOU authored and stage it in the Learn Inbox for the user
+    to review and file. Don't hand-write a note file — pass the whole body here.
 
-    Use for anything substantial (research, a synthesis, a long answer) — these are
-    usually large, and one giant note is worse than a few well-scoped linked ones. Returns
-    the job descriptor; poll GET /ingest/{id}. `title` is an optional display hint.
+    `already_processed` (default True): the text was authored by an LLM (you), so it is
+    already good — stage it AS-IS with NO further LLM synthesis and NO async job. The
+    write is SYNCHRONOUS: the note exists on disk when this returns, so it is durable
+    without needing the async ingest queue, and it never re-spends tokens re-processing
+    content tokens already produced. This is the normal path for agent-authored notes.
 
-    Gate: notes shorter than INGEST_SPLIT_MIN_WORDS (default 700) are staged in the Inbox
-    AS-IS — no LLM re-synthesis (splitting a short note is meaningless and double-spends
-    tokens). Such a note is its own source (the Inbox review shows the note itself)."""
+    Pass `already_processed=False` ONLY to deliberately treat the text as a RAW source to
+    be re-processed by the ingest pipeline (deterministically segmented into linked concept
+    notes when long). That spends tokens and runs async — use it for pasted third-party
+    material, not for your own output. Short inputs stage as-is either way (splitting a
+    short note is meaningless). Returns notes_created (as-is) or a job descriptor to poll
+    GET /ingest/{id} (re-process). `title` is an optional display hint."""
     from ingest import jobs as ingest_jobs
 
     if not text or not text.strip():
         raise ValueError("text is empty")
+
+    # Default: LLM-authored content is already good — stage it as-is (no tokens, no queue,
+    # durable synchronous write). See [[mcp-ingest-durability-gap]] for the reasoning.
+    if already_processed:
+        return _stage_note_as_is(text.strip(), title)
 
     split_min = int(os.environ.get("INGEST_SPLIT_MIN_WORDS", "700"))
     if len(text.split()) < split_min:

@@ -271,3 +271,58 @@ def test_resolve_in_vault_rejects_absolute_outside(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
     with pytest.raises(ValueError):
         mcp_server._resolve_in_vault(str(tmp_path.parent / "outside.md"))
+
+
+# ── create_note durability: authored text stages as-is, no LLM, no async job ──
+
+def _stub_publish(monkeypatch):
+    """Mock the backend-write seam so create_note runs without the Java internal API."""
+    from ingest import publish
+    monkeypatch.setattr(publish, "find_home", lambda t: "Study")
+    monkeypatch.setattr(publish, "ensure_folder", lambda f: None)
+    monkeypatch.setattr(publish, "stamp_inbox", lambda md, s, f: md)
+    monkeypatch.setattr(publish, "create_note",
+                        lambda folder, name, content: f"{folder}/{name}.md")
+
+
+def test_create_note_default_stages_as_is_no_job(monkeypatch):
+    """already_processed defaults True: a LONG authored note is staged synchronously
+    (durable) with NO async ingest job and NO LLM re-synthesis (no token re-spend)."""
+    _stub_publish(monkeypatch)
+    from ingest import jobs as ingest_jobs
+    def _boom(*a, **k):
+        raise AssertionError("create_note must NOT submit an async job when already_processed")
+    monkeypatch.setattr(ingest_jobs, "submit", _boom)
+
+    long_text = "word " * 2000   # well over INGEST_SPLIT_MIN_WORDS
+    res = mcp_server.create_note(long_text, title="My Synthesis")
+    assert res["status"] == "DONE"
+    assert res["ingested"] is False
+    assert len(res["notes_created"]) == 1
+    assert res["notes_created"][0].startswith("_inbox/")
+    assert res["notes_created"][0].endswith(".md")
+
+
+def test_create_note_reprocess_false_submits_job_for_long_text(monkeypatch):
+    """already_processed=False on long text DOES hand it to the async ingest pipeline."""
+    _stub_publish(monkeypatch)
+    from ingest import jobs as ingest_jobs
+    calls = {}
+    def _fake_submit(ref, resolved, *a, **k):
+        calls["submitted"] = True
+        return {"id": "job123", "status": "QUEUED"}
+    monkeypatch.setattr(ingest_jobs, "submit", _fake_submit)
+
+    res = mcp_server.create_note("word " * 2000, already_processed=False)
+    assert calls.get("submitted") is True
+    assert res["status"] == "QUEUED"
+
+
+def test_create_note_short_stages_as_is_even_when_reprocess_requested(monkeypatch):
+    """Short input stages as-is regardless of the flag (splitting a short note is noise)."""
+    _stub_publish(monkeypatch)
+    from ingest import jobs as ingest_jobs
+    monkeypatch.setattr(ingest_jobs, "submit",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no job for short text")))
+    res = mcp_server.create_note("a short thought", already_processed=False)
+    assert res["status"] == "DONE" and res["ingested"] is False
