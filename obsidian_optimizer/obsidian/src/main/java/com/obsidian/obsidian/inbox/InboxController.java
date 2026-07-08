@@ -58,7 +58,8 @@ public class InboxController {
 
     public record InboxItem(String path, String title, String source,
                      String suggestedFolder, String content,
-                     String captureId, Integer captureSeq, boolean inPlace) {}
+                     String captureId, Integer captureSeq, Integer captureSeqMinor,
+                     boolean inPlace) {}
 
     // ── List staged notes ──────────────────────────────────────────────────────
 
@@ -79,10 +80,11 @@ public class InboxController {
                           try {
                               String content = Files.readString(p);
                               String title = p.getFileName().toString().replaceAll("\\.md$", "");
-                              String seqRaw = frontmatterValue(content, "capture-seq");
-                              Integer seq = null;
-                              try { if (!seqRaw.isBlank()) seq = Integer.parseInt(seqRaw); }
-                              catch (NumberFormatException ignored) {}
+                              Integer seq = parseIntOrNull(frontmatterValue(content, "capture-seq"));
+                              // capture-seq-minor: sub-order for notes manually split off the same
+                              // source region (e.g. one PDF page range → two chapter notes). Absent
+                              // ⇒ 0 (the original / un-split note). See #split endpoint.
+                              Integer seqMinor = parseIntOrNull(frontmatterValue(content, "capture-seq-minor"));
                               items.add(new InboxItem(
                                   p.toAbsolutePath().toString(),
                                   title,
@@ -91,6 +93,7 @@ public class InboxController {
                                   content,
                                   emptyToNull(frontmatterValue(content, "capture-id")),
                                   seq,
+                                  seqMinor,
                                   false));
                           } catch (IOException e) {
                               log.warn("[inbox] could not read {}: {}", p, e.getMessage());
@@ -107,7 +110,7 @@ public class InboxController {
             for (String path : noteIndex.findNotesByCapture(c.id())) {
                 String content = repository.getText(path);
                 String title = Paths.get(path).getFileName().toString().replaceAll("\\.md$", "");
-                items.add(new InboxItem(path, title, null, null, content, c.id(), 1, true));
+                items.add(new InboxItem(path, title, null, null, content, c.id(), 1, 0, true));
             }
         }
 
@@ -228,6 +231,109 @@ public class InboxController {
         }
     }
 
+    // ── Split a note into a sibling for the same source region ──────────────────
+    // The ingest pipeline sometimes lumps one source region (e.g. PDF pages 21-23) into a
+    // single note when it is really several chapters. Re-running ingest is expensive and
+    // token-heavy, so instead of that we let the user manually spawn an ADDITIONAL note that
+    // references the SAME source region and slots in right after the original. Ordering uses
+    // a sub-sequence (capture-seq-minor) so no other note has to be renumbered: an original
+    // at #11 gets a sibling #11-1, then #11-2, … — cheap insertion, source order preserved.
+    // The new note is a duplicate the user trims down to just its chapter (both keep the same
+    // `## Source` footer, so SourceSplicePanel shows the same region for each).
+
+    @PostMapping("/split")
+    public ResponseEntity<?> split(@RequestBody SplitRequest req) {
+        if (req == null || req.path() == null || !req.path().contains(INBOX_DIR)) {
+            return ResponseEntity.badRequest().body("inbox path required");
+        }
+        try {
+            String content = repository.getText(req.path());
+            if (content == null || content.isBlank()) {
+                return ResponseEntity.badRequest().body("note not found");
+            }
+            String captureId = emptyToNull(frontmatterValue(content, "capture-id"));
+            String source    = frontmatterValue(content, "ingest-source");
+            Integer seq      = parseIntOrNull(frontmatterValue(content, "capture-seq"));
+            int newMinor     = nextSplitMinor(captureId, source, seq);
+
+            // Duplicate the original (same source region) and stamp the sub-order onto it.
+            String newContent = upsertFrontmatter(content, "capture-seq-minor", String.valueOf(newMinor));
+
+            Path inboxDir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
+            String base = Paths.get(req.path()).getFileName().toString().replaceAll("\\.md$", "");
+            String newPath = createUniqueInboxNote(inboxDir.toString(), base + " (split)", newContent);
+            log.info("[inbox] split {} -> {} (capture-seq-minor {})", req.path(), newPath, newMinor);
+            return ResponseEntity.ok(Map.of("path", newPath, "captureSeqMinor", newMinor));
+        } catch (IOException e) {
+            log.error("[inbox] split failed for {}: {}", req.path(), e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    /** Next free sub-order for a note being split: 1 + the highest capture-seq-minor already
+     *  present among _inbox notes that share this note's source region (same capture-id — or
+     *  same ingest-source when un-captured — AND the same capture-seq). Starts at 1 so the
+     *  original (implicit minor 0) keeps its bare "#N" label and siblings become #N-1, #N-2. */
+    private int nextSplitMinor(String captureId, String source, Integer seq) {
+        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
+        int max = 0;
+        if (Files.isDirectory(dir)) {
+            try (var stream = Files.list(dir)) {
+                for (Path p : (Iterable<Path>) stream.filter(x -> x.toString().endsWith(".md"))::iterator) {
+                    String c;
+                    try { c = Files.readString(p); } catch (IOException e) { continue; }
+                    boolean sameGroup = captureId != null
+                        ? captureId.equals(emptyToNull(frontmatterValue(c, "capture-id")))
+                        : source != null && source.equals(frontmatterValue(c, "ingest-source"));
+                    if (!sameGroup) continue;
+                    if (!java.util.Objects.equals(seq, parseIntOrNull(frontmatterValue(c, "capture-seq")))) continue;
+                    Integer m = parseIntOrNull(frontmatterValue(c, "capture-seq-minor"));
+                    if (m != null && m > max) max = m;
+                }
+            } catch (IOException e) {
+                log.warn("[inbox] split minor scan failed: {}", e.getMessage());
+            }
+        }
+        return max + 1;
+    }
+
+    /** Create an _inbox note with pre-built content, retrying the name on collision so a
+     *  second split of the same note never clobbers the first. */
+    private String createUniqueInboxNote(String folderAbs, String base, String content) throws IOException {
+        for (int attempt = 1; attempt <= 20; attempt++) {
+            String name = attempt == 1 ? base : base + " " + attempt;
+            try {
+                String path = repository.createNote(folderAbs, name);
+                repository.updateNote(path, content);
+                return path;
+            } catch (IOException e) {
+                if (!String.valueOf(e.getMessage()).contains("already exists")) throw e;
+            }
+        }
+        throw new IOException("could not find a free name for split of " + base);
+    }
+
+    /** Insert or replace a scalar key in the first frontmatter block. If the note has no
+     *  frontmatter the content is returned unchanged (a split target always has some). */
+    static String upsertFrontmatter(String content, String key, String value) {
+        if (!content.startsWith("---\n")) return content;
+        int end = content.indexOf("\n---\n", 4);
+        if (end < 0) return content;
+        String block = content.substring(4, end);
+        String rest  = content.substring(end);   // starts with "\n---\n…"
+        String line  = key + ": " + value;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+            .compile("(?m)^" + java.util.regex.Pattern.quote(key) + ":.*$").matcher(block);
+        String newBlock = m.find() ? m.replaceFirst(java.util.regex.Matcher.quoteReplacement(line))
+                                   : block + "\n" + line;
+        return "---\n" + newBlock + rest;
+    }
+
+    private static Integer parseIntOrNull(String s) {
+        if (s == null || s.isBlank()) return null;
+        try { return Integer.parseInt(s.trim()); } catch (NumberFormatException e) { return null; }
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
     /** First-block frontmatter scalar lookup (cheap; avoids a YAML dep). */
@@ -264,6 +370,7 @@ public class InboxController {
     record FileRequest(String path, String targetFolder, String content) {}
     record DiscardRequest(String path) {}
     record AcknowledgeRequest(String captureId) {}
+    record SplitRequest(String path) {}
 
     // ── Programmatic API for the offline PWA (export + mailbox consume) ──────────
     // Thin delegates to the endpoint methods above, so all the triage logic + private

@@ -6,7 +6,8 @@ import {
   acknowledgeOffline as acknowledgeCapture,
 } from '../../pwa/offlineApi';
 import { fetchChildren, updateNote } from '../../api/notes';
-import { buildSourceColors, groupBySource } from '../../utils/sourceColor';
+import { splitInboxNote } from '../../api/inbox';
+import { buildSourceColors, groupBySource, captureLabel } from '../../utils/sourceColor';
 import useStore from '../../store/useStore';
 import { useIsMobile } from '../../utils/useMediaQuery';
 import LearnLayout from '../templates/LearnLayout';
@@ -141,6 +142,22 @@ export default function InboxReview({ onCount }) {
     finally { setBusy(false); }
   }
 
+  // Split: spawn an additional note for the SAME source region, slotted right after this one
+  // (#N → #N-1). The backend duplicates the on-disk note, so persist any unsaved edits first;
+  // the new note lands selected so the user can trim it down to its own chapter.
+  async function split() {
+    if (!current) return;
+    setBusy(true); setStatus('Splitting…');
+    try {
+      if (draft !== current.content) { try { await updateNote(current.path, draft); } catch {} }
+      const { path } = await splitInboxNote(current.path);
+      setStatus('');
+      setSelected(path);   // load() will select this new note once it's in the list
+      load();
+    } catch (e) { setStatus(`Failed: ${e.message || e}`); }
+    finally { setBusy(false); }
+  }
+
   // ── bulk delete (email-style multi-select) ──────────────────────────────────
   // Only standalone _inbox notes can be discarded (in-place notes are acknowledged, not
   // deleted). Deleting a source's LAST note trashes its media too (backend Stage 4 retention).
@@ -231,7 +248,7 @@ export default function InboxReview({ onCount }) {
                     <span className={styles.rowTitle}>{it.title}</span>
                     {it.inPlace
                       ? <span className={styles.rowTag}>in place</span>
-                      : it.captureSeq != null && <span className={styles.rowTag}>#{it.captureSeq + 1}</span>}
+                      : captureLabel(it) && <span className={styles.rowTag}>{captureLabel(it)}</span>}
                   </button>
                 </div>
               );
@@ -270,6 +287,8 @@ export default function InboxReview({ onCount }) {
                       📁 {dest || 'Choose a folder'} ▸
                     </button>
                     <button className={styles.primary} onClick={file} disabled={busy}>Save &amp; file</button>
+                    <button className={styles.ghost} onClick={split} disabled={busy}
+                            title="Create another note for the same source region (splits this one into chapters)">Split</button>
                     <button className={styles.ghost} onClick={discard} disabled={busy}>Discard</button>
                   </>
                 )}

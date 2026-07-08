@@ -43,7 +43,19 @@ export function groupBySource(items) {
       if (ga !== gb) return ga - gb;
       const sa = a.it.captureSeq ?? 0, sb = b.it.captureSeq ?? 0;
       if (sa !== sb) return sa - sb;
+      // Same source order → sub-order (manual splits): #N before #N-1 before #N-2.
+      const ma = a.it.captureSeqMinor ?? 0, mb = b.it.captureSeqMinor ?? 0;
+      if (ma !== mb) return ma - mb;
       return a.i - b.i;
     })
     .map(x => x.it);
+}
+
+// The order badge for an inbox row: "#N" for an original note, "#N-M" for a note manually
+// split off it (capture-seq-minor). captureSeq is 0-based on the wire, shown 1-based.
+export function captureLabel(item) {
+  if (item?.captureSeq == null) return null;
+  const major = item.captureSeq + 1;
+  const minor = item.captureSeqMinor ?? 0;
+  return minor > 0 ? `#${major}-${minor}` : `#${major}`;
 }

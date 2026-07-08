@@ -3,7 +3,8 @@ import ENV from '../env.js';
 const BASE = ENV.API_BASE;
 
 // Returns [{ path, title, source, suggestedFolder, content, captureId, captureSeq,
-// inPlace }, ...] — everything the ingest agent touched. Two shapes share the queue:
+// captureSeqMinor, inPlace }, ...] — everything the ingest agent touched. captureSeqMinor
+// is the manual-split sub-order (0 = original). Two shapes share the queue:
 //   inPlace=false → a new note staged in _inbox/; file it into a real folder.
 //   inPlace=true  → an existing note rewritten below an embed; acknowledge it.
 export async function fetchInbox() {
@@ -34,6 +35,21 @@ export async function discardInboxNote(path) {
     body: JSON.stringify({ path }),
   });
   if (!res.ok) throw new Error(res.status);
+}
+
+// Split a note into an additional sibling for the SAME source region (e.g. one PDF
+// page range that is really two chapters). Creates a duplicate stamped with the next
+// capture-seq-minor so it slots in right after the original (#N → #N-1) without
+// renumbering anything else. Returns { path, captureSeqMinor }. Online-only.
+export async function splitInboxNote(path) {
+  const res = await fetch(`${BASE}/inbox/split`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) throw new Error(await res.text() || res.status);
+  return res.json();
 }
 
 // Acknowledge an in-place note (rewritten below an embed, never left its folder).
