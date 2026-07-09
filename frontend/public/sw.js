@@ -15,7 +15,7 @@
  * architecture_plans/PWA_MOBILE_ARCH.md §9.
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `obsopt-shell-${VERSION}`;
 const MEDIA_CACHE = 'obsopt-media'; // unversioned: managed by the offline sync, not the SW
 
@@ -64,9 +64,20 @@ self.addEventListener('activate', (event) => {
       Promise.all(
         keys.filter((k) => k.startsWith('obsopt-shell-') && k !== SHELL_CACHE).map((k) => caches.delete(k))
       )
-    ).then(() => self.clients.claim())
+    ).then(evictStrandedIcons).then(() => self.clients.claim())
   );
 });
+
+// One-time repair: the old SW cache-firsted brand icons (.svg matched isMedia) into
+// the unversioned MEDIA_CACHE, which nothing ever evicts — so a changed icon kept
+// serving stale bytes. Drop those entries so the new revalidating route refetches.
+async function evictStrandedIcons() {
+  const cache = await caches.open(MEDIA_CACHE);
+  const reqs = await cache.keys();
+  await Promise.all(
+    reqs.filter((r) => isAppIcon(new URL(r.url).pathname)).map((r) => cache.delete(r))
+  );
+}
 
 // ── Fetch routing ────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
@@ -89,6 +100,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Brand icons (favicon + PWA icons) are versioned app assets, NOT user media.
+  // They MUST be checked before isMedia() — its regex matches '.svg', which would
+  // otherwise cache-first them into the unversioned media cache and strand the old
+  // icon forever (that's exactly the bug this guards against). Revalidate instead.
+  if (url.origin === self.location.origin && isAppIcon(url.pathname)) {
+    event.respondWith(staleWhileRevalidate(request, SHELL_CACHE));
+    return;
+  }
+
   // Same-origin media → cache-first (populated by the offline sync).
   if (url.origin === self.location.origin && isMedia(url.pathname)) {
     event.respondWith(cacheFirst(request, MEDIA_CACHE));
@@ -104,6 +124,10 @@ self.addEventListener('fetch', (event) => {
   // Everything else (incl. /api data GETs) → straight to network. Offline data
   // reads are served from IndexedDB by src/pwa/offlineApi.js, not the SW.
 });
+
+function isAppIcon(path) {
+  return path === '/favicon.svg' || path.startsWith('/icons/');
+}
 
 function isMedia(path) {
   return /\.(png|jpe?g|gif|webp|svg|pdf|mp4|mkv|webm|mov|avi|mp3|m4a|wav|ogg|flac)$/i.test(path)
