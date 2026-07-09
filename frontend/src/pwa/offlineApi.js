@@ -23,7 +23,7 @@ import {
 } from '../api/inbox';
 import { getAllReviewNotes, getReviewNote, getAssignmentByNote, getMeta, setMeta } from './db';
 import {
-  enqueueGrade, enqueueCapture, enqueueAssignment,
+  enqueueGrade, enqueueCapture, enqueueCaptureText, enqueueAssignment,
   enqueueFile, enqueueDiscard, enqueueAcknowledge, flush,
 } from './outbox';
 import { isOnline } from './connectivity';
@@ -106,6 +106,30 @@ export async function captureUrl(url) {
     }
   }
   await enqueueCapture(url);
+  return { queued: true };
+}
+
+// Capture a typed raw note (brain dump) → text ingest → Learn inbox. Queues when offline /
+// on 401, replays server-direct on reconnect. Mirrors captureUrl; driveMode is irrelevant
+// (capture always goes server-direct — the ingest pipeline needs the server regardless).
+export async function captureText(text, title) {
+  if (isOnline()) {
+    try {
+      const res = await fetch('/api/capture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ text, title }),
+      });
+      if (res.ok) return { queued: false };
+      if (res.status === 401) { await enqueueCaptureText(text, title); return { queued: true, reason: 'auth' }; }
+      throw new ApiError(res.status);
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      // network failure → queue
+    }
+  }
+  await enqueueCaptureText(text, title);
   return { queued: true };
 }
 

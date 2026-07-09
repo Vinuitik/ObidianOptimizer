@@ -16,6 +16,12 @@ POST /api/capture {url|text, title?}                         CaptureController.c
   ingestWorker.nudge()                                        → drain now (no tick wait)
   → 200 {status:"queued", captureId}
 
+POST /api/capture/file (multipart)                           CaptureController.captureFile()
+  PWA share-sheet shares a PDF/video/audio FILE (public/sw.js handleShareFile)
+  classifyFile(ext) → pdf|video|audio (else 415); empty → 400
+  storeBinaryResource() writes resources/files/{id}.{ext}    → BOTH source_ref and local copy
+  captureRepo.enqueue(id, type, path, path, filename)        → 'queued' → same drain → standalone
+
 CaptureIngestWorker (continuous)                             capture/CaptureIngestWorker.java
   @Scheduled tick (15s) ─┐
   nudge() (on capture)  ─┼─→ WorkerLane("capture-ingest").trigger(drain)   (1 drain at a time)
@@ -89,7 +95,8 @@ duplicate. `deferred` blocks the dedup guard (live) and is excluded from orphan 
 
 | Thing to change | Where |
 |---|---|
-| Capture intake endpoint | `CaptureController.capture()` (`POST /api/capture`) |
+| Capture intake endpoint | `CaptureController.capture()` (`POST /api/capture`, url/text) |
+| Shared-file intake (PDF/av) | `CaptureController.captureFile()` (`POST /api/capture/file`, multipart); `classifyFile`/`storeBinaryResource` |
 | Resource → queue insert | `CaptureRepository.enqueue()` (status `queued`) |
 | Continuous drain cadence / batch | `ingest.capture.delay-ms` / `ingest.capture.batch-limit` env |
 | Claim / queued query | `CaptureRepository.claim()` / `findQueued()` |

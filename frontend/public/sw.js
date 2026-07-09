@@ -141,14 +141,22 @@ async function staleWhileRevalidate(request, cacheName) {
 // Android puts a shared link in `url` OR `text` (varies by source app). Extract a
 // URL from either, then POST it to the backend's capture endpoint. Offline → queue.
 async function handleShareTarget(request) {
-  let shared = '';
+  let form = null;
   try {
-    const form = await request.formData();
-    shared = (form.get('url') || extractUrl(form.get('text')) || form.get('title') || '').toString().trim();
+    form = await request.formData();
   } catch (e) {
-    shared = '';
+    return Response.redirect('/capture?shared=err', 303);
   }
 
+  // A shared FILE (PDF / video / audio) → multipart to /api/capture/file. Checked first:
+  // some apps share a file AND a title, and the file is the thing we want to ingest.
+  const file = form.get('file');
+  if (file && typeof file.name === 'string' && file.size > 0) {
+    return handleShareFile(file, form.get('title'));
+  }
+
+  // Otherwise a shared LINK — Android puts it in `url` OR `text` (varies by source app).
+  const shared = (form.get('url') || extractUrl(form.get('text')) || form.get('title') || '').toString().trim();
   if (!shared) return Response.redirect('/capture?shared=err', 303);
 
   try {
@@ -166,6 +174,28 @@ async function handleShareTarget(request) {
     throw new Error('capture failed: ' + res.status);
   } catch (e) {
     await enqueueOutbox({ kind: 'capture', url: shared });
+    return Response.redirect('/capture?shared=queued', 303);
+  }
+}
+
+// Shared file → /api/capture/file (multipart). Offline / 401 → queue the Blob in the outbox
+// (kind 'captureFile'); the client replays it on reconnect (src/pwa/outbox.js flush()).
+async function handleShareFile(file, title) {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  if (title) fd.append('title', title.toString());
+  try {
+    const res = await fetch('/api/capture/file', {
+      method: 'POST', credentials: 'same-origin', body: fd,
+    });
+    if (res.ok) return Response.redirect('/capture?shared=ok', 303);
+    if (res.status === 401) {
+      await enqueueOutbox({ kind: 'captureFile', blob: file, filename: file.name });
+      return Response.redirect('/capture?shared=auth', 303);
+    }
+    throw new Error('capture/file failed: ' + res.status);
+  } catch (e) {
+    await enqueueOutbox({ kind: 'captureFile', blob: file, filename: file.name });
     return Response.redirect('/capture?shared=queued', 303);
   }
 }

@@ -59,6 +59,50 @@
 .warn { color: #ffd27a; }
 .err  { color: #ff8a8a; }
 
+/* Link | Note segmented toggle on the Capture tab */
+.modeToggle {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.modeBtn {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #262a35);
+  background: var(--color-surface, #161922);
+  color: var(--color-text-muted, #9aa0ad);
+  font-weight: 600;
+}
+
+.modeBtnActive {
+  background: var(--color-accent, #7c5cff);
+  border-color: var(--color-accent, #7c5cff);
+  color: #fff;
+}
+
+/* Note mode stacks: title + textarea + button */
+.captureFormCol {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.captureTextarea {
+  min-height: 160px;
+  resize: vertical;
+  padding: 12px;
+  font-size: 16px; /* >=16px stops iOS/Android zoom-on-focus */
+  line-height: 1.4;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #262a35);
+  background: var(--color-surface, #161922);
+  color: var(--color-text, #e6e8ee);
+  font-family: inherit;
+}
+
 /* ── Reader ─────────────────────────────────────────────────────────────── */
 .reader {
   display: flex;

@@ -14,6 +14,12 @@ export function enqueueCapture(url) {
   return addToOutbox({ kind: 'capture', url, eventId: newId() });
 }
 
+// A typed raw note (brain dump) → text ingest → Learn inbox. Replayed server-direct like
+// `capture` — ingestion needs the server/embedder anyway, so no Drive mailbox is warranted.
+export function enqueueCaptureText(text, title) {
+  return addToOutbox({ kind: 'captureText', text, title, eventId: newId() });
+}
+
 export function enqueueAssignment(assignmentId, notePath, answers) {
   return addToOutbox({ kind: 'assignment', assignmentId, notePath, answers, eventId: newId() });
 }
@@ -47,6 +53,23 @@ export async function flush() {
           body: JSON.stringify({ url: item.url }),
         });
         if (!res.ok) throw new Error('capture ' + res.status);
+      } else if (item.kind === 'captureText') {
+        const res = await fetch('/api/capture', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ text: item.text, title: item.title }),
+        });
+        if (!res.ok) throw new Error('captureText ' + res.status);
+      } else if (item.kind === 'captureFile') {
+        // Queued by the service worker when a file was shared offline (public/sw.js).
+        const fd = new FormData();
+        fd.append('file', item.blob, item.filename || 'shared');
+        if (item.title) fd.append('title', item.title);
+        const res = await fetch('/api/capture/file', {
+          method: 'POST', credentials: 'same-origin', body: fd,
+        });
+        if (!res.ok) throw new Error('captureFile ' + res.status);
       }
       await deleteFromOutbox(item.id);
       sent++;

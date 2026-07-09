@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -33,7 +35,8 @@ import java.util.regex.Pattern;
  * nginx strips the {@code /api/} prefix, so these map relative — {@code /api/capture}
  * → {@code capture} here (same convention as NotesController).
  *
- *   POST capture        — share-target / paste-a-link → embedder /ingest (standalone).
+ *   POST capture        — share-target / paste-a-link OR typed raw text → embedder /ingest.
+ *   POST capture/file    — share a PDF / video / audio FILE → stored + ingested (standalone).
  *   GET  review/bundle   — due notes WITH text + media URLs, so "Download for offline"
  *                          is one round-trip instead of N.
  *
@@ -123,6 +126,75 @@ public class CaptureController {
             log.warn("[Capture] enqueue failed for {}: {}", captureId, e.toString());
             return ResponseEntity.status(500).body(Map.of("error", "could not queue resource"));
         }
+    }
+
+    /**
+     * Share a FILE into the PWA (Android share-sheet → a PDF / video / audio file) → ingest.
+     * The share-sheet path in {@code public/sw.js} POSTs the shared bytes here as multipart;
+     * we persist them under {@code resources/files/} and enqueue a standalone capture, so the
+     * same ingest→Learn-inbox pipeline as a shared link runs — you're guaranteed to triage it.
+     * Rejects types the ingest pipeline can't consume (single images use the image pipeline).
+     */
+    @PostMapping("capture/file")
+    public ResponseEntity<Map<String, Object>> captureFile(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "title", required = false) String title) {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "file required"));
+        }
+        String original = file.getOriginalFilename();
+        String ext = fileExt(original);
+        String sourceType = classifyFile(ext);
+        if (sourceType == null) {
+            return ResponseEntity.status(415).body(Map.of(
+                "error", "unsupported file type",
+                "message", "Share a PDF, video, or audio file."));
+        }
+
+        String captureId = UUID.randomUUID().toString().substring(0, 12);
+        try {
+            // The stored file is BOTH the capture's source_ref (what the worker submits to the
+            // embedder — it resolves the vault-relative path) and its kept local copy.
+            String sourcePath = storeBinaryResource(captureId, ext, file.getBytes());
+            String display = (title != null && !title.isBlank()) ? title.trim()
+                : (original != null && !original.isBlank() ? original : sourcePath);
+            captureRepo.enqueue(captureId, sourceType, sourcePath, sourcePath, display);
+            ingestWorker.nudge();
+            log.info("[Capture] enqueued file {} ({}, {} bytes)", captureId, sourceType, file.getSize());
+            return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
+        } catch (Exception e) {
+            captureRepo.updateStatus(captureId, "failed");
+            log.warn("[Capture] file enqueue failed for {}: {}", captureId, e.toString());
+            return ResponseEntity.status(500).body(Map.of("error", "could not queue file"));
+        }
+    }
+
+    private static final Set<String> VIDEO_EXT = Set.of("mp4", "mov", "mkv", "webm", "avi");
+    private static final Set<String> AUDIO_EXT = Set.of("mp3", "m4a", "wav", "ogg", "flac");
+
+    private static String fileExt(String name) {
+        if (name == null) return "";
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        String base = slash >= 0 ? name.substring(slash + 1) : name;
+        int dot = base.lastIndexOf('.');
+        return dot >= 0 ? base.substring(dot + 1).toLowerCase() : "";
+    }
+
+    /** source_type the ingest pipeline understands, or null for unsupported (→ 415). */
+    private static String classifyFile(String ext) {
+        if (ext.equals("pdf")) return "pdf";
+        if (VIDEO_EXT.contains(ext)) return "video";
+        if (AUDIO_EXT.contains(ext)) return "audio";
+        return null;
+    }
+
+    /** Persist shared bytes under resources/files/<captureId>.<ext> (vault-relative path). */
+    private String storeBinaryResource(String captureId, String ext, byte[] bytes) throws java.io.IOException {
+        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve("files");
+        Files.createDirectories(dir);
+        String name = captureId + (ext.isEmpty() ? "" : "." + ext);
+        Files.write(dir.resolve(name), bytes);
+        return "resources/files/" + name;
     }
 
     /** Coarse source_type for display/grouping (the embedder router does the real

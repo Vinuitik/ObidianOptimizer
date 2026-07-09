@@ -20,7 +20,13 @@
     "params": {
       "title": "title",
       "text": "text",
-      "url": "url"
+      "url": "url",
+      "files": [
+        {
+          "name": "file",
+          "accept": ["application/pdf", ".pdf", "video/*", "audio/*"]
+        }
+      ]
     }
   }
 }
