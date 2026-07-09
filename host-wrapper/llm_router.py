@@ -52,6 +52,14 @@ def _parse_batch_limits():
 VISION_BATCH_LIMITS = _parse_batch_limits()
 
 
+# Request priority for the shared, scarce LLM providers (lower = more important).
+# Image-captions/flashcards/ingest-synthesis all draw from the SAME free-tier
+# providers, so when tokens are scarce a freed provider goes to the highest-priority
+# waiter first (ingest > flashcards > image-captions). See _acquire.
+PRIORITY = {"high": 0, "medium": 1, "low": 2}
+DEFAULT_PRIORITY = "medium"
+
+
 class RouterError(Exception):
     """All candidate providers failed or none are configured."""
 
@@ -171,6 +179,11 @@ class Router:
         self.providers = _build_providers()
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
+        # Priority levels of requests currently BLOCKED in _acquire (a multiset).
+        # A waiter only takes an available provider if no strictly-higher-priority
+        # request is also waiting — so ingest beats flashcards beats image-captions
+        # for a freed token. Guarded by _lock.
+        self._waiting = []  # list[int] priority values of blocked acquirers
 
     # ── leasing ──────────────────────────────────────────────────────────
 
@@ -181,46 +194,64 @@ class Router:
                 and self.providers[n].configured
                 and self.providers[n].supports(capability)]
 
-    def _acquire(self, capability, skip):
-        """Lease the highest-priority free provider; block until one frees up."""
+    def _acquire(self, capability, skip, priority=DEFAULT_PRIORITY):
+        """Lease the best free provider; block until one frees up. When several
+        requests wait, a freed provider goes to the highest-priority waiter first
+        (ingest 'high' > flashcards 'medium' > image-captions 'low'): a waiter only
+        TAKES an available provider if no strictly-higher-priority request is also
+        blocked, else it yields a beat so the important one wins. Providers overlap
+        across chains, so the yield is capability-agnostic on purpose."""
+        prio = PRIORITY.get(priority, PRIORITY[DEFAULT_PRIORITY])
         deadline = time.time() + ACQUIRE_DEADLINE_S
         with self._cv:
-            while True:
-                chain = [p for p in self._chain(capability) if p.name not in skip]
-                if not chain:
-                    raise RouterError(
-                        f"no providers left for '{capability}' "
-                        f"(configured: {[p.name for p in self._chain(capability)]}, "
-                        f"failed this request: {sorted(skip)})")
-                now = time.time()
+            self._waiting.append(prio)
+            try:
+                return self._acquire_loop(capability, skip, prio, deadline)
+            finally:
+                self._waiting.remove(prio)
+
+    def _acquire_loop(self, capability, skip, prio, deadline):
+        """The blocking lease loop. Runs with self._cv held (called from _acquire)."""
+        while True:
+            chain = [p for p in self._chain(capability) if p.name not in skip]
+            if not chain:
+                raise RouterError(
+                    f"no providers left for '{capability}' "
+                    f"(configured: {[p.name for p in self._chain(capability)]}, "
+                    f"failed this request: {sorted(skip)})")
+            now = time.time()
+            # A strictly-higher-priority request is also blocked → let it have the
+            # next freed provider; wait a beat instead of grabbing one now.
+            higher_waiting = any(w < prio for w in self._waiting)
+            if not higher_waiting:
                 for p in chain:
                     if p.cooldown_until > now or p.in_flight >= 1 or p.next_start > now:
                         continue
                     p.in_flight += 1
                     p.next_start = now + p.min_interval
                     return p
-                if now >= deadline:
+            if now >= deadline:
+                raise RouterError(
+                    f"all '{capability}' providers busy/cooling for "
+                    f"{ACQUIRE_DEADLINE_S}s: "
+                    + ", ".join(f"{p.name}(cooldown {max(0, int(p.cooldown_until - now))}s,"
+                                f" in_flight {p.in_flight})" for p in chain))
+            # Fail fast when provably doomed: no candidate is in flight (so no
+            # release can free one early) and every candidate's earliest
+            # availability lies beyond the deadline. Without this, a request
+            # arriving while all providers sit on long Retry-After benches
+            # (e.g. daily caps) blocks the caller the full ACQUIRE_DEADLINE_S
+            # before failing — pure dead air.
+            if not any(p.in_flight for p in chain):
+                soonest = min(max(p.cooldown_until, p.next_start) for p in chain)
+                if soonest > deadline:
                     raise RouterError(
-                        f"all '{capability}' providers busy/cooling for "
-                        f"{ACQUIRE_DEADLINE_S}s: "
-                        + ", ".join(f"{p.name}(cooldown {max(0, int(p.cooldown_until - now))}s,"
-                                    f" in_flight {p.in_flight})" for p in chain))
-                # Fail fast when provably doomed: no candidate is in flight (so no
-                # release can free one early) and every candidate's earliest
-                # availability lies beyond the deadline. Without this, a request
-                # arriving while all providers sit on long Retry-After benches
-                # (e.g. daily caps) blocks the caller the full ACQUIRE_DEADLINE_S
-                # before failing — pure dead air.
-                if not any(p.in_flight for p in chain):
-                    soonest = min(max(p.cooldown_until, p.next_start) for p in chain)
-                    if soonest > deadline:
-                        raise RouterError(
-                            f"all '{capability}' providers cooling past the "
-                            f"{ACQUIRE_DEADLINE_S}s acquire deadline (soonest in "
-                            f"{int(soonest - now)}s): "
-                            + ", ".join(f"{p.name}(cooldown {max(0, int(p.cooldown_until - now))}s)"
-                                        for p in chain))
-                self._cv.wait(timeout=0.25)
+                        f"all '{capability}' providers cooling past the "
+                        f"{ACQUIRE_DEADLINE_S}s acquire deadline (soonest in "
+                        f"{int(soonest - now)}s): "
+                        + ", ".join(f"{p.name}(cooldown {max(0, int(p.cooldown_until - now))}s)"
+                                    for p in chain))
+            self._cv.wait(timeout=0.25)
 
     def _release(self, provider, ok, retry_after=None):
         with self._cv:
@@ -233,16 +264,19 @@ class Router:
 
     # ── public API ───────────────────────────────────────────────────────
 
-    def complete_text(self, prompt, system=None, cli_model=None):
+    def complete_text(self, prompt, system=None, cli_model=None, priority=DEFAULT_PRIORITY):
         """Returns (text, provider_name). Raises RouterError when exhausted."""
-        return self._run("text", lambda p: self._call_text(p, prompt, system, cli_model))
+        return self._run("text", lambda p: self._call_text(p, prompt, system, cli_model),
+                         priority=priority)
 
-    def complete_vision(self, prompt, image_bytes, media_type):
+    def complete_vision(self, prompt, image_bytes, media_type, priority=DEFAULT_PRIORITY):
         """Returns (text, provider_name). Raises RouterError when exhausted."""
         b64 = base64.standard_b64encode(image_bytes).decode()
-        return self._run("vision", lambda p: self._call_vision(p, prompt, b64, media_type))
+        return self._run("vision", lambda p: self._call_vision(p, prompt, b64, media_type),
+                         priority=priority)
 
-    def complete_vision_batch(self, single_prompt, batch_prompt_tmpl, images):
+    def complete_vision_batch(self, single_prompt, batch_prompt_tmpl, images,
+                              priority=DEFAULT_PRIORITY):
         """images: list of (bytes, media_type). Returns (list[str], provider).
 
         One provider lease serves the whole list, split into that provider's
@@ -252,14 +286,14 @@ class Router:
         """
         encoded = [(base64.standard_b64encode(b).decode(), mt) for b, mt in images]
         return self._run("vision", lambda p: self._call_vision_batch(
-            p, single_prompt, batch_prompt_tmpl, encoded))
+            p, single_prompt, batch_prompt_tmpl, encoded), priority=priority)
 
-    def _run(self, capability, call):
+    def _run(self, capability, call, priority=DEFAULT_PRIORITY):
         skip = set()
         errors = []
         while True:
             try:
-                provider = self._acquire(capability, skip)
+                provider = self._acquire(capability, skip, priority)
             except RouterError as e:
                 if errors:
                     raise RouterError(f"{e} — failures: {'; '.join(errors)}") from None

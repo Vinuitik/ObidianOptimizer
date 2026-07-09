@@ -218,7 +218,8 @@ def process_image():
 
     try:
         text, provider = router.complete_vision(
-            IMAGE_PROMPT, host_path.read_bytes(), media_type)
+            IMAGE_PROMPT, host_path.read_bytes(), media_type,
+            priority=(data or {}).get("priority", "low"))
     except llm_router.RouterError as e:
         return jsonify({"error": str(e)}), 503
 
@@ -246,7 +247,8 @@ def process_images():
     if present:
         try:
             texts, provider = router.complete_vision_batch(
-                IMAGE_PROMPT, IMAGE_BATCH_PROMPT, present)
+                IMAGE_PROMPT, IMAGE_BATCH_PROMPT, present,
+                priority=data.get("priority", "low"))
         except llm_router.RouterError as e:
             return jsonify({"error": str(e)}), 503
 
@@ -274,7 +276,8 @@ def complete():
 
     try:
         text, provider = router.complete_text(
-            prompt, system=data.get("system"), cli_model=data.get("model"))
+            prompt, system=data.get("system"), cli_model=data.get("model"),
+            priority=data.get("priority", "medium"))
     except llm_router.RouterError as e:
         return jsonify({"error": str(e)}), 503
 

@@ -95,18 +95,26 @@ SOURCE SEGMENTS:
 
 
 class SynthesisError(Exception):
-    pass
+    """Synthesis failed. `status` mirrors the wrapper HTTP code when the failure was
+    an LLM call — 503 means all providers were cooling (retryable → job DEFERRED),
+    anything else is treated as terminal. None when the error wasn't an LLM call."""
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 # ── LLM plumbing ─────────────────────────────────────────────────────────
 
 def _complete(prompt: str, system: str) -> str:
+    # priority=high: ingest synthesis wins scarce LLM tokens over flashcards (medium)
+    # and image-captions (low). See host-wrapper llm_router.PRIORITY.
     resp = httpx.post(f"{WRAPPER_URL}/complete",
                       json={"prompt": prompt, "system": system,
-                            "model": SYNTH_MODEL},
+                            "model": SYNTH_MODEL, "priority": "high"},
                       timeout=LLM_TIMEOUT_S)
     if resp.status_code != 200:
-        raise SynthesisError(f"wrapper /complete {resp.status_code}: {resp.text[:300]}")
+        raise SynthesisError(f"wrapper /complete {resp.status_code}: {resp.text[:300]}",
+                             status=resp.status_code)
     return resp.json()["text"]
 
 

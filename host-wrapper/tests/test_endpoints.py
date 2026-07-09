@@ -41,7 +41,7 @@ def test_providers_returns_router_status(client):
 def test_process_image_translates_vault_path(client, vault_image, monkeypatch):
     captured = {}
 
-    def fake_vision(prompt, image_bytes, media_type):
+    def fake_vision(prompt, image_bytes, media_type, priority=None):
         captured.update(prompt=prompt, bytes=image_bytes, media_type=media_type)
         return "extracted", "gemini"
 
@@ -75,7 +75,7 @@ def test_process_image_unknown_extension_defaults_png(client, vault_image, monke
     odd.write_bytes(b"bmp")
     captured = {}
 
-    def fake_vision(prompt, image_bytes, media_type):
+    def fake_vision(prompt, image_bytes, media_type, priority=None):
         captured["media_type"] = media_type
         return "t", "gemini"
 
@@ -88,7 +88,7 @@ def test_process_image_unknown_extension_defaults_png(client, vault_image, monke
 # ── /process-images (batch) ──────────────────────────────────────────────
 
 def test_process_images_aligns_results_with_missing_files(client, vault_image, monkeypatch):
-    def fake_batch(single_prompt, batch_tmpl, images):
+    def fake_batch(single_prompt, batch_tmpl, images, priority=None):
         return [f"text-{i}" for i in range(len(images))], "gemini"
 
     monkeypatch.setattr(main.router, "complete_vision_batch", fake_batch)
@@ -133,7 +133,7 @@ def test_process_images_all_missing_skips_router(client, vault_image, monkeypatc
 def test_complete_routes_through_text_chain(client, monkeypatch):
     captured = {}
 
-    def fake_text(prompt, system=None, cli_model=None):
+    def fake_text(prompt, system=None, cli_model=None, priority=None):
         captured.update(prompt=prompt, system=system, cli_model=cli_model)
         return "answer", "groq"
 

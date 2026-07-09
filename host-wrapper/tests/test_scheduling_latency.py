@@ -173,6 +173,83 @@ def test_retry_after_reopens_provider_exactly(router, no_rate_spacing, monkeypat
     assert waited >= 0.7, "leased before the provider's Retry-After elapsed"
 
 
+# ── priority: scarce tokens go to the important request ──────────────────
+
+def test_high_priority_waiter_wins_freed_provider(router, no_rate_spacing):
+    """One provider, occupied. A LOW and a HIGH request both block waiting for it.
+    When it frees, HIGH must get it first (ingest beats image-captions)."""
+    r = no_rate_spacing(router)
+    _only(r, "gemini")
+    g = r.providers["gemini"]
+    with r._cv:              # occupy the only provider
+        g.in_flight = 1
+
+    got = []
+    start = threading.Barrier(3)
+
+    def waiter(prio):
+        start.wait()
+        p = r._acquire("vision", set(), prio)
+        got.append(prio)
+        r._release(p, ok=True)
+
+    low = threading.Thread(target=waiter, args=("low",))
+    high = threading.Thread(target=waiter, args=("high",))
+    low.start(); high.start()
+    start.wait()
+    time.sleep(0.4)          # let both register as blocked waiters
+    with r._cv:              # free the provider
+        g.in_flight = 0
+        r._cv.notify_all()
+    low.join(3); high.join(3)
+
+    assert got == ["high", "low"], f"priority ignored, got {got}"
+
+
+def test_equal_priority_both_served_no_starvation(router, no_rate_spacing):
+    """Two equal-priority waiters on one provider: both get served (no deadlock,
+    equal priority never yields to itself)."""
+    r = no_rate_spacing(router)
+    _only(r, "gemini")
+    g = r.providers["gemini"]
+    with r._cv:
+        g.in_flight = 1
+
+    served = []
+    start = threading.Barrier(3)
+
+    def waiter(tag):
+        start.wait()
+        p = r._acquire("vision", set(), "medium")
+        served.append(tag)
+        r._release(p, ok=True)
+
+    a = threading.Thread(target=waiter, args=("a",))
+    b = threading.Thread(target=waiter, args=("b",))
+    a.start(); b.start()
+    start.wait()
+    time.sleep(0.3)
+    with r._cv:
+        g.in_flight = 0
+        r._cv.notify_all()
+    a.join(3); b.join(3)
+
+    assert sorted(served) == ["a", "b"]
+
+
+def test_priority_does_not_break_doomed_fast_fail(router, no_rate_spacing):
+    """A HIGH request when every provider is benched past the deadline still fails
+    fast (priority must not defeat the doomed-acquire guard)."""
+    r = no_rate_spacing(router)
+    now = time.time()
+    for p in r._chain("vision"):
+        p.cooldown_until = now + 9999
+    t0 = time.time()
+    with pytest.raises(RouterError):
+        r._acquire("vision", set(), "high")
+    assert time.time() - t0 < 1.0
+
+
 def test_all_benched_recovery_at_cooldown_not_deadline(router, no_rate_spacing, monkeypatch):
     """Every provider cooling 1s: the request must be served as the first
     cooldown expires (~1s + <=1 poll tick), not at the acquire deadline
