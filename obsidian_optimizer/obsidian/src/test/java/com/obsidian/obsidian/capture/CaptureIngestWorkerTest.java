@@ -32,7 +32,12 @@ class CaptureIngestWorkerTest {
 
     private static CaptureRepository.Capture url(String id) {
         return new CaptureRepository.Capture(id, "video", "https://youtu.be/" + id, null,
-            id, "queued", 0L);
+            id, "queued", null, 0L);
+    }
+
+    private static CaptureRepository.Capture deferred(String id, String bundleRef) {
+        return new CaptureRepository.Capture(id, "video", "https://youtu.be/" + id, null,
+            id, "deferred", bundleRef, 0L);
     }
 
     @BeforeEach
@@ -100,5 +105,90 @@ class CaptureIngestWorkerTest {
         ReflectionTestUtils.setField(worker, "appReady", false);
         worker.drain();
         verifyNoInteractions(repo, ingest);
+    }
+
+    // ── synthesis durability: DEFER detection + resume drain ─────────────────
+
+    @Test
+    void deferredEmbedderJobParksCaptureWithBundle() {
+        when(ingest.listJobs()).thenReturn(List.of(
+            new IngestClient.JobView("job1", "cap-1", "DEFERRED",
+                "wrapper 503 cooling", "/models/ingest_bundles/job1.json")));
+
+        worker.pollFailures();
+
+        verify(repo).markDeferred("cap-1", "/models/ingest_bundles/job1.json");
+        verify(repo, never()).markFailed(any());
+    }
+
+    @Test
+    void failedEmbedderJobStillMarksFailed() {
+        when(ingest.listJobs()).thenReturn(List.of(
+            new IngestClient.JobView("job1", "cap-2", "FAILED", "boom", null)));
+
+        worker.pollFailures();
+
+        verify(repo).markFailed("cap-2");
+        verify(repo, never()).markDeferred(any(), any());
+    }
+
+    @Test
+    void retryResumesDeferredCaptureFromBundle() {
+        var cap = deferred("cap-3", "/models/ingest_bundles/b.json");
+        when(repo.findDeferred(anyInt())).thenReturn(List.of(cap));
+        when(noteIndex.findNotesByCapture("cap-3")).thenReturn(List.of());  // no notes yet
+        when(repo.claimDeferred("cap-3")).thenReturn(true);
+        when(ingest.resume(any(), any(), any(), any(), any(), any()))
+            .thenReturn(new IngestClient.Result(true, 200, "job9", "{}"));
+
+        worker.drainDeferred();
+
+        verify(ingest).resume("/models/ingest_bundles/b.json", "cap-3",
+            "https://youtu.be/cap-3", "video", "cap-3", null);
+        // outcome reconciled by pollFailures — no direct status write on success
+        verify(repo, never()).updateStatus(eq("cap-3"), any());
+    }
+
+    @Test
+    void retrySettlesCaptureThatAlreadyProducedNotes() {
+        // a prior resume succeeded but a status race left it 'deferred' → don't re-run
+        var cap = deferred("cap-4", "/models/ingest_bundles/b.json");
+        when(repo.findDeferred(anyInt())).thenReturn(List.of(cap));
+        when(noteIndex.findNotesByCapture("cap-4"))
+            .thenReturn(List.of("/vault/_inbox/note.md"));
+
+        worker.drainDeferred();
+
+        verify(repo).updateStatus("cap-4", "processing");
+        verify(repo, never()).claimDeferred(any());
+        verifyNoInteractions(ingest);
+    }
+
+    @Test
+    void retryMissingBundleFailsTheCapture() {
+        var cap = deferred("cap-5", "/models/ingest_bundles/gone.json");
+        when(repo.findDeferred(anyInt())).thenReturn(List.of(cap));
+        when(noteIndex.findNotesByCapture("cap-5")).thenReturn(List.of());
+        when(repo.claimDeferred("cap-5")).thenReturn(true);
+        when(ingest.resume(any(), any(), any(), any(), any(), any()))
+            .thenReturn(new IngestClient.Result(false, 404, null, "bundle not found"));
+
+        worker.drainDeferred();
+
+        verify(repo).updateStatus("cap-5", "failed");
+    }
+
+    @Test
+    void retryEmbedderDownReDefersForNextTick() {
+        var cap = deferred("cap-6", "/models/ingest_bundles/b.json");
+        when(repo.findDeferred(anyInt())).thenReturn(List.of(cap));
+        when(noteIndex.findNotesByCapture("cap-6")).thenReturn(List.of());
+        when(repo.claimDeferred("cap-6")).thenReturn(true);
+        when(ingest.resume(any(), any(), any(), any(), any(), any()))
+            .thenReturn(IngestClient.Result.unreachable());
+
+        worker.drainDeferred();
+
+        verify(repo).markDeferred("cap-6", "/models/ingest_bundles/b.json");
     }
 }

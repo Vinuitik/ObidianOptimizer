@@ -120,10 +120,54 @@ public class CaptureIngestWorker {
     public void pollFailures() {
         if (!ingestEnabled || !appReady) return;
         for (IngestClient.JobView j : ingestClient.listJobs()) {
-            if ("FAILED".equals(j.status()) && j.captureId() != null
-                    && captureRepo.markFailed(j.captureId())) {
+            if (j.captureId() == null) continue;
+            if ("DEFERRED".equals(j.status())) {
+                // Synthesis blocked on LLM providers — not a failure. Park the capture as
+                // 'deferred' with its bundle so retryDeferred resumes it (no re-extract).
+                if (captureRepo.markDeferred(j.captureId(), j.bundlePath())) {
+                    log.info("[CaptureIngestWorker] capture {} DEFERRED (providers cooling), "
+                        + "will retry synthesis from bundle", j.captureId());
+                }
+            } else if ("FAILED".equals(j.status()) && captureRepo.markFailed(j.captureId())) {
                 log.warn("[CaptureIngestWorker] capture {} ingest FAILED: {}",
                     j.captureId(), j.error());
+            }
+        }
+    }
+
+    /** Retry DEFERRED synthesis when LLM providers may have recovered. Slow cadence (we're
+     *  waiting on cooldowns, not hammering): claim a deferred capture, resume from its saved
+     *  bundle (no re-extract). Idempotent + restart-safe — the deferred state is a DB row and
+     *  the bundle a file on the embedder volume, so neither an app nor an embedder restart
+     *  loses the work. Guard against duplicate notes: if the capture already produced notes
+     *  (a prior resume succeeded but a status race re-deferred it), settle it instead. */
+    @Scheduled(fixedDelayString = "${ingest.capture.retry-deferred-ms:180000}",
+               initialDelayString = "${ingest.capture.initial-delay-ms:20000}")
+    public void retryDeferred() {
+        if (!ingestEnabled || !appReady) return;
+        lane.trigger(this::drainDeferred);
+    }
+
+    void drainDeferred() {
+        for (CaptureRepository.Capture c : captureRepo.findDeferred(batchLimit)) {
+            // Idempotency guard: synthesis already published notes for this capture → don't
+            // re-run it (would duplicate). Settle it back to processing (awaiting triage).
+            if (!noteIndex.findNotesByCapture(c.id()).isEmpty()) {
+                captureRepo.updateStatus(c.id(), "processing");
+                continue;
+            }
+            if (c.bundleRef() == null || c.bundleRef().isBlank()) continue;  // nothing to resume
+            if (!captureRepo.claimDeferred(c.id())) continue;                // a concurrent retry won it
+            IngestClient.Result res = ingestClient.resume(
+                c.bundleRef(), c.id(), c.sourceRef(), c.sourceType(), c.title(), null);
+            if (res.ok()) {
+                log.info("[CaptureIngestWorker] resumed synthesis for capture {}", c.id());
+                // outcome (DONE / DEFERRED again / FAILED) is reconciled by pollFailures
+            } else if (res.status() == 404) {
+                captureRepo.updateStatus(c.id(), "failed");   // bundle gone — can't resume
+                log.warn("[CaptureIngestWorker] capture {} bundle missing — marked failed", c.id());
+            } else {
+                captureRepo.markDeferred(c.id(), c.bundleRef());  // embedder down/5xx — retry next tick
             }
         }
     }

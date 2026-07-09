@@ -30,7 +30,8 @@ public class CaptureRepository {
     }
 
     public record Capture(String id, String sourceType, String sourceRef,
-                          String sourcePath, String title, String status, long createdAt) {}
+                          String sourcePath, String title, String status,
+                          String bundleRef, long createdAt) {}
 
     @PostConstruct
     public void initSchema() {
@@ -41,11 +42,14 @@ public class CaptureRepository {
                 source_ref  TEXT,               -- url / original filename / paste label
                 source_path TEXT,               -- vault-relative path of the kept original
                 title       TEXT,
-                status      TEXT    NOT NULL DEFAULT 'processing', -- queued|processing|ready|filed|failed
+                status      TEXT    NOT NULL DEFAULT 'processing', -- queued|processing|deferred|ready|filed|failed
                 created_at  BIGINT  NOT NULL
             )
             """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_capture_status ON capture(status)");
+        // bundle_ref: the embedder's saved-bundle path for a DEFERRED synthesis, so the retry
+        // resumes without re-extracting. Added by migration (existing DBs predate the column).
+        jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS bundle_ref TEXT");
     }
 
     public void create(String id, String sourceType, String sourceRef,
@@ -81,9 +85,33 @@ public class CaptureRepository {
             id) > 0;
     }
 
+    /** Mark a capture DEFERRED (synthesis waiting on LLM providers) ONLY if it's still
+     *  'processing', storing the bundle to resume from. Returns true if it flipped. */
+    public boolean markDeferred(String id, String bundleRef) {
+        return jdbc.update(
+            "UPDATE capture SET status = 'deferred', bundle_ref = ? " +
+            "WHERE id = ? AND status = 'processing'",
+            bundleRef, id) > 0;
+    }
+
+    /** Oldest-first batch of DEFERRED captures awaiting a synthesis retry. */
+    public List<Capture> findDeferred(int limit) {
+        return jdbc.query(
+            "SELECT * FROM capture WHERE status = 'deferred' ORDER BY created_at ASC LIMIT ?",
+            CaptureRepository::map, limit);
+    }
+
+    /** Atomically claim a DEFERRED row for a retry (→ {@code processing}) so two ticks
+     *  can't double-resume. Returns true if THIS caller won it. */
+    public boolean claimDeferred(String id) {
+        return jdbc.update(
+            "UPDATE capture SET status = 'processing' WHERE id = ? AND status = 'deferred'",
+            id) > 0;
+    }
+
     /** Captures still 'processing'/'failed' and older than a cutoff — candidates for the
      *  orphan-source cleanup sweep (a source with no notes left → trash it). The age gate
-     *  keeps mid-ingest captures out. */
+     *  keeps mid-ingest captures out. Excludes 'deferred' (mid-pipeline, not orphaned). */
     public List<Capture> findStaleActive(long olderThanEpochMillis) {
         return jdbc.query(
             "SELECT * FROM capture WHERE status IN ('processing','failed') AND created_at < ? " +
@@ -112,7 +140,8 @@ public class CaptureRepository {
     public boolean existsLiveForSource(String sourceRef) {
         if (sourceRef == null || sourceRef.isBlank()) return false;
         Integer n = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM capture WHERE source_ref = ? AND status IN ('queued','processing','ready')",
+            "SELECT COUNT(*) FROM capture WHERE source_ref = ? " +
+            "AND status IN ('queued','processing','deferred','ready')",
             Integer.class, sourceRef);
         return n != null && n > 0;
     }
@@ -148,6 +177,6 @@ public class CaptureRepository {
         return new Capture(
             rs.getString("id"), rs.getString("source_type"), rs.getString("source_ref"),
             rs.getString("source_path"), rs.getString("title"), rs.getString("status"),
-            rs.getLong("created_at"));
+            rs.getString("bundle_ref"), rs.getLong("created_at"));
     }
 }

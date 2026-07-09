@@ -41,6 +41,13 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
                         and j.get("embed_ref") == embed_ref
                         and j["status"] in ("QUEUED", "RUNNING")):
                     return public_view(j)
+    # Resuming a capture supersedes its prior DEFERRED job — drop the stale one so the
+    # backend's failure poller can't re-defer the capture off it while this retry runs.
+    if resume_bundle and capture_id:
+        with _lock:
+            for jid in [k for k, v in _jobs.items()
+                        if v.get("capture_id") == capture_id and v.get("status") == "DEFERRED"]:
+                del _jobs[jid]
     job_id = uuid.uuid4().hex[:12]
     job = {
         "id": job_id, "ref": ref, "status": "QUEUED", "stage": None,

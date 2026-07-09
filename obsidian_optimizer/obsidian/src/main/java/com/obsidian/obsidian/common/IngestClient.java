@@ -51,8 +51,10 @@ public class IngestClient {
     private long submitTimeoutMs;
 
     /** A row from the embedder job registry (GET /ingest) — enough to spot failures and
-     *  map them back to their capture (AGENT_ESCALATION: failure visibility). */
-    public record JobView(String jobId, String captureId, String status, String error) {}
+     *  DEFERRALs and map them back to their capture (failure visibility + durability).
+     *  {@code bundlePath} is set on a DEFERRED job so the capture can resume from it. */
+    public record JobView(String jobId, String captureId, String status, String error,
+                          String bundlePath) {}
 
     private static String txt(JsonNode n, String field) {
         JsonNode v = n.path(field);
@@ -76,7 +78,8 @@ public class IngestClient {
             if (jobs != null && jobs.isArray()) {
                 for (JsonNode j : jobs) {
                     out.add(new JobView(txt(j, "id"), txt(j, "capture_id"),
-                                        txt(j, "status"), txt(j, "error")));
+                                        txt(j, "status"), txt(j, "error"),
+                                        txt(j, "bundle_path")));
                 }
             }
         } catch (Exception e) {
@@ -108,6 +111,20 @@ public class IngestClient {
         return submit(p);
     }
 
+    /** Resume a DEFERRED synthesis from its saved bundle — no re-extract. Called by the
+     *  capture queue when LLM providers recover (embedder {@code POST /ingest/resume}). */
+    public Result resume(String bundleRef, String captureId, String ref,
+                         String sourceType, String title, String notePath) {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("bundle_path", bundleRef);
+        if (captureId != null)  p.put("capture_id", captureId);
+        if (ref != null)        p.put("ref", ref);
+        if (sourceType != null) p.put("source_type", sourceType);
+        if (title != null)      p.put("title", title);
+        if (notePath != null)   p.put("note_path", notePath);
+        return submit(p, "/ingest/resume");
+    }
+
     /** Standalone captured prose (no fetch) → new note(s), tracked by {@code captureId}. */
     public Result submitText(String captureId, String text, String title) {
         Map<String, Object> p = new LinkedHashMap<>();
@@ -121,10 +138,14 @@ public class IngestClient {
     // ── the single transport ─────────────────────────────────────────────────────
 
     public Result submit(Map<String, Object> payload) {
+        return submit(payload, "/ingest");
+    }
+
+    public Result submit(Map<String, Object> payload, String path) {
         try {
             String body = objectMapper.writeValueAsString(payload);
             HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(embedderUrl + "/ingest"))
+                .uri(URI.create(embedderUrl + path))
                 .timeout(Duration.ofMillis(submitTimeoutMs))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
