@@ -78,9 +78,25 @@ suite_frontend() {
 }
 
 suite_drive_live() {
-  # Requires: DRIVE_LIVE=1 + SYNC creds env (see DriveLiveIT javadoc). Deliberately opt-in.
+  # LIVE Google Drive round-trip (DriveLiveIT). Creds are pulled from the running
+  # stack's app_settings (same account; the IT writes only inside a throwaway
+  # ObsidianOptimizer-LIVETEST-<ts> folder and hard-deletes it afterwards).
+  local q="docker exec obidianoptimizer-postgres-1 psql -U obsidian -d obsidian -tA -c"
+  local cid sec tok pass
+  cid=$($q "SELECT value FROM app_settings WHERE key='syncClientId'" 2>/dev/null)
+  sec=$($q "SELECT value FROM app_settings WHERE key='syncClientSecret'" 2>/dev/null)
+  tok=$($q "SELECT value FROM app_settings WHERE key='sync.refresh_token'" 2>/dev/null)
+  pass=$($q "SELECT value FROM app_settings WHERE key='syncPassphrase'" 2>/dev/null)
+  if [ -z "$cid" ] || [ -z "$sec" ] || [ -z "$tok" ] || [ -z "$pass" ]; then
+    echo "drive-live: could not read Drive creds from the running stack's app_settings"
+    RESULT[drive-live]=SKIP; return
+  fi
+  export DRIVE_LIVE=1 DRIVE_LIVE_CLIENT_ID="$cid" DRIVE_LIVE_CLIENT_SECRET="$sec" \
+         DRIVE_LIVE_REFRESH_TOKEN="$tok" DRIVE_LIVE_PASSPHRASE="$pass"
   cd "$ROOT/obsidian_optimizer/obsidian" \
-    && DRIVE_LIVE=1 run_suite drive-live ./mvnw -q test -Dtest='DriveLiveIT' --no-transfer-progress
+    && run_suite drive-live ./mvnw -q test -Dtest='DriveLiveIT' --no-transfer-progress
+  unset DRIVE_LIVE DRIVE_LIVE_CLIENT_ID DRIVE_LIVE_CLIENT_SECRET \
+        DRIVE_LIVE_REFRESH_TOKEN DRIVE_LIVE_PASSPHRASE
 }
 
 suite_ingest_live() {
