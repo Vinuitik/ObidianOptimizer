@@ -31,7 +31,7 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
            extract_only: bool = False, note_path: str | None = None,
            embed_ref: str | None = None, capture_id: str | None = None,
            text: str | None = None, source_type: str | None = None,
-           title: str | None = None) -> dict:
+           title: str | None = None, resume_bundle: str | None = None) -> dict:
     # In-place dedup: never run two jobs for the same (note, embed) at once —
     # the auto-scanner re-fires on every save until the marker lands.
     if note_path and embed_ref:
@@ -50,6 +50,9 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
         "capture_id": capture_id, "source_type": source_type, "title": title,
         "_resolved_path": str(resolved_path) if resolved_path else None,
         "_text": text,
+        # Resume mode: skip extraction, load this already-saved bundle, synthesize only
+        # (the durable retry path when synthesis was DEFERRED on provider exhaustion).
+        "_resume_bundle": resume_bundle,
     }
     with _lock:
         _jobs[job_id] = job
@@ -133,6 +136,19 @@ def _run(job: dict):
     from ingest import extract_av, extract_pdf, extract_text, extract_web, router
 
     job["status"] = "RUNNING"
+
+    # RESUME: the bundle was already extracted (+ keyframes + local copy) and saved to
+    # disk before synthesis DEFERRED on a provider outage. Skip straight to synthesis —
+    # no re-fetch, no re-download, no re-whisper. Durable across restarts: the bundle
+    # file survives on the MODEL_CACHE volume, the "needs synthesis" note is a capture row.
+    if job.get("_resume_bundle"):
+        bundle = json.loads(Path(job["_resume_bundle"]).read_text(encoding="utf-8"))
+        job["bundle_path"] = job["_resume_bundle"]
+        job["segments"] = len(bundle["segments"])
+        job["duration_s"] = bundle["source"]["duration_s"]
+        _synthesize(job, bundle)
+        return
+
     resolved = Path(job["_resolved_path"]) if job["_resolved_path"] else None
 
     # Text route: the captured prose IS the content — no fetch, no router, no media.
@@ -171,13 +187,7 @@ def _run(job: dict):
                 f"route '{kind}': single images go through the existing "
                 f"pending_image_jobs pipeline, not ingest")
 
-    BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
-    out = BUNDLE_DIR / f"{job['id']}.json"
-    out.write_text(json.dumps(bundle, ensure_ascii=False, indent=1),
-                   encoding="utf-8")
-    job["bundle_path"] = str(out)
-    job["segments"] = len(bundle["segments"])
-    job["duration_s"] = bundle["source"]["duration_s"]
+    _save_bundle(job, bundle)
     job["stage"] = "extracted"
 
     if job.get("extract_only"):
@@ -191,16 +201,47 @@ def _run(job: dict):
     except Exception as e:
         log.warning("local media copy skipped for %s: %s", job.get("ref"), e)
 
+    # Re-save now that keyframes + local media are attached, so the on-disk bundle is the
+    # complete PRE-SYNTHESIS state. A DEFERRED job resumes from THIS (skipping the expensive
+    # download/keyframe half), not the bare-transcript extract state saved above.
+    _save_bundle(job, bundle)
+    _synthesize(job, bundle)
+
+
+def _save_bundle(job: dict, bundle: dict) -> None:
+    BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
+    out = BUNDLE_DIR / f"{job['id']}.json"
+    out.write_text(json.dumps(bundle, ensure_ascii=False, indent=1), encoding="utf-8")
+    job["bundle_path"] = str(out)
+    job["segments"] = len(bundle["segments"])
+    job["duration_s"] = bundle["source"]["duration_s"]
+
+
+def _synthesize(job: dict, bundle: dict) -> None:
+    """Run stage-2 synthesis (the ONLY LLM step). On provider exhaustion (wrapper 503)
+    the job is DEFERRED — NOT failed — so the backend capture queue can retry it from
+    the saved bundle when a provider frees up. Any other synthesis error still fails."""
+    from ingest.synthesize import SynthesisError
+
     job["stage"] = "synthesize"
     # v2 cutover (INGEST_V2, default off): segment.py picks boundaries, the LLM only
     # writes each Unit. Same publish/capture path; v1 stays the default until flipped.
     from ingest import pipeline_v2
     v2 = pipeline_v2.v2_enabled()
     job["pipeline"] = "v2" if v2 else "v1"
-    if job.get("note_path"):
-        (_synthesize_and_inject_v2 if v2 else _synthesize_and_inject)(job, bundle)
-    else:
-        (_synthesize_and_publish_v2 if v2 else _synthesize_and_publish)(job, bundle)
+    try:
+        if job.get("note_path"):
+            (_synthesize_and_inject_v2 if v2 else _synthesize_and_inject)(job, bundle)
+        else:
+            (_synthesize_and_publish_v2 if v2 else _synthesize_and_publish)(job, bundle)
+    except SynthesisError as e:
+        if getattr(e, "status", None) == 503:
+            job["status"] = "DEFERRED"
+            job["error"] = str(e)[:500]
+            log.warning("ingest job %s DEFERRED — all LLM providers cooling; "
+                        "capture queue will retry from bundle: %s", job["id"], e)
+            return
+        raise
     job["status"] = "DONE"
     log.info("ingest job %s: %d segments, %d note(s) from %s",
              job["id"], len(bundle["segments"]),

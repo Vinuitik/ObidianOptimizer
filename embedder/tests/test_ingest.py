@@ -148,6 +148,73 @@ def test_job_failure_is_captured_not_fatal(stub_extract, monkeypatch):
     assert _wait_done(job2["id"])["status"] == "DONE"
 
 
+# ── synthesis durability: DEFER on provider exhaustion, resume from bundle ──
+
+def _wait_status(job_id, statuses, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = ingest_jobs.get(job_id)
+        if job["status"] in statuses:
+            return job
+        time.sleep(0.02)
+    raise AssertionError(f"job {job_id} not in {statuses}: {ingest_jobs.get(job_id)}")
+
+
+def test_synthesis_503_defers_not_fails(stub_extract, monkeypatch, tmp_path):
+    """All LLM providers cooling (wrapper 503) → job DEFERRED, bundle kept on disk."""
+    from ingest.synthesize import SynthesisError
+
+    def cooling(job, bundle):
+        raise SynthesisError("wrapper /complete 503: all providers cooling", status=503)
+
+    monkeypatch.setattr(ingest_jobs, "_synthesize_and_publish", cooling)
+    job = ingest_jobs.submit("resources/audio/x.mp3", tmp_path / "x.mp3")  # standalone, full run
+    done = _wait_status(job["id"], ("DEFERRED", "FAILED", "DONE"))
+    assert done["status"] == "DEFERRED"
+    assert (tmp_path / "bundles" / f"{job['id']}.json").is_file()   # bundle retained for resume
+
+
+def test_synthesis_non_503_still_fails(stub_extract, monkeypatch, tmp_path):
+    from ingest.synthesize import SynthesisError
+
+    def broken(job, bundle):
+        raise SynthesisError("wrapper /complete 500: boom", status=500)
+
+    monkeypatch.setattr(ingest_jobs, "_synthesize_and_publish", broken)
+    job = ingest_jobs.submit("resources/audio/x.mp3", tmp_path / "x.mp3")
+    done = _wait_status(job["id"], ("DEFERRED", "FAILED", "DONE"))
+    assert done["status"] == "FAILED"
+
+
+def test_resume_from_bundle_skips_extraction(stub_extract, monkeypatch, tmp_path):
+    """Resume synthesizes from a saved bundle WITHOUT re-extracting (the durable retry)."""
+    from ingest import extract_av
+
+    # a bundle already sitting on disk (as a prior DEFERRED job left it)
+    bundles = tmp_path / "bundles"
+    bundles.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundles / "saved.json"
+    bundle_path.write_text(json.dumps({
+        "source": {"type": "video", "ref": "https://y/x", "title": "t",
+                   "duration_s": 5.0, "chapters": []},
+        "segments": [{"loc": {"t_start": 0, "t_end": 5}, "text": "hi"}],
+        "media": []}), encoding="utf-8")
+
+    extract_called = {"n": 0}
+    monkeypatch.setattr(extract_av, "extract",
+                        lambda *a, **k: extract_called.__setitem__("n", extract_called["n"] + 1))
+    synth = {"n": 0}
+    monkeypatch.setattr(ingest_jobs, "_synthesize_and_publish",
+                        lambda job, bundle: synth.__setitem__("n", synth["n"] + 1))
+
+    job = ingest_jobs.submit("https://y/x", None, resume_bundle=str(bundle_path),
+                             capture_id="cap-1")
+    done = _wait_status(job["id"], ("DONE", "FAILED", "DEFERRED"))
+    assert done["status"] == "DONE"
+    assert extract_called["n"] == 0   # NO re-extraction
+    assert synth["n"] == 1            # synthesis ran once
+
+
 def test_private_fields_not_exposed(stub_extract):
     # extract_only: this test only inspects the public view's keys, but a full
     # job would wedge the single worker on publish's httpx call to an unreachable
@@ -178,6 +245,29 @@ def test_ingest_endpoint_422_on_unroutable(client):
 def test_ingest_endpoint_404_on_missing_local_file(client):
     res = client.post("/ingest", json={"ref": "resources/videos/ghost.mp4"})
     assert res.status_code == 404
+
+
+def test_resume_endpoint_rejects_bundle_outside_dir(client, tmp_path):
+    # path traversal / arbitrary file → 404 (only bundles under BUNDLE_DIR resume)
+    res = client.post("/ingest/resume", json={"bundle_path": "/etc/passwd"})
+    assert res.status_code == 404
+
+
+def test_resume_endpoint_accepts_saved_bundle(client, tmp_path, monkeypatch):
+    bundles = tmp_path / "bundles"
+    bundles.mkdir(parents=True, exist_ok=True)
+    bp = bundles / "b1.json"
+    bp.write_text(json.dumps({
+        "source": {"type": "video", "ref": "https://y/x", "title": "t",
+                   "duration_s": 3.0, "chapters": []},
+        "segments": [{"loc": {"t_start": 0, "t_end": 3}, "text": "hi"}],
+        "media": []}), encoding="utf-8")
+    monkeypatch.setattr(ingest_jobs, "_synthesize_and_publish", lambda job, bundle: None)
+
+    res = client.post("/ingest/resume",
+                      json={"bundle_path": str(bp), "capture_id": "cap-9", "ref": "https://y/x"})
+    assert res.status_code == 200
+    assert res.json()["status"] in ("QUEUED", "RUNNING", "DONE", "DEFERRED")
 
 
 def test_ingest_endpoint_accepts_existing_file(client, tmp_path, monkeypatch):

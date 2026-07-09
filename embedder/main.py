@@ -86,6 +86,16 @@ class IngestRequest(BaseModel):
     title: str | None = None        # display title for the text route
 
 
+class ResumeRequest(BaseModel):
+    bundle_path: str                # the saved bundle to synthesize from (under BUNDLE_DIR)
+    ref: str = ""                   # original source ref (for logging / note source)
+    capture_id: str | None = None   # links proposed notes back to the Java capture row
+    note_path: str | None = None    # in-place mode (else standalone)
+    embed_ref: str | None = None
+    source_type: str | None = None
+    title: str | None = None
+
+
 class SplitNoteRequest(BaseModel):
     note_path: str                  # vault-relative .md path
 
@@ -261,6 +271,25 @@ def _resolve_embed(ref: str):
             if candidate.is_file():
                 return candidate
     return None
+
+
+@app.post("/ingest/resume")
+def ingest_resume(req: ResumeRequest):
+    """Retry a DEFERRED synthesis from its already-saved bundle — no re-extract.
+    Called by the backend capture queue when LLM providers recover (durability:
+    the bundle survives on disk, the 'this needs synthesis' state is a capture row)."""
+    from ingest import jobs as ingest_jobs
+
+    # path guard: only bundles under BUNDLE_DIR may be resumed
+    bp = os.path.realpath(req.bundle_path)
+    if not bp.startswith(os.path.realpath(str(ingest_jobs.BUNDLE_DIR)) + os.sep) \
+            or not os.path.isfile(bp):
+        raise HTTPException(status_code=404, detail="bundle not found")
+
+    return ingest_jobs.submit(
+        req.ref or "", None, resume_bundle=bp,
+        note_path=req.note_path, embed_ref=req.embed_ref,
+        capture_id=req.capture_id, source_type=req.source_type, title=req.title)
 
 
 @app.post("/ingest/split-note")
