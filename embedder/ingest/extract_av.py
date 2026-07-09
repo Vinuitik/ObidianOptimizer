@@ -74,7 +74,15 @@ def extract(ref: str, resolved_path: Path | None, force_whisper: bool = False) -
         if force_whisper:
             segments, title, duration = _youtube_whisper(ref)
         else:
-            segments, title, duration = _youtube_captions(ref)
+            # Captions are the fast path (seconds, no download). If a video has none,
+            # don't fail — fall through to the whisper safety net (download bestaudio →
+            # faster-whisper). Slower, but a captionless lecture still becomes notes.
+            try:
+                segments, title, duration = _youtube_captions(ref)
+            except RuntimeError as e:
+                log.warning("no captions for %s (%s) — falling back to whisper "
+                            "download+transcribe", ref, e)
+                segments, title, duration = _youtube_whisper(ref)
         source_type = "video"
     else:
         if resolved_path is None or not resolved_path.exists():
