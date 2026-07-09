@@ -43,6 +43,16 @@ lease different providers (image A → Gemini while image B → Groq). Same tota
 coverage, parallel throughput. A provider is also rate-spaced (`min_interval` ≈
 60/free-tier-RPM between request starts).
 
+**Priority (scarce tokens go to the important request).** Image-captions, flashcards
+and ingest-synthesis all draw from the SAME providers, so requests carry a `priority`
+(`PRIORITY = {high:0, medium:1, low:2}`). When several requests block waiting, a freed
+provider goes to the highest-priority waiter first: `_acquire` tracks waiting priorities
+(`Router._waiting`) and a waiter only TAKES an available provider when no strictly-higher
+priority request is also blocked, else it yields a beat. Assignments: **ingest synthesis =
+high** (`synthesize._complete`), **flashcards = medium** (default), **image-captions = low**
+(`/process-image[s]`). No aging (finite ingest bursts; ingest is meant to win). To change a
+level: pass `priority` in the `/complete` or `/process-image` request body.
+
 **Failover:** `Router._run()` → `_acquire()` leases the highest-priority free
 provider (blocks up to `LLM_ACQUIRE_DEADLINE_S`, default 150s) → on 429 the provider
 is benched (`Retry-After` honored, else 30s·2^failures, cap 1h) and the request

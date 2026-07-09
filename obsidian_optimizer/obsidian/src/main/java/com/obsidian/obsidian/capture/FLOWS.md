@@ -49,15 +49,25 @@ text, title)`. Callers: `CaptureIngestWorker` (standalone, from the queue) and
 
 ```
 queued ──drain/submit──> processing ──embedder publishes notes to _inbox──> (Inbox shows it)
-   │                          │                                                    │
-   4xx→failed            5xx/down→queued (retry)                    user files/acks each note
-                                                                         │
-                                                                 all filed → 'filed' + source trashed
+   │                     │  │                                                      │
+   4xx→failed  5xx→queued   synthesis 503 (LLM cooling) → deferred      user files/acks each note
+   (retry)     (retry)      (+bundle_ref)     │                                    │
+                              retryDeferred: resume from bundle      all filed → 'filed' + source trashed
+                              (no re-extract) → processing
 ```
 `queued` is NEW (this change): resources wait here until submitted. `processing`/`ready` are what
 the Learn Inbox lists (`InboxController`); `filed` is set when every child note is triaged (see
 `inbox/FLOWS.md`). In-place note snapshots (`InternalAgentController.createCapture`) skip the queue
 — their ingest already ran — and are inserted straight at `processing`.
+
+**`deferred` = synthesis waiting on LLM providers.** When the embedder DEFERS a job (all
+providers cooling), `pollFailures` parks the capture `deferred` with the `bundle_ref` instead of
+failing it; `retryDeferred` (@Scheduled `ingest.capture.retry-deferred-ms`, default 3min) resumes
+synthesis from the saved bundle via `IngestClient.resume` → embedder `POST /ingest/resume` (no
+re-download/re-whisper). Restart-safe: the state is this DB row, the bundle a file on the embedder
+`/models` volume. Idempotency: resume is skipped if the capture already produced notes
+(`noteIndex.findNotesByCapture` non-empty → settle to `processing`), so a status race can't
+duplicate. `deferred` blocks the dedup guard (live) and is excluded from orphan cleanup.
 
 ## Technology Notes
 
@@ -88,7 +98,9 @@ the Learn Inbox lists (`InboxController`); `filed` is set when every child note 
 | Embedder URL / submit timeout | `embedder.url` / `ingest.submit.timeout-ms` env |
 | Master ingest on/off | `ingest.enabled` (shared with ResourceScanService) |
 | Capture lifecycle transitions | `queued`→`processing` here; `filed` in `inbox/InboxController` |
-| **Failure visibility** (job failed after submit) | `CaptureIngestWorker.pollFailures()` polls `IngestClient.listJobs()` → `CaptureRepository.markFailed()` (stranded `processing`→`failed`) |
+| **Failure visibility** (job failed after submit) | `CaptureIngestWorker.pollFailures()` polls `IngestClient.listJobs()` → `CaptureRepository.markFailed()` (stranded `processing`→`failed`); DEFERRED → `markDeferred()` |
+| **Synthesis durability retry** | `CaptureIngestWorker.retryDeferred()`/`drainDeferred()` → `IngestClient.resume(bundle_ref,…)`; cadence `ingest.capture.retry-deferred-ms` (3min) |
+| **Deferred state + bundle** | `CaptureRepository.markDeferred/findDeferred/claimDeferred`; `bundle_ref` column; status `deferred` |
 | **Orphan-source cleanup** ("no children → trash source") | `CaptureIngestWorker.cleanupOrphanSources()` (age + no-active-job + `countLiveReferencesToFile` guards) → `FileRepository.softDeleteFile`; env `ingest.cleanup.min-age-ms` |
 | **Duplicate-capture guard** (409) | `CaptureController.capture()` → `CaptureRepository.existsLiveForSource()`; extension shows ⚠️ |
 | Per-note retention (last note deleted → trash media) | `inbox/InboxController.discard()` (`local:` + `trashLocalMedia`; LOCAL_MEDIA_RETENTION §4) |

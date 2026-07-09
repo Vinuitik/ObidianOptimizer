@@ -61,9 +61,24 @@ _worker_loop (daemon, MAX 1 concurrent; GPU VRAM arbitrated by ../GPU_MEMORY.md 
   → image → NotImplementedError (single images use the existing image pipeline)
   → bundle persisted to {MODEL_CACHE}/ingest_bundles/{id}.json
   → extract_only? stop here.
-  → note_path set?  _synthesize_and_inject()   else  _synthesize_and_publish()
+  → _ensure_local_copy → RE-SAVE bundle (now synthesis-ready: keyframes + local media)
+  → _synthesize(job, bundle):  note_path set? _synthesize_and_inject() else _synthesize_and_publish()
+      SynthesisError.status == 503 (all LLM providers cooling) → job DEFERRED (not FAILED),
+        bundle kept → the capture queue retries later (durability, see below)
+      any other synthesis error → FAILED
 ```
 Jobs are in-memory — restart loses status (bundle files survive).
+
+**Synthesis durability (standalone captures).** A synthesis blocked on exhausted LLM
+providers is NOT thrown away: the job is `DEFERRED` and its bundle kept. The backend
+`capture` row is parked `deferred` with the `bundle_ref`, and `CaptureIngestWorker.retryDeferred`
+later calls `POST /ingest/resume {bundle_path, capture_id, …}` → `jobs.submit(resume_bundle=…)`
+→ `_run` loads the saved bundle and runs synthesis ONLY (no re-extract/re-download). The
+bundle is re-saved *after* keyframes+local-copy precisely so resume skips the expensive half.
+Restart-safe: the "needs synthesis" state is a DB row, the bundle a file on the `/models`
+volume. A resume purges the superseded `DEFERRED` job so the backend poller can't re-defer it
+mid-retry. To change retry cadence: backend `ingest.capture.retry-deferred-ms` (default 3min).
+See `.../capture/FLOWS.md` (capture lifecycle) + `architecture_plans/INGEST_DURABILITY_PRIORITY.md`.
 
 `synthesize.outline()` writes a debug report (source + segments in, raw LLM per
 window, planned notes out) via `embedder/agent_reports.py` →
@@ -110,7 +125,7 @@ one bad note never sinks its siblings; all-fail raises.
 ## Extractors (deterministic, zero LLM)
 
 ```
-extract_av : ffmpeg -vn 16kHz wav → faster-whisper (WHISPER_MODEL int8); YouTube → download/downloader.fetch_subs() VTT (in-process yt-dlp); force_whisper → fetch_audio → whisper
+extract_av : ffmpeg -vn 16kHz wav → faster-whisper (WHISPER_MODEL int8); YouTube → download/downloader.fetch_subs() VTT (in-process yt-dlp); force_whisper → fetch_audio → whisper. **No captions? auto-fallback to the whisper path** (download bestaudio → transcribe) instead of failing — captions are the fast path, whisper the safety net.
 extract_pdf: PyMuPDF text blocks; <20 words/page → Tesseract OCR; images >200px → _keep_diagrams()
 extract_web: trafilatura markdown, per-heading segments; <200 chars → loud fail (SPA)
 keyframes  : scene-cut + 1/15s + transcript-cue candidates → CLIP keep/drop → CLIP dedupe → ≤MAX_FRAMES
@@ -389,6 +404,10 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | v2 splice resolution (consume) | `locator.py` (`resolve_splice`) `[v2 scaffold]` |
 | v2 orchestrator chain (flagged) | `pipeline_v2.py` (`run`); `INGEST_V2` env, `guard()` `[v2 scaffold]` |
 | (note, embed) job de-dup | `jobs.submit()` |
+| **Synthesis DEFER on provider exhaustion** | `jobs._synthesize()` (503 → DEFERRED, keep bundle); `synthesize.SynthesisError.status` |
+| **Resume synthesis from saved bundle** | `POST /ingest/resume` (`main.ingest_resume`, path-guarded to BUNDLE_DIR) → `jobs.submit(resume_bundle=…)` → `_run` skip-to-synthesize |
+| **Bundle re-save (pre-synthesis, resume-ready)** | `jobs._save_bundle()` called again after `_ensure_local_copy` |
+| **Auto-whisper fallback (no captions)** | `extract_av.extract()` youtube branch: `_youtube_captions` RuntimeError → `_youtube_whisper` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | MCP: agent-authored text → notes | `mcp_server.create_note(text, title)` → `jobs.submit(text=…)` (text route → segment → _inbox) |
 | MCP: short-note gate (skip LLM split) | `mcp_server.create_note` → `_stage_note_as_is()` when `< INGEST_SPLIT_MIN_WORDS`(700); stages raw text in _inbox, note is its own source, zero tokens |
