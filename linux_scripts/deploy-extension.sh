@@ -12,7 +12,11 @@
 #      and compose mounts ./ext-dist:/ext-dist:ro with an nginx /ext/ route.
 #   2. Rebuild the frontend so that nginx route + mount go live:
 #        sudo -n systemctl restart obsidian-optimizer   # start.sh rebuilds images
-#   3. Export your AMO API creds (https://addons.mozilla.org/developers/addon/api/key/):
+#   3. Set your AMO API creds (https://addons.mozilla.org/developers/addon/api/key/)
+#      EITHER by pasting them into .env (persistent — recommended):
+#        AMO_KEY=<JWT issuer>
+#        AMO_SECRET=<JWT secret>
+#      OR by exporting them for a one-off run (a shell export overrides .env):
 #        export AMO_KEY=<JWT issuer>  AMO_SECRET=<JWT secret>
 #   4. Run this script once, then install the produced .xpi ONCE from
 #      about:addons → ⚙ → Install Add-on From File (so Firefox learns the update_url).
@@ -38,8 +42,19 @@ EXT_ID="obsidian-optimizer@obsidianoptimizer.uk"
 BASE_URL="https://obsidianoptimizer.uk/ext"
 DIST="ext-dist"
 
-: "${AMO_KEY:?export AMO_KEY (JWT issuer) — see https://addons.mozilla.org/developers/addon/api/key/}"
-: "${AMO_SECRET:?export AMO_SECRET (JWT secret)}"
+# AMO creds: prefer a value already exported in the shell, otherwise pull it from
+# .env. We read ONLY these two keys (not `source .env`) because .env holds values
+# with spaces/# that would break under `set -e` — compose + the host-wrapper parse
+# .env with their own parsers, so a shell `source` is not equivalent. `:=` means an
+# exported shell value wins; `tr -d '\r'` guards against CRLF line endings.
+if [ -f "$ROOT_DIR/.env" ]; then
+  : "${AMO_KEY:=$(grep -E '^AMO_KEY=' "$ROOT_DIR/.env" | tail -1 | cut -d= -f2- | tr -d '\r')}"
+  : "${AMO_SECRET:=$(grep -E '^AMO_SECRET=' "$ROOT_DIR/.env" | tail -1 | cut -d= -f2- | tr -d '\r')}"
+  export AMO_KEY AMO_SECRET
+fi
+
+: "${AMO_KEY:?set AMO_KEY (JWT issuer) in .env or export it — https://addons.mozilla.org/developers/addon/api/key/}"
+: "${AMO_SECRET:?set AMO_SECRET (JWT secret) in .env or export it}"
 
 # ── 1. bump patch version (0.2.1 → 0.2.2) ────────────────────────────────────
 CUR=$(grep -oP '"version"\s*:\s*"\K[^"]+' "$MANIFEST")
