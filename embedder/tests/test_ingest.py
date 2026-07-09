@@ -215,6 +215,104 @@ def test_resume_from_bundle_skips_extraction(stub_extract, monkeypatch, tmp_path
     assert synth["n"] == 1            # synthesis ran once
 
 
+# ── in-place resume-from-bundle (INGEST_DURABILITY_PRIORITY §4) ───────────
+
+def test_inplace_defer_records_bundle_and_refire_resumes(stub_extract, monkeypatch, tmp_path):
+    """In-place synthesis 503 → DEFERRED + the saved bundle is recorded for (note, embed).
+    The next re-fire RESUMES from that bundle — NO re-extraction — and clears the record on
+    success. This is the efficiency win: a cooling provider no longer re-downloads/re-whispers
+    every 5-min ResourceScanService retry."""
+    import os
+
+    from ingest import extract_av, inplace_resume
+    from ingest.synthesize import SynthesisError
+
+    note, embed = "notes/lecture.md", "resources/audio/x.mp3"
+
+    calls = {"extract": 0, "synth": 0}
+    fake = extract_av.extract   # the stub_extract fixture's fake_extract
+    def counting_extract(*a, **k):
+        calls["extract"] += 1
+        return fake(*a, **k)
+    monkeypatch.setattr(extract_av, "extract", counting_extract)
+
+    # 1) first pass — extraction runs once, synthesis defers (all providers cooling)
+    def cooling(job, bundle):
+        calls["synth"] += 1
+        raise SynthesisError("all providers cooling", status=503)
+    monkeypatch.setattr(ingest_jobs, "_synthesize_and_inject", cooling)
+
+    job1 = ingest_jobs.submit(embed, tmp_path / "x.mp3",
+                              note_path=note, embed_ref=embed, source_type="audio")
+    done1 = _wait_status(job1["id"], ("DEFERRED", "FAILED", "DONE"))
+    assert done1["status"] == "DEFERRED"
+    assert calls["extract"] == 1
+    entry = inplace_resume.lookup(note, embed)
+    assert entry is not None and os.path.isfile(entry["bundle_path"])   # bundle remembered
+
+    # 2) re-fire the SAME (note, embed) — providers recovered, synthesis succeeds. It must
+    #    resume from the saved bundle, so the extractor is NOT called a second time.
+    def ok(job, bundle):
+        calls["synth"] += 1
+        job["notes_created"] = [note]
+    monkeypatch.setattr(ingest_jobs, "_synthesize_and_inject", ok)
+
+    job2 = ingest_jobs.submit(embed, tmp_path / "x.mp3",
+                              note_path=note, embed_ref=embed, source_type="audio")
+    done2 = _wait_status(job2["id"], ("DONE", "FAILED", "DEFERRED"))
+    assert done2["status"] == "DONE"
+    assert calls["extract"] == 1     # NO second extraction — resumed from bundle
+    assert calls["synth"] == 2       # synthesis ran again (the retry)
+    assert inplace_resume.lookup(note, embed) is None   # record dropped once it settled
+
+
+def test_inplace_resume_survives_restart_via_sidecar(stub_extract, monkeypatch, tmp_path):
+    """Restart durability: even with the in-memory DEFERRED job gone (as after an embedder
+    restart), a re-fire still resumes from the on-disk sidecar record + bundle."""
+    from ingest import extract_av, inplace_resume
+
+    note, embed = "notes/talk.md", "resources/audio/x.mp3"
+
+    calls = {"extract": 0, "synth": 0}
+    fake = extract_av.extract
+    def counting_extract(*a, **k):
+        calls["extract"] += 1
+        return fake(*a, **k)
+    monkeypatch.setattr(extract_av, "extract", counting_extract)
+
+    # extract-only run to produce a real saved bundle on disk, then simulate the DEFERRED
+    # record a restart would have left behind (job registry emptied, sidecar file survives).
+    seed = ingest_jobs.submit(embed, tmp_path / "x.mp3", extract_only=True)
+    _wait_done(seed["id"])
+    bundle_path = str(tmp_path / "bundles" / f"{seed['id']}.json")
+    inplace_resume.record(note, embed, bundle_path, source_type="audio")
+    with ingest_jobs._lock:
+        ingest_jobs._jobs.clear()          # ← the "restart": no in-memory DEFERRED job left
+    calls["extract"] = 0
+
+    synth = {"n": 0}
+    monkeypatch.setattr(ingest_jobs, "_synthesize_and_inject",
+                        lambda job, bundle: synth.__setitem__("n", synth["n"] + 1))
+    job = ingest_jobs.submit(embed, tmp_path / "x.mp3",
+                             note_path=note, embed_ref=embed, source_type="audio")
+    done = _wait_status(job["id"], ("DONE", "FAILED", "DEFERRED"))
+    assert done["status"] == "DONE"
+    assert calls["extract"] == 0    # resumed purely from the sidecar + bundle
+    assert synth["n"] == 1
+
+
+def test_inplace_resume_prunes_dangling_record(stub_extract, tmp_path):
+    """A recorded bundle whose file was swept away is treated as absent (and pruned), so the
+    caller falls back to a fresh extract instead of resuming a ghost."""
+    from ingest import inplace_resume
+
+    inplace_resume.record("n.md", "e.mp4", str(tmp_path / "bundles" / "gone.json"))
+    assert inplace_resume.lookup("n.md", "e.mp4") is None
+    inplace_resume.record("n.md", "e.mp4", str(tmp_path / "bundles" / "gone.json"))
+    inplace_resume.drop("n.md", "e.mp4")
+    assert inplace_resume.lookup("n.md", "e.mp4") is None
+
+
 def test_private_fields_not_exposed(stub_extract):
     # extract_only: this test only inspects the public view's keys, but a full
     # job would wedge the single worker on publish's httpx call to an unreachable

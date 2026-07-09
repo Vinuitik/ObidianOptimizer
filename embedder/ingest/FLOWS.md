@@ -1,6 +1,6 @@
 # Ingest Module Flows — resource → notes
 
-Files (v1, live): router.py, extract_av.py, extract_pdf.py, extract_web.py, extract_text.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py
+Files (v1, live): router.py, extract_av.py, extract_pdf.py, extract_web.py, extract_text.py, keyframes.py, clip_onnx.py, bundle.py, synthesize.py, publish.py, split_note.py, jobs.py, inplace_resume.py
 Files (v2, wired behind INGEST_V2 flag, default off): ir.py, extract_ir.py, extract_pdf_ir.py, extract_av_ir.py, segment.py, flagging.py, retention.py, locator.py, pipeline_v2.py (+ jobs.py `_*_v2`, synthesize.py `write_unit_body`/`build_inplace_body_v2`)
 Architecture: architecture_plans/INGEST_AGENT_ARCH.md (v1), architecture_plans/INGESTION_V2_FLOWS.md (v2 design)
 
@@ -79,6 +79,18 @@ Restart-safe: the "needs synthesis" state is a DB row, the bundle a file on the 
 volume. A resume purges the superseded `DEFERRED` job so the backend poller can't re-defer it
 mid-retry. To change retry cadence: backend `ingest.capture.retry-deferred-ms` (default 3min).
 See `.../capture/FLOWS.md` (capture lifecycle) + `architecture_plans/INGEST_DURABILITY_PRIORITY.md`.
+
+**Synthesis durability (in-place note embeds).** In-place jobs have NO capture row when they
+defer — `_synthesize_and_inject` calls `publish.create_capture` only *after* synthesis, so a job
+that defers at `outline()` has `capture_id=None` and the backend poller can't park it. Instead
+the embedder records the saved bundle itself, keyed by `(note_path, embed_ref)`, in
+`inplace_resume.py` (a durable sidecar `inplace_deferred.json` under `BUNDLE_DIR`). The existing
+`ResourceScanService` 5-min re-fire is the retry driver: on the next `submit()` for that
+`(note, embed)`, `jobs._find_deferred_inplace_bundle` finds the bundle (in-memory DEFERRED job
+first, sidecar second) and RESUMES from it — no re-download/re-whisper/re-keyframe (the §4
+efficiency win). The record is dropped on DONE or terminal FAIL so a genuine later re-ingest of a
+changed source extracts fresh. Restart-safe: the sidecar + bundle both live on the `/models`
+volume, so a deploy mid-cooldown still resumes rather than re-extracting.
 
 `synthesize.outline()` writes a debug report (source + segments in, raw LLM per
 window, planned notes out) via `embedder/agent_reports.py` →
@@ -366,6 +378,17 @@ its module. Tests: `tests/test_pipeline_v2.py`.
   GPU; on a tiny one this could pressure memory (the old open_clip path freed CLIP
   after each job). To revert to load→free, clear `clip_onnx._state` after use.
 - **In-memory jobs dict**: restart loses job *status* but not extracted bundles.
+- **In-place deferred-resume sidecar (`inplace_deferred.json`).** A single JSON file under
+  `BUNDLE_DIR`, written atomically (temp + `replace`) under a module lock, touched from two
+  threads (FastAPI request `lookup` on submit; worker `record`/`drop` around synthesis). Failure
+  modes: (1) it is NOT the durability of the work — the note's `ingest_pending` flag is; the
+  sidecar is a pure *efficiency* cache, so a corrupt/missing file just means `_load` returns `{}`
+  and the next re-fire re-extracts (self-heals, no data loss). (2) A stale entry pointing at a
+  swept bundle is pruned on `lookup` (bundle-file existence check). (3) It maps `(note_path,
+  embed_ref)` verbatim — if a note is *renamed* while a resume is pending, the key no longer
+  matches the re-fire (new path) → one wasted re-extract under the new name; the old entry lingers
+  until it's overwritten or the bundle is swept (harmless). (4) Not size-bounded: entries only
+  exist for embeds stuck deferred, and each clears on settle, so the file stays tiny in practice.
 
 ---
 
@@ -406,6 +429,7 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | (note, embed) job de-dup | `jobs.submit()` |
 | **Synthesis DEFER on provider exhaustion** | `jobs._synthesize()` (503 → DEFERRED, keep bundle); `synthesize.SynthesisError.status` |
 | **Resume synthesis from saved bundle** | `POST /ingest/resume` (`main.ingest_resume`, path-guarded to BUNDLE_DIR) → `jobs.submit(resume_bundle=…)` → `_run` skip-to-synthesize |
+| **In-place resume-from-bundle (no re-extract on retry)** | `inplace_resume.py` (`record`/`lookup`/`drop`, sidecar `BUNDLE_DIR/inplace_deferred.json`); `jobs._find_deferred_inplace_bundle` (in-mem DEFERRED → sidecar); DEFER records, DONE/FAIL drops. Driven by `ResourceScanService` re-fire, no new worker (§4) |
 | **Bundle re-save (pre-synthesis, resume-ready)** | `jobs._save_bundle()` called again after `_ensure_local_copy` |
 | **Auto-whisper fallback (no captions)** | `extract_av.extract()` youtube branch: `_youtube_captions` RuntimeError → `_youtube_whisper` |
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |

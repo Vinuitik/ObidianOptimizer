@@ -41,12 +41,33 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
                         and j.get("embed_ref") == embed_ref
                         and j["status"] in ("QUEUED", "RUNNING")):
                     return public_view(j)
+    # In-place resume (INGEST_DURABILITY_PRIORITY §4): a prior synthesis for this (note,
+    # embed) DEFERRED with its bundle already extracted. Resume from that bundle instead of
+    # re-extracting (re-download + re-whisper + re-keyframe) — the whole efficiency win.
+    # Covers the in-memory DEFERRED job (embedder stayed up) AND the durable sidecar (after
+    # a restart). Skip when this call is itself a resume, extract-only, or the text route.
+    if note_path and embed_ref and not resume_bundle and not extract_only and text is None:
+        saved = _find_deferred_inplace_bundle(note_path, embed_ref)
+        if saved:
+            resume_bundle = saved["bundle_path"]
+            source_type = source_type or saved.get("source_type")
+            title = title or saved.get("title")
+            log.info("in-place resume: DEFERRED bundle found for (note=%s embed=%s) — "
+                     "synthesizing from saved bundle, no re-extract", note_path, embed_ref)
     # Resuming a capture supersedes its prior DEFERRED job — drop the stale one so the
     # backend's failure poller can't re-defer the capture off it while this retry runs.
     if resume_bundle and capture_id:
         with _lock:
             for jid in [k for k, v in _jobs.items()
                         if v.get("capture_id") == capture_id and v.get("status") == "DEFERRED"]:
+                del _jobs[jid]
+    # Same for an in-place resume (no capture_id): drop the superseded DEFERRED job for this
+    # (note, embed) so it can't linger in the registry as a phantom for listJobs/cleanup.
+    if resume_bundle and note_path and embed_ref:
+        with _lock:
+            for jid in [k for k, v in _jobs.items()
+                        if v.get("note_path") == note_path and v.get("embed_ref") == embed_ref
+                        and v.get("status") == "DEFERRED"]:
                 del _jobs[jid]
     job_id = uuid.uuid4().hex[:12]
     job = {
@@ -84,6 +105,21 @@ def public_view(job: dict) -> dict:
     return {k: v for k, v in job.items() if not k.startswith("_")}
 
 
+def _find_deferred_inplace_bundle(note_path: str, embed_ref: str) -> dict | None:
+    """A resumable bundle for this (note, embed) from a prior DEFERRED in-place synthesis,
+    or None. In-memory DEFERRED job first (fast path, embedder stayed up); the durable
+    sidecar second (survives restart). Returns {'bundle_path', 'source_type', 'title'}."""
+    with _lock:
+        for j in _jobs.values():
+            if (j.get("note_path") == note_path and j.get("embed_ref") == embed_ref
+                    and j.get("status") == "DEFERRED" and j.get("bundle_path")
+                    and os.path.isfile(j["bundle_path"])):
+                return {"bundle_path": j["bundle_path"],
+                        "source_type": j.get("source_type"), "title": j.get("title")}
+    from ingest import inplace_resume
+    return inplace_resume.lookup(note_path, embed_ref)
+
+
 def _ensure_worker():
     global _worker_started
     with _lock:
@@ -107,6 +143,14 @@ def _worker_loop():
             log.exception("ingest job %s failed", job_id)
             job["status"] = "FAILED"
             job["error"] = str(e)[:500]
+            # Terminal failure of an in-place job → forget its deferred-resume entry so the
+            # next re-fire extracts fresh (a bad bundle would just re-fail the resume) (§4).
+            if job.get("note_path") and job.get("embed_ref"):
+                try:
+                    from ingest import inplace_resume
+                    inplace_resume.drop(job["note_path"], job["embed_ref"])
+                except Exception:
+                    pass
             _maybe_escalate(job)   # AGENT_ESCALATION: hand recoverable failures to the agent
         finally:
             # Once the burst drains, release the bursty ingest models so VRAM/RAM
@@ -245,11 +289,25 @@ def _synthesize(job: dict, bundle: dict) -> None:
         if getattr(e, "status", None) == 503:
             job["status"] = "DEFERRED"
             job["error"] = str(e)[:500]
+            # Standalone captures are parked 'deferred' by the backend poller (they have a
+            # capture row). In-place jobs have NO capture row yet (create_capture runs only
+            # after synthesis), so record the saved bundle keyed by (note, embed) here — the
+            # next ResourceScanService re-fire resumes from it instead of re-extracting (§4).
+            if job.get("note_path") and job.get("embed_ref") and job.get("bundle_path"):
+                from ingest import inplace_resume
+                inplace_resume.record(job["note_path"], job["embed_ref"], job["bundle_path"],
+                                      ref=job.get("ref"), source_type=job.get("source_type"),
+                                      title=job.get("title"))
             log.warning("ingest job %s DEFERRED — all LLM providers cooling; "
-                        "capture queue will retry from bundle: %s", job["id"], e)
+                        "will retry from bundle: %s", job["id"], e)
             return
         raise
     job["status"] = "DONE"
+    # In-place synthesis settled successfully → forget any deferred-resume entry so a genuine
+    # future re-ingest (source changed) extracts fresh rather than resuming this stale bundle.
+    if job.get("note_path") and job.get("embed_ref"):
+        from ingest import inplace_resume
+        inplace_resume.drop(job["note_path"], job["embed_ref"])
     log.info("ingest job %s: %d segments, %d note(s) from %s",
              job["id"], len(bundle["segments"]),
              len(job.get("notes_created", [])), job["ref"])

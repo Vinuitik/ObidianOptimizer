@@ -93,11 +93,19 @@ survives an embedder OR backend restart. The on-disk bundle holds the completed 
 
 ## §4 Out of scope (flagged for follow-up)
 
-- **In-place note-embed durability optimization.** Already restart-durable via
-  `ResourceScanService.retryPendingIngests` (5-min, `ingest_pending` flag), but it *re-extracts*
-  each retry — re-downloading the video + re-running whisper/keyframes while providers are down.
-  A resume-from-bundle for in-place (keyed by note+embed) would remove that waste. Deferred:
-  it's an efficiency win, not a correctness gap. `[NOT IMPLEMENTED]`
+- **In-place note-embed durability optimization.** ✅ **SHIPPED 2026-07-09.** Was: restart-durable
+  via `ResourceScanService.retryPendingIngests` (5-min, `ingest_pending` flag) but *re-extracted*
+  each retry — re-downloading the video + re-running whisper/keyframes while providers were down.
+  Now: on an in-place synthesis DEFER the embedder records the saved bundle keyed by
+  `(note_path, embed_ref)` in `embedder/ingest/inplace_resume.py` (durable sidecar
+  `BUNDLE_DIR/inplace_deferred.json`); the existing 5-min re-fire drives the retry, and
+  `jobs.submit` → `_find_deferred_inplace_bundle` resumes from the bundle (in-memory DEFERRED job
+  first, sidecar second — restart-safe) instead of re-extracting. Dropped on DONE / terminal FAIL.
+  **Design choice (Option A):** kept entirely embedder-side (no new Java table/worker) because
+  in-place durability is *already* note-flag-driven — this only removes the re-extract waste, it is
+  not new durability. The sidecar is a pure efficiency cache: lose it and the next re-fire simply
+  re-extracts (no data loss). Tests: `embedder/tests/test_ingest.py` (defer→record→resume,
+  restart-via-sidecar, dangling-prune). See `embedder/ingest/FLOWS.md`.
 - **Router priority aging** (anti-starvation for low-priority work). `[NOT IMPLEMENTED]`
 
 ## Execution order (each a commit, tests green before moving on)
