@@ -437,6 +437,8 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | MCP: short-note gate (skip LLM split) | `mcp_server.create_note` → `_stage_note_as_is()` when `< INGEST_SPLIT_MIN_WORDS`(700); stages raw text in _inbox, note is its own source, zero tokens |
 | Routing rules | `router.py → ROUTE_TABLE` (ext→route) + `VIDEO_HOST_RE` (remote video platforms → "youtube"/yt-dlp branch) |
 | Add a video platform (IG/TikTok/Vimeo/X…) | `router.py VIDEO_HOST_RE` — narrow per-host patterns; route value "youtube" = yt-dlp remote (captions→whisper), site-agnostic. IG/TikTok best-effort (login/rate-limit/cookies) |
+| Web page with embedded video (Prong A) | `_run` (web branch) → `_fanout_web_videos(job)` → `embed_detect.detect_content_videos(html)` (main-content players + og:video, NOT prose `<a>` links; capped `MAX_VIDEOS`) → `submit()` each under the SAME `capture_id` (bands with page text). Toggle `INGEST_WEB_VIDEO_FANOUT` (default on). v1 limitation: child capture-seq restarts at 0 (intra-band order approximate) |
+| Detect/normalize embedded videos | `embed_detect.detect_content_videos()` / `canonical_video_url()` (embed/… → watch?v=…, vimeo player → vimeo.com/id, ig embed → reel) |
 | Whisper model / device | `WHISPER_MODEL` env / `extract_av._pick_device()` |
 | PDF diagram keep/drop | `keyframes.KEEP_PROMPTS / DROP_PROMPTS`, `extract_pdf._keep_diagrams()` |
 | Keyframe tuning | `keyframes.py → SCENE_THRESHOLD / MAX_FRAMES / CLIP_SIM_THRESHOLD / CUE_PATTERNS` |

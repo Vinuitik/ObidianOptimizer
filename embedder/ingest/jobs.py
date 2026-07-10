@@ -258,6 +258,42 @@ def _run(job: dict):
     _save_bundle(job, bundle)
     _synthesize(job, bundle)
 
+    # Prong A: a web page whose real substance is an embedded video → the page text alone is a
+    # thin blurb (trafilatura drops the <iframe>). Fan the embedded content-video(s) out as
+    # child ingest jobs under THIS capture, so the page becomes text notes + video subnotes in
+    # one inbox source-band. Best-effort, after the page's own notes are in.
+    if bundle.get("source", {}).get("type") == "web":
+        _fanout_web_videos(job)
+
+
+def _fanout_web_videos(job: dict) -> None:
+    """Submit each MAIN-CONTENT embedded video on a web page as a child ingest job under the
+    SAME capture_id, so its transcript notes band with the page's text notes as one source
+    (Prong A). Videos flow through the normal youtube/yt-dlp path (captions→whisper). Reuses
+    the parent's capture row — no new row, no backend round-trip. Best-effort: any failure is
+    logged and never fails the page ingest. Toggle via INGEST_WEB_VIDEO_FANOUT (default on).
+
+    KNOWN LIMITATION (v1): child jobs re-enumerate capture-seq from 0, so within the band the
+    video subnotes and text notes interleave by arrival, not strict page order. Unifying seq
+    needs inline (single-job) publishing — a follow-up."""
+    if os.environ.get("INGEST_WEB_VIDEO_FANOUT", "on").lower() in ("off", "0", "false"):
+        return
+    try:
+        import trafilatura
+        from ingest import embed_detect
+        html = trafilatura.fetch_url(job["ref"])
+        videos = embed_detect.detect_content_videos(html or "", job["ref"])
+    except Exception as e:
+        log.warning("web fan-out: detection failed for %s: %s", job.get("ref"), e)
+        return
+    for v in videos:
+        try:
+            submit(v, None, capture_id=job.get("capture_id"), source_type="video")
+            log.info("web fan-out: queued embedded video %s under capture %s",
+                     v, job.get("capture_id"))
+        except Exception as e:
+            log.warning("web fan-out: failed to queue %s: %s", v, e)
+
 
 def _save_bundle(job: dict, bundle: dict) -> None:
     BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
