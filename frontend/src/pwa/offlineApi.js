@@ -1,6 +1,6 @@
 // The offline seam. Drop-in replacements for the three api/notes functions the
 // review flow uses, made offline-aware so the SAME leaf components (ReviewPage,
-// FlashcardSession, SlideshowReview) work offline with zero component edits.
+// FlashcardSession, InlineNoteReview) work offline with zero component edits.
 //
 // Wiring (P3 activation): point the store at these instead of api/notes for the
 // three functions below — e.g. in src/store/useStore.js swap the imports of
