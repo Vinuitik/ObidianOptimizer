@@ -180,3 +180,4 @@ embedder `/ingest` (standalone, `find_home`).
 | Embedder URL | backend `embedder.url` (`${embedder.url:http://embedder:8000}`) |
 | Switch to Workbox | install `vite-plugin-pwa`, merge `vite-pwa.config.js` |
 | Persist-storage / SW register | `registerSW.js` |
+| **Offline boot on origin-down (Cloudflare 1033)** | `public/sw.js handleNavigate()` — network-first with timeout, falls back to cached shell on thrown error, timeout, OR non-ok RESPONSE (a down tunnel returns a real 5xx, so a plain `.catch()` leaked the error page). Bump `VERSION` to force re-cache. Needs ONE online load to install the new SW |

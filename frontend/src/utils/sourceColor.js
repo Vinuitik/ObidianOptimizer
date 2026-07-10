@@ -1,6 +1,8 @@
 // Color-code inbox notes by their source (capture), so every note the ingest agent produced
 // from ONE source shares a hue and reads as a band in the queue (InboxReview).
 //
+import { parseSourceRegion } from './inboxParse';
+//
 // Strategy: assign hues by the source's FIRST-APPEARANCE order using the golden angle
 // (~137.5°). Consecutive sources land far apart on the wheel — no two adjacent groups look
 // alike (the old hash-into-fixed-palette let near-duplicates like violet/periwinkle collide).
@@ -27,8 +29,11 @@ export function buildSourceColors(items) {
 }
 
 // Reorder so notes from the same source are contiguous (color bands read as groups),
-// preserving each source's first-appearance order and ordering within a source by
-// captureSeq. Falls back to `path` for items without a captureId (e.g. in-place).
+// preserving each source's first-appearance order. WITHIN a source, order by the note's
+// position IN the source (min page for a PDF, min start-time for a/v) so review flows in
+// reading order instead of the LLM's topical emit order — otherwise pages ricochet
+// (24,25 → 4,5 → 41) and there's no sane way to review. Falls back to captureSeq when a
+// note has no positional anchor (e.g. plain text). `path` keys un-captured/in-place items.
 export function groupBySource(items) {
   const firstSeen = new Map();
   items.forEach((it, i) => {
@@ -36,19 +41,31 @@ export function groupBySource(items) {
     if (!firstSeen.has(k)) firstSeen.set(k, i);
   });
   return items
-    .map((it, i) => ({ it, i }))
+    .map((it, i) => ({ it, i, pos: sourcePosition(it) }))
     .sort((a, b) => {
       const ga = firstSeen.get(a.it.captureId || a.it.path);
       const gb = firstSeen.get(b.it.captureId || b.it.path);
       if (ga !== gb) return ga - gb;
+      // Positional order within the source (page / timestamp). Positionless notes sort last.
+      if (a.pos !== b.pos) return a.pos - b.pos;
       const sa = a.it.captureSeq ?? 0, sb = b.it.captureSeq ?? 0;
       if (sa !== sb) return sa - sb;
-      // Same source order → sub-order (manual splits): #N before #N-1 before #N-2.
+      // Same position → sub-order (manual splits): #N before #N-1 before #N-2.
       const ma = a.it.captureSeqMinor ?? 0, mb = b.it.captureSeqMinor ?? 0;
       if (ma !== mb) return ma - mb;
       return a.i - b.i;
     })
     .map(x => x.it);
+}
+
+// A note's position within its source, as a sortable number: PDF → its lowest page;
+// audio/video → its clip start (seconds). No anchor (plain text) → Infinity (sorts last,
+// then captureSeq decides). Reuses the same footer parse the splice viewer reads.
+function sourcePosition(item) {
+  const r = parseSourceRegion(item?.content || '', item?.source);
+  if (r.pages && r.pages.length) return Math.min(...r.pages);
+  if (r.startSeconds != null) return r.startSeconds;
+  return Infinity;
 }
 
 // The order badge for an inbox row: "#N" for an original note, "#N-M" for a note manually

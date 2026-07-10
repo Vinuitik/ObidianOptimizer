@@ -15,7 +15,7 @@
  * architecture_plans/PWA_MOBILE_ARCH.md §9.
  */
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL_CACHE = `obsopt-shell-${VERSION}`;
 const MEDIA_CACHE = 'obsopt-media'; // unversioned: managed by the offline sync, not the SW
 
@@ -92,11 +92,10 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return; // never cache writes
 
-  // Navigations → network-first, fall back to cached shell so the app opens offline.
+  // Navigations → network-first, but fall back to the cached shell on ANY failure so the
+  // installed app actually boots when the origin is unreachable.
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match('/index.html'))
-    );
+    event.respondWith(handleNavigate(request));
     return;
   }
 
@@ -124,6 +123,41 @@ self.addEventListener('fetch', (event) => {
   // Everything else (incl. /api data GETs) → straight to network. Offline data
   // reads are served from IndexedDB by src/pwa/offlineApi.js, not the SW.
 });
+
+// App-shell navigation. Network-first with a hard timeout, but fall back to the cached
+// shell on ANY failure mode:
+//   • fetch throws            → truly offline (airplane mode, DNS down)
+//   • fetch times out         → origin hanging
+//   • fetch resolves NON-OK   → Cloudflare "error 1033" (tunnel down) is a real 5xx
+//                               RESPONSE, not a thrown error, so the old plain .catch()
+//                               leaked that error page instead of booting the cached app.
+// A successful response also refreshes the cached shell so deploys aren't stuck stale.
+async function handleNavigate(request) {
+  const cache = await caches.open(SHELL_CACHE);
+  try {
+    const res = await fetchWithTimeout(request, 3500);
+    if (res && res.ok) {
+      cache.put('/index.html', res.clone()).catch(() => {});
+      return res;
+    }
+    // Reachable origin but a bad status (tunnel down, 5xx, maintenance page) → prefer cache.
+    return (await cache.match('/index.html')) || (await cache.match('/')) || res;
+  } catch (e) {
+    return (await cache.match('/index.html')) || (await cache.match('/')) || Response.error();
+  }
+}
+
+// fetch() with a timeout — a down/slow origin shouldn't hang the app's boot. The underlying
+// request may keep running after we reject; that's fine, we've already fallen back to cache.
+function fetchWithTimeout(request, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('nav timeout')), ms);
+    fetch(request).then(
+      (r) => { clearTimeout(timer); resolve(r); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
 
 function isAppIcon(path) {
   return path === '/favicon.svg' || path.startsWith('/icons/');

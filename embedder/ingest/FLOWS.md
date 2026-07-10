@@ -446,3 +446,5 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | Default standalone folder | `INGEST_DEFAULT_FOLDER` env |
 | Synthesis model (claude-cli only) | `SYNTH_MODEL` env |
 | YouTube captions / download | `download/downloader.py` (`fetch_subs` / `download_sync`); see `download/FLOWS.md` |
+| PDF page render (review source) | `main.pdf_page()` `GET /pdf-page?path=&page=&dpi=&box=` → PyMuPDF rasterize; `box="x0,y0,x1,y1"` (PDF pts) draws a highlight before render (toggle-able server-side). nginx `location /pdf-page` → embedder. Path-guarded by `mcp_server._resolve_in_vault` |
+| Source-footer sub-page bbox (v2) | `synthesize._span_to_segs()` attaches `loc.bbox` for SINGLE-page spans (`bbox_start/end` pts) → `_source_section()` emits `bbox: <page> x0 y0 x1 y1`. Multi-page/v1 → omitted. Read by frontend `inboxParse.parseSourceRegion.bboxes` |

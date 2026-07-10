@@ -123,6 +123,66 @@ def health():
     }
 
 
+@app.get("/pdf-page")
+def pdf_page(path: str, page: int = 1, dpi: int = 110, box: str | None = None):
+    """Rasterize ONE page of a vault PDF → PNG for the review "source" panel, so a note's
+    referenced page is visible inline (and a mis-sourced note — e.g. one the pipeline built
+    from the table-of-contents page — is immediately obvious). The PDF is already served
+    unauthenticated at /workspace + /vault-media, so this exposes nothing new; it's just a
+    render of bytes the browser can already fetch.
+
+    `path` is vault-relative (e.g. `_workspace/Introduction to Agents.pdf`); `page` is
+    1-based; `dpi` is clamped 40–200. `box`="x0,y0,x1,y1" (PDF points — the SAME space the
+    ingest bbox is stored in) draws a highlight rectangle on the page BEFORE rasterizing, so
+    the frontend's "show region" toggle is just this param present/absent — no client-side
+    coordinate math. Absent → the clean page."""
+    from fastapi import Response
+    from mcp_server import _resolve_in_vault
+    import fitz
+
+    try:
+        pdf = _resolve_in_vault(path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path escapes the vault")
+    if pdf.suffix.lower() != ".pdf" or not pdf.exists():
+        raise HTTPException(status_code=404, detail="not a PDF in the vault")
+
+    dpi = max(40, min(int(dpi), 200))
+    rect = _parse_box(box)
+    try:
+        doc = fitz.open(pdf)
+        n_pages = doc.page_count
+        pg = doc[max(1, min(int(page), n_pages)) - 1]   # clamp to a real page, 0-based
+        if rect is not None:
+            # Stroked rect only (no fill) so the highlighted content stays readable. fitz
+            # draw-space == text-block bbox space (top-left origin) → coords map directly.
+            pg.draw_rect(fitz.Rect(*rect), color=(0.95, 0.25, 0.25), width=2.0)
+        png = pg.get_pixmap(dpi=dpi).tobytes("png")
+        doc.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"render failed: {e}")
+
+    # A clean page is immutable per (file, page, dpi) → cache hard. A boxed render varies by
+    # coords but is still deterministic; cache it too. `X-Pdf-Pages` lets the client clamp nav.
+    return Response(content=png, media_type="image/png", headers={
+        "Cache-Control": "public, max-age=604800",
+        "X-Pdf-Pages": str(n_pages),
+    })
+
+
+def _parse_box(box: str | None):
+    """"x0,y0,x1,y1" → (x0,y0,x1,y1) floats, or None if absent/malformed (→ clean page)."""
+    if not box:
+        return None
+    try:
+        parts = [float(v) for v in box.split(",")]
+        return tuple(parts) if len(parts) == 4 else None
+    except (ValueError, TypeError):
+        return None
+
+
 @app.post("/embed", response_model=EmbedResponse)
 def embed(req: EmbedRequest):
     if not req.texts:

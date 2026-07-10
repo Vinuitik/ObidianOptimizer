@@ -93,6 +93,18 @@ server {
         proxy_send_timeout  3600s;
     }
 
+    # Rendered PDF page images for the review "source" panel — embedder (PyMuPDF) rasterizes
+    # one page → PNG so the note's referenced page is visible inline. The PDF itself is already
+    # served unauthenticated at /workspace + /vault-media, so this adds no new exposure; it's a
+    # render of bytes the browser can already fetch. Endpoint self-caches (Cache-Control).
+    location /pdf-page {
+        proxy_pass         http://embedder:8000;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+    }
+
     # ── Static media — served by nginx directly for range-request support ────────
     # vault/resources/ subdirs (images, videos, audio, pdf) → embedded note media
     location /vault-media/ {

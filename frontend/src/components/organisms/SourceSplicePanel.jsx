@@ -81,10 +81,13 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
                       onOrientation={onOrientation} />;
   }
   if (kind === 'pdf') {
-    const page = region.pages[0] || 1;
+    const vp = vaultPdfPath(region.local || region.ref);
+    // Local vault PDF → render the actual referenced page(s) inline (so a note mis-sourced
+    // from the TOC is obvious), with a toggle-able highlight. External http PDF → plain embed.
+    if (vp) return <PdfPages path={vp} pages={region.pages} bboxes={region.bboxes} />;
     const src = mediaUrl(region.local || region.ref);
     return <embed key={src} className={styles.media} type="application/pdf"
-                  src={`${src}#page=${page}`} />;
+                  src={`${src}#page=${region.pages[0] || 1}`} />;
   }
   if (kind === 'web') {
     return <iframe className={styles.frame} src={region.ref} title="source page" />;
@@ -97,24 +100,85 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
   return <RsvpReader text={item.content} />;
 }
 
-// A video bounded to [start, end] — the note's own span. `#t=start,end` seeks to start;
-// the timeupdate guard pauses ONCE at end (media-fragment end isn't reliably enforced by
-// browsers). If the user hits play again from the end, we stop fighting them and let it run.
+// A video bounded to [start, end] — the note's own span. We DON'T trust the `#t=start,end`
+// media-fragment to seek: browsers honor it inconsistently (Chrome often ignores the start),
+// so the clip would open at 0:00 and play the whole file — exactly the "not a defined range"
+// bug. Instead we set `currentTime = start` explicitly on loadedmetadata. The timeupdate guard
+// pauses ONCE at end (fragment end isn't enforced either); replay from the end runs free.
 function ClipVideo({ src, start, end, onOrientation }) {
   const released = useRef(false);
-  const frag = start != null ? `#t=${start}${end != null ? ',' + end : ''}` : '';
-  const full = src + frag;
-  useEffect(() => { released.current = false; }, [full]);   // reset the clip guard per note
-  const onMeta = (e) => onOrientation?.(
-    e.target.videoHeight > e.target.videoWidth ? 'portrait' : 'landscape');
+  const seeked = useRef(false);
+  useEffect(() => { released.current = false; seeked.current = false; }, [src, start, end]);
+  const onMeta = (e) => {
+    onOrientation?.(e.target.videoHeight > e.target.videoWidth ? 'portrait' : 'landscape');
+    if (start != null && !seeked.current) {
+      try { e.target.currentTime = start; } catch {}   // explicit seek — reliable across browsers
+      seeked.current = true;
+    }
+  };
   const onTime = (e) => {
     if (end != null && !released.current && e.target.currentTime >= end) {
       e.target.pause();
       released.current = true;   // clip shown once; don't re-pause on manual replay
     }
   };
-  return <video key={full} className={styles.media} src={full} controls
+  return <video key={src} className={styles.media} src={src} controls preload="metadata"
                 onLoadedMetadata={onMeta} onTimeUpdate={onTime} />;
+}
+
+// The referenced PDF page(s), rasterized server-side by the embedder (/pdf-page) so we see
+// exactly what the note claims as its source — not the clunky whole-doc <embed>. When the
+// note carries a sub-page bbox (v2 ingest), a "Show region" toggle asks the endpoint to draw
+// the highlight (box= param); the user can disable it when the region is wrong. v1 notes have
+// no bbox → just the clean page(s), which already exposes TOC/agenda mis-sourcing at a glance.
+function PdfPages({ path, pages, bboxes }) {
+  const list = pages && pages.length ? pages : [1];
+  const hasBoxes = bboxes && list.some(p => bboxes[p]);
+  const [showRegion, setShowRegion] = useState(true);
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    const raw = mediaUrl(path);
+    return (
+      <div className={styles.pdfMissing}>
+        <p>Couldn’t render this page.</p>
+        <a href={`${raw}#page=${list[0]}`} target="_blank" rel="noreferrer">Open the PDF ↗</a>
+      </div>
+    );
+  }
+  return (
+    <div className={styles.pdfWrap}>
+      {hasBoxes && (
+        <div className={styles.pdfControls}>
+          <label className={styles.pdfToggle}>
+            <input type="checkbox" checked={showRegion} onChange={e => setShowRegion(e.target.checked)} />
+            Show region
+          </label>
+        </div>
+      )}
+      <div className={styles.pdfPages}>
+        {list.map(p => (
+          <img key={`${p}-${showRegion}`} className={styles.pdfPage} loading="lazy"
+               alt={`page ${p}`} src={pdfPageUrl(path, p, showRegion ? bboxes?.[p] : null)}
+               onError={() => setFailed(true)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function pdfPageUrl(vaultPath, page, box) {
+  let u = `/pdf-page?path=${encodeURIComponent(vaultPath)}&page=${page}`;
+  if (box && box.length === 4) u += `&box=${box.map(n => Math.round(n * 10) / 10).join(',')}`;
+  return u;
+}
+
+// A local vault PDF path the /pdf-page endpoint can resolve (vault-relative, .pdf), or null
+// for an external http PDF (which the endpoint can't open — caller falls back to <embed>).
+function vaultPdfPath(ref) {
+  const r = (ref || '').trim();
+  if (!r || /^https?:\/\//i.test(r)) return null;
+  return /\.pdf$/i.test(r) ? r.replace(/^\/+/, '') : null;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -136,11 +200,14 @@ function youtubeId(url) {
 // http(s) refs load directly; vault-relative media is served by nginx (range-request
 // support): resources/… → /vault-media/…, _workspace/… → /workspace/…. Legacy bare image
 // names still go through the Java image endpoint.
+// Paths are percent-encoded per segment: real media filenames carry spaces and non-ASCII
+// (e.g. the fullwidth colon "：" in yt-dlp titles), which are invalid raw in a src attribute.
 function mediaUrl(ref) {
   if (/^https?:\/\//.test(ref || '')) return ref;
   const p = (ref || '').replace(/^\/+/, '');
-  if (p.startsWith('_workspace/')) return '/workspace/' + p.slice('_workspace/'.length);
-  if (p.startsWith('resources/'))  return '/vault-media/' + p.slice('resources/'.length);
+  const enc = (rest) => rest.split('/').map(encodeURIComponent).join('/');
+  if (p.startsWith('_workspace/')) return '/workspace/' + enc(p.slice('_workspace/'.length));
+  if (p.startsWith('resources/'))  return '/vault-media/' + enc(p.slice('resources/'.length));
   return `/api/images/${encodeURIComponent(ref || '')}`;
 }
 function hrefFor(ref) { return /^https?:\/\//.test(ref) ? ref : mediaUrl(ref); }

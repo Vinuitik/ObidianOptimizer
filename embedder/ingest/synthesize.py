@@ -262,7 +262,16 @@ def _span_to_segs(span: dict) -> list[dict]:
     carry no page/time meta → no media, ref-only footer."""
     kind = span.get("kind")
     if kind == "page":
-        return [{"loc": {"page": p}} for p in span.get("pages", [])]
+        pages = span.get("pages", [])
+        segs = [{"loc": {"page": p}} for p in pages]
+        # Sub-page region (bbox_start/end are PDF points). Only meaningful when the Unit sits
+        # on ONE page — a start point on page A and an end point on page B don't make a rect —
+        # so attach it just then. This is what lights up the review "show region" highlight;
+        # for multi-page or v1 (page-only) spans there's no bbox and the whole page shows.
+        bs, be = span.get("bbox_start"), span.get("bbox_end")
+        if bs and be and len(segs) == 1:
+            segs[0]["loc"]["bbox"] = [bs[0], bs[1], be[0], be[1]]
+        return segs
     if kind == "time":
         return [{"loc": {"t_start": span.get("start_ms", 0) / 1000,
                          "t_end": span.get("end_ms", 0) / 1000}}]
@@ -350,6 +359,12 @@ def _source_section(src: dict, segs: list[dict]) -> str:
             lines.append(f"clip: {t0}-{t1}")
     if pages:
         lines.append("pages: " + ", ".join(str(p) for p in pages))
+    # Sub-page highlight region(s), PDF points: `bbox: <page> x0 y0 x1 y1`. Only v2 page spans
+    # carry one (see _span_to_segs); the review viewer draws it as a toggle-able rectangle.
+    for s in segs:
+        b = s.get("loc", {}).get("bbox")
+        if b and "page" in s["loc"]:
+            lines.append("bbox: %d %.1f %.1f %.1f %.1f" % (s["loc"]["page"], b[0], b[1], b[2], b[3]))
     return "\n".join(lines)
 
 

@@ -264,3 +264,9 @@ Controlled by `store.toastMessage` + `showToast()`.
 | Toast dismiss timing | `atoms/Toast.jsx` + `store/useStore.js showToast()` |
 | New note form | `organisms/NewNoteForm.jsx` |
 | Frontmatter display | `molecules/FrontmatterTable.jsx` |
+| Ingest-review source panel | `organisms/SourceSplicePanel.jsx` — kind (`sourceKind`) → viewer: youtube iframe / `ClipVideo` (local) / `PdfPages` (local pdf) / web iframe / RSVP·Read (text). Region from `utils/inboxParse.parseSourceRegion` |
+| PDF source: page render + region toggle | `SourceSplicePanel.PdfPages` → `<img src=/pdf-page?path=&page=[&box=]>`; "Show region" toggle adds `box=` (drawn server-side). `vaultPdfPath()` gates local-vs-external. v1 notes = clean page (no bbox) |
+| Video clip start-seek | `SourceSplicePanel.ClipVideo` — `currentTime=start` on `loadedmetadata` (NOT `#t=`, browsers ignore start); `onTime` pauses once at `end` |
+| Media URL encoding | `SourceSplicePanel.mediaUrl()` — per-segment `encodeURIComponent` (spaces/fullwidth-colon in yt-dlp names) |
+| Inbox order within a source | `utils/sourceColor.groupBySource()` → `sourcePosition()` (min page / clip start), NOT captureSeq — reading order |
+| Source footer parse (pages/clip/bbox) | `utils/inboxParse.parseSourceRegion()` (`pages`, `startSeconds`/`endSeconds`, `local`, `bboxes`) |

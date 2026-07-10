@@ -59,6 +59,9 @@ services:
       - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}
       - WRAPPER_URL=${WRAPPER_URL:-http://host.docker.internal:5001}
       - SYNTH_MODEL=${SYNTH_MODEL:-haiku}
+      # v2 ingest (block-anchored, TOC-aware chaptering + sub-page bbox). Was dark-launched
+      # off; now on. Toggle via INGEST_V2 in .env (on/off).
+      - INGEST_V2=${INGEST_V2:-off}
       - WHISPER_MODEL=${WHISPER_MODEL:-distil-large-v3}
       - DOWNLOAD_DIR=/workspace
       - RESOURCE_DIR=/resources

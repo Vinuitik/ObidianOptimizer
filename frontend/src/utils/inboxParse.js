@@ -49,6 +49,15 @@ export function parseSourceRegion(content, source) {
     ? pagesM[1].split(',').map(s => parseInt(s, 10)).filter(Number.isFinite)
     : [];
 
+  // Sub-page highlight regions (v2 only): `bbox: <page> x0 y0 x1 y1` in PDF points. Map
+  // page → [x0,y0,x1,y1]; the splice viewer forwards it to the render endpoint's `box=` param
+  // (drawn server-side) as a toggle-able highlight. v1 notes have none → whole page shows.
+  const bboxes = {};
+  const bboxRe = /^\s*bbox:\s*(\d+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)/gim;
+  for (const m of body.matchAll(bboxRe)) {
+    bboxes[parseInt(m[1], 10)] = [m[2], m[3], m[4], m[5]].map(Number);
+  }
+
   // Bounded clip (seconds): `clip: START-END` — the note's exact video span, so the viewer
   // plays only that fragment. Falls back to a start-only anchor (t=…s / "from MM:SS").
   let startSeconds = null, endSeconds = null;
@@ -65,5 +74,5 @@ export function parseSourceRegion(content, source) {
       if (mm) startSeconds = parseInt(mm[1], 10) * 60 + parseInt(mm[2], 10);
     }
   }
-  return { ref, pages, startSeconds, endSeconds, local };
+  return { ref, pages, startSeconds, endSeconds, local, bboxes };
 }
