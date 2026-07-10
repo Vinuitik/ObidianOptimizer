@@ -62,6 +62,11 @@ export const putAssignments = (list) =>
 export const getAssignmentByNote = (notePath) =>
   tx('assignments', 'readonly', (s) => reqValue(s.get(notePath), {}));
 
+// All prebuilt assignments — used to tag which offline due notes have flashcards
+// (hasCards) for the hybrid-review split.
+export const getAllAssignments = () =>
+  tx('assignments', 'readonly', (s) => reqValue(s.getAll(), {}));
+
 // ── outbox ───────────────────────────────────────────────────────────────────
 export const addToOutbox = (entry) =>
   tx('outbox', 'readwrite', (s) => { s.add({ ...entry, ts: Date.now() }); });
@@ -76,5 +81,11 @@ export const deleteFromOutbox = (id) =>
 export const setMeta = (key, value) =>
   tx('meta', 'readwrite', (s) => { s.put({ key, value }); });
 
-export const getMeta = (key) =>
-  tx('meta', 'readonly', (s) => reqValue(s.get(key), {}));
+// meta rows are stored as { key, value }; callers want the VALUE, not the record. Unwrap it
+// here (returning null for a missing row) — otherwise every reader gets `{key,value}` and
+// e.g. `getMeta('inboxItems')` looks like an object, not the array (crashed Learn), and
+// `getCreds().driveFolderId` is undefined (broke the Drive test read).
+export const getMeta = async (key) => {
+  const rec = await tx('meta', 'readonly', (s) => reqValue(s.get(key), {}));
+  return rec && 'value' in rec ? rec.value : null;
+};

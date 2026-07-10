@@ -4,7 +4,6 @@ import { gradeNoteOffline as gradeNote, fetchNoteContentOffline as fetchNoteCont
 import useOffline from '../pwa/useOffline';
 import FlashcardSession from '../components/organisms/FlashcardSession';
 import NoteRenderer from '../components/molecules/NoteRenderer';
-import cardStyles from '../components/organisms/FlashcardSession.module.css';
 import styles from './ReviewPage.module.css';
 
 export default function ReviewPage() {
@@ -28,9 +27,17 @@ export default function ReviewPage() {
   }, [isAuthenticated]);
 
   function startSession(note) {
-    setActiveNote(note);
-    setInlineNote(null);
-    setSessionKey(k => k + 1);
+    // Hybrid routing: a flashcard-track note (and flashcards actually usable here) →
+    // the auto-graded test. Everything else is read-and-self-rate — open the note
+    // inline with the grade bar (canGrade=true), the same surface the no-cards path uses.
+    if (note.track === 'flashcard' && useFlashcards) {
+      setActiveNote(note);
+      setInlineNote(null);
+      setSessionKey(k => k + 1);
+    } else {
+      setActiveNote(null);
+      handleReviewNote(note.fullPath, true);
+    }
   }
 
   // canGrade: show the self-rate band bar only when the note was NOT already graded.
@@ -63,6 +70,10 @@ export default function ReviewPage() {
 
   const hasSession = Boolean(activeNote || inlineNote);
 
+  // Split summary for the list header (how the day is divided).
+  const flashcardCount = reviewNotes.filter(n => n.track === 'flashcard').length;
+  const readCount      = reviewNotes.length - flashcardCount;
+
   return (
     <div className={`${styles.page} ${hasSession ? styles.hasSession : ''}`}>
       {/* Left — note list */}
@@ -71,6 +82,12 @@ export default function ReviewPage() {
           <h2 className={styles.listTitle}>Due for review</h2>
           <span className={styles.listCount}>{reviewNotes.length}</span>
         </div>
+        {reviewNotes.length > 0 && (
+          <p className={styles.listSplit}>
+            {flashcardCount > 0 ? `${flashcardCount} flashcard${flashcardCount > 1 ? 's' : ''} · ` : ''}
+            {readCount} to read
+          </p>
+        )}
 
         <div className={styles.listItems}>
           {reviewNotes.length === 0 && (
@@ -82,7 +99,10 @@ export default function ReviewPage() {
               className={`${styles.noteItem} ${activeNote?.fullPath === note.fullPath ? styles.noteItemActive : ''}`}
               onClick={() => startSession(note)}
             >
-              {note.shortName}
+              <span className={styles.noteItemName}>{note.shortName}</span>
+              <span className={styles.trackBadge} data-track={note.track === 'flashcard' ? 'flashcard' : 'read'}>
+                {note.track === 'flashcard' ? 'cards' : 'read'}
+              </span>
             </button>
           ))}
         </div>
@@ -95,7 +115,7 @@ export default function ReviewPage() {
       {/* Divider */}
       <div className={styles.divider} />
 
-      {/* Right — inline note view, flashcard test, or slideshow */}
+      {/* Right — flashcard test (flashcard track) or inline read + self-rate (read track) */}
       <div className={styles.sessionPane}>
         {inlineNote ? (
           <InlineNoteReview
@@ -104,29 +124,18 @@ export default function ReviewPage() {
             onClose={handleClose}
           />
         ) : activeNote ? (
-          useFlashcards ? (
-            <FlashcardSession
-              key={sessionKey}
-              notePath={activeNote.fullPath}
-              onReviewNote={handleReviewNote}
-              onClose={handleClose}
-            />
-          ) : (
-            <SlideshowReview
-              key={sessionKey}
-              note={activeNote}
-              onReviewNote={handleReviewNote}
-              onClose={handleClose}
-            />
-          )
+          <FlashcardSession
+            key={sessionKey}
+            notePath={activeNote.fullPath}
+            onReviewNote={handleReviewNote}
+            onClose={handleClose}
+          />
         ) : (
           <div className={styles.emptySession}>
             <p className={styles.emptySessionText}>
-              {useFlashcards
-                ? 'Select a note from the list to start a flashcard test.'
-                : online
-                  ? 'Select a note from the list to review and self-rate it.'
-                  : 'Offline — select a downloaded note to self-rate it. Grades sync when you reconnect.'}
+              {online || isDriveMode()
+                ? 'Select a note — “cards” notes start a flashcard test, “read” notes open to read and self-rate.'
+                : 'Offline — select a downloaded note to read and self-rate. Grades sync when you reconnect.'}
             </p>
           </div>
         )}
@@ -214,62 +223,5 @@ function InlineNoteReview({ note, onBack, onClose }) {
   );
 }
 
-// ── Slideshow mode (flashcards off): read the note, self-rate with 4 bands ────
-
-function SlideshowReview({ note, onReviewNote, onClose }) {
-  const dismissFromReview = useStore(s => s.dismissFromReview);
-  const showToast         = useStore(s => s.showToast);
-  const [graded, setGraded] = useState(null); // grade result after rating
-
-  async function rate(band) {
-    try {
-      const result = await gradeNote(note.fullPath, band);
-      setGraded(result);
-      dismissFromReview(note.fullPath);
-    } catch (e) {
-      showToast(`Rating failed: ${e.message ?? e}`);
-    }
-  }
-
-  return (
-    <div className={cardStyles.session} data-testid="slideshow-review">
-      <div className={cardStyles.card}>
-        <span className={cardStyles.cardType}>Self-rated review</span>
-        <p className={cardStyles.question}>{note.shortName}</p>
-
-        {!graded ? (
-          <>
-            <p className={cardStyles.lockedNote}>
-              Read the note, then rate how well you remembered it.
-            </p>
-            <div className={cardStyles.options} data-testid="band-buttons">
-              {BANDS.map(b => (
-                <button key={b.value} className={cardStyles.option}
-                        onClick={() => rate(b.value)} data-testid={`band-${b.value}`}>
-                  <span className={cardStyles.optionLetter}>{b.label[0]}</span>
-                  {b.label} — {b.hint}
-                </button>
-              ))}
-            </div>
-          </>
-        ) : (
-          <p className={cardStyles.lockedNote} data-testid="slideshow-graded">
-            Graded <strong>{graded.band.replace('_', ' ')}</strong>
-            {graded.queued
-              ? ' — queued, will sync when you reconnect'
-              : ` — next review ${new Date(graded.due).toLocaleDateString()}`}
-          </p>
-        )}
-      </div>
-
-      <div className={cardStyles.resultFooter}>
-        <button className={cardStyles.reviewNoteBtn} onClick={() => onReviewNote(note.fullPath)}>
-          Open note →
-        </button>
-        <button className={cardStyles.navBtn} onClick={onClose}>
-          {graded ? 'Next note' : 'Close'}
-        </button>
-      </div>
-    </div>
-  );
-}
+// (Former SlideshowReview removed: the read track now uses InlineNoteReview, which
+// renders the note body inline above the same four self-rate band buttons.)

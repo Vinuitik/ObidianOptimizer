@@ -56,8 +56,16 @@
   text-align: center;
 }
 
+.listSplit {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  padding: 0 var(--sp-4) var(--sp-2);
+}
+
 .noteItem {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   width: 100%;
   text-align: left;
   padding: var(--sp-2) var(--sp-4);
@@ -68,6 +76,32 @@
   border: none;
   cursor: pointer;
   transition: background var(--ease-fast), color var(--ease-fast);
+}
+
+.noteItemName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Track tag: which lane this note is in today — flashcard test vs read-and-self-rate. */
+.trackBadge {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 1px 7px;
+  color: var(--color-muted);
+  background: var(--color-card);
+}
+
+.trackBadge[data-track="flashcard"] {
+  color: var(--color-accent-soft);
+  background: var(--color-accent-dim);
 }
 
 .noteItem:hover { background: var(--color-card); color: var(--color-text); }

@@ -43,8 +43,9 @@ function answerDisplayOf(card, value) {
 }
 
 export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
-  const dismissFromReview = useStore(s => s.dismissFromReview);
-  const showToast         = useStore(s => s.showToast);
+  const dismissFromReview   = useStore(s => s.dismissFromReview);
+  const recordFlashcardDone = useStore(s => s.recordFlashcardDone);
+  const showToast           = useStore(s => s.showToast);
   const [flagged, setFlagged]       = useState({});        // { [cardId]: true } once flagged
   const [phase, setPhase]           = useState('loading'); // loading | quiz | result | error
   const [error, setError]           = useState(null);
@@ -57,7 +58,15 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
   useEffect(() => {
     let cancelled = false;
     buildAssignment(notePath, SESSION_POINTS)
-      .then(a => { if (!cancelled) { setAssignment(a); setPhase('quiz'); } })
+      .then(a => {
+        if (cancelled) return;
+        // A malformed/empty assignment (missing cards array) must NOT crash the render at
+        // `cards[idx]` — route it to the error phase, which offers "Review note directly".
+        if (!a || !Array.isArray(a.cards) || a.cards.length === 0) {
+          throw new Error('No cards available for this note yet.');
+        }
+        setAssignment(a); setPhase('quiz');
+      })
       .catch(e => { if (!cancelled) { setError(String(e.message ?? e)); setPhase('error'); } });
     return () => { cancelled = true; };
   }, [notePath]);
@@ -65,6 +74,10 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
   if (phase === 'loading') {
     return <div className={styles.session} data-testid="flashcard-loading">
       <p className={styles.lockedNote}>Building your test…</p>
+      {/* Escape hatch: never trap the user on a slow/stuck build. */}
+      <div className={styles.nav}>
+        <button className={styles.navBtn} onClick={onClose}>Cancel</button>
+      </div>
     </div>;
   }
   if (phase === 'error') {
@@ -80,7 +93,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
     </div>;
   }
 
-  const cards    = assignment.cards;
+  const cards    = Array.isArray(assignment.cards) ? assignment.cards : [];
   const variants = assignment.variants ?? {};
   const card     = cards[idx];
   const isLocked = Boolean(verdicts[card?.id]);
@@ -105,6 +118,9 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
       // no longer due — drop it from the visible review list. Slideshow mode does
       // the same on rate(). Without this the note lingers and looks un-reviewed.
       dismissFromReview(notePath);
+      // Count this test against today's flashcard budget so a reload won't re-offer
+      // flashcard slots past the daily cap (see reviewPlan.js / getReviewSession).
+      recordFlashcardDone();
     } catch { /* result phase still renders per-card verdicts */ }
     setPhase('result');
   }

@@ -17,6 +17,7 @@ import {
   fetchReviewOffline as fetchReview,
   fetchNoteContentOffline as fetchNoteContent,
 } from '../pwa/offlineApi';
+import { allocateTracks } from '../pwa/reviewPlan';
 import { setPendingBlobs } from '../utils/obsidianImagePlugin';
 import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
@@ -29,15 +30,30 @@ function getReviewSession() {
   const today = new Date().toISOString().slice(0, 10);
   try {
     const stored = JSON.parse(localStorage.getItem(REVIEW_KEY) || 'null');
-    if (stored?.date === today) return { offset: stored.offset ?? 0 };
+    if (stored?.date === today) {
+      return { offset: stored.offset ?? 0, flashcardsDone: stored.flashcardsDone ?? 0 };
+    }
   } catch {}
-  localStorage.setItem(REVIEW_KEY, JSON.stringify({ date: today, offset: 0 }));
-  return { offset: 0 };
+  // New calendar day → reset offset AND the flashcard-done counter (fresh daily budget).
+  localStorage.setItem(REVIEW_KEY, JSON.stringify({ date: today, offset: 0, flashcardsDone: 0 }));
+  return { offset: 0, flashcardsDone: 0 };
+}
+
+function saveReviewSession(patch) {
+  const today = new Date().toISOString().slice(0, 10);
+  const cur = getReviewSession();
+  localStorage.setItem(REVIEW_KEY, JSON.stringify({ date: today, ...cur, ...patch }));
 }
 
 function saveReviewOffset(offset) {
-  const today = new Date().toISOString().slice(0, 10);
-  localStorage.setItem(REVIEW_KEY, JSON.stringify({ date: today, offset }));
+  saveReviewSession({ offset });
+}
+
+// One more flashcard test finished today → shrink today's remaining flashcard budget
+// so a mid-day reload won't re-offer flashcard slots past maxDailyFlashcards.
+function bumpFlashcardsDone() {
+  const { flashcardsDone } = getReviewSession();
+  saveReviewSession({ flashcardsDone: flashcardsDone + 1 });
 }
 
 // ── Tree helpers ──────────────────────────────────────────────────────────────
@@ -82,18 +98,20 @@ function indexEntries(filePaths) {
 
 // ── Review list builder ───────────────────────────────────────────────────────
 
-function buildReviewList(paths) {
+// Input: allocated notes [{ path, hasCards, track }]. Produces the review list items
+// the UI renders, keeping track/hasCards and de-duplicating display names.
+function buildReviewList(notes) {
   const used = {};
-  const map = new Map();
-  paths.forEach(fullPath => {
+  const seen = new Set();
+  return notes.map(({ path: fullPath, track, hasCards }) => {
     let base   = fullPath.split(/[/\\]/).pop().replace(/\.md$/, '');
     let unique = base;
     let count  = used[base] || 0;
-    while (map.has(unique)) { count += 1; unique = `${base} (${count})`; }
+    while (seen.has(unique)) { count += 1; unique = `${base} (${count})`; }
     used[base] = count;
-    map.set(unique, fullPath);
+    seen.add(unique);
+    return { shortName: unique, fullPath, track, hasCards };
   });
-  return Array.from(map.entries()).map(([shortName, fullPath]) => ({ shortName, fullPath }));
 }
 
 function noteBasename(fullPath) {
@@ -134,7 +152,7 @@ const initialDataState = () => ({
   reviewHasMore: false,
 
   // Settings (loaded from backend on startup)
-  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true },
+  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true, maxDailyReviews: 50, maxDailyFlashcards: 20 },
 
   // Toast notification: null | { message: string }
   toast: null,
@@ -235,10 +253,21 @@ const useStore = create((set, get) => ({
   },
 
   fetchReviewNotes: async (offset = 0) => {
-    const pageSize = get().settings.reviewPageSize;
+    const { maxDailyReviews, maxDailyFlashcards } = get().settings;
+    const totalMax = maxDailyReviews ?? 50;         // total-per-day ceiling = fetch size
     try {
-      const { notes, hasMore } = await fetchReview(offset, pageSize);
-      set({ reviewNotes: buildReviewList(notes), reviewOffset: offset, reviewHasMore: hasMore });
+      const { notes, hasMore } = await fetchReview(offset, totalMax);
+      // Split into flashcard vs read tracks under the caps. flashcardsDone shrinks
+      // the flashcard budget so the day never exceeds maxDailyFlashcards.
+      const { flashcardsDone } = getReviewSession();
+      // Global flashcards-off = 0 flashcard budget → the whole day is read-and-self-grade.
+      const flashcardMax = get().settings.flashcardsEnabled === false ? 0 : (maxDailyFlashcards ?? 20);
+      const allocated = allocateTracks(notes, {
+        flashcardMax,
+        totalMax,
+        flashcardsDoneToday: flashcardsDone,
+      });
+      set({ reviewNotes: buildReviewList(allocated), reviewOffset: offset, reviewHasMore: hasMore });
       saveReviewOffset(offset);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
@@ -249,12 +278,16 @@ const useStore = create((set, get) => ({
 
   loadMoreReview: async () => {
     const { reviewOffset, settings } = get();
-    await get().fetchReviewNotes(reviewOffset + settings.reviewPageSize);
+    await get().fetchReviewNotes(reviewOffset + (settings.maxDailyReviews ?? 50));
   },
 
   dismissFromReview: (fullPath) => {
     set(s => ({ reviewNotes: s.reviewNotes.filter(n => n.fullPath !== fullPath) }));
   },
+
+  // A flashcard test finished → count it against today's flashcard budget so a reload
+  // won't re-offer flashcard slots past the cap. (Read/self-grade reviews don't count.)
+  recordFlashcardDone: () => { bumpFlashcardsDone(); },
 
   // ── Note open ─────────────────────────────────────────────────────────────
 

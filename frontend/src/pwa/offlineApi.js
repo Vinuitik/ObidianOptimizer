@@ -21,7 +21,7 @@ import {
   discardInboxNote as netDiscardInbox,
   acknowledgeCapture as netAcknowledge,
 } from '../api/inbox';
-import { getAllReviewNotes, getReviewNote, getAssignmentByNote, getMeta, setMeta } from './db';
+import { getAllReviewNotes, getReviewNote, getAssignmentByNote, getAllAssignments, getMeta, setMeta } from './db';
 import {
   enqueueGrade, enqueueCapture, enqueueCaptureText, enqueueAssignment,
   enqueueFile, enqueueDiscard, enqueueAcknowledge, flush,
@@ -36,21 +36,29 @@ let driveMode = false;
 export function setDriveMode(on) { driveMode = on; }
 export function isDriveMode() { return driveMode; }
 
-// Review list — network when online, downloaded IDB subset when offline.
+// Review list — network when online, downloaded IDB subset when offline. Every branch
+// yields { notes: [{ path, hasCards }], hasMore } so the store's allocator (reviewPlan.js)
+// can split flashcard vs read tracks identically on desktop and phone.
 export async function fetchReviewOffline(offset = 0, limit = 40) {
-  if (driveMode) {
-    // The bundle the server exported already contains only due notes.
-    const all = await getAllReviewNotes();
-    const page = all.slice(offset, offset + limit);
-    return { notes: page.map(n => n.path), hasMore: offset + limit < all.length };
-  }
+  if (driveMode) return localReviewPage(offset, limit);      // phone: never hits the server
   if (isOnline()) {
-    try { return await netFetchReview(offset, limit); }
-    catch (e) { if (!(e instanceof TypeError)) throw e; } // network blip → fall through
+    try { return await netFetchReview(offset, limit); }      // { notes:[{path,hasCards}], hasMore }
+    catch (e) { if (!(e instanceof TypeError)) throw e; }     // network blip → fall through
   }
+  return localReviewPage(offset, limit);
+}
+
+// Build a review page from the downloaded IDB set. hasCards = a prebuilt assignment
+// exists for the note; ordered oldest-due-first to match the server, so the flashcard
+// budget lands on the same (oldest) notes it would online.
+async function localReviewPage(offset, limit) {
   const all = await getAllReviewNotes();
-  const page = all.slice(offset, offset + limit);
-  return { notes: page.map(n => n.path), hasMore: offset + limit < all.length };
+  const cardPaths = new Set((await getAllAssignments()).map(a => a.notePath));
+  all.sort((a, b) => String(a.srDue ?? '').localeCompare(String(b.srDue ?? '')) ||
+                     String(a.path).localeCompare(String(b.path)));
+  const notes = all.map(n => ({ path: n.path, hasCards: cardPaths.has(n.path) }));
+  const page = notes.slice(offset, offset + limit);
+  return { notes: page, hasMore: offset + limit < notes.length };
 }
 
 // Note text — network when online, downloaded copy when offline.

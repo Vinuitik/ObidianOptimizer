@@ -52,13 +52,22 @@ const SECTIONS = [
         label: 'Review system',
         type: 'select',
         options: [
-          { value: true,  label: 'Flashcards — auto-graded mini-tests on a dedicated Review tab' },
-          { value: false, label: 'Review list — read & self-rate from the Notes page' },
+          { value: true,  label: 'Hybrid — a few flashcard tests + the rest read & self-rate' },
+          { value: false, label: 'Read only — read & self-rate every note, no flashcards' },
         ],
-        hint: 'Picks ONE system. Flashcards: the Notes-page review list is hidden, the Review tab '
-          + 'appears, and new cards are generated. Review list: the Review tab disappears, review '
-          + 'runs inline on the Notes page, and NO new flashcards are created (existing cards are '
-          + 'kept, never deleted). Either grade feeds the same FSRS scheduler.',
+        hint: 'Hybrid: each day up to "Max flashcards per day" of your due card-bearing notes '
+          + '(oldest first) run as auto-graded tests; every other due note is read-and-self-rate. '
+          + 'Read only: no note is ever tested as flashcards (existing cards are kept, never '
+          + 'deleted, and no new ones are generated). Either grade feeds the same FSRS scheduler.',
+      },
+      {
+        key: 'maxDailyFlashcards',
+        label: 'Max flashcards per day',
+        type: 'number',
+        min: 0,
+        hint: 'Hard daily ceiling on flashcard tests (only card-bearing notes count, oldest-due '
+          + 'first). Remaining due notes are read-and-self-rate. Unfinished ones stay due and are '
+          + 'offered again first tomorrow. 0 = no flashcards. Must not exceed "Max reviews per day".',
       },
     ],
   },
