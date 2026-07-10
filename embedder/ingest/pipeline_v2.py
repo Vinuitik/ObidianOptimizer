@@ -137,9 +137,11 @@ def run(
 
     units = segment(ir, embed_fn=embed_fn)                      # boundaries (deterministic)
 
+    # Titles up front so collisions (2+ Units under one TOC chapter) get "… (part k)" before
+    # drafting — the reused chapter names stay unique and the LLM drafts against the final title.
+    titles = _dedup_titles([_unit_title(u, ir) for u in units])
     notes: list[DraftedNote] = []
-    for unit in units:
-        title = _unit_title(unit, ir)
+    for unit, title in zip(units, titles):
         body = draft_fn(unit, title)                            # the ONLY LLM (injected)
         splice = locator.resolve_splice(unit, ir).as_dict()    # consume-layer region
         notes.append(DraftedNote(
@@ -183,13 +185,40 @@ def _lifecycle_of(unit: Unit) -> str:
 
 
 def _unit_title(unit: Unit, ir: SourceIR) -> str:
-    """A provisional title for drafting: the Unit's first heading block if it has one,
-    else `<source title> (n)`. The drafter may refine it; boundaries are already fixed."""
+    """Title for a Unit, in priority order:
+      1. a real HEADING block inside the Unit — it IS the section name;
+      2. the enclosing TOC chapter name (paged media) — reuse the outline the boundaries were
+         already anchored to, so a mid-chapter Unit reads "Agent Ops", not "Introduction (7)";
+      3. `<source title> (n)` as a last resort (no heading, no TOC — e.g. plain text)."""
     owned = set(unit.block_ids)
-    for b in ir.sorted_blocks():
-        if b.id in owned and b.type == BlockType.HEADING and b.text.strip():
+    blocks = [b for b in ir.sorted_blocks() if b.id in owned]
+    for b in blocks:
+        if b.type == BlockType.HEADING and b.text.strip():
             return b.text.lstrip("#").strip()
+    # Enclosing TOC leaf: the last outline entry whose start page is at/before the Unit's first.
+    page = min((getattr(b.locator, "page_no", None) for b in blocks
+                if getattr(b.locator, "page_no", None) is not None), default=None)
+    if page is not None and ir.toc:
+        enclosing = [t for t in ir.toc if t.page_no is not None and t.page_no <= page and t.title.strip()]
+        if enclosing:
+            return max(enclosing, key=lambda t: t.page_no).title.strip()
     return f"{ir.title} ({unit.order_index + 1})"
+
+
+def _dedup_titles(titles: list[str]) -> list[str]:
+    """Reused chapter names collide when one chapter is size-split into several Units. Append
+    "(part k)" in order so titles stay unique; singletons are left untouched."""
+    from collections import Counter
+    counts = Counter(titles)
+    seen: dict[str, int] = {}
+    out = []
+    for t in titles:
+        if counts[t] > 1:
+            seen[t] = seen.get(t, 0) + 1
+            out.append(f"{t} (part {seen[t]})")
+        else:
+            out.append(t)
+    return out
 
 
 def _echo_draft(unit: Unit, title: str) -> str:
