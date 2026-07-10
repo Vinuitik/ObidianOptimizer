@@ -42,10 +42,23 @@ export function isDriveMode() { return driveMode; }
 export async function fetchReviewOffline(offset = 0, limit = 40) {
   if (driveMode) return localReviewPage(offset, limit);      // phone: never hits the server
   if (isOnline()) {
-    try { return await netFetchReview(offset, limit); }      // { notes:[{path,hasCards}], hasMore }
+    try {
+      const res = await netFetchReview(offset, limit);
+      return { notes: normalizeNotes(res?.notes), hasMore: Boolean(res?.hasMore) };
+    }
     catch (e) { if (!(e instanceof TypeError)) throw e; }     // network blip → fall through
   }
   return localReviewPage(offset, limit);
+}
+
+// Accept both the new shape ([{path,hasCards}]) and the legacy one (string[]), so a
+// frontend that's ahead of a not-yet-redeployed backend degrades to read-track instead
+// of crashing. Drops any entry without a path.
+function normalizeNotes(list) {
+  return (list ?? [])
+    .map(n => (typeof n === 'string' ? { path: n, hasCards: false }
+                                     : { path: n?.path, hasCards: Boolean(n?.hasCards) }))
+    .filter(n => typeof n.path === 'string' && n.path.length > 0);
 }
 
 // Build a review page from the downloaded IDB set. hasCards = a prebuilt assignment
