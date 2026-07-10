@@ -46,18 +46,21 @@ public class OfflineExportService {
     private final DriveService drive;
     private final AssignmentService assignmentService;
     private final InboxController inbox;
+    private final com.obsidian.obsidian.settings.SettingsRepository settingsRepo;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public OfflineExportService(FileRepository repository,
                                 VaultEncryptionService encryption,
                                 DriveService drive,
                                 AssignmentService assignmentService,
-                                InboxController inbox) {
+                                InboxController inbox,
+                                com.obsidian.obsidian.settings.SettingsRepository settingsRepo) {
         this.repository = repository;
         this.encryption = encryption;
         this.drive = drive;
         this.assignmentService = assignmentService;
         this.inbox = inbox;
+        this.settingsRepo = settingsRepo;
     }
 
     /** Build + encrypt + upload the due-notes bundle. Returns the note count. */
@@ -78,6 +81,12 @@ public class OfflineExportService {
         Map<String, Object> bundle = new LinkedHashMap<>();
         bundle.put("generatedAt", System.currentTimeMillis());
         bundle.put("notes", notes);
+        // Carry the review caps so the phone's hybrid split (reviewPlan.allocateTracks)
+        // matches the desktop even offline, where /settings is unreachable.
+        bundle.put("settings", Map.of(
+            "maxDailyReviews",    settingsRepo.getMaxDailyReviews(),
+            "maxDailyFlashcards", settingsRepo.getMaxDailyFlashcards(),
+            "flashcardsEnabled",  settingsRepo.isFlashcardsEnabled()));
 
         byte[] encrypted = encryption.encrypt(mapper.writeValueAsBytes(bundle));
         drive.uploadOffline(REVIEW_BUNDLE, encrypted);

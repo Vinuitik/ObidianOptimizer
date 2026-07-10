@@ -1,7 +1,7 @@
 // Pull the offline set from Drive → IndexedDB, so review works with no server.
 // Reads the ONE encrypted bundle the server exports (_offline/review-bundle.json.enc),
 // not the 3k per-file vault notes — the server already narrowed it to due notes.
-import { getCreds } from './setup';
+import { getCreds, refreshCreds } from './setup';
 import { getAccessToken, driveList, driveDownload } from './drive';
 import { deriveKey, decryptText } from './crypto';
 import { splitFrontmatter, parseFrontmatterFields } from '../utils/frontmatter';
@@ -35,8 +35,11 @@ async function findOfflineFile(token, folderId, name) {
 
 // Download + decrypt the review bundle into the reviewNotes store. Returns {notes, generatedAt}.
 export async function pullReviewFromDrive() {
-  const creds = await getCreds();
+  let creds = await getCreds();
   if (!creds) throw new Error('Link this device first (Drive link, below).');
+  // Self-heal a device that linked too early (blank folder id cached): re-read the server
+  // creds once before giving up — no manual unlink/re-link needed.
+  if (!creds.driveFolderId && navigator.onLine) creds = (await refreshCreds()) || creds;
   if (!creds.driveFolderId) throw new Error('No Drive folder yet — run a sync on the server first.');
 
   const token = await getAccessToken(creds);
@@ -54,6 +57,10 @@ export async function pullReviewFromDrive() {
     srDue: dueOf(n.content),
   }));
   await putReviewNotes(records);
+
+  // Cache the review caps the bundle carried so the offline hybrid split matches the
+  // desktop (the store reads this in Drive mode — see useStore.fetchReviewNotes).
+  if (bundle.settings) await setMeta('reviewCaps', bundle.settings);
 
   // Best-effort: pull the pre-built flashcard assignments too (offline card tests).
   // Absent bundle → self-rated review still works, so never fail the whole pull on it.

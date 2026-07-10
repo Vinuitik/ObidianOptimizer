@@ -16,8 +16,10 @@ import {
 import {
   fetchReviewOffline as fetchReview,
   fetchNoteContentOffline as fetchNoteContent,
+  isDriveMode,
 } from '../pwa/offlineApi';
 import { allocateTracks } from '../pwa/reviewPlan';
+import { getMeta } from '../pwa/db';
 import { setPendingBlobs } from '../utils/obsidianImagePlugin';
 import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
@@ -253,7 +255,20 @@ const useStore = create((set, get) => ({
   },
 
   fetchReviewNotes: async (offset = 0) => {
-    const { maxDailyReviews, maxDailyFlashcards } = get().settings;
+    let { maxDailyReviews, maxDailyFlashcards, flashcardsEnabled } = get().settings;
+    // Offline phone (Drive mode): /settings is unreachable and the store may still hold
+    // initial defaults, so the caps the Drive bundle carried (cached in IDB) win — this
+    // is what keeps the offline hybrid split identical to the desktop.
+    if (isDriveMode()) {
+      try {
+        const caps = await getMeta('reviewCaps');
+        if (caps) {
+          maxDailyReviews    = caps.maxDailyReviews    ?? maxDailyReviews;
+          maxDailyFlashcards = caps.maxDailyFlashcards ?? maxDailyFlashcards;
+          flashcardsEnabled  = caps.flashcardsEnabled  ?? flashcardsEnabled;
+        }
+      } catch { /* fall back to store/defaults */ }
+    }
     const totalMax = maxDailyReviews ?? 50;         // total-per-day ceiling = fetch size
     try {
       const { notes, hasMore } = await fetchReview(offset, totalMax);
@@ -261,7 +276,7 @@ const useStore = create((set, get) => ({
       // the flashcard budget so the day never exceeds maxDailyFlashcards.
       const { flashcardsDone } = getReviewSession();
       // Global flashcards-off = 0 flashcard budget → the whole day is read-and-self-grade.
-      const flashcardMax = get().settings.flashcardsEnabled === false ? 0 : (maxDailyFlashcards ?? 20);
+      const flashcardMax = flashcardsEnabled === false ? 0 : (maxDailyFlashcards ?? 20);
       const allocated = allocateTracks(notes, {
         flashcardMax,
         totalMax,
