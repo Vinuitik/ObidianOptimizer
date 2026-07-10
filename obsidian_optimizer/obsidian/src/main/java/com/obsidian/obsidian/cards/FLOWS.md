@@ -59,8 +59,19 @@ review system. It gates BOTH the UI and card generation:
   → **no new cards generated. Existing cards are NEVER deleted** (generation-only path).
   Flip is live (read each tick). *To change:* `CardJobWorker` gate + `SettingsRepository.isFlashcardsEnabled`.
 
+**Hybrid split (per-note track, not a global mode).** The daily due set is divided into a
+**flashcard track** and a **read-and-self-rate track** by the client allocator
+`frontend/src/pwa/reviewPlan.js` `allocateTracks()` — oldest-due-first, flashcard slots to
+card-bearing notes up to `maxDailyFlashcards`, everything else read-track, capped at
+`maxDailyReviews` total. `hasCards` comes from `GET /review`
+(`NoteIndexRepository.getReviewNotesPagedWithCards` → EXISTS against active `cards`). Caps are
+`SettingsRepository.getMaxDailyReviews()` / `getMaxDailyFlashcards()`. Carryover of unfinished
+flashcards is emergent (skipped = still due = ages to front). Full flow: `frontend/src/pwa/FLOWS.md`
+→ "hybrid review split". `flashcardsEnabled=false` ⇒ client sets the flashcard budget to 0
+(whole day read-track); cards are still never deleted.
+
 **UI modes** (`flashcardsEnabled` setting, toggle in Settings → Review):
-- ON: ReviewPage → FlashcardSession.jsx — builds a tiered-knapsack assignment for
+- ON (hybrid): flashcard-track note → FlashcardSession.jsx — builds a tiered-knapsack assignment for
   the note, verifies each answer server-side, completes → band + next due shown.
   Exam-style: correctness is NOT revealed per question (no answer leaks to later
   questions) — the breakdown (your answer + correct answer + judge feedback) shows
@@ -78,8 +89,10 @@ review system. It gates BOTH the UI and card generation:
   After a test, "Review note directly →" opens the note **read-only** (`canGrade=false`
   in ReviewPage) — the self-rate band bar only appears on the no-cards path, where the
   inline note IS the grading surface.
-- OFF: ReviewPage → SlideshowReview (in ReviewPage.jsx) — four band buttons →
-  POST /reviews/grade. ReviewRating.jsx (list dropdown) posts the same.
+- Read track (flashcards off, no cards, or budget spent): ReviewPage → InlineNoteReview
+  (in ReviewPage.jsx, `canGrade=true`) — renders the note body inline above four band
+  buttons → POST /reviews/grade. ReviewRating.jsx (list dropdown) posts the same.
+  (The former standalone SlideshowReview was removed — InlineNoteReview covers it.)
 
 Context buckets: difficulty {<4, 4-7, >7} × stability {<7d, 7-30d, >30d} —
 9 buckets × 5 arms. Review-count is intentionally NOT a bucket axis — FSRS

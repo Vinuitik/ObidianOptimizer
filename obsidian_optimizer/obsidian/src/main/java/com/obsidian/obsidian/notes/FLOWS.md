@@ -82,7 +82,8 @@ Key methods:
 - `syncWithDisk(diskFiles)` — delta sync (see above)
 - `forceResync(diskFiles)` — TRUNCATE notes + note_links → full syncWithDisk
 - `getAllPaths()` — `SELECT path FROM notes ORDER BY path`
-- `getReviewNotesPaged(offset, limit)` — `WHERE sr_due <= CURRENT_DATE ORDER BY sr_due, path LIMIT limit+1 OFFSET offset` (limit+1 avoids COUNT)
+- `getReviewNotesPaged(offset, limit)` — `WHERE sr_due <= CURRENT_DATE ORDER BY sr_due, path LIMIT limit+1 OFFSET offset` (limit+1 avoids COUNT). Returns paths (used by offline/capture bundle export).
+- `getReviewNotesPagedWithCards(offset, limit)` — same query + `EXISTS(...active cards...) AS has_cards` per note; feeds `GET /review` so the client can split flashcard vs read tracks (hybrid review — see cards/FLOWS.md)
 - `upsert(path, title, meta, modifiedAt)` — INSERT … ON CONFLICT DO UPDATE
 - `rename(oldPath, newPath, newTitle)` — UPDATE path + title
 - `delete(path)` — DELETE
@@ -121,9 +122,9 @@ Returns `{ parentPath, filePaths[], folderPaths[] }`. `folder` absent → vault 
 
 ## GET /review
 
-`NotesController.getReviewNames(offset, limit)` → `FileRepository.getReviewNotesPaged()` → `NoteIndexRepository.getReviewNotesPaged()`  
-`hasMore` via limit+1 trick — no COUNT query.  
-To change sort: `NoteIndexRepository.getReviewNotesPaged()` ORDER BY clause.
+`NotesController.getReviewNames(offset, limit)` → `FileRepository.getReviewNotesPagedWithCards()` → `NoteIndexRepository.getReviewNotesPagedWithCards()`  
+Returns `{ notes: [{path, hasCards}], hasMore }` — `hasCards` drives the hybrid flashcard/read split (client-side, `reviewPlan.js`). `hasMore` via limit+1 trick — no COUNT query.  
+To change sort: `NoteIndexRepository.getReviewNotesPagedWithCards()` ORDER BY clause.
 
 ---
 

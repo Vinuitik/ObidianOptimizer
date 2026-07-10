@@ -18,7 +18,9 @@ client → same `drive.file` namespace). 409 if Drive not connected / passphrase
 
 ## Export (server → phone) — `OfflineExportService`
 `exportAll()` writes three singleton `_offline/*.enc` files (encrypted, overwritten each run):
-- `exportReviewBundle` → `review-bundle.json.enc` — due notes + text (self-rated review).
+- `exportReviewBundle` → `review-bundle.json.enc` — due notes + text, plus `settings`
+  (`maxDailyReviews`/`maxDailyFlashcards`/`flashcardsEnabled`) so the phone's hybrid split
+  matches the desktop offline (drivePull → IDB meta `reviewCaps` → store). See frontend pwa/FLOWS.md.
 - `exportCards` → `cards.json.enc` — a pre-built `AssignmentService.build` per due note
   (real persisted assignment, so consume grades via the same engine). Capped `CARDS_NOTE_LIMIT`.
 - `exportInbox` → `inbox.json.enc` — `InboxController.listItems()` (Learn triage offline).
