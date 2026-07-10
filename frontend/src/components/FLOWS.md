@@ -1,6 +1,6 @@
 # Components Flows
 
-Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx
+Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx
 
 ---
 
@@ -194,6 +194,21 @@ Overlay click / Cancel → `showLogin = false`.
 
 Overlay is `overflow-y: auto` + modal `margin: auto` — on-screen keyboard shrinking the viewport scrolls instead of clipping the modal top.
 
+Full site: shown on-demand (401). Installed PWA: auto-opened when `checkAuth()` returns
+unauthenticated while online — see `pwa/FLOWS.md` "Auto sign-in prompt" (`MobileLayout` gate).
+
+---
+
+## SyncBanner
+
+`organisms/SyncBanner.jsx` — global slim bar in the full-site shell (`App.jsx`, above the
+routes). Polls the CHEAP `GET /sync/progress` (no Drive quota call) — every 3s while a
+Drive pull / DB restore is active, a 15s heartbeat when idle; only when `isAuthenticated`.
+Renders nothing unless `downloading` or `dbRestoring`. Message tells the user the vault
+isn't 100% local yet ("Some content may not be available yet" / restore phase), so a
+missing note reads as "still syncing" not a bug. Failed-file count (`downloadFailed`)
+appears inline as "N to retry". To change cadence/copy: `SyncBanner.jsx`.
+
 ---
 
 ## Responsive / Mobile (site-wide)
@@ -240,6 +255,9 @@ Controlled by `store.toastMessage` + `showToast()`.
 | Mobile breakpoint (768px) | every `@media` block; convention doc in `styles/tokens.css` |
 | Mobile drawer width/behavior | `templates/SplitLayout.module.css` `@media` block |
 | Drawer initial collapsed state | `store/useStore.js leftCollapsed/rightCollapsed` |
+| Sync banner copy / poll cadence | `organisms/SyncBanner.jsx` (`fetchSyncProgress`, 3s/15s) |
+| PWA auto sign-in prompt | `pwa/MobileLayout.jsx` `gate()` effect (`setShowLogin`) |
+| App-level crash boundary (PWA) | `organisms/RouteErrorBoundary.jsx` wraps `<Outlet>` in `pwa/MobileLayout.jsx` — catches leaf throws so a bad screen (e.g. Learn) can't blank the app / kill the nav; resets per route (`key=pathname`) |
 | Review mobile pane switch | `pages/ReviewPage.jsx hasSession` + `.module.css` `@media` |
 | Center panel routing | `templates/SplitLayout.jsx` center conditional |
 | Streak display | `organisms/NavBar.jsx` hardcoded string |

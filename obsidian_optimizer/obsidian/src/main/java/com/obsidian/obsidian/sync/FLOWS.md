@@ -135,6 +135,18 @@ for each DriveFileInfo:
     (upsert because files created on another device have no local row yet)
 ```
 
+**Download retry (partial-tolerant).** Unlike uploads (which self-heal via the `sync_queue`
+FAILED/retry_count loop), a download failure has no queue row to re-drive. So resilience lives
+in two layers: (1) `DriveService.downloadFile` is now wrapped in `withRetry` — the SAME
+transient policy as uploads (429/5xx/burst-403 → exp backoff), so a rate-limited bulk pull no
+longer strands a file per-call; (2) `downloadAllQuiet` (restore path) collects per-file
+failures and does `QUIET_RETRY_SWEEPS` (3) end-of-pass re-attempts, `QUIET_RETRY_PAUSE_MS`
+(3s) apart, before giving up. Whatever's still failing is logged + counted in `downloadFailed`
+(surfaced in `/progress` → the banner shows "N to retry"). `downloadAll` (manual pull) also
+benefits from the `downloadFile` retry; its leftover failures simply have no DONE row, so the
+next `POST /sync/download` re-pulls them. **The whole model is "partial is OK": the app is
+usable while files stream in, and the banner tells the user content isn't 100% here yet.**
+
 Conflict rule: **PENDING local edits always win over Drive** until uploaded, and
 **DELETE_PENDING tombstones are never re-downloaded** (that would resurrect a deleted
 file and cancel its tombstone). Files without pending edits are overwritten by Drive
@@ -246,7 +258,8 @@ the proxy — fixed 2026-07-02.)
 
 | Method | Browser path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/api/sync/status` | session | Queue counts (`pendingCount`/`doneCount`/`failedCount`), live upload progress (`uploading`/`uploadDone`/`uploadTotal`), deviceId, enabled, mode, clientConfigured, connected, accountEmail, config flags |
+| `GET` | `/api/sync/status` | session | Queue counts (`pendingCount`/`doneCount`/`failedCount`), live upload progress (`uploading`/`uploadDone`/`uploadTotal`), **download progress** (`downloading`/`downloadDone`/`downloadTotal`/`downloadFailed`), deviceId, enabled, mode, clientConfigured, connected, accountEmail, config flags, quota. **Does a Drive quota API call — do NOT poll it.** |
+| `GET` | `/api/sync/progress` | session | **Cheap in-memory progress only** (upload + download + `dbRestoring`/`dbRestorePhase`/`dbBackupRunning`) — NO Drive calls. This is what the full-site `SyncBanner` polls every 3s while a pull/restore runs. |
 | `POST` | `/api/sync/upload` | session | Kick the drain on the sync lane; **returns 202 immediately** (`{started}`) — poll `/status` for progress |
 | `POST` | `/api/sync/download` | session | Pull all Drive files, write newer ones |
 | `GET` | `/api/sync/oauth/url?origin=` | session | Google consent URL (Settings "Connect") |
@@ -330,7 +343,8 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
   (`DriveService.folderLocks`) so two threads never double-create the same Drive folder.
 - **Folder ID cache**: `DriveService.folderCache` is in-memory, cleared on restart. On restart the first upload to each folder makes 1–2 extra API calls to re-discover existing folder IDs.
 - **Large resource files**: no chunking — a 100MB video is encrypted in-memory as a single byte[]. If this becomes a problem, split into chunks before encryption.
-- **Scheduled upload only, no download**: `SyncWorker` auto-uploads but never auto-downloads. Download is manual (`POST /api/sync/download`). Add a second `@Scheduled` worker if you want auto pull.
+- **Scheduled upload only, no download**: `SyncWorker` auto-uploads but never auto-downloads. Download is manual (`POST /api/sync/download`) or part of restore (`downloadAllQuiet`). Add a second `@Scheduled` worker if you want auto pull. Note: a stranded download file is NOT auto-re-driven later (no queue row) — the in-pass retry sweeps + `downloadFile` `withRetry` are the safety net; a permanent failure needs a manual re-Sync.
+- **`POST /sync/download` is synchronous (blocks the request thread)** — unlike upload/restore which run on the sync lane and return 202. Fine for a manual button, but a huge pull holds the connection open. Move it onto `syncWorker` if that bites. Restore's `downloadAllQuiet` already runs on the lane (async), so the app stays responsive during it.
 
 ---
 
@@ -352,6 +366,11 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 | Folder double-create guard | `DriveService.folderLocks` (per-key lock in `getOrCreateFolder`) |
 | Manual upload = async 202 | `SyncController.triggerUpload()` → `SyncWorker.triggerManualUpload()` |
 | Live upload progress | `SyncService.uploadProgress()` → `/sync/status` |
+| Live download progress | `SyncService.downloadProgress()` (`downloading`/`downloadDone`/`downloadTotal`/`downloadFailed`) → `/sync/status` + `/sync/progress` |
+| Cheap progress poll (banner) | `SyncController.getProgress()` → `GET /sync/progress` (no Drive calls) |
+| Download per-call retry | `DriveService.downloadFile()` (`withRetry`) |
+| Restore download retry sweeps | `SyncService.QUIET_RETRY_SWEEPS` (3) / `QUIET_RETRY_PAUSE_MS` (3s) in `downloadAllQuiet` |
+| Per-file quiet materialize | `SyncService.materializeQuiet()` |
 | Uploadable selection (self-heal) | `SyncQueueRepository.findUploadable()` |
 | Janitor schedule | `SYNC_JANITOR_CRON` env / `sync.janitor.cron` (default Sun 4am) |
 | Janitor grace period | `SyncService.GRACE_DAYS` (30) |

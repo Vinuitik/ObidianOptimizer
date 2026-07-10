@@ -65,6 +65,7 @@ public class SyncController {
         body.put("encryptionConfigured", encryptionService.isConfigured());
         body.put("driveConfigured",      driveService.isConfigured());
         body.putAll(syncService.uploadProgress());   // uploading / uploadDone / uploadTotal
+        body.putAll(syncService.downloadProgress()); // downloading / downloadDone / downloadTotal / downloadFailed
         body.putAll(dbBackupService.statusFragment()); // dbBackup / dbEmpty / dbRestoring
         body.putAll(oauthService.statusFragment());
         // Quota is one Drive API call; the panel fetches status on mount, not on a poll.
@@ -75,6 +76,21 @@ public class SyncController {
                 log.warn("[SyncController] quota fetch failed: {}", e.getMessage());
             }
         }
+        return ResponseEntity.ok(body);
+    }
+
+    /**
+     * GET /api/sync/progress — lightweight in-memory progress ONLY (no Drive API calls),
+     * safe to poll every few seconds. The global sync banner uses this to show "syncing
+     * N/M — some content not yet available" during a pull/restore without hammering Drive
+     * (which {@code /status} does via its quota lookup).
+     */
+    @GetMapping("/progress")
+    public ResponseEntity<Map<String, Object>> getProgress() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.putAll(syncService.uploadProgress());
+        body.putAll(syncService.downloadProgress());
+        body.putAll(dbBackupService.progressFragment());
         return ResponseEntity.ok(body);
     }
 

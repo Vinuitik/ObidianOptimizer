@@ -6,6 +6,11 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* Own compositing layer so mobile Chrome re-rasterizes on scroll instead of
+     leaving paint trails of the scrolled rows (see SplitLayout mobile drawer). */
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 .controls {

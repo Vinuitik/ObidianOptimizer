@@ -182,6 +182,14 @@
     width: min(85vw, 320px) !important;  /* beats the inline resize width */
     min-width: 0 !important;
     box-shadow: var(--shadow-modal);
+    /* An absolutely-positioned, box-shadowed drawer wrapping a native scroll area
+       (.tree) makes mobile Chrome promote a compositing layer but skip invalidating
+       its backing store on scroll → the folder text smears into "code rain" trails
+       over the search bar + New note. Forcing a clean, self-invalidating layer
+       (translateZ + backface-visibility) makes it repaint every scroll frame. */
+    transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
   }
 
   .panelLeft {

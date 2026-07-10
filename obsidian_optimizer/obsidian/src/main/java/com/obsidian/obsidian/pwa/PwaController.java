@@ -70,6 +70,13 @@ public class PwaController {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body("Sync passphrase is not set on the server — set it in Settings first.");
         }
+        // The Drive folder id is created+persisted only on the server's FIRST upload (OAuth
+        // connect clears it). Handing out a blank here lets a phone cache an unusable link
+        // ("No Drive folder yet"); make it link AFTER a sync instead.
+        if (isBlank(folderId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body("Drive folder not created yet — run a sync on the server once, then link this device.");
+        }
 
         return ResponseEntity.ok(new PwaSetup(
             clientId, clientSecret, refreshToken, folderId, passphrase, deviceIdentity.getDeviceId()));

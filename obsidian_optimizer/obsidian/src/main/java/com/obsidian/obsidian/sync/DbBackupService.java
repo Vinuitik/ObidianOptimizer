@@ -176,6 +176,15 @@ public class DbBackupService {
 
     // ── Status ──────────────────────────────────────────────────────────────────
 
+    /** In-memory-only subset (no Drive calls) for the cheap GET /sync/progress poll. */
+    public Map<String, Object> progressFragment() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("dbBackupRunning", backupRunning);
+        m.put("dbRestoring",     restoring);
+        m.put("dbRestorePhase",  restorePhase);
+        return m;
+    }
+
     /** Fields merged into GET /sync/status. */
     public Map<String, Object> statusFragment() {
         Map<String, Object> m = new LinkedHashMap<>();

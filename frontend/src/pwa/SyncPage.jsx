@@ -61,7 +61,7 @@ export default function SyncPage() {
     setBusy(true); setDriveMsg({ text: 'Reading a note from Drive…', tone: null });
     try {
       const r = await proofReadNote();
-      setDriveMsg({ text: `✓ Decrypted “${r.path}” (${r.total} files on Drive): ${r.preview}`, tone: 'ok' });
+      setDriveMsg({ text: `✓ Decrypted “${r.path}” from Drive: ${r.preview}`, tone: 'ok' });
     } catch (e) {
       setDriveMsg({ text: `Drive read failed: ${e.message ?? e}`, tone: 'err' });
     } finally { setBusy(false); }

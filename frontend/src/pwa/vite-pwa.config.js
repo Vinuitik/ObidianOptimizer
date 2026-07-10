@@ -27,7 +27,7 @@ export const pwaOptions = {
     start_url: '/',
     scope: '/',
     display: 'standalone',
-    orientation: 'portrait',
+    orientation: 'any',
     background_color: '#0f1115',
     theme_color: '#0f1115',
     icons: [

@@ -22,6 +22,13 @@ export function fetchSyncStatus() {
   return req('/sync/status');
 }
 
+// Lightweight in-memory progress ONLY (no Drive quota call) — safe to poll every few
+// seconds for the global "still syncing" banner. { uploading, uploadDone, uploadTotal,
+// downloading, downloadDone, downloadTotal, downloadFailed, dbRestoring, dbRestorePhase }
+export function fetchSyncProgress() {
+  return req('/sync/progress');
+}
+
 // Google consent URL for "Connect Google Drive". The redirect URI is derived from
 // this origin, so it must be registered on the OAuth client in Google Cloud Console.
 export async function fetchOAuthUrl() {

@@ -5,7 +5,9 @@ import useOffline from './useOffline';
 import { flushOutbox, setDriveMode } from './offlineApi';
 import { pushMailbox } from './mailbox';
 import { hasCreds } from './setup';
+import { maybeAutoSync } from './autoSync';
 import LoginModal from '../components/organisms/LoginModal';
+import RouteErrorBoundary from '../components/organisms/RouteErrorBoundary';
 import BottomNav from './BottomNav';
 import styles from './MobileLayout.module.css';
 
@@ -15,17 +17,28 @@ import styles from './MobileLayout.module.css';
 // prompt sign-in (captures/grades queue until then).
 export default function MobileLayout() {
   const checkAuth       = useStore(s => s.checkAuth);
+  const setShowLogin    = useStore(s => s.setShowLogin);
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const showLogin       = useStore(s => s.showLogin);
   const online          = useOffline();
 
-  // Same bootstrap the desktop App does — auth gate + revalidate on focus.
+  // Same bootstrap the desktop App does — auth gate + revalidate on focus — but the
+  // installed PWA has no visible "Sign in" affordance, so if the check comes back
+  // unauthenticated we AUTO-OPEN the login modal (rather than waiting for a write to
+  // 401). Skip while offline: /login is unreachable and the downloaded set still works.
   useEffect(() => {
-    checkAuth();
-    const onFocus = () => checkAuth();
+    let alive = true;
+    const gate = async () => {
+      try { await checkAuth(); } catch { /* offline / server down */ }
+      if (alive && navigator.onLine && !useStore.getState().isAuthenticated) {
+        setShowLogin(true);
+      }
+    };
+    gate();
+    const onFocus = () => gate();
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [checkAuth]);
+    return () => { alive = false; window.removeEventListener('focus', onFocus); };
+  }, [checkAuth, setShowLogin]);
 
   // If this device is linked to Drive, the PWA reads its review set from the Drive-pulled
   // IndexedDB (not the server). Unlinked → falls back to the server path (still works online).
@@ -42,13 +55,27 @@ export default function MobileLayout() {
     })();
   }, [online]);
 
+  // Auto-sync (cron-like): keep the Drive-linked review set fresh without a manual tap.
+  // Fires on launch (mount) and reconnect (online flips true), on tab-focus, and every
+  // 30 min while open. maybeAutoSync self-gates on staleness (6h) so these are cheap.
+  useEffect(() => {
+    if (!online) return;
+    maybeAutoSync();
+    const onVis = () => { if (document.visibilityState === 'visible') maybeAutoSync(); };
+    document.addEventListener('visibilitychange', onVis);
+    const id = setInterval(() => maybeAutoSync(), 30 * 60 * 1000);
+    return () => { document.removeEventListener('visibilitychange', onVis); clearInterval(id); };
+  }, [online]);
+
   return (
     <div className={styles.shell}>
       {!online && (
         <div className={styles.offlineBar}>Offline — showing your downloaded set</div>
       )}
       <main className={styles.content}>
-        <Outlet context={{ isAuthenticated }} />
+        <RouteErrorBoundary>
+          <Outlet context={{ isAuthenticated }} />
+        </RouteErrorBoundary>
       </main>
       <BottomNav />
       {showLogin && <LoginModal />}

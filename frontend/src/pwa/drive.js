@@ -79,6 +79,24 @@ export async function driveListTree(token, rootFolderId) {
   return files;
 }
 
+// Find the FIRST file matching `pred` under a folder subtree, descending depth-first so a
+// match is hit in a handful of API calls instead of listing the whole tree. Used by the
+// Drive "test read" — driveListTree over a multi-thousand-file mirror is hundreds of
+// sequential calls (~40s); this returns after the first note it finds. null if none.
+export async function driveFindFirstFile(token, rootFolderId, pred, depth = 0) {
+  if (depth > 8) return null;
+  const children = await driveList(token, `'${rootFolderId}' in parents and trashed=false`);
+  const hit = children.find(c => c.mimeType !== 'application/vnd.google-apps.folder' && pred(c));
+  if (hit) return hit;
+  for (const c of children) {
+    if (c.mimeType === 'application/vnd.google-apps.folder') {
+      const found = await driveFindFirstFile(token, c.id, pred, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export async function driveDownload(token, fileId) {
   const res = await driveFetch(token, `${DRIVE_API}/files/${fileId}?alt=media`);
   return new Uint8Array(await res.arrayBuffer());

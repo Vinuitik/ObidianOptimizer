@@ -322,9 +322,13 @@ public class DriveService {
     // ── Download ──────────────────────────────────────────────────────────────
 
     public byte[] downloadFile(String fileId) throws IOException {
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        requireClient().files().get(fileId).executeMediaAndDownloadTo(bos);
-        return bos.toByteArray();
+        // Same transient-retry policy as uploads: a 429/5xx/burst-403 during a bulk pull
+        // (e.g. a restore of thousands of files) no longer strands that file permanently.
+        return withRetry(() -> {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            requireClient().files().get(fileId).executeMediaAndDownloadTo(bos);
+            return bos.toByteArray();
+        });
     }
 
     // ── List ──────────────────────────────────────────────────────────────────

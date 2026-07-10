@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,18 @@ public class SyncService {
     private volatile boolean uploadRunning = false;
     private volatile int     uploadTotal   = 0;
     private final AtomicInteger uploadDone  = new AtomicInteger(0);
+
+    // Same, for the download side (both downloadAll and the restore-time downloadAllQuiet).
+    // Lets the UI show "syncing N/M — some content not yet available" instead of a blank
+    // wait, so a device can be used while its vault is still streaming down from Drive.
+    private volatile boolean downloadRunning = false;
+    private volatile int     downloadTotal   = 0;
+    private final AtomicInteger downloadDone   = new AtomicInteger(0);
+    private final AtomicInteger downloadFailed = new AtomicInteger(0);
+
+    // Restore-time retry of files that failed even after downloadFile's per-call backoff.
+    private static final int  QUIET_RETRY_SWEEPS   = 3;
+    private static final long QUIET_RETRY_PAUSE_MS = 3000;
 
     private final SyncQueueRepository   syncQueueRepo;
     private final VaultEncryptionService encryptionService;
@@ -236,6 +249,17 @@ public class SyncService {
         return m;
     }
 
+    /** In-memory download progress — cheap to poll (no Drive calls). Merged into /sync/status
+     *  and /sync/progress so the UI can show a "still syncing" banner during a pull/restore. */
+    public Map<String, Object> downloadProgress() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("downloading",    downloadRunning);
+        m.put("downloadDone",   downloadDone.get());
+        m.put("downloadTotal",  downloadTotal);
+        m.put("downloadFailed", downloadFailed.get());
+        return m;
+    }
+
     // ── Download ──────────────────────────────────────────────────────────────
 
     public void downloadAll() throws IOException {
@@ -253,6 +277,10 @@ public class SyncService {
         List<DriveFileInfo> driveFiles = driveService.listAllFiles();
         int downloaded = 0, skipped = 0, kept = 0;
 
+        downloadRunning = true;
+        downloadTotal   = driveFiles.size();
+        downloadDone.set(0);
+      try {
         for (DriveFileInfo df : driveFiles) {
             try {
                 // vault_path comes from Drive metadata — never trust it blindly.
@@ -291,8 +319,13 @@ public class SyncService {
 
             } catch (Exception e) {
                 log.error("[SyncService.downloadAll] failed for {}: {}", df.vaultPath(), e.getMessage());
+            } finally {
+                downloadDone.incrementAndGet();
             }
         }
+      } finally {
+        downloadRunning = false;
+      }
         log.info("[SyncService.downloadAll] downloaded={}, skipped={}, keptLocal={}", downloaded, skipped, kept);
     }
 
@@ -315,30 +348,78 @@ public class SyncService {
         }
         Path vaultRootPath = Paths.get(settingsRepo.getVaultPath()).toAbsolutePath().normalize();
         List<DriveFileInfo> driveFiles = driveService.listAllFiles();
-        int written = 0, skipped = 0, failed = 0;
+        int written = 0, skipped = 0;
+        List<DriveFileInfo> failedFiles = new ArrayList<>();
 
+        downloadRunning = true;
+        downloadTotal   = driveFiles.size();
+        downloadDone.set(0);
+        downloadFailed.set(0);
+      try {
         for (DriveFileInfo df : driveFiles) {
             try {
-                Path target = vaultRootPath.resolve(df.vaultPath()).normalize();
-                if (!target.startsWith(vaultRootPath)) {
-                    log.error("[SyncService.downloadAllQuiet] rejected path escaping vault: {}", df.vaultPath());
-                    continue;
-                }
-                if (df.contentHash().equals(computeLocalHash(target.toString(), df.vaultPath()))) {
-                    skipped++;
-                    continue;
-                }
-                byte[] plaintext = encryptionService.decrypt(driveService.downloadFile(df.fileId()));
-                Files.createDirectories(target.getParent());
-                Files.write(target, plaintext);
-                written++;
+                if (materializeQuiet(df, vaultRootPath)) written++;
+                else skipped++;
             } catch (Exception e) {
-                log.error("[SyncService.downloadAllQuiet] failed for {}: {}", df.vaultPath(), e.getMessage());
-                failed++;
+                log.warn("[SyncService.downloadAllQuiet] failed for {} ({}), will retry", df.vaultPath(), e.getMessage());
+                failedFiles.add(df);
+                downloadFailed.incrementAndGet();
+            } finally {
+                downloadDone.incrementAndGet();
             }
         }
-        log.info("[SyncService.downloadAllQuiet] written={}, skipped={}, failed={}", written, skipped, failed);
+
+        // End-of-pass retry sweeps: a file whose transient error outlasted downloadFile's
+        // per-call backoff shouldn't be stranded — the whole point of "partial is OK" is
+        // that the rest still lands. Re-attempt only the failures, a few times, with a pause.
+        for (int sweep = 1; sweep <= QUIET_RETRY_SWEEPS && !failedFiles.isEmpty(); sweep++) {
+            sleepQuiet(QUIET_RETRY_PAUSE_MS);
+            List<DriveFileInfo> retry = failedFiles;
+            failedFiles = new ArrayList<>();
+            downloadFailed.set(0);
+            log.info("[SyncService.downloadAllQuiet] retry sweep {} for {} file(s)", sweep, retry.size());
+            for (DriveFileInfo df : retry) {
+                try {
+                    if (materializeQuiet(df, vaultRootPath)) written++;
+                } catch (Exception e) {
+                    log.warn("[SyncService.downloadAllQuiet] retry {} failed for {}: {}", sweep, df.vaultPath(), e.getMessage());
+                    failedFiles.add(df);
+                    downloadFailed.incrementAndGet();
+                }
+            }
+        }
+      } finally {
+        downloadRunning = false;
+      }
+        if (!failedFiles.isEmpty()) {
+            log.error("[SyncService.downloadAllQuiet] {} file(s) still failed after retries: {}",
+                failedFiles.size(),
+                failedFiles.stream().map(DriveFileInfo::vaultPath).limit(10).toList());
+        }
+        log.info("[SyncService.downloadAllQuiet] written={}, skipped={}, failed={}", written, skipped, failedFiles.size());
         return written;
+    }
+
+    /** Materialize one Drive file to disk (raw bytes, no reprocessing). Returns true if
+     *  written, false if it was already present (hash match) or rejected as a bad path.
+     *  Throws on a download/decrypt/write error so the caller can retry it. */
+    private boolean materializeQuiet(DriveFileInfo df, Path vaultRootPath) throws Exception {
+        Path target = vaultRootPath.resolve(df.vaultPath()).normalize();
+        if (!target.startsWith(vaultRootPath)) {
+            log.error("[SyncService.downloadAllQuiet] rejected path escaping vault: {}", df.vaultPath());
+            return false;
+        }
+        if (df.contentHash().equals(computeLocalHash(target.toString(), df.vaultPath()))) {
+            return false;   // already present
+        }
+        byte[] plaintext = encryptionService.decrypt(driveService.downloadFile(df.fileId()));
+        Files.createDirectories(target.getParent());
+        Files.write(target, plaintext);
+        return true;
+    }
+
+    private static void sleepQuiet(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
     }
 
     // ── Delete propagation (tombstones → Drive trash) ────────────────────────

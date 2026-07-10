@@ -43,7 +43,8 @@
 }
 
 .captureBtn {
-  padding: 0 16px;
+  min-height: 46px;            /* was padding:0 → button collapsed to text height */
+  padding: 12px 16px;
   border-radius: 10px;
   border: none;
   background: var(--color-accent, #7c5cff);
