@@ -135,34 +135,43 @@ function PdfPages({ path, pages, bboxes }) {
   const list = pages && pages.length ? pages : [1];
   const hasBoxes = bboxes && list.some(p => bboxes[p]);
   const [showRegion, setShowRegion] = useState(true);
+  const [fullDoc, setFullDoc] = useState(false);   // escape hatch: scroll the whole PDF
   const [failed, setFailed] = useState(false);
+  const raw = mediaUrl(path);
 
-  if (failed) {
-    const raw = mediaUrl(path);
-    return (
-      <div className={styles.pdfMissing}>
-        <p>Couldn’t render this page.</p>
-        <a href={`${raw}#page=${list[0]}`} target="_blank" rel="noreferrer">Open the PDF ↗</a>
-      </div>
-    );
-  }
   return (
     <div className={styles.pdfWrap}>
-      {hasBoxes && (
-        <div className={styles.pdfControls}>
+      <div className={styles.pdfControls}>
+        {hasBoxes && !fullDoc && (
           <label className={styles.pdfToggle}>
             <input type="checkbox" checked={showRegion} onChange={e => setShowRegion(e.target.checked)} />
             Show region
           </label>
+        )}
+        {/* v2 can clip a unit mid-page; this lets the user scroll the whole doc to find the
+            spill-over / preceding context the page crop dropped. */}
+        <button type="button" className={styles.pdfBtn} onClick={() => setFullDoc(f => !f)}>
+          {fullDoc ? '↩ Note page' + (list.length > 1 ? 's' : '') : '⤢ Full PDF'}
+        </button>
+        <a className={styles.pdfBtn} href={`${raw}#page=${list[0]}`} target="_blank" rel="noreferrer">Open ↗</a>
+      </div>
+
+      {fullDoc ? (
+        <embed className={styles.pdfEmbed} type="application/pdf" src={`${raw}#page=${list[0]}`} />
+      ) : failed ? (
+        <div className={styles.pdfMissing}>
+          <p>Couldn’t render {list.length > 1 ? 'these pages' : 'this page'}.</p>
+          <button type="button" className={styles.pdfBtn} onClick={() => setFullDoc(true)}>⤢ View full PDF</button>
+        </div>
+      ) : (
+        <div className={styles.pdfPages}>
+          {list.map(p => (
+            <img key={`${p}-${showRegion}`} className={styles.pdfPage} loading="lazy"
+                 alt={`page ${p}`} src={pdfPageUrl(path, p, showRegion ? bboxes?.[p] : null)}
+                 onError={() => setFailed(true)} />
+          ))}
         </div>
       )}
-      <div className={styles.pdfPages}>
-        {list.map(p => (
-          <img key={`${p}-${showRegion}`} className={styles.pdfPage} loading="lazy"
-               alt={`page ${p}`} src={pdfPageUrl(path, p, showRegion ? bboxes?.[p] : null)}
-               onError={() => setFailed(true)} />
-        ))}
-      </div>
     </div>
   );
 }

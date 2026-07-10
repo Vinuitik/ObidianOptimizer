@@ -149,3 +149,18 @@
   font-size: var(--text-sm);
 }
 .pdfMissing a { color: var(--color-accent-soft); }
+.pdfBtn {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-card);
+  color: var(--color-text-2);
+  cursor: pointer;
+  text-decoration: none;
+}
+.pdfBtn:hover { color: var(--color-text); border-color: var(--color-border-hover); }
+/* the two buttons sit together on the right; only the first gets the auto margin */
+.pdfBtn ~ .pdfBtn { margin-left: var(--sp-2); }
+.pdfEmbed { flex: 1; min-height: 0; width: 100%; border: 0; }
