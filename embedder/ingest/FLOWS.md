@@ -435,7 +435,8 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | MCP: agent-authored text → notes | `mcp_server.create_note(text, title)` → `jobs.submit(text=…)` (text route → segment → _inbox) |
 | MCP: short-note gate (skip LLM split) | `mcp_server.create_note` → `_stage_note_as_is()` when `< INGEST_SPLIT_MIN_WORDS`(700); stages raw text in _inbox, note is its own source, zero tokens |
-| Routing rules | `router.py → ROUTE_TABLE` |
+| Routing rules | `router.py → ROUTE_TABLE` (ext→route) + `VIDEO_HOST_RE` (remote video platforms → "youtube"/yt-dlp branch) |
+| Add a video platform (IG/TikTok/Vimeo/X…) | `router.py VIDEO_HOST_RE` — narrow per-host patterns; route value "youtube" = yt-dlp remote (captions→whisper), site-agnostic. IG/TikTok best-effort (login/rate-limit/cookies) |
 | Whisper model / device | `WHISPER_MODEL` env / `extract_av._pick_device()` |
 | PDF diagram keep/drop | `keyframes.KEEP_PROMPTS / DROP_PROMPTS`, `extract_pdf._keep_diagrams()` |
 | Keyframe tuning | `keyframes.py → SCENE_THRESHOLD / MAX_FRAMES / CLIP_SIM_THRESHOLD / CUE_PATTERNS` |
@@ -448,3 +449,4 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | YouTube captions / download | `download/downloader.py` (`fetch_subs` / `download_sync`); see `download/FLOWS.md` |
 | PDF page render (review source) | `main.pdf_page()` `GET /pdf-page?path=&page=&dpi=&box=` → PyMuPDF rasterize; `box="x0,y0,x1,y1"` (PDF pts) draws a highlight before render (toggle-able server-side). nginx `location /pdf-page` → embedder. Path-guarded by `mcp_server._resolve_in_vault` |
 | Source-footer sub-page bbox (v2) | `synthesize._span_to_segs()` attaches `loc.bbox` for SINGLE-page spans (`bbox_start/end` pts) → `_source_section()` emits `bbox: <page> x0 y0 x1 y1`. Multi-page/v1 → omitted. Read by frontend `inboxParse.parseSourceRegion.bboxes` |
+| v2 note title (reuse chapter names) | `pipeline_v2._unit_title()` — in-unit HEADING → enclosing TOC chapter name (`ir.toc` leaf ≤ unit start page) → `<source> (n)`. `_dedup_titles()` appends "(part k)" when a chapter splits into ≥2 Units. Set BEFORE drafting in `run()` |
