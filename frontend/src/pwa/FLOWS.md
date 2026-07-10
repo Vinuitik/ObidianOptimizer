@@ -146,7 +146,21 @@ embedder `/ingest` (standalone, `find_home`).
 - To change what's warmed: `noteMedia.mediaEntriesForNote()`. To warm PDFs offline: not done —
   would need to cache `/pdf-page` PNG renders per page.
 
+## Flow — offline auth (persisted flag, not a re-login)
+`store/useStore.js` (`AUTH_KEY='obsOpt_authOk'`), `MobileLayout.jsx`, `api/notes.checkAuth`.
+- The Spring **session cookie** already persists in the browser; the bug was the app's in-memory
+  `isAuthenticated` defaulting to `false` on every cold boot → offline you were walled behind a
+  `/login` you can't reach. Fix: seed `isAuthenticated` from `localStorage[AUTH_KEY]`.
+- `store.checkAuth()` now distinguishes **server-unreachable** (fetch throws → keep persisted
+  state, retry next focus/reconnect) from a real **401** (reachable server says no → `sessionExpired`).
+  The flag is written on: login success (true), 200 `/me` (its value), 401 / logout (false).
+- To reset a device's remembered sign-in: clear `localStorage['obsOpt_authOk']` (or log out).
+
 ## Technology Notes (constraints / failure modes)
+- **Offline auth is trust-the-last-check, not real verification:** the persisted flag says "this
+  device signed in and we haven't seen a 401 since." Writes still 401 if the cookie actually
+  expired — they queue in the outbox and replay after a real re-login. It removes the *wall*, it
+  doesn't forge a session.
 - **Cache Storage has no HTTP Range (206):** a cached `<video>`/`<audio>` served by the SW
   comes back as a full `200`, so the browser must load the WHOLE file before it can seek —
   fine for short clips, memory-heavy for long lectures, and **Safari may refuse to play** a

@@ -28,6 +28,14 @@ import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
 
 const REVIEW_KEY = 'obsOpt_reviewSession';
 
+// "Signed in on this device" — persisted so a COLD boot (esp. offline: server unreachable,
+// `/me` can't be checked) starts authenticated instead of walling the downloaded set behind a
+// login it can't complete. The session cookie itself already persists in the browser; this is
+// just the app-side flag that used to reset to false on every launch. Cleared on a real 401.
+const AUTH_KEY = 'obsOpt_authOk';
+const persistedAuth = () => { try { return localStorage.getItem(AUTH_KEY) === '1'; } catch { return false; } };
+const setPersistedAuth = (ok) => { try { localStorage.setItem(AUTH_KEY, ok ? '1' : '0'); } catch {} };
+
 function getReviewSession() {
   const today = new Date().toISOString().slice(0, 10);
   try {
@@ -175,8 +183,9 @@ const useStore = create((set, get) => ({
   // Incremented on cancel to force Milkdown remount with clean content
   editorResetKey: 0,
 
-  // Auth
-  isAuthenticated: false,
+  // Auth — seed from the persisted flag so an offline cold boot isn't walled (checkAuth
+  // corrects it to false only on a real 401 from a reachable server).
+  isAuthenticated: persistedAuth(),
   showLogin: false,
 
   // Panel collapse — start closed on phones, where the panels render as
@@ -430,11 +439,19 @@ const useStore = create((set, get) => ({
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   checkAuth: async () => {
-    const ok = await checkAuth();
+    let ok;
+    try {
+      ok = await checkAuth();
+    } catch {
+      // Server UNREACHABLE (offline / down) — not a sign-out. Keep the persisted state so
+      // the downloaded set stays usable; retry on the next focus/reconnect.
+      return;
+    }
     // Was signed in, server now says no (e.g. backend restarted → session cookie
     // invalid): tear down stale data + surface login, don't just flip the flag.
     if (!ok && get().isAuthenticated) { get().sessionExpired(); return; }
     set({ isAuthenticated: ok });
+    setPersistedAuth(ok);
   },
 
   // Session lost server-side. Wipe all vault data like logout (note content must not
@@ -446,6 +463,7 @@ const useStore = create((set, get) => ({
     });
     setPendingBlobs({});
     localStorage.removeItem(REVIEW_KEY);
+    setPersistedAuth(false);
     set(s => ({
       ...initialDataState(),
       isAuthenticated: false,
@@ -457,6 +475,7 @@ const useStore = create((set, get) => ({
   login: async (username, password) => {
     const ok = await apiLogin(username, password);
     if (ok) {
+      setPersistedAuth(true);
       set({ isAuthenticated: true, showLogin: false });
       // settings require auth — without this they'd sit at defaults until reload
       await get().loadSettings();
@@ -469,6 +488,7 @@ const useStore = create((set, get) => ({
 
   logout: async () => {
     await apiLogout();
+    setPersistedAuth(false);
     // wipe everything loaded from the vault — note content must not survive sign-out
     Object.values(get().pendingFiles).forEach(({ blobURL }) => {
       try { URL.revokeObjectURL(blobURL); } catch {}
