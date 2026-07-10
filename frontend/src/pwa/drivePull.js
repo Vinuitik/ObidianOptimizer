@@ -100,8 +100,19 @@ export async function pullReviewFromDrive() {
 // Ask the server (while it's up) to rebuild the bundle, then pull it. Used at home so the
 // train set is fresh; falls back to pulling the existing bundle if the server is off.
 export async function refreshAndPull() {
+  let serverUp = false;
   try {
     await fetch('/api/pwa/export', { method: 'POST', credentials: 'same-origin' });
+    serverUp = true;
   } catch { /* server off — pull whatever bundle is already on Drive */ }
-  return pullReviewFromDrive();
+  const res = await pullReviewFromDrive();
+  // Heavy media (images + A/V) comes DIRECT from the server, not Drive — only possible while
+  // it's up. Best-effort: a failed warm never fails the pull. Scoped + self-evicting inside.
+  if (serverUp) {
+    try {
+      const { warmReviewMedia } = await import('./warmMedia');
+      res.media = await warmReviewMedia();
+    } catch { /* keep the note set even if media warming fails */ }
+  }
+  return res;
 }

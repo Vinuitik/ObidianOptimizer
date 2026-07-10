@@ -124,7 +124,32 @@ embedder `/ingest` (standalone, `find_home`).
   existing one) → IndexedDB. Best-effort, never throws — a fail leaves the last-good set.
 - To change freshness window: `autoSync.js` `FRESH_MS`. Interval: `MobileLayout` `setInterval`.
 
+## Flow — offline media warm (images + A/V, direct from server)
+`warmMedia.js`, `../utils/noteMedia.js`, `drivePull.js`, `../../public/sw.js`.
+- **Why direct, not Drive:** the warm only runs while ONLINE/server-up, so heavy blobs skip
+  Drive entirely — `refreshAndPull()` fetches them straight from the server after the note
+  bundle lands. Note TEXT still comes via the encrypted Drive bundle (works server-down); only
+  MEDIA is direct.
+- **Scope:** `noteMedia.mediaUrlsForNote(content)` = image embeds `![[name]]` → `/api/images/name`
+  + the local A/V source from the `## Source` footer (`resources/…` → `/vault-media/…`,
+  `_workspace/…` → `/workspace/…`). Union over review notes (`getAllReviewNotes`) + Learn
+  inbox (`meta.inboxItems`). PDFs excluded — offline they render via server `/pdf-page`, not a blob.
+- **Warm + retention:** `warmReviewMedia()` `cache.add()`s missing URLs into `obsopt-media`
+  (one-by-one so a 404/oversize doesn't abort), then EVICTS managed entries (`/vault-media|
+  workspace|api/images/`) not in the current scope → the phone store stays lean.
+- **Serve offline:** `sw.js isMedia()` already cache-firsts these paths (extension + `/api/images/`).
+- To change what's warmed: `noteMedia.mediaUrlsForNote()`. To warm PDFs offline: not done —
+  would need to cache `/pdf-page` PNG renders per page. Renditions (lower-res video): [NOT IMPLEMENTED].
+
 ## Technology Notes (constraints / failure modes)
+- **Cache Storage has no HTTP Range (206):** a cached `<video>`/`<audio>` served by the SW
+  comes back as a full `200`, so the browser must load the WHOLE file before it can seek —
+  fine for short clips, memory-heavy for long lectures, and **Safari may refuse to play** a
+  ranged media element from cache. This is why server-side low-res/audio-only **renditions**
+  (smaller files) are the right next lever, not on-device compression (no browser encoder API).
+- **No true overnight cron on a phone:** `periodicSync` is Chrome/Android-only for installed
+  PWAs and ~12h-throttled; iOS Safari has none. "Overnight refresh" really means "next
+  app-open on wifi" (`autoSync` foreground triggers). Media warm rides the same triggers.
 - **PWA auto-sync is FOREGROUND-only.** `autoSync` runs on launch/focus/interval while the app
   is OPEN — it is NOT a true background cron. Periodic Background Sync (`registration.periodicSync`)
   would run closed, but it's **Chrome/Android-only**, needs the `periodic-background-sync`
