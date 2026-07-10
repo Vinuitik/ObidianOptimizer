@@ -133,6 +133,15 @@ one bad note never sinks its siblings; all-fail raises.
   for the Learn **Inbox** triage view; the user edits + files them to a real folder
   (which moves them into the FSRS review queue). `NoteIndexRepository` keeps `_inbox/`
   out of the review query until then. To change the staging folder: `publish.INBOX_FOLDER`.
+- **Folder suggestion = hierarchical nearest-centroid** (`ingest.placement`), computed PER
+  NOTE from its own content (`publish.find_home(title + body)`), NOT once per source. Each
+  folder is modeled as the centroid of its notes' embeddings; `suggest()` walks the tree to the
+  closest branch. Rules: min depth 2 (never root / bare main folder), staging+media folders
+  excluded from candidates AND centroids (kills the old `_inbox`→`_inbox` self-vote), tiny
+  folders skipped (`PLACEMENT_MIN_FOLDER_NOTES`), confidence floor (`PLACEMENT_MIN_SIM`) →
+  "" (unsorted, no pre-pick) rather than a wrong guess. Centroids cached (`PLACEMENT_CACHE_TTL_S`).
+  Same engine backs MCP `find_home_for_note` (`suggested_folder`). Replaced the old kNN-title-vote
+  that suggested `_inbox` back to itself (770 unfiled chunks polluted the index).
 
 ## Extractors (deterministic, zero LLM)
 
@@ -172,7 +181,7 @@ create_capture(capture_id, source_ref, content): POST /api/internal/capture — 
 stamp_capture(content, capture_id, seq): inject capture-id/capture-seq frontmatter (durable
     note↔capture link, mirrored to notes.capture_id/seq). Shared with standalone captures.
 stamp_inbox(content, source, folder): inject ingest-inbox/-source/-suggested-folder (standalone)
-find_home : mcp_server.find_home_for_note → folder, else INGEST_DEFAULT_FOLDER
+find_home : ingest.placement.suggest_folder(title+body) → folder, else "" (unsorted)
 ```
 
 ---

@@ -236,8 +236,12 @@ def test_tools_call_find_home_returns_folder_suggestions(client):
     # dict-returning tools are serialized as JSON text content by the SDK
     import json as _json
     out = _json.loads(resp.json()["result"]["content"][0]["text"])
-    assert out["suggested_folders"][0] == "/vault/ml"
+    # New contract: `suggested_folder` (singular) from the centroid classifier — present as a
+    # key (null here, since the DB stub feeds note rows, not folder-centroid rows; the descent
+    # itself is covered in test_placement). Context fields still come from the vector candidates.
+    assert "suggested_folder" in out
     assert "FlexMatch" in out["name_examples"]
+    assert any(p.endswith("FlexMatch.md") for p in out["similar_notes"])
 
 
 def test_get_note_content_rejects_path_escape(client):

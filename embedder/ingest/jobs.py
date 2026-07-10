@@ -575,7 +575,8 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     stored_names = _store_media(bundle)
     res = _run_pipeline_v2(job, bundle)
 
-    suggested = publish.find_home(bundle["source"].get("title", ""))
+    # Folder suggestion is PER NOTE, from each note's own content (title + body) — not once
+    # from the source title, which used to file every sibling to the same wrong folder.
     source_ref = bundle["source"].get("ref", "")
     publish.ensure_folder(publish.INBOX_FOLDER)
     capture_id = job.get("capture_id")
@@ -607,6 +608,7 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             problems = publish.validate_note(note_md, stored_names)
             if problems:
                 raise publish.PublishError("; ".join(problems))
+            suggested = publish.find_home(n.title + "\n\n" + n.body)
             note_md = publish.stamp_inbox(note_md, source_ref, suggested)
             if capture_id:
                 note_md = publish.stamp_capture(note_md, capture_id, seq)
@@ -635,9 +637,9 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     job["planned_notes"] = [p["title"] for p in plans]
     numbered = bundle_util.number_segments(bundle)
 
-    # Notes land in the Inbox staging folder; find_home is only a SUGGESTED
-    # destination stamped into each note for the triage UI to pre-pick.
-    suggested = publish.find_home(bundle["source"].get("title", ""))
+    # Notes land in the Inbox staging folder; find_home is only a SUGGESTED destination
+    # stamped into each note for the triage UI to pre-pick — computed PER NOTE below from
+    # each note's own content, not once from the source title.
     source_ref = bundle["source"].get("ref", "")
     publish.ensure_folder(publish.INBOX_FOLDER)
     capture_id = job.get("capture_id")
@@ -655,6 +657,7 @@ def _synthesize_and_publish(job: dict, bundle: dict):
             problems = publish.validate_note(note_md, stored_names)
             if problems:
                 raise publish.PublishError("; ".join(problems))
+            suggested = publish.find_home(plan["title"] + "\n\n" + note_md)
             note_md = publish.stamp_inbox(note_md, source_ref, suggested)
             if capture_id:
                 note_md = publish.stamp_capture(note_md, capture_id, seq)

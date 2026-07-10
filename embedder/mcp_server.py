@@ -186,30 +186,39 @@ def get_note_content(note_path: str) -> str:
 
 
 @mcp.tool()
-def find_home_for_note(proposed_title: str) -> dict:
-    """CANDIDATE GENERATOR for where a new note might belong, based purely on
-    embedding similarity of the title — it is often wrong for short/generic
-    titles. Treat suggested_folders as hypotheses: verify with get_vault_tree()
-    (the real folder map) and list_folder(folder) (what actually lives there,
-    naming conventions) before deciding. Returns semantically similar notes,
-    the folders they live in (ranked), and example note names."""
-    query_vec = embed_texts([proposed_title], kind="query")[0]
-    rows = _vector_candidates(query_vec)
+def find_home_for_note(proposed_title: str, content: str = "") -> dict:
+    """Suggest where a new note belongs. `suggested_folder` is the primary answer, from a
+    hierarchical nearest-centroid classifier (`ingest.placement`): each folder is modeled as
+    the centroid of its notes and the tree is walked to the closest branch (min depth 2; staging
+    folders excluded; null when nothing is confident). PASS `content` (the note body) as well as
+    the title — the classifier is far better on real content than on a short title alone.
 
-    # note_path values are written by the backend container, so always POSIX
+    `similar_notes`/`name_examples` are extra context (nearest existing notes + their naming),
+    NOT a placement vote. Still verify with get_vault_tree() / list_folder() before filing."""
+    text = (proposed_title + "\n\n" + content).strip() if content else proposed_title
+    try:
+        from ingest import placement
+        suggested = placement.suggest_folder(text)
+    except Exception as e:
+        log.warning("placement failed in find_home_for_note: %s", e)
+        suggested = None
+
+    # Context only: nearest existing notes (staging folders filtered so the loop that made the
+    # old tool suggest _inbox back to itself can't reappear here either).
+    query_vec = embed_texts([text[:4000]], kind="query")[0]
     similar_notes: list[str] = []
-    folder_counts: Counter = Counter()
-    for row in rows:
+    for row in _vector_candidates(query_vec):
         note_path = row[0]
+        if "/_inbox/" in note_path or note_path.startswith(("ingest/", "/vault/ingest/")):
+            continue
         if note_path not in similar_notes:
             similar_notes.append(note_path)
-            folder_counts[str(PurePosixPath(note_path).parent)] += 1
         if len(similar_notes) >= 10:
             break
 
     return {
+        "suggested_folder": suggested,          # primary — may be null ("unsorted")
         "similar_notes": similar_notes,
-        "suggested_folders": [f for f, _ in folder_counts.most_common(5)],
         "name_examples": [PurePosixPath(p).stem for p in similar_notes[:5]],
     }
 

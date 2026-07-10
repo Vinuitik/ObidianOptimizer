@@ -93,18 +93,18 @@ def inject_block(content: str, embed_ref: str, body: str, sha: str) -> str:
     return content[:m.end()] + "\n\n" + block + content[m.end():]
 
 
-def find_home(title: str) -> str:
-    """Vault-relative folder for a new note: pgvector neighborhood vote via the
-    MCP tool's internals; falls back to INGEST_DEFAULT_FOLDER."""
+def find_home(text: str) -> str:
+    """Folder for a new note from its OWN content (title + body) via the hierarchical
+    centroid classifier (`placement`). Returns "" ("unsorted") when nothing is confident
+    enough — so the triage UI shows no pre-pick instead of a confidently-wrong folder.
+    `text` should be the note's content, NOT just a short title (short titles were the old
+    kNN-vote's core failure)."""
     try:
-        import mcp_server
-        res = mcp_server.find_home_for_note(title)
-        for folder in res.get("suggested_folders", []):
-            if folder and folder != ".":
-                return folder
+        from ingest import placement
+        return placement.suggest_folder(text) or ""
     except Exception as e:
-        log.warning("find_home failed for %r: %s", title, e)
-    return DEFAULT_FOLDER
+        log.warning("find_home failed: %s", e)
+        return ""
 
 
 def _insert_frontmatter(content: str, extra: str) -> str:

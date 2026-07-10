@@ -355,10 +355,12 @@ public class InboxController {
     }
 
     /** Convert the stored vault-relative suggestion to an absolute path so it
-     *  matches the /children folder list the UI picks from. Blank/"." → vault root. */
+     *  matches the /children folder list the UI picks from. Blank/"." → "" (UNSORTED):
+     *  the classifier wasn't confident, so the triage UI shows NO pre-pick rather than
+     *  defaulting the note into the vault root (which isn't a valid note home anyway). */
     private String suggestedFolderAbs(String rel) {
+        if (rel == null || rel.isBlank() || rel.equals(".")) return "";
         Path root = Paths.get(settingsRepo.getVaultPath());
-        if (rel == null || rel.isBlank() || rel.equals(".")) return root.toString();
         return root.resolve(rel).normalize().toString();
     }
 
