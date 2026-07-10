@@ -66,13 +66,26 @@ describe('FlashcardSession — quiz phase', () => {
     await renderSession();
     expect(screen.getByTestId('next-btn')).toBeDisabled();
     fireEvent.click(screen.getByTestId('option-0'));
+    // Selecting only highlights — nothing is submitted/locked until Submit answer.
+    expect(api.submitAttempt).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('mcq-submit'));
     await waitFor(() => expect(screen.getByTestId('next-btn')).not.toBeDisabled());
     expect(api.submitAttempt).toHaveBeenCalledWith('a1', 'c1', '0');
+  });
+
+  it('lets the student change an MCQ pick before submitting', async () => {
+    await renderSession();
+    fireEvent.click(screen.getByTestId('option-0'));
+    fireEvent.click(screen.getByTestId('option-2'));   // changed mind
+    fireEvent.click(screen.getByTestId('mcq-submit'));
+    await waitFor(() => screen.getByTestId('recorded'));
+    expect(api.submitAttempt).toHaveBeenCalledWith('a1', 'c1', '2');
   });
 
   it('does NOT reveal correctness during the quiz (exam style)', async () => {
     await renderSession();
     fireEvent.click(screen.getByTestId('option-0'));
+    fireEvent.click(screen.getByTestId('mcq-submit'));
     await waitFor(() => screen.getByTestId('recorded'));
     // no per-card verdict leak, and the correct option is not highlighted
     expect(screen.queryByTestId('verdict')).toBeNull();
@@ -92,6 +105,7 @@ describe('FlashcardSession — quiz phase', () => {
   it('open-ended answers go to the judge', async () => {
     await renderSession();
     fireEvent.click(screen.getByTestId('option-0'));
+    fireEvent.click(screen.getByTestId('mcq-submit'));
     await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
 
@@ -106,6 +120,7 @@ describe('FlashcardSession — result phase', () => {
   async function completeSession() {
     await renderSession();
     fireEvent.click(screen.getByTestId('option-0'));
+    fireEvent.click(screen.getByTestId('mcq-submit'));
     await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
     fireEvent.change(screen.getByTestId('open-textarea'), { target: { value: 'answer' } });
@@ -131,6 +146,7 @@ describe('FlashcardSession — result phase', () => {
     api.submitAttempt.mockResolvedValue({ verdict: 'WRONG', pointsEarned: 0, maxPoints: 2 });
     await renderSession();
     fireEvent.click(screen.getByTestId('option-2'));            // wrong (correct is 0)
+    fireEvent.click(screen.getByTestId('mcq-submit'));
     await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
     fireEvent.click(screen.getByTestId('idk-btn'));             // open card → "I don't know"
@@ -146,6 +162,7 @@ describe('FlashcardSession — result phase', () => {
     render(<FlashcardSession notePath="/vault/note.md" onReviewNote={onReviewNote} onClose={noop} />);
     await waitFor(() => screen.getByTestId('flashcard-session'));
     fireEvent.click(screen.getByTestId('option-0'));
+    fireEvent.click(screen.getByTestId('mcq-submit'));
     await waitFor(() => screen.getByTestId('recorded'));
     fireEvent.click(screen.getByTestId('next-btn'));
     fireEvent.change(screen.getByTestId('open-textarea'), { target: { value: 'a' } });

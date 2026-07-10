@@ -130,7 +130,8 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
 
           {card.type === 'mcq' && (
             <McqOptions card={card} answer={answers[card.id]} locked={isLocked}
-                        onSelect={val => submitAnswer(card.id, val)} />
+                        onSelect={val => setAnswers(prev => ({ ...prev, [card.id]: val }))}
+                        onSubmit={() => submitAnswer(card.id, answers[card.id])} />
           )}
           {card.type === 'open' && (
             <OpenEndedInput answer={answers[card.id] === IDK ? '' : (answers[card.id] ?? '')} locked={isLocked}
@@ -299,23 +300,33 @@ function FlagControl({ flagged, onFlag }) {
   );
 }
 
-function McqOptions({ card, answer, locked, onSelect }) {
-  // Exam style: highlight only what the student CHOSE, never reveal which is
-  // correct here — that's shown in the end-of-test breakdown.
+function McqOptions({ card, answer, locked, onSelect, onSubmit }) {
+  // Selecting an option only HIGHLIGHTS it — the choice isn't submitted (and thus
+  // isn't locked) until "Submit answer", so the student can freely change picks.
+  // Exam style: never reveal which is correct here — that's in the end-of-test breakdown.
+  const hasChoice = answer != null && answer !== '';
   return (
-    <div className={styles.options} data-testid="mcq-options">
-      {card.payload.options.map((opt, i) => {
-        const strI   = String(i);
-        const chosen = answer === strI;
-        return (
-          <button key={i} disabled={locked} onClick={() => onSelect(strI)}
-                  className={`${styles.option} ${chosen ? styles.optionChosen : ''}`}
-                  data-testid={`option-${i}`}>
-            <span className={styles.optionLetter}>{String.fromCharCode(65 + i)}</span>
-            {opt}
-          </button>
-        );
-      })}
+    <div className={styles.openBlock}>
+      <div className={styles.options} data-testid="mcq-options">
+        {card.payload.options.map((opt, i) => {
+          const strI   = String(i);
+          const chosen = answer === strI;
+          return (
+            <button key={i} disabled={locked} onClick={() => onSelect(strI)}
+                    className={`${styles.option} ${chosen ? styles.optionChosen : ''}`}
+                    data-testid={`option-${i}`}>
+              <span className={styles.optionLetter}>{String.fromCharCode(65 + i)}</span>
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+      {!locked && (
+        <button className={styles.navBtnPrimary} onClick={onSubmit} disabled={!hasChoice}
+                data-testid="mcq-submit">
+          Submit answer
+        </button>
+      )}
     </div>
   );
 }
