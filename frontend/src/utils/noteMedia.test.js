@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mediaUrlsForNote, vaultMediaUrl } from './noteMedia';
+import { mediaUrlsForNote, mediaEntriesForNote, vaultMediaUrl } from './noteMedia';
 
 describe('vaultMediaUrl', () => {
   it('maps vault resources → /vault-media/, _workspace → /workspace/, encodes segments', () => {
@@ -36,5 +36,18 @@ describe('mediaUrlsForNote', () => {
 
   it('dedups repeated embeds', () => {
     expect(mediaUrlsForNote('![[a.png]] ![[a.png]]')).toEqual(['/api/images/a.png']);
+  });
+});
+
+describe('mediaEntriesForNote (key = player URL, fetch = rendition)', () => {
+  it('A/V: cache key is the canonical player URL, fetch is the server rendition', () => {
+    const note = 'b\n\n## Source\nlocal: resources/videos/talk.mp4\nclip: 39-131\n';
+    const [e] = mediaEntriesForNote(note);
+    expect(e.key).toBe('/vault-media/videos/talk.mp4');
+    expect(e.fetch).toBe('/media-rendition?path=resources%2Fvideos%2Ftalk.mp4');
+  });
+  it('images have no rendition → fetch equals key', () => {
+    const [e] = mediaEntriesForNote('![[a.png]]');
+    expect(e).toEqual({ key: '/api/images/a.png', fetch: '/api/images/a.png' });
   });
 });

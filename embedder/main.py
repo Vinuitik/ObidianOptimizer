@@ -183,6 +183,75 @@ def _parse_box(box: str | None):
         return None
 
 
+# On-device offline space is the constraint, not server CPU — so we transcode a lightweight
+# rendition ONCE (server-side) and let the phone download that instead of the full lecture.
+# No client-side (de)compression: the rendition is a normal, smaller, already-playable file.
+_VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi"}
+_AUDIO_EXTS = {".mp3", ".m4a", ".wav", ".ogg", ".flac"}
+_RENDITION_DIR = "/reports/_renditions"        # writable, excluded from vault scans
+_RENDITION_TIMEOUT_S = int(os.environ.get("RENDITION_TIMEOUT_S", "1200"))
+_RENDITION_HEIGHT = os.environ.get("RENDITION_HEIGHT", "480")   # video rendition max height (px)
+
+
+@app.get("/media-rendition")
+def media_rendition(path: str, mode: str = "auto"):
+    """A lightweight, already-playable rendition of a vault A/V file for offline download.
+    Video → H.264 at ≤`RENDITION_HEIGHT`p (CRF 30) + AAC 64k, `+faststart`; audio (or
+    `mode=audio` to strip a video's picture) → mono AAC 48k. Transcoded ONCE with ffmpeg and
+    cached under `_RENDITION_DIR` keyed by (path, mtime, size, kind), so repeat pulls are
+    instant. `path` is vault-relative; same unauth exposure as /vault-media (it's a re-encode
+    of bytes already served there). The PWA warm stores this under the canonical media URL so
+    the player is unchanged."""
+    import hashlib
+    import subprocess
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+    from mcp_server import _resolve_in_vault
+
+    try:
+        src = _resolve_in_vault(path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path escapes the vault")
+    ext = src.suffix.lower()
+    if not src.exists() or ext not in (_VIDEO_EXTS | _AUDIO_EXTS):
+        raise HTTPException(status_code=404, detail="not an A/V file in the vault")
+
+    audio_only = mode == "audio" or ext in _AUDIO_EXTS
+    st = src.stat()
+    key = hashlib.sha256(
+        f"{path}|{st.st_mtime_ns}|{st.st_size}|{'a' if audio_only else 'v' + _RENDITION_HEIGHT}|v1"
+        .encode()).hexdigest()[:16]
+    out_ext = ".m4a" if audio_only else ".mp4"
+    cache_dir = Path(_RENDITION_DIR)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out = cache_dir / f"{key}{out_ext}"
+
+    if not out.exists():
+        tmp = cache_dir / f".{key}.{os.getpid()}{out_ext}"   # temp+atomic-rename → concurrency-safe
+        if audio_only:
+            cmd = ["ffmpeg", "-y", "-i", str(src), "-vn", "-ac", "1",
+                   "-c:a", "aac", "-b:a", "48k", "-movflags", "+faststart", str(tmp)]
+        else:
+            cmd = ["ffmpeg", "-y", "-i", str(src),
+                   "-vf", f"scale=-2:min({_RENDITION_HEIGHT}\\,ih)",   # never upscale
+                   "-c:v", "libx264", "-crf", "30", "-preset", "veryfast",
+                   "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", str(tmp)]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=_RENDITION_TIMEOUT_S)
+            os.replace(tmp, out)
+        except subprocess.TimeoutExpired:
+            Path(tmp).unlink(missing_ok=True)
+            raise HTTPException(status_code=504, detail="rendition timed out")
+        except subprocess.CalledProcessError as e:
+            Path(tmp).unlink(missing_ok=True)
+            tail = (e.stderr or b"")[-300:].decode(errors="ignore")
+            raise HTTPException(status_code=500, detail=f"transcode failed: {tail}")
+
+    return FileResponse(out, media_type="audio/mp4" if audio_only else "video/mp4",
+                        headers={"Cache-Control": "public, max-age=604800"})
+
+
 @app.post("/embed", response_model=EmbedResponse)
 def embed(req: EmbedRequest):
     if not req.texts:

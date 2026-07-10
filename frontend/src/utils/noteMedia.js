@@ -13,6 +13,13 @@ function enc(p) {
   return p.split('/').map(encodeURIComponent).join('/');
 }
 
+// The server transcodes A/V to a lightweight rendition once; the warm downloads THAT but
+// caches it under the canonical player URL (`key`), so playback code is unchanged and offline
+// it transparently gets the small file. Images have no rendition → fetch == key.
+function renditionUrl(vaultPath) {
+  return `/media-rendition?path=${encodeURIComponent(vaultPath.replace(/^\.?\//, ''))}`;
+}
+
 // A vault-relative path → the same-origin URL that serves it (or null if not a vault path).
 export function vaultMediaUrl(path) {
   if (!path || /^https?:\/\//.test(path)) return null;   // external ref → streamed live, not warmed
@@ -31,17 +38,24 @@ function imageUrls(content) {
   return urls;
 }
 
-// All same-origin media a note needs offline: image embeds + its local A/V source file.
-// PDFs are intentionally excluded — offline they render through the server `/pdf-page`
-// endpoint (a separate warm concern), not as a raw blob. Deduped, relative URLs.
-export function mediaUrlsForNote(content, source) {
-  const out = new Set(imageUrls(content));
+// Media a note needs offline as {key, fetch} entries: `key` is the canonical URL the player
+// requests (and the cache is keyed by); `fetch` is what the warm actually downloads — the
+// server rendition for A/V, the file itself for images. PDFs are intentionally excluded —
+// offline they render through the server `/pdf-page` endpoint, not as a raw blob. Deduped by key.
+export function mediaEntriesForNote(content, source) {
+  const byKey = new Map();
+  for (const u of imageUrls(content)) byKey.set(u, { key: u, fetch: u });
   try {
     const region = parseSourceRegion(content || '', source);
     if (region.local && VIDEO_AUDIO_RE.test(region.local)) {
-      const u = vaultMediaUrl(region.local);
-      if (u) out.add(u);
+      const key = vaultMediaUrl(region.local);
+      if (key) byKey.set(key, { key, fetch: renditionUrl(region.local) });
     }
   } catch { /* a note with no parseable source footer just contributes its images */ }
-  return [...out];
+  return [...byKey.values()];
+}
+
+// Canonical URLs only (cache keys) — used for retention scoping.
+export function mediaUrlsForNote(content, source) {
+  return mediaEntriesForNote(content, source).map(e => e.key);
 }

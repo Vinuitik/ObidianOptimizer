@@ -6,7 +6,7 @@
 // Best-effort: never throws — a failed warm just leaves the last-good cache in place. Call
 // from the ONLINE sync path (drivePull.refreshAndPull) after the note set lands in IndexedDB.
 import { getAllReviewNotes, getMeta } from './db';
-import { mediaUrlsForNote } from '../utils/noteMedia';
+import { mediaEntriesForNote } from '../utils/noteMedia';
 
 const MEDIA_CACHE = 'obsopt-media';   // must match public/sw.js + syncOffline.js
 // Only prune URLs the warm itself manages — never touch app icons or anything else the SW
@@ -20,20 +20,26 @@ export async function warmReviewMedia({ onProgress } = {}) {
   const notes = (await getAllReviewNotes().catch(() => [])) || [];
   const inbox = (await getMeta('inboxItems').catch(() => [])) || [];
 
-  // The in-scope set, as pathname(+search) keys so we can compare against cache entries.
-  const wanted = new Set();
-  for (const n of notes) mediaUrlsForNote(n.content).forEach(u => wanted.add(u));
-  for (const it of inbox) mediaUrlsForNote(it.content).forEach(u => wanted.add(u));
+  // In-scope media as {key, fetch} entries, deduped by canonical key (the URL the player uses
+  // and the cache is keyed by). `key` drives retention; `fetch` is the rendition we download.
+  const entries = new Map();
+  for (const n of notes) for (const e of mediaEntriesForNote(n.content)) entries.set(e.key, e);
+  for (const it of inbox) for (const e of mediaEntriesForNote(it.content)) entries.set(e.key, e);
+  const wanted = new Set(entries.keys());
 
   const cache = await caches.open(MEDIA_CACHE);
   const present = new Set((await cache.keys()).map(r => new URL(r.url).pathname));
 
-  // 1. Fetch what's wanted but not yet cached (direct from server). add() is one-by-one so a
-  //    single 404/large file doesn't abort the batch (addAll is all-or-nothing).
-  const missing = [...wanted].filter(u => !present.has(u));
+  // 1. Fetch what's wanted but not yet cached — the rendition (`fetch`), stored under the
+  //    canonical player URL (`key`) so playback is unchanged. One-by-one so a single 404 /
+  //    slow transcode doesn't abort the batch.
+  const missing = [...entries.values()].filter(e => !present.has(e.key));
   let warmed = 0;
   for (let i = 0; i < missing.length; i++) {
-    try { await cache.add(missing[i]); warmed++; } catch { /* skip unreachable/oversized */ }
+    try {
+      const res = await fetch(missing[i].fetch);
+      if (res.ok) { await cache.put(missing[i].key, res); warmed++; }
+    } catch { /* skip unreachable/oversized/failed transcode */ }
     onProgress?.({ done: i + 1, total: missing.length });
   }
 

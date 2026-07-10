@@ -138,8 +138,13 @@ embedder `/ingest` (standalone, `find_home`).
   (one-by-one so a 404/oversize doesn't abort), then EVICTS managed entries (`/vault-media|
   workspace|api/images/`) not in the current scope → the phone store stays lean.
 - **Serve offline:** `sw.js isMedia()` already cache-firsts these paths (extension + `/api/images/`).
-- To change what's warmed: `noteMedia.mediaUrlsForNote()`. To warm PDFs offline: not done —
-  would need to cache `/pdf-page` PNG renders per page. Renditions (lower-res video): [NOT IMPLEMENTED].
+- **Renditions:** A/V isn't warmed at full quality — `noteMedia.mediaEntriesForNote()` returns
+  `{key, fetch}` where `fetch` is the server rendition (`/media-rendition?path=…`, embedder
+  transcodes to ≤480p / audio-only, cached under `/reports/_renditions`) and `key` is the
+  canonical player URL. The warm `cache.put(key, fetch(fetch))` so the player is unchanged and
+  offline transparently gets the small file. To force audio-only: `&mode=audio`.
+- To change what's warmed: `noteMedia.mediaEntriesForNote()`. To warm PDFs offline: not done —
+  would need to cache `/pdf-page` PNG renders per page.
 
 ## Technology Notes (constraints / failure modes)
 - **Cache Storage has no HTTP Range (206):** a cached `<video>`/`<audio>` served by the SW
