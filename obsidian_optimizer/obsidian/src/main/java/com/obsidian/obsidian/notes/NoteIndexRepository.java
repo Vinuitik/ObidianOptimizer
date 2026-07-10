@@ -187,6 +187,27 @@ public class NoteIndexRepository {
         return new FileRepository.ReviewPage(new ArrayList<>(page), hasMore);
     }
 
+    /** Due query enriched with a hasCards flag per note (EXISTS against active cards),
+     *  same ordering/exclusions as getReviewNotesPaged. Feeds the hybrid-review split. */
+    public FileRepository.ReviewPageInfo getReviewNotesPagedWithCards(int offset, int limit) {
+        List<FileRepository.ReviewNoteInfo> rows = jdbc.query("""
+            SELECT n.path AS path,
+                   EXISTS (SELECT 1 FROM cards c
+                           WHERE c.note_path = n.path AND c.status = 'ACTIVE') AS has_cards
+            FROM notes n
+            WHERE n.sr_due <= CURRENT_DATE
+              AND n.path NOT LIKE '%/_inbox/%'
+            ORDER BY n.sr_due ASC, n.path ASC
+            LIMIT ? OFFSET ?
+            """,
+            (rs, i) -> new FileRepository.ReviewNoteInfo(rs.getString("path"), rs.getBoolean("has_cards")),
+            limit + 1, offset);
+
+        boolean hasMore = rows.size() > limit;
+        List<FileRepository.ReviewNoteInfo> page = hasMore ? rows.subList(0, limit) : rows;
+        return new FileRepository.ReviewPageInfo(new ArrayList<>(page), hasMore);
+    }
+
     public void upsert(String path, String title, FrontmatterParser.NoteMetadata meta, long modifiedAt) {
         jdbc.update("""
             INSERT INTO notes(path, title, sr_due, sr_interval, sr_ease, modified_at,

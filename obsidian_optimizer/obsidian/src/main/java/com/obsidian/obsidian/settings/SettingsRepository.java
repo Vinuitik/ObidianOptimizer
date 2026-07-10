@@ -18,6 +18,14 @@ public class SettingsRepository {
     @Value("${IMAGE_PATH:#{null}}")
     private String defaultImagePath;
 
+    // Hybrid-review daily caps. Env seeds fresh installs only (DB wins after — see
+    // insertDefault). maxDailyReviews doubles as the chrono spread target (SpreadService).
+    @Value("${REVIEW_MAX_DAILY:50}")
+    private String defaultMaxDailyReviews;
+
+    @Value("${REVIEW_MAX_DAILY_FLASHCARDS:20}")
+    private String defaultMaxDailyFlashcards;
+
     // Sync seeds — env vars remain the headless bootstrap; the Settings UI owns the
     // values afterwards (DB wins over env once seeded).
     @Value("${SYNC_PASSPHRASE:}")
@@ -56,7 +64,8 @@ public class SettingsRepository {
         insertDefault("resourcePath", imagePath);
         insertDefault("reviewPageSize", "20");
         insertDefault("startupSyncMode", "blocking");
-        insertDefault("maxDailyReviews", "30");
+        insertDefault("maxDailyReviews", defaultMaxDailyReviews);
+        insertDefault("maxDailyFlashcards", defaultMaxDailyFlashcards);
         insertDefault("bankruptcyLimit", "200");
         insertDefault("chronoLastRunDate", "");
         insertDefault("ollamaEmbedModel", "mixedbread-ai/mxbai-embed-large-v1");
@@ -135,6 +144,11 @@ public class SettingsRepository {
 
     public int getMaxDailyReviews() {
         return Integer.parseInt(get("maxDailyReviews"));
+    }
+
+    /** Of the daily review set, how many run as flashcards (rest are read-and-self-grade). */
+    public int getMaxDailyFlashcards() {
+        return Integer.parseInt(getOrDefault("maxDailyFlashcards", "20"));
     }
 
     public int getBankruptcyLimit() {

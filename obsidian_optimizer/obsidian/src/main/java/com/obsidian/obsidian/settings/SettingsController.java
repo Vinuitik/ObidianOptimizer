@@ -35,6 +35,7 @@ public class SettingsController {
             settingsRepo.getReviewPageSize(),
             settingsRepo.getStartupSyncMode(),
             settingsRepo.getMaxDailyReviews(),
+            settingsRepo.getMaxDailyFlashcards(),
             settingsRepo.getBankruptcyLimit(),
             settingsRepo.getChronicNeglectDays(),
             settingsRepo.getEmbedModel(),
@@ -73,6 +74,13 @@ public class SettingsController {
                     return ResponseEntity.badRequest().body("maxDailyReviews must be a positive integer");
                 }
                 settingsRepo.set("maxDailyReviews", String.valueOf(req.maxDailyReviews()));
+            }
+            if (req.maxDailyFlashcards() != null) {
+                // 0 = no flashcards (all review is read-and-self-grade); must not exceed the total cap.
+                if (req.maxDailyFlashcards() < 0) {
+                    return ResponseEntity.badRequest().body("maxDailyFlashcards must be zero or a positive integer");
+                }
+                settingsRepo.set("maxDailyFlashcards", String.valueOf(req.maxDailyFlashcards()));
             }
             if (req.bankruptcyLimit() != null) {
                 if (req.bankruptcyLimit() < 1) {
@@ -123,12 +131,14 @@ public class SettingsController {
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
     public record SettingsResponse(String vaultPath, String resourcePath, int reviewPageSize,
-                                   String startupSyncMode, int maxDailyReviews, int bankruptcyLimit,
+                                   String startupSyncMode, int maxDailyReviews, int maxDailyFlashcards,
+                                   int bankruptcyLimit,
                                    int chronicNeglectDays, String embedModel, boolean flashcardsEnabled,
                                    boolean syncEnabled, String syncClientId,
                                    boolean syncClientSecretSet, boolean syncPassphraseSet) {}
     record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize,
-                                 String startupSyncMode, Integer maxDailyReviews, Integer bankruptcyLimit,
+                                 String startupSyncMode, Integer maxDailyReviews, Integer maxDailyFlashcards,
+                                 Integer bankruptcyLimit,
                                  Integer chronicNeglectDays, String embedModel, Boolean flashcardsEnabled,
                                  Boolean syncEnabled, String syncClientId,
                                  String syncClientSecret, String syncPassphrase) {}

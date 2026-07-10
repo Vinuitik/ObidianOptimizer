@@ -156,6 +156,12 @@ public class FileRepository {
         return noteIndex.getReviewNotesPaged(offset, limit);
     }
 
+    /** Same due query, but each note tagged with whether it has active flashcards —
+     *  the hybrid-review UI uses this to split the daily set into flashcard vs read tracks. */
+    public ReviewPageInfo getReviewNotesPagedWithCards(int offset, int limit) {
+        return noteIndex.getReviewNotesPagedWithCards(offset, limit);
+    }
+
     // ── CRUD ─────────────────────────────────────────────────────────────────
 
     public String createFolder(String parentPath, String name) throws IOException {
@@ -489,6 +495,8 @@ public class FileRepository {
 
     public record ChildrenResult(String parentPath, List<String> folderPaths, List<String> filePaths) {}
     public record ReviewPage(List<String> notes, boolean hasMore) {}
+    public record ReviewNoteInfo(String path, boolean hasCards) {}
+    public record ReviewPageInfo(List<ReviewNoteInfo> notes, boolean hasMore) {}
     public record PatchHunk(int startLine, int deleteCount, List<String> insertLines) {}
 
     // ── Private ───────────────────────────────────────────────────────────────

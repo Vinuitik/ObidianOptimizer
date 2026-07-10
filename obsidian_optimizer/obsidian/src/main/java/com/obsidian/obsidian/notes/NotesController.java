@@ -38,10 +38,13 @@ public class NotesController {
     }
 
     @GetMapping("review")
-    public FileRepository.ReviewPage getReviewNames(
+    public FileRepository.ReviewPageInfo getReviewNames(
             @RequestParam(defaultValue = "0")  int offset,
             @RequestParam(defaultValue = "40") int limit) {
-        return repository.getReviewNotesPaged(offset, limit);
+        // Each note carries hasCards so the client can split the daily set into
+        // flashcard vs read tracks under the caps (see reviewPlan.js). The caps
+        // themselves ride the /settings sync (maxDailyReviews / maxDailyFlashcards).
+        return repository.getReviewNotesPagedWithCards(offset, limit);
     }
 
     @GetMapping("text")
