@@ -43,8 +43,8 @@ export default function SourceSplicePanel({ item, onOrientation }) {
             ↗ {shorten(region.ref)}
           </a>
         )}
-        {region.startSeconds != null && <span className={styles.at}>from {fmt(region.startSeconds)}</span>}
-        {region.pages.length > 0 && <span className={styles.at}>p. {region.pages.join(', ')}</span>}
+        {region.startSeconds != null && <span className={styles.at}>{fmtRange(region.startSeconds, region.endSeconds)}</span>}
+        {region.pages.length > 0 && <span className={styles.at}>{pageRange(region.pages)}</span>}
         {kind === 'text' && (
           <div className={styles.toggle}>
             <button className={`${styles.toggleBtn} ${textMode === 'rsvp' ? styles.toggleOn : ''}`}
@@ -224,6 +224,16 @@ function hrefFor(ref) { return /^https?:\/\//.test(ref) ? ref : mediaUrl(ref); }
 function fmt(s) {
   const m = Math.floor(s / 60), sec = String(s % 60).padStart(2, '0');
   return `${m}:${sec}`;
+}
+// A literal span, always two numbers: [start – end]. If we somehow have no end
+// (legacy start-only anchor) show [start – ?] rather than silently hiding the range.
+function fmtRange(start, end) {
+  return end != null ? `[${fmt(start)} – ${fmt(end)}]` : `[${fmt(start)} – ?]`;
+}
+// Pages as a compact range too, not a comma list: [4–5] or [7] for a single page.
+function pageRange(pages) {
+  const lo = Math.min(...pages), hi = Math.max(...pages);
+  return lo === hi ? `[${lo}]` : `[${lo}–${hi}]`;
 }
 function shorten(ref) {
   try { return new URL(ref).host; } catch { return ref.split(/[/\\]/).pop(); }
