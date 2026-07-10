@@ -7,6 +7,8 @@ REVIEWING gate, retention runs over auto-committable Units only, splice mirrors 
 """
 import os
 
+import pytest
+
 from ingest import pipeline_v2
 from ingest.ir import (Block, BlockType, CharSpan, Flag, PageBox, Severity,
                        SourceIR, Medium)
@@ -58,6 +60,40 @@ def test_injected_draft_fn_is_the_only_writer():
     assert seen and all(n.body.startswith("DRAFTED::") for n in res.notes)
     # title came from the Unit's heading block, not the drafter
     assert res.notes[0].title == "A"
+
+
+def test_title_fn_names_unstructured_units():
+    # Headingless source (the A/V-transcript case: no chapters) → no structural name →
+    # title_fn (the LLM stand-in) is asked and its name is used.
+    called = []
+
+    def title_fn(unit):
+        called.append(unit.order_index)
+        return "LLM Picked Name"
+
+    res = pipeline_v2.run_text(" ".join(["w"] * 40), "Src", title_fn=title_fn)
+    assert called and res.notes[0].title == "LLM Picked Name"
+
+    # A structural (heading) name always wins — title_fn is never consulted for it.
+    called.clear()
+    res2 = pipeline_v2.run_text("# Real Heading\n\n" + " ".join(["w"] * 40), "Src", title_fn=title_fn)
+    assert res2.notes[0].title == "Real Heading" and called == []
+
+    # No title_fn → the generic "<source> (n)" fallback, never a crash.
+    res3 = pipeline_v2.run_text(" ".join(["w"] * 40), "Src")
+    assert res3.notes[0].title.startswith("Src (")
+
+
+def test_title_fn_503_propagates_to_defer():
+    # Provider exhaustion during naming must DEFER the job (bubble up), not silently fall back.
+    class Cooling(Exception):
+        status = 503
+
+    def title_fn(unit):
+        raise Cooling("all providers cooling")
+
+    with pytest.raises(Cooling):
+        pipeline_v2.run_text(" ".join(["w"] * 40), "Src", title_fn=title_fn)
 
 
 def test_embed_fn_drives_boundaries_not_draft():

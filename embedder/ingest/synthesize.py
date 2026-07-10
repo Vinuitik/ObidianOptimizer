@@ -221,6 +221,27 @@ def write_unit_body(title: str, raw_text: str, summary_hint: str = "") -> str:
     return _strip_fences(body)
 
 
+TITLE_SYSTEM = (
+    "You name a note from a slice of source content — usually a video/audio transcript "
+    "chapter. Reply with ONLY the title: a short, specific noun phrase (2–7 words) naming "
+    "what THIS slice is about. No quotes, no numbering, no trailing punctuation, no 'Part N'."
+)
+
+TITLE_PROMPT = """Name this section of "{source}". Return only the title.
+
+CONTENT:
+{segments}"""
+
+
+def write_unit_title(raw_text: str, source: str = "the source") -> str:
+    """Name ONE v2 Unit that has no structural title (chiefly an A/V transcript chapter —
+    videos rarely ship yt-dlp chapters). One cheap LLM call; the caller (`pipeline_v2`) uses
+    the "<source> (n)" fallback if this raises. Trimmed to a single clean line."""
+    raw = _complete(TITLE_PROMPT.format(source=source, segments=raw_text[:4000]), TITLE_SYSTEM)
+    line = _strip_fences(raw).strip().splitlines()[0] if raw.strip() else ""
+    return line.strip().strip('"').strip("#").strip()[:120]
+
+
 def _strip_fences(body: str) -> str:
     t = body.strip()
     if t.startswith("```"):

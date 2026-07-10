@@ -67,6 +67,12 @@ class Lifecycle(str):
 # None → identity echo so the chain runs without an LLM (testable).
 DraftFn = Callable[[Unit, str], str]
 
+# title_fn: (Unit) -> a name from the Unit's own content. Called ONLY for Units with no
+# structural name (no HEADING, no enclosing TOC chapter) — chiefly A/V transcripts, which
+# rarely ship yt-dlp chapters. The real wiring is synthesize.write_unit_title (one LLM call);
+# None → the "<source> (n)" fallback so the chain still runs LLM-free (testable).
+TitleFn = Callable[[Unit], str]
+
 
 @dataclass
 class DraftedNote:
@@ -123,6 +129,7 @@ def run(
     ir: SourceIR,
     draft_fn: Optional[DraftFn] = None,
     embed_fn: Optional[EmbedFn] = None,
+    title_fn: Optional[TitleFn] = None,
     kept_fragments: Optional[list[KeptFragment]] = None,
     source_blob_path: Optional[str] = None,
 ) -> PipelineResult:
@@ -139,7 +146,9 @@ def run(
 
     # Titles up front so collisions (2+ Units under one TOC chapter) get "… (part k)" before
     # drafting — the reused chapter names stay unique and the LLM drafts against the final title.
-    titles = _dedup_titles([_unit_title(u, ir) for u in units])
+    # Structural names (HEADING / TOC chapter) win; a Unit with none (chiefly A/V transcripts
+    # with no chapters) gets an LLM-picked name from its content instead of "<source> (n)".
+    titles = _dedup_titles([_title_for(u, ir, title_fn) for u in units])
     notes: list[DraftedNote] = []
     for unit, title in zip(units, titles):
         body = draft_fn(unit, title)                            # the ONLY LLM (injected)
@@ -184,12 +193,30 @@ def _lifecycle_of(unit: Unit) -> str:
     return Lifecycle.DRAFT
 
 
-def _unit_title(unit: Unit, ir: SourceIR) -> str:
-    """Title for a Unit, in priority order:
+def _title_for(unit: Unit, ir: SourceIR, title_fn: Optional[TitleFn]) -> str:
+    """Resolve a Unit's title. Structural names (HEADING / TOC chapter) always win. When a Unit
+    has neither, ask `title_fn` to name it from its content (LLM); with no `title_fn` fall back
+    to `<source> (n)` so the pipeline stays runnable LLM-free."""
+    structural = _structural_title(unit, ir)
+    if structural:
+        return structural
+    if title_fn:
+        try:
+            picked = (title_fn(unit) or "").strip()
+            if picked:
+                return picked
+        except Exception as e:                       # never fail a whole ingest on naming …
+            if getattr(e, "status", None) == 503:    # … except provider exhaustion: let the
+                raise                                # job DEFER + resume (same as drafting).
+            log.warning("title_fn failed for unit %d: %s", unit.order_index, e)
+    return f"{ir.title} ({unit.order_index + 1})"
+
+
+def _structural_title(unit: Unit, ir: SourceIR) -> Optional[str]:
+    """A Unit's name from the source's own structure, or None if it has none:
       1. a real HEADING block inside the Unit — it IS the section name;
       2. the enclosing TOC chapter name (paged media) — reuse the outline the boundaries were
-         already anchored to, so a mid-chapter Unit reads "Agent Ops", not "Introduction (7)";
-      3. `<source title> (n)` as a last resort (no heading, no TOC — e.g. plain text)."""
+         already anchored to, so a mid-chapter Unit reads "Agent Ops", not "Introduction (7)"."""
     owned = set(unit.block_ids)
     blocks = [b for b in ir.sorted_blocks() if b.id in owned]
     for b in blocks:
@@ -202,7 +229,7 @@ def _unit_title(unit: Unit, ir: SourceIR) -> str:
         enclosing = [t for t in ir.toc if t.page_no is not None and t.page_no <= page and t.title.strip()]
         if enclosing:
             return max(enclosing, key=lambda t: t.page_no).title.strip()
-    return f"{ir.title} ({unit.order_index + 1})"
+    return None
 
 
 def _dedup_titles(titles: list[str]) -> list[str]:

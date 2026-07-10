@@ -522,8 +522,12 @@ def _run_pipeline_v2(job: dict, bundle: dict):
     def draft_fn(unit, title):
         return synthesize.write_unit_body(title, unit.raw_text)
 
+    src_title = bundle.get("source", {}).get("title") or "the source"
+    def title_fn(unit):                 # only called for Units with no HEADING/TOC name
+        return synthesize.write_unit_title(unit.raw_text, src_title)
+
     ir = _ir_from_bundle(bundle)
-    res = pipeline_v2.run(ir, draft_fn=draft_fn, embed_fn=embed_fn,
+    res = pipeline_v2.run(ir, draft_fn=draft_fn, embed_fn=embed_fn, title_fn=title_fn,
                           source_blob_path=bundle.get("source", {}).get("ref"))
     job["planned_notes"] = [n.title for n in res.notes]
     job["retention"] = res.retention.as_dict()   # observability; sweep is task 4
