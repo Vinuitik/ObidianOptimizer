@@ -24,15 +24,27 @@ export async function fetchNames() {
   return res.json();
 }
 
+// A utility folder the UI hides — any folder whose name begins with '_' (e.g. _inbox,
+// _workspace). View-only: the backend still uses these; this just declutters folder lists.
+export function isHiddenFolder(path) {
+  const name = (path || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || '';
+  return name.startsWith('_');
+}
+
 // Returns { parentPath, folderPaths, filePaths }.
-// folder=null fetches vault root.
+// folder=null fetches vault root. Underscore-prefixed utility folders are filtered out of
+// folderPaths here (single chokepoint → hidden everywhere: tree, pickers, settings).
 export async function fetchChildren(folder) {
   const url = folder
     ? `${BASE}/children?folder=${encodeURIComponent(folder)}`
     : `${BASE}/children`;
   const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
   if (!res.ok) throw new ApiError(res.status);
-  return res.json();
+  const data = await res.json();
+  if (Array.isArray(data.folderPaths)) {
+    data.folderPaths = data.folderPaths.filter(p => !isHiddenFolder(p));
+  }
+  return data;
 }
 
 // Returns { notes: string[], hasMore: boolean }.
