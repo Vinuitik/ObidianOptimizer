@@ -8,6 +8,7 @@
 import { parseSourceRegion } from './inboxParse';
 
 const VIDEO_AUDIO_RE = /\.(mp4|mkv|webm|mov|m4v|mp3|m4a|wav|ogg|flac)$/i;
+const PDF_RE = /\.pdf$/i;
 
 function enc(p) {
   return p.split('/').map(encodeURIComponent).join('/');
@@ -18,6 +19,24 @@ function enc(p) {
 // it transparently gets the small file. Images have no rendition → fetch == key.
 function renditionUrl(vaultPath) {
   return `/media-rendition?path=${encodeURIComponent(vaultPath.replace(/^\.?\//, ''))}`;
+}
+
+// The URL the review Source panel requests for one rasterized PDF page (embedder /pdf-page).
+// EXPORTED and reused by SourceSplicePanel so the warm caches byte-identical keys — any drift
+// in encoding/param order would make the cached page miss offline. `box` = optional sub-page
+// highlight (v2 bbox), rounded exactly as the panel rounds it.
+export function pdfPageUrl(vaultPath, page, box) {
+  let u = `/pdf-page?path=${encodeURIComponent(vaultPath)}&page=${page}`;
+  if (box && box.length === 4) u += `&box=${box.map(n => Math.round(n * 10) / 10).join(',')}`;
+  return u;
+}
+
+// A local vault PDF the /pdf-page endpoint can resolve (vault-relative, .pdf), or null for an
+// external http PDF. Mirrors SourceSplicePanel.vaultPdfPath.
+function vaultPdfPath(ref) {
+  const r = (ref || '').trim();
+  if (!r || /^https?:\/\//i.test(r)) return null;
+  return PDF_RE.test(r) ? r.replace(/^\/+/, '') : null;
 }
 
 // A vault-relative path → the same-origin URL that serves it (or null if not a vault path).
@@ -39,17 +58,39 @@ function imageUrls(content) {
 }
 
 // Media a note needs offline as {key, fetch} entries: `key` is the canonical URL the player
-// requests (and the cache is keyed by); `fetch` is what the warm actually downloads — the
-// server rendition for A/V, the file itself for images. PDFs are intentionally excluded —
-// offline they render through the server `/pdf-page` endpoint, not as a raw blob. Deduped by key.
+// requests (and the cache is keyed by); `fetch` is what the warm actually downloads. We cache
+// EVERYTHING a note sources, so review works fully offline:
+//   • image embeds ![[x]]  → /api/images/x            (fetch == key)
+//   • A/V source           → /media-rendition (≤480p) cached under the /vault-media player URL
+//   • PDF source           → the referenced page(s) as /pdf-page PNGs (+ bbox-highlight variant)
+//   • any other local file → the file itself under /vault-media|/workspace
+// External http sources stream live (cross-origin, not cacheable here) and are skipped.
+// Deduped by key.
 export function mediaEntriesForNote(content, source) {
   const byKey = new Map();
-  for (const u of imageUrls(content)) byKey.set(u, { key: u, fetch: u });
+  const add = (key, fetch) => { if (key) byKey.set(key, { key, fetch: fetch ?? key }); };
+
+  for (const u of imageUrls(content)) add(u, u);
+
   try {
     const region = parseSourceRegion(content || '', source);
-    if (region.local && VIDEO_AUDIO_RE.test(region.local)) {
-      const key = vaultMediaUrl(region.local);
-      if (key) byKey.set(key, { key, fetch: renditionUrl(region.local) });
+    const local = region.local;
+    if (local && !/^https?:\/\//i.test(local)) {
+      if (VIDEO_AUDIO_RE.test(local)) {
+        add(vaultMediaUrl(local), renditionUrl(local));
+      } else if (PDF_RE.test(local)) {
+        const vp = vaultPdfPath(local);
+        if (vp) {
+          const pages = region.pages && region.pages.length ? region.pages : [1];
+          for (const p of pages) {
+            add(pdfPageUrl(vp, p, null));                       // plain page (Show-region OFF)
+            const box = region.bboxes?.[p];
+            if (box && box.length === 4) add(pdfPageUrl(vp, p, box)); // highlighted variant (default ON)
+          }
+        }
+      } else {
+        add(vaultMediaUrl(local));                              // doc / other source file, as-is
+      }
     }
   } catch { /* a note with no parseable source footer just contributes its images */ }
   return [...byKey.values()];

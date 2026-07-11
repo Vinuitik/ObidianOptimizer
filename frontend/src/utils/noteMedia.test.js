@@ -24,9 +24,18 @@ describe('mediaUrlsForNote', () => {
     expect(mediaUrlsForNote(note)).toContain('/vault-media/videos/talk.mp4');
   });
 
-  it('excludes local PDFs (rendered via /pdf-page server-side, not warmed as a blob)', () => {
+  it('warms the referenced PDF pages as /pdf-page PNGs (offline review needs them)', () => {
     const note = 'body\n\n## Source\nlocal: resources/books/x.pdf\npages: 4,5\n';
-    expect(mediaUrlsForNote(note)).toEqual([]);
+    const urls = mediaUrlsForNote(note);
+    expect(urls).toContain('/pdf-page?path=resources%2Fbooks%2Fx.pdf&page=4');
+    expect(urls).toContain('/pdf-page?path=resources%2Fbooks%2Fx.pdf&page=5');
+  });
+
+  it('warms the highlighted bbox variant too, so the default Show-region view is offline-ready', () => {
+    const note = 'body\n\n## Source\nlocal: resources/books/x.pdf\npages: 4\nbbox: 4 10 20 30 40\n';
+    const urls = mediaUrlsForNote(note);
+    expect(urls).toContain('/pdf-page?path=resources%2Fbooks%2Fx.pdf&page=4');
+    expect(urls).toContain('/pdf-page?path=resources%2Fbooks%2Fx.pdf&page=4&box=10,20,30,40');
   });
 
   it('ignores external video refs (no local file to warm)', () => {

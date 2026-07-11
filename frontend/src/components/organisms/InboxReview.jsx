@@ -19,6 +19,18 @@ import styles from './InboxReview.module.css';
 const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
 const dirName  = p => p.replace(/[/\\]+$/, '').replace(/[/\\][^/\\]*$/, '');
 
+// A note's source group (same key groupBySource / buildSourceColors use).
+const groupKeyOf = it => it?.captureId || it?.path;
+
+// After acting on a note, the next one to review WITHIN its source group: the first remaining
+// group member in review order (groupBySource). The acted note is already gone from `list`, so
+// what's left flows in reading order. null → the group is exhausted (caller then auto-picks
+// nothing, per the "don't jump to an unrelated source" rule).
+function nextInGroup(list, groupKey) {
+  const inGroup = groupBySource(list).filter(i => groupKeyOf(i) === groupKey);
+  return inGroup[0] || null;
+}
+
 // Ingest review (INGESTION_V2_FLOWS §7). Reuses the Library layout the user liked:
 //   [collapsible queue] · LearnLayout( ORIGINAL source | NEW note ) · [proposed folder bar]
 // LearnLayout brings the adjustable, swappable, orientation-aware split for free (landscape
@@ -65,15 +77,24 @@ export default function InboxReview({ onCount }) {
     setOrient(null);
   }, []);
 
-  const load = useCallback(() => {
+  // opts.preferGroup (a source group key): after an action, auto-advance to the next note in
+  // THAT group and stop (select nothing) once it's exhausted — instead of jumping to list[0].
+  const load = useCallback((opts) => {
     setLoading(true);
     setError(null);
     fetchInbox()
       .then(list => {
         setItems(list);
         onCount?.(list.length);
-        if (list.length && !list.some(i => i.path === selected)) select(list[0]);
-        if (!list.length) { setSelected(null); setDraft(''); setDest(''); }
+        if (!list.length) { setSelected(null); setDraft(''); setDest(''); return; }
+        if (list.some(i => i.path === selected)) return;   // current still present → keep it
+        if (opts?.preferGroup !== undefined) {
+          const next = nextInGroup(list, opts.preferGroup);
+          if (next) select(next);
+          else { setSelected(null); setDraft(''); setDest(''); }
+          return;
+        }
+        select(list[0]);   // initial load / generic refresh
       })
       .catch(() => setError('Could not load the inbox.'))
       .finally(() => setLoading(false));
@@ -115,29 +136,32 @@ export default function InboxReview({ onCount }) {
   async function file() {
     if (!current) return;
     if (!dest.trim()) { setStatus('Pick a destination folder.'); return; }
+    const group = groupKeyOf(current);
     setBusy(true); setStatus('Filing…');
-    try { await fileInboxNote(current.path, dest.trim(), draft); setStatus(''); load(); }
+    try { await fileInboxNote(current.path, dest.trim(), draft); setStatus(''); load({ preferGroup: group }); }
     catch (e) { setStatus(`Failed: ${e.message || e}`); }
     finally { setBusy(false); }
   }
 
   async function acknowledge() {
     if (!current) return;
+    const group = groupKeyOf(current);
     setBusy(true); setStatus('Saving…');
     try {
       // Best-effort: offline this hits no server — the acknowledge still queues. (Filing
       // carries edited content in its event; in-place edits offline are the rare gap.)
       if (draft !== current.content) { try { await updateNote(current.path, draft); } catch {} }
       await acknowledgeCapture(current.captureId);
-      setStatus(''); load();
+      setStatus(''); load({ preferGroup: group });
     } catch (e) { setStatus(`Failed: ${e.message || e}`); }
     finally { setBusy(false); }
   }
 
   async function discard() {
     if (!current) return;
+    const group = groupKeyOf(current);
     setBusy(true);
-    try { await discardInboxNote(current.path); load(); }
+    try { await discardInboxNote(current.path); load({ preferGroup: group }); }
     catch (e) { setStatus(`Failed: ${e.message || e}`); }
     finally { setBusy(false); }
   }

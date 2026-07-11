@@ -55,9 +55,24 @@ export default function ReviewPage() {
     }
   }
 
-  function handleClose() {
-    setActiveNote(null);
-    setInlineNote(null);
+  // After a note is reviewed, auto-advance to a RANDOM remaining due note (web + PWA use this
+  // same component). `fromPath` is the note just finished — excluded so we never re-open it.
+  // Nothing left → fall back to the empty pane. Read fresh from the store: grading dismisses
+  // the finished note from reviewNotes, so getState() reflects the real remaining set.
+  function pickRandomNext(excludePath) {
+    const list = useStore.getState().reviewNotes.filter(n => n.fullPath !== excludePath);
+    return list.length ? list[Math.floor(Math.random() * list.length)] : null;
+  }
+
+  function handleClose(fromPath) {
+    const done = fromPath ?? inlineNote?.fullPath ?? activeNote?.fullPath ?? null;
+    const next = pickRandomNext(done);
+    if (next) {
+      startSession(next);   // transitions cleanly (sets/clears active+inline itself)
+    } else {
+      setActiveNote(null);
+      setInlineNote(null);
+    }
   }
 
   if (!isAuthenticated) {
@@ -121,14 +136,14 @@ export default function ReviewPage() {
           <InlineNoteReview
             note={inlineNote}
             onBack={() => setInlineNote(null)}
-            onClose={handleClose}
+            onClose={() => handleClose(inlineNote.fullPath)}
           />
         ) : activeNote ? (
           <FlashcardSession
             key={sessionKey}
             notePath={activeNote.fullPath}
             onReviewNote={handleReviewNote}
-            onClose={handleClose}
+            onClose={() => handleClose(activeNote.fullPath)}
           />
         ) : (
           <div className={styles.emptySession}>

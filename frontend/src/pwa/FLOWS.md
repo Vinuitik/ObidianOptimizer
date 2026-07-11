@@ -48,8 +48,8 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
 - Secure-context gate: SW refuses on the self-signed `:8443` cert. Install over the Cloudflare tunnel domain (real cert). To change shell precache list: `public/sw.js` `SHELL_URLS`.
 
 ## Flow — download for offline (P3)
-Settings/Review action → `syncForOffline()` → `fetchReview()` + `fetchNoteContent()` per note → `putReviewNotes()` (IndexedDB) → `caches.open('obsopt-media').add()` per `![[embed]]`.
-- To change subset size / media policy: `syncForOffline({ limit, includeMedia })` args.
+Settings/Review action → `syncForOffline()` → `fetchReview()` + `fetchNoteContent()` per note → `putReviewNotes()` (IndexedDB) → **`warmReviewMedia()`** (the SAME media engine the Drive path uses).
+- **Both download paths warm the FULL media set** now (images + A/V renditions + PDF pages + other source files) — `syncForOffline` (non-linked) delegates to `warmReviewMedia` exactly like `refreshAndPull` (linked) does, so media is no longer Drive-link-gated and no longer images-only. To change subset size: `syncForOffline({ limit, includeMedia })`.
 - One-round-trip alternative: backend `GET /api/review/bundle?limit=N` (CaptureController) returns notes+text+media together.
 
 ## Flow — offline review (P3)
@@ -124,20 +124,29 @@ embedder `/ingest` (standalone, `find_home`).
   existing one) → IndexedDB. Best-effort, never throws — a fail leaves the last-good set.
 - To change freshness window: `autoSync.js` `FRESH_MS`. Interval: `MobileLayout` `setInterval`.
 
-## Flow — offline media warm (images + A/V, direct from server)
-`warmMedia.js`, `../utils/noteMedia.js`, `drivePull.js`, `../../public/sw.js`.
+## Flow — offline media warm (EVERYTHING a note sources, direct from server)
+`warmMedia.js`, `../utils/noteMedia.js`, `drivePull.js`, `syncOffline.js`, `../../public/sw.js`.
 - **Why direct, not Drive:** the warm only runs while ONLINE/server-up, so heavy blobs skip
-  Drive entirely — `refreshAndPull()` fetches them straight from the server after the note
-  bundle lands. Note TEXT still comes via the encrypted Drive bundle (works server-down); only
-  MEDIA is direct.
-- **Scope:** `noteMedia.mediaUrlsForNote(content)` = image embeds `![[name]]` → `/api/images/name`
-  + the local A/V source from the `## Source` footer (`resources/…` → `/vault-media/…`,
-  `_workspace/…` → `/workspace/…`). Union over review notes (`getAllReviewNotes`) + Learn
-  inbox (`meta.inboxItems`). PDFs excluded — offline they render via server `/pdf-page`, not a blob.
+  Drive entirely — `refreshAndPull()` / `syncForOffline()` fetch them straight from the server
+  after the note bundle lands. Note TEXT still comes via the encrypted Drive bundle (works
+  server-down); only MEDIA is direct.
+- **Scope = every source a note references** (`noteMedia.mediaEntriesForNote`): image embeds
+  `![[name]]` → `/api/images/name`; the `## Source` footer's local file →
+  A/V → `/media-rendition` (cached under the `/vault-media|/workspace` player URL),
+  **PDF → each referenced page as `/pdf-page?path=…&page=N` PNG (+ the bbox-highlight variant)**,
+  any other file → the file itself. Union over review notes (`getAllReviewNotes`) + Learn inbox
+  (`meta.inboxItems`). External http sources stream live (cross-origin) and are skipped.
+  **Not cached: raw whole PDF/video originals** — the page PNGs + A/V renditions ARE the review
+  surface; caching multi-hundred-MB originals on top risks Android eviction. To change: `mediaEntriesForNote`.
+- **Cache identity is pathname+search** (`warmMedia.idOf`), not pathname — `/pdf-page` URLs carry
+  a query, so keying on pathname alone would collapse all pages to `/pdf-page` and retention would
+  nuke them. `MANAGED_RE` still tests the pathname (which prefix owns the entry).
 - **Warm + retention:** `warmReviewMedia()` `cache.add()`s missing URLs into `obsopt-media`
   (one-by-one so a 404/oversize doesn't abort), then EVICTS managed entries (`/vault-media|
   workspace|api/images/`) not in the current scope → the phone store stays lean.
-- **Serve offline:** `sw.js isMedia()` already cache-firsts these paths (extension + `/api/images/`).
+- **Serve offline:** `sw.js isMedia()` cache-firsts these paths (extension + `/api/images/` +
+  **`/pdf-page`**). The `/pdf-page` prefix is explicit — it has no file extension. Bump `sw.js`
+  `VERSION` when changing routing so the new SW installs (needs one online load).
 - **Renditions:** A/V isn't warmed at full quality — `noteMedia.mediaEntriesForNote()` returns
   `{key, fetch}` where `fetch` is the server rendition (`/media-rendition?path=…`, embedder
   transcodes to ≤480p / audio-only, cached under `/reports/_renditions`) and `key` is the
@@ -145,6 +154,14 @@ embedder `/ingest` (standalone, `find_home`).
   offline transparently gets the small file. To force audio-only: `&mode=audio`.
 - To change what's warmed: `noteMedia.mediaEntriesForNote()`. To warm PDFs offline: not done —
   would need to cache `/pdf-page` PNG renders per page.
+- **Download progress signal:** every phase reports up to the Sync button. `pullReviewFromDrive`
+  fires `onStage({stage})` as each bundle starts (`notes`→`cards`→`inbox`); `warmReviewMedia`
+  fires `onProgress({phase,done,total})` split into `images` → `media` (A/V) → `pdf`
+  (`phaseOf(key)`: `/pdf-page`=pdf, `/api/images/`=images, else media). `refreshAndPull` /
+  `syncForOffline` funnel these into one `onStage` stream; `SyncPage.stageText()` maps stage keys →
+  labels (`STAGE_LABELS`) for the button ("Downloading PDF pages 3/7…"), and `mediaSummary(byPhase)`
+  shows real per-type counts on completion ("Pulled 40 notes · 12 images · 3 video/audio · 8 PDF pages").
+  To rename phases: `SyncPage.STAGE_LABELS`. To add a phase: emit a new `stage` + add its label.
 
 ## Flow — offline auth (persisted flag, not a re-login)
 `store/useStore.js` (`AUTH_KEY='obsOpt_authOk'`), `MobileLayout.jsx`, `api/notes.checkAuth`.
@@ -179,7 +196,7 @@ embedder `/ingest` (standalone, `find_home`).
   on the tunnel domain. Blank-folder heal likewise needs one online pull to run.
 - **Service workers need a secure context.** Real HTTPS or `localhost` only. The stack's self-signed `:8443` will BLOCK SW registration in Chrome — `registerSW.js` no-ops via `window.isSecureContext`. Install + first sync MUST be done online over the Cloudflare tunnel (`obsidianoptimizer.uk`, real cert). After that, offline runs from cache.
 - **Hand-written SW, not Workbox.** `public/sw.js` precaches only the shell URLs; hashed JS/CSS are cached lazily (stale-while-revalidate) on first online visit — so a cold-install that immediately goes offline before assets load can fail. First online launch is required. Upgrade path: `vite-pwa.config.js` (Workbox `injectManifest`).
-- **Storage is sandboxed + evictable.** PWA can't roam the phone filesystem. Offline data lives in IndexedDB (`obsopt-offline`) + Cache Storage (`obsopt-shell-v1`, `obsopt-media`). `navigator.storage.persist()` is requested but the browser may still deny; under pressure Android can evict the offline set. No quota guard on media — video is excluded by default (`syncForOffline includeMedia` caches images/PDF only).
+- **Storage is sandboxed + evictable.** PWA can't roam the phone filesystem. Offline data lives in IndexedDB (`obsopt-offline`) + Cache Storage (`obsopt-shell-*`, `obsopt-media`). `navigator.storage.persist()` is requested but the browser may still deny; under pressure Android can evict the offline set. **No quota guard on media** — the warm now caches images + A/V renditions + PDF pages for the whole due+inbox set (`includeMedia` default on). Renditions/page-PNGs keep it bounded (originals are NOT cached), but a large due set can still be sizable; retention evicts out-of-scope media each warm. If eviction bites, add a byte cap in `warmMedia.warmReviewMedia`.
 - **The SW duplicates the IDB outbox schema** (it writes captures while a client may be closed). `public/sw.js` `openDB()` MUST stay in sync with `db.js` (`DB_NAME='obsopt-offline'`, `DB_VERSION=1`, stores reviewNotes/outbox/meta). Bump both together.
 - **Session cookie in PWA context.** Capture/grade rely on the same-origin Spring session cookie surviving the installed-PWA context. If it doesn't, requests 401 → everything queues until re-login. CSP `connect-src 'self'` is fine (same-origin only).
 - **`navigator.onLine` is a hint, not truth.** It only knows the device has *a* network, not that the server is reachable; the offline layer still falls back to IDB whenever a `fetch` actually throws.
@@ -205,6 +222,11 @@ embedder `/ingest` (standalone, `find_home`).
 | App tabs / scope | `BottomNav.jsx` `TABS` + `MobileApp.jsx` `<Route>` |
 | PWA activation (live) | `src/main.jsx` (`ResponsiveApp` + `registerServiceWorker()`) |
 | Download-for-offline / sync UI | `SyncPage.jsx` (`syncForOffline`, `flushOutbox`) |
+| Download progress phase labels | `SyncPage.jsx` `STAGE_LABELS` / `stageText()` / `mediaSummary()`; emitted by `drivePull.pullReviewFromDrive`/`refreshAndPull` (`onStage`) + `warmMedia.warmReviewMedia` (`onProgress.phase`) |
+| What media is warmed (images/A-V/PDF/other) | `utils/noteMedia.js` `mediaEntriesForNote()` (shares `pdfPageUrl` with `SourceSplicePanel`) |
+| SW media routing (incl. `/pdf-page`) | `public/sw.js` `isMedia()` + `VERSION` bump |
+| Review auto-advance (random next note) | `pages/ReviewPage.jsx` `pickRandomNext()` / `handleClose(fromPath)` |
+| Learn auto-advance (next in source group, stop at group end) | `components/organisms/InboxReview.jsx` `nextInGroup()` + `load({preferGroup})` (file/acknowledge/discard) |
 | PWA auto-sync cron (launch/focus/interval) | `MobileLayout.jsx` effect → `autoSync.maybeAutoSync()` |
 | Auto-sync freshness window | `autoSync.js` `FRESH_MS` (6h) |
 | Creds re-read / blank-folder heal | `setup.js` `refreshCreds()` (+ `drivePull.js` just-in-time call) |

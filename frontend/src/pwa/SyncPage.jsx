@@ -23,6 +23,26 @@ function ago(ts) {
   return `${Math.round(hrs / 24)} d ago`;
 }
 
+// User-facing names for each download phase (stage key → label).
+const STAGE_LABELS = {
+  notes: 'notes', cards: 'flashcards', inbox: 'inbox',
+  images: 'images', media: 'video & audio', pdf: 'PDF pages',
+};
+function stageText(s) {
+  if (!s) return 'Downloading…';
+  const label = STAGE_LABELS[s.stage] || s.stage;
+  return `Downloading ${label}${s.total ? ` ${s.done}/${s.total}` : ''}…`;
+}
+// "12 images · 3 video/audio · 8 PDF pages" from a warm's byPhase counts (skip zeros).
+function mediaSummary(byPhase) {
+  if (!byPhase) return '';
+  const parts = [];
+  if (byPhase.images) parts.push(`${byPhase.images} image${byPhase.images > 1 ? 's' : ''}`);
+  if (byPhase.media)  parts.push(`${byPhase.media} video/audio`);
+  if (byPhase.pdf)    parts.push(`${byPhase.pdf} PDF page${byPhase.pdf > 1 ? 's' : ''}`);
+  return parts.join(' · ');
+}
+
 export default function SyncPage() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const setShowLogin    = useStore(s => s.setShowLogin);
@@ -30,7 +50,7 @@ export default function SyncPage() {
 
   const [lastSync, setLastSync] = useState(null);
   const [busy, setBusy]         = useState(false);
-  const [progress, setProgress] = useState(null); // { done, total }
+  const [stage, setStage]       = useState(null); // { stage, done, total }
   const [status, setStatus]     = useState(null);  // { text, tone }
   const [linked, setLinked]     = useState(false);
   const [driveMsg, setDriveMsg] = useState(null);  // { text, tone }
@@ -68,28 +88,33 @@ export default function SyncPage() {
   }
 
   async function download() {
-    setBusy(true); setStatus(null); setProgress(null);
+    setBusy(true); setStatus(null); setStage(null);
     try {
       if (linked) {
         // Push my grades to the Drive mailbox first (server drains them on its next boot),
         // then pull the freshest bundle. Works even with the laptop off.
         const up = await pushMailbox().catch(() => ({ pushed: 0 }));
-        const res = online ? await refreshAndPull() : await pullReviewFromDrive();
+        const res = online
+          ? await refreshAndPull({ onStage: setStage })
+          : await pullReviewFromDrive({ onStage: setStage });
         setLastSync(Date.now());
+        const summary = mediaSummary(res.media?.byPhase);
         setStatus({
-          text: `${up.pushed ? `Synced ${up.pushed} grade(s) · ` : ''}Pulled ${res.notes} notes from Drive.`,
+          text: `${up.pushed ? `Synced ${up.pushed} grade(s) · ` : ''}Pulled ${res.notes} notes`
+            + `${summary ? ` · ${summary}` : ''} from Drive.`,
           tone: 'ok',
         });
       } else {
         await flushOutbox().catch(() => {});
-        const res = await syncForOffline({ onProgress: setProgress });
+        const res = await syncForOffline({ onStage: setStage });
         setLastSync(Date.now());
-        setStatus({ text: `Downloaded ${res.notes} notes · ${res.media} media for offline.`, tone: 'ok' });
+        const summary = mediaSummary(res.byPhase);
+        setStatus({ text: `Downloaded ${res.notes} notes${summary ? ` · ${summary}` : ''} for offline.`, tone: 'ok' });
       }
     } catch (e) {
       setStatus({ text: `Sync failed: ${e.message ?? e}`, tone: 'err' });
     } finally {
-      setBusy(false); setProgress(null);
+      setBusy(false); setStage(null);
     }
   }
 
@@ -112,9 +137,7 @@ export default function SyncPage() {
       {isAuthenticated ? (
         <button className={styles.captureBtn} onClick={download} disabled={busy || !online}
                 style={{ marginTop: 14, width: '100%', padding: '12px 16px' }}>
-          {busy
-            ? (progress ? `Downloading ${progress.done}/${progress.total}…` : 'Downloading…')
-            : 'Download for offline'}
+          {busy ? stageText(stage) : 'Download for offline'}
         </button>
       ) : (
         <button className={styles.captureBtn} onClick={() => setShowLogin(true)}

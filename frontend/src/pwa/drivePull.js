@@ -34,7 +34,8 @@ async function findOfflineFile(token, folderId, name) {
 }
 
 // Download + decrypt the review bundle into the reviewNotes store. Returns {notes, generatedAt}.
-export async function pullReviewFromDrive() {
+// onStage?.({ stage }) fires as each bundle phase starts so the UI can name what's downloading.
+export async function pullReviewFromDrive({ onStage } = {}) {
   let creds = await getCreds();
   if (!creds) throw new Error('Link this device first (Drive link, below).');
   // Self-heal a device that linked too early (blank folder id cached): re-read the server
@@ -42,6 +43,7 @@ export async function pullReviewFromDrive() {
   if (!creds.driveFolderId && navigator.onLine) creds = (await refreshCreds()) || creds;
   if (!creds.driveFolderId) throw new Error('No Drive folder yet — run a sync on the server first.');
 
+  onStage?.({ stage: 'notes' });
   const token = await getAccessToken(creds);
   const file = await findOfflineFile(token, creds.driveFolderId, REVIEW_BUNDLE);
   if (!file) throw new Error('No offline set on Drive yet — tap “Prep on server”, or open the desktop once.');
@@ -66,6 +68,7 @@ export async function pullReviewFromDrive() {
   // Absent bundle → self-rated review still works, so never fail the whole pull on it.
   let cards = 0;
   try {
+    onStage?.({ stage: 'cards' });
     const cardsFile = await findOfflineFile(token, creds.driveFolderId, CARDS_BUNDLE);
     if (cardsFile) {
       const cbundle = JSON.parse(await decryptText(key, await driveDownload(token, cardsFile.id)));
@@ -84,6 +87,7 @@ export async function pullReviewFromDrive() {
   // array; file/discard/acknowledge mutate it optimistically and queue mailbox events.
   let inbox = 0;
   try {
+    onStage?.({ stage: 'inbox' });
     const inboxFile = await findOfflineFile(token, creds.driveFolderId, INBOX_BUNDLE);
     if (inboxFile) {
       const ib = JSON.parse(await decryptText(key, await driveDownload(token, inboxFile.id)));
@@ -99,19 +103,22 @@ export async function pullReviewFromDrive() {
 
 // Ask the server (while it's up) to rebuild the bundle, then pull it. Used at home so the
 // train set is fresh; falls back to pulling the existing bundle if the server is off.
-export async function refreshAndPull() {
+// onStage?.({ stage, done, total }) reports progress phase-by-phase for the UI.
+export async function refreshAndPull({ onStage } = {}) {
   let serverUp = false;
   try {
     await fetch('/api/pwa/export', { method: 'POST', credentials: 'same-origin' });
     serverUp = true;
   } catch { /* server off — pull whatever bundle is already on Drive */ }
-  const res = await pullReviewFromDrive();
+  const res = await pullReviewFromDrive({ onStage });
   // Heavy media (images + A/V) comes DIRECT from the server, not Drive — only possible while
   // it's up. Best-effort: a failed warm never fails the pull. Scoped + self-evicting inside.
   if (serverUp) {
     try {
       const { warmReviewMedia } = await import('./warmMedia');
-      res.media = await warmReviewMedia();
+      res.media = await warmReviewMedia({
+        onProgress: p => onStage?.({ stage: p.phase, done: p.done, total: p.total }),
+      });
     } catch { /* keep the note set even if media warming fails */ }
   }
   return res;

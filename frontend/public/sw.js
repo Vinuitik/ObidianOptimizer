@@ -15,7 +15,7 @@
  * architecture_plans/PWA_MOBILE_ARCH.md §9.
  */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = `obsopt-shell-${VERSION}`;
 const MEDIA_CACHE = 'obsopt-media'; // unversioned: managed by the offline sync, not the SW
 
@@ -165,7 +165,10 @@ function isAppIcon(path) {
 
 function isMedia(path) {
   return /\.(png|jpe?g|gif|webp|svg|pdf|mp4|mkv|webm|mov|avi|mp3|m4a|wav|ogg|flac)$/i.test(path)
-    || path.startsWith('/api/images/') || path.startsWith('/images/');
+    || path.startsWith('/api/images/') || path.startsWith('/images/')
+    // Rasterized PDF pages the offline warm cached (keyed WITH their ?path=&page= query, which
+    // cache-first matches by default). No file extension, so it needs an explicit prefix.
+    || path.startsWith('/pdf-page');
 }
 
 function isAsset(path) {

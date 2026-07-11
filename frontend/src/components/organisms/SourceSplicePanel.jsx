@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { parseSourceRegion } from '../../utils/inboxParse';
+import { pdfPageUrl } from '../../utils/noteMedia';   // shared so offline warm caches identical keys
 import RsvpReader from '../molecules/RsvpReader';
 import NoteRenderer from '../molecules/NoteRenderer';
 import styles from './SourceSplicePanel.module.css';
@@ -176,11 +177,7 @@ function PdfPages({ path, pages, bboxes }) {
   );
 }
 
-function pdfPageUrl(vaultPath, page, box) {
-  let u = `/pdf-page?path=${encodeURIComponent(vaultPath)}&page=${page}`;
-  if (box && box.length === 4) u += `&box=${box.map(n => Math.round(n * 10) / 10).join(',')}`;
-  return u;
-}
+// pdfPageUrl is imported from utils/noteMedia (shared with the offline warm so keys match).
 
 // A local vault PDF path the /pdf-page endpoint can resolve (vault-relative, .pdf), or null
 // for an external http PDF (which the endpoint can't open — caller falls back to <embed>).
