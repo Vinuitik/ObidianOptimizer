@@ -126,6 +126,10 @@ services:
       - CHRONO_ENABLED=${CHRONO_ENABLED:-true}
       - INGEST_ENABLED=${INGEST_ENABLED:-true}
       - APP_AUTH_PASSWORD=${APP_AUTH_PASSWORD:?set APP_AUTH_PASSWORD in .env}
+      # Stable remember-me signing key — MUST persist across restarts (random default in Spring
+      # would log everyone out on each boot). Set APP_AUTH_REMEMBER_KEY in .env to a long random
+      # string; the fallback keeps local/dev booting.
+      - APP_AUTH_REMEMBER_KEY=${APP_AUTH_REMEMBER_KEY:-obsopt-dev-remember-key-change-me}
       - EMBEDDER_URL=http://embedder:8000
       - WRAPPER_URL=${WRAPPER_URL:-http://host.docker.internal:5001}
       - IMAGE_WORKER_PARALLELISM=${IMAGE_WORKER_PARALLELISM:-4}

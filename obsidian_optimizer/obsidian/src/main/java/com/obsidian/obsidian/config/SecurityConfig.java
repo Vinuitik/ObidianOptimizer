@@ -25,6 +25,12 @@ public class SecurityConfig {
     @Value("${app.auth.password}")
     private String password;
 
+    @Value("${app.auth.remember-key}")
+    private String rememberKey;
+
+    @Value("${app.auth.remember-validity-seconds}")
+    private int rememberValiditySeconds;
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -44,10 +50,22 @@ public class SecurityConfig {
                     res.setStatus(HttpServletResponse.SC_UNAUTHORIZED))
                 .permitAll()
             )
+            // Long-lived remember-me: sign-in issues a persistent, signed token cookie so the
+            // user stays authenticated across app-close AND backend restarts/redeploys (the
+            // hash-based token is stateless — it re-validates against the user, so there's no
+            // in-memory session to lose). alwaysRemember → every login gets the cookie without
+            // a form checkbox. The fixed `key` is what makes tokens survive restarts.
+            .rememberMe(rm -> rm
+                .key(rememberKey)
+                .tokenValiditySeconds(rememberValiditySeconds)
+                .alwaysRemember(true)
+                .userDetailsService(userDetailsService())
+            )
             .logout(logout -> logout
                 .logoutUrl("/logout")
                 .logoutSuccessHandler((req, res, auth) ->
                     res.setStatus(HttpServletResponse.SC_OK))
+                .deleteCookies("remember-me")
                 .permitAll()
             )
             .exceptionHandling(ex -> ex
