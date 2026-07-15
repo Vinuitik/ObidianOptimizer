@@ -9,9 +9,19 @@ Files: SecurityConfig.java, WebConfig.java, ObsidianApplication.java, ServletIni
 Spring Security session-based single-user auth.  
 Credentials come from env vars `APP_AUTH_USERNAME` / `APP_AUTH_PASSWORD` (set in `.env`, passed via `docker-compose.yml`). `application.properties` only holds placeholders with throwaway local defaults — never put real credentials there (BCrypt is applied at startup).
 
-`POST /login` (form-encoded: `username=&password=`) → Spring Security → session cookie → 200  
-`POST /logout` → session invalidated → 200  
+`POST /login` (form-encoded: `username=&password=`) → Spring Security → session cookie **+ long-lived `remember-me` cookie** → 200  
+`POST /logout` → session invalidated + `remember-me` deleted → 200  
 `GET /me` → 200 + username if authenticated, 401 if not
+
+**Remember-me (long-lived auth).** `SecurityConfig.filterChain()` `.rememberMe(...)`: hash-based
+(stateless) token, `alwaysRemember(true)` so every login issues a persistent cookie (no form
+checkbox), `tokenValiditySeconds` = 365 d (`app.auth.remember-validity-seconds`). The signing
+**key MUST be stable** — `app.auth.remember-key` ← `APP_AUTH_REMEMBER_KEY` (`.env`); Spring's
+default is RANDOM-per-boot, which would invalidate every token on each restart. Because the token
+re-validates against the (in-memory) user instead of an `HttpSession`, it **survives backend
+restarts/redeploys** — that in-memory session loss was the cause of the constant re-login. Pairs
+with the PWA's persisted offline flag (`obsOpt_authOk`) → "sign in once." To change validity/key:
+those two props. Rotating the key logs everyone out.
 
 Only `/login` and `/logout` are public — **everything else requires session auth**
 (`GET /settings` was public until the security-hardening pass; it leaked the vault path).  
