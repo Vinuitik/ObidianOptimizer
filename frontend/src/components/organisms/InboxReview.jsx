@@ -8,6 +8,7 @@ import {
 import { fetchChildren, updateNote } from '../../api/notes';
 import { splitInboxNote } from '../../api/inbox';
 import { buildSourceColors, groupBySource, captureLabel } from '../../utils/sourceColor';
+import { markLearnTaskDone } from '../../utils/dailyDuty';
 import useStore from '../../store/useStore';
 import { useIsMobile } from '../../utils/useMediaQuery';
 import LearnLayout from '../templates/LearnLayout';
@@ -138,7 +139,7 @@ export default function InboxReview({ onCount }) {
     if (!dest.trim()) { setStatus('Pick a destination folder.'); return; }
     const group = groupKeyOf(current);
     setBusy(true); setStatus('Filing…');
-    try { await fileInboxNote(current.path, dest.trim(), draft); setStatus(''); load({ preferGroup: group }); }
+    try { await fileInboxNote(current.path, dest.trim(), draft); markLearnTaskDone(); setStatus(''); load({ preferGroup: group }); }
     catch (e) { setStatus(`Failed: ${e.message || e}`); }
     finally { setBusy(false); }
   }
@@ -152,6 +153,7 @@ export default function InboxReview({ onCount }) {
       // carries edited content in its event; in-place edits offline are the rare gap.)
       if (draft !== current.content) { try { await updateNote(current.path, draft); } catch {} }
       await acknowledgeCapture(current.captureId);
+      markLearnTaskDone();
       setStatus(''); load({ preferGroup: group });
     } catch (e) { setStatus(`Failed: ${e.message || e}`); }
     finally { setBusy(false); }

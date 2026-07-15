@@ -9,6 +9,7 @@ import DashboardPage from './pages/DashboardPage';
 import NavBar from './components/organisms/NavBar';
 import LoginModal from './components/organisms/LoginModal';
 import SyncBanner from './components/organisms/SyncBanner';
+import QuitGuard from './components/organisms/QuitGuard';
 import Toast from './components/atoms/Toast';
 import useStore from './store/useStore';
 import { flushOutbox } from './pwa/offlineApi';
@@ -74,6 +75,7 @@ export default function App() {
         <SyncBanner />
         <AnimatedRoutes />
         {showLogin && <LoginModal />}
+        <QuitGuard />
         <Toast />
       </div>
     </BrowserRouter>
