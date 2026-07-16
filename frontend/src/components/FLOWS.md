@@ -1,6 +1,6 @@
 # Components Flows
 
-Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx
+Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/QuitGuard.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx
 
 ---
 
@@ -256,6 +256,7 @@ Controlled by `store.toastMessage` + `showToast()`.
 | Mobile drawer width/behavior | `templates/SplitLayout.module.css` `@media` block |
 | Drawer initial collapsed state | `store/useStore.js leftCollapsed/rightCollapsed` |
 | Sync banner copy / poll cadence | `organisms/SyncBanner.jsx` (`fetchSyncProgress`, 3s/15s) |
+| "Are you a quitter?" guard | `organisms/QuitGuard.jsx` (mounted in `App.jsx`) — arms native `beforeunload` prompt + shows quote modal on tab-refocus while duty unfinished. Duty = `utils/dailyDuty.dutyUnfinished()` (`learnTaskDoneToday()` localStorage day-stamp AND `fetchReview(0,1)` due-probe). Nag copy/quotes: `utils/quotes.js`. Learn-done stamp set in `organisms/InboxReview.jsx` file()/acknowledge() via `markLearnTaskDone()`. **Web can't render custom UI at true close (browser limit) → the on-close modal is a desktop-app (Tauri/Electron) capability** |
 | PWA auto sign-in prompt | `pwa/MobileLayout.jsx` `gate()` effect (`setShowLogin`) |
 | App-level crash boundary (PWA) | `organisms/RouteErrorBoundary.jsx` wraps `<Outlet>` in `pwa/MobileLayout.jsx` — catches leaf throws so a bad screen (e.g. Learn) can't blank the app / kill the nav; resets per route (`key=pathname`) |
 | Review mobile pane switch | `pages/ReviewPage.jsx hasSession` + `.module.css` `@media` |

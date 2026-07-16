@@ -46,6 +46,7 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
 `registerServiceWorker()` → `navigator.serviceWorker.register('/sw.js')` → `requestPersistentStorage()`
 - `public/sw.js` `install` precaches the shell; `fetch` navigations are network-first → fall back to cached `/index.html` so the app opens offline.
 - Secure-context gate: SW refuses on the self-signed `:8443` cert. Install over the Cloudflare tunnel domain (real cert). To change shell precache list: `public/sw.js` `SHELL_URLS`.
+- **Desktop install (Windows/Mac):** same PWA installs as a standalone **desktop app** from Edge/Chrome (address-bar install icon, or ⋮ → *Install this site as an app*). `display-mode: standalone` → the app renders `PwaApp` (the narrow phone app) in its own window — the desktop app IS the installed PWA, no separate build. Thin online client → the Docker stack runs on a separate always-on box; the desktop machine no longer needs the local stack. Desktop Chrome/Edge only surface the Install prompt when the manifest advertises **PNG 192+512** icons (SVG-only can suppress it) → `public/icons/icon-192.png` / `icon-512.png` / `icon-maskable-512.png` (regenerate from the SVGs with ImageMagick+librsvg). To change: `manifest.webmanifest` `icons`.
 
 ## Flow — download for offline (P3)
 Settings/Review action → `syncForOffline()` → `fetchReview()` + `fetchNoteContent()` per note → `putReviewNotes()` (IndexedDB) → **`warmReviewMedia()`** (the SAME media engine the Drive path uses).
@@ -238,6 +239,7 @@ embedder `/ingest` (standalone, `find_home`).
 | IndexedDB schema | `db.js` + mirror in `public/sw.js` `openDB()` |
 | Offline subset size / media policy | `syncOffline.js` `syncForOffline({ limit, includeMedia })` |
 | Share-target params (incl. file `accept`) | `manifest.webmanifest` + `vite-pwa.config.js` `share_target` |
+| Manifest icons (desktop-install gate) | `manifest.webmanifest` `icons` — needs PNG 192+512 for the Edge/Chrome desktop Install prompt; regen from `public/icons/*.svg` |
 | Raw-note (text) capture | `CapturePage` Note mode → `offlineApi.captureText()` → `POST /api/capture {text,title}` |
 | Shared-file (PDF/av) capture | `public/sw.js handleShareFile()` → `POST /api/capture/file` (multipart) |
 | Offline capture queue kinds | `outbox.js` `enqueueCaptureText` / `captureFile` + `flush()` handlers (server-direct) |
