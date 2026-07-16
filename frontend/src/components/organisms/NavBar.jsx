@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/learn',    label: 'Learn' },
   { to: '/review',   label: 'Review', flashcardsOnly: true },
   { to: '/dashboard', label: 'Dashboard' },
+  { to: '/get-app',  label: 'Get App' },
   { to: '/settings', label: 'Settings' },
 ];
 

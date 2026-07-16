@@ -190,6 +190,10 @@ services:
       # (nginx /ext/ ← linux_scripts/deploy-extension.sh writes here). :ro — nginx
       # only reads; new versions appear live without recreating the container.
       - ./ext-dist:/ext-dist:ro
+      # Desktop installer (.exe) served at nginx /download/ for the in-app "Get App" view.
+      # Populated by the desktop build (linux_scripts publish or manual copy of
+      # desktop/release/*.exe → downloads/). :ro, live without recreating the container.
+      - ./downloads:/downloads:ro
     depends_on:
       - backend
 

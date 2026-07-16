@@ -138,6 +138,16 @@ server {
         default_type application/octet-stream;
     }
 
+    # ── Desktop installer download ───────────────────────────────────────────────
+    # Serves the Electron .exe for the in-app "Get App" view (frontend GetAppPage →
+    # /download/ObsidianOptimizer-Setup.exe). Files live in host ./downloads, mounted
+    # :ro at /downloads. A new build just replaces the file — no container rebuild.
+    location /download/ {
+        alias /downloads/;
+        default_type application/octet-stream;
+        add_header Content-Disposition "attachment" always;
+    }
+
     location / {
         root       /usr/share/nginx/html;
         try_files  $uri $uri/ /index.html;

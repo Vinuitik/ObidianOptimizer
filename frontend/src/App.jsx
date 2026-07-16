@@ -6,6 +6,7 @@ import SettingsPage from './pages/SettingsPage';
 import ReviewPage from './pages/ReviewPage';
 import LearnPage from './pages/LearnPage';
 import DashboardPage from './pages/DashboardPage';
+import GetAppPage from './pages/GetAppPage';
 import NavBar from './components/organisms/NavBar';
 import LoginModal from './components/organisms/LoginModal';
 import SyncBanner from './components/organisms/SyncBanner';
@@ -39,6 +40,7 @@ function AnimatedRoutes() {
           <Route path="/learn" element={<LearnPage />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/get-app" element={<GetAppPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </motion.div>

@@ -4,6 +4,7 @@ import './styles/globals.css';
 import 'katex/dist/katex.min.css';
 import ResponsiveApp from './pwa/ResponsiveApp';
 import { registerServiceWorker } from './pwa/registerSW';
+import './pwa/installPrompt';   // side-effect: capture beforeinstallprompt early for the Get App view
 
 // ResponsiveApp renders the full site in a browser and the narrow PWA when launched
 // from the installed home-screen icon (display-mode: standalone). Desktop browsers
