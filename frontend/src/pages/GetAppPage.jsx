@@ -29,6 +29,13 @@ export default function GetAppPage() {
         “Are you a quitter?” close-guard.
       </p>
 
+      <p className={styles.note}>
+        A note on browser support: installing a web app to your desktop is only offered by
+        <strong> Chrome</strong> and <strong>Edge</strong> — Firefox and Safari don’t support it. For
+        the smoothest install, open this page in Chrome. On Firefox or Safari, use the Windows
+        download below instead. Sorry for the hoops — it’s a browser limitation, not by choice.
+      </p>
+
       <div className={styles.cards}>
         {/* ── Install as PWA ─────────────────────────────────────────────── */}
         <section className={styles.card}>
