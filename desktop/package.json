@@ -1,0 +1,33 @@
+{
+  "name": "obsidian-optimizer-desktop",
+  "productName": "Obsidian Optimizer",
+  "version": "1.0.0",
+  "description": "Desktop shell for Obsidian Optimizer — loads the live site and adds the quit-breaker close-guard.",
+  "main": "main.js",
+  "author": "Obsidian Optimizer",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win --publish never"
+  },
+  "build": {
+    "appId": "uk.obsidianoptimizer.desktop",
+    "productName": "Obsidian Optimizer",
+    "files": ["main.js", "quotes.json", "icon.png"],
+    "directories": { "output": "release" },
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}
