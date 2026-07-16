@@ -42,3 +42,4 @@ Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notl
 | [Frontend Testing](frontend/FLOWS.md#testing) | Testing | Vitest: useStore, TabBar, FolderTree filter, diff, LoginModal, NewNoteForm |
 | [CI Pipeline](.github/workflows/ci.yml) | CI/CD | GitHub Actions: backend-unit, backend-integration, frontend, docker-build |
 | [Deploy/Boot FLOWS](linux_scripts/FLOWS.md) | Flows | systemd boot service, restart-on-crash, log querying, host-wrapper respawn |
+| [Desktop Shell FLOWS](desktop/FLOWS.md) | Flows | Electron quit-breaker: loads live site, window-close intercept → anti-quitter quote, Windows build via dockerized wine |
