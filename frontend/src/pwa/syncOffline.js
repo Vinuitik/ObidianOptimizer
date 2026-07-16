@@ -20,7 +20,10 @@ export async function syncForOffline({ limit = 40, includeMedia = true, onStage 
   const records = [];
 
   for (let i = 0; i < notes.length; i++) {
-    const path = notes[i];
+    // fetchReview returns note OBJECTS ({ path, track, hasCards }) — not bare path
+    // strings. Pull the path out; treating the object as a string here was the
+    // "e.split is not a function" sync crash on non-Drive (server-direct) clients.
+    const path = notes[i].path;
     let content = '';
     try { content = await fetchNoteContent(path); } catch { /* skip unreadable */ }
     records.push({ path, shortName: shortNameOf(path), content });
