@@ -6,6 +6,7 @@
 // URL shapes mirror SourceSplicePanel.mediaUrl / nginx: vault `resources/…` → `/vault-media/…`,
 // `_workspace/…` → `/workspace/…`, and image embeds `![[name]]` → `/api/images/name`.
 import { parseSourceRegion } from './inboxParse';
+import { mediaUrl as embedUrl } from './obsidianImagePlugin';
 
 const VIDEO_AUDIO_RE = /\.(mp4|mkv|webm|mov|m4v|mp3|m4a|wav|ogg|flac)$/i;
 const PDF_RE = /\.pdf$/i;
@@ -48,12 +49,15 @@ export function vaultMediaUrl(path) {
   return null;
 }
 
-// Image embeds `![[name]]` → `/api/images/name`. Same regex renderMarkdown uses for <img src>.
+// Embeds `![[name]]` → the SAME URL the Milkdown renderer (obsidianImagePlugin) requests:
+// `/vault-media/<subdir>/name`. This MUST match the renderer exactly — caching under the old
+// `/api/images/name` (a different endpoint the review view never hits) is what left images
+// blank offline despite a "successful" sync. `embedUrl` handles image/video/audio/pdf subdirs.
 function imageUrls(content) {
   const urls = [];
   const re = /!\[\[(.*?)\]\]/gs;
   let m;
-  while ((m = re.exec(content || '')) !== null) urls.push(`/api/images/${encodeURIComponent(m[1])}`);
+  while ((m = re.exec(content || '')) !== null) urls.push(embedUrl(m[1]));
   return urls;
 }
 

@@ -15,8 +15,10 @@ describe('vaultMediaUrl', () => {
 describe('mediaUrlsForNote', () => {
   it('collects image embeds', () => {
     const urls = mediaUrlsForNote('text ![[diagram.png]] more ![[b.jpg]]');
-    expect(urls).toContain('/api/images/diagram.png');
-    expect(urls).toContain('/api/images/b.jpg');
+    // Must be the SAME URL the Milkdown renderer requests (obsidianImagePlugin.mediaUrl),
+    // else the offline warm caches a key the review view never asks for → blank images.
+    expect(urls).toContain('/vault-media/images/diagram.png');
+    expect(urls).toContain('/vault-media/images/b.jpg');
   });
 
   it('adds the local A/V source file from the ## Source footer', () => {
@@ -44,7 +46,7 @@ describe('mediaUrlsForNote', () => {
   });
 
   it('dedups repeated embeds', () => {
-    expect(mediaUrlsForNote('![[a.png]] ![[a.png]]')).toEqual(['/api/images/a.png']);
+    expect(mediaUrlsForNote('![[a.png]] ![[a.png]]')).toEqual(['/vault-media/images/a.png']);
   });
 });
 
@@ -57,6 +59,6 @@ describe('mediaEntriesForNote (key = player URL, fetch = rendition)', () => {
   });
   it('images have no rendition → fetch equals key', () => {
     const [e] = mediaEntriesForNote('![[a.png]]');
-    expect(e).toEqual({ key: '/api/images/a.png', fetch: '/api/images/a.png' });
+    expect(e).toEqual({ key: '/vault-media/images/a.png', fetch: '/vault-media/images/a.png' });
   });
 });

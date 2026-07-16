@@ -131,7 +131,10 @@ function subdirFor(filename) {
   return 'files';
 }
 
-function mediaUrl(filename) {
+// EXPORTED: the offline warm (utils/noteMedia) MUST cache embeds under this exact URL,
+// or the review renderer's request misses the cache and images blank out offline. Single
+// source of truth — do not hand-build `/vault-media/...` for embeds anywhere else.
+export function mediaUrl(filename) {
   return `/vault-media/${subdirFor(filename)}/${encodeURIComponent(filename)}`;
 }
 
