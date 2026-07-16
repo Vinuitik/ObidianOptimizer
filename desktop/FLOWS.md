@@ -34,6 +34,23 @@ docker run --rm -v "$PWD":/project -w /project electronuserland/builder:wine \
 Output → `desktop/release/*.exe` (NSIS installer, user-level, desktop shortcut). `build.log` holds
 the last run's output. `node_modules/` + `release/` are gitignored.
 
+## Distribution (in-app "Get App" view)
+The built `.exe` is copied to repo `downloads/` (gitignored binary) and served by the frontend
+nginx at **`/download/`** (compose mounts `./downloads:/downloads:ro`; `nginx.conf.template`
+`location /download/`). The app's **Get App** view (`frontend/src/pages/GetAppPage.jsx`, nav
+`/get-app`) links to `/download/ObsidianOptimizer-Setup.exe` and also offers the **PWA install**
+button (native `beforeinstallprompt`, captured in `frontend/src/pwa/installPrompt.js`). To publish a
+new desktop build: rebuild, then `cp desktop/release/*.exe downloads/ObsidianOptimizer-Setup.exe`
+(no container rebuild — the mount is live).
+
+## Code signing — [NOT IMPLEMENTED, deliberate]
+The installer is **unsigned** → Windows SmartScreen warns "Windows protected your PC" on first run
+(More info → Run anyway). Real signing needs a **paid CA cert** (OV/EV code-signing, ~$100–300/yr)
+plus identity validation and, for instant SmartScreen trust, an **EV cert or reputation build-up** —
+none of it self-serviceable in a build step. Decision: skip it; acceptable for a personal tool. The
+`.exe` warning text is surfaced honestly in the Get App view. To add later: set `CSC_LINK`/
+`CSC_KEY_PASSWORD` (electron-builder) with a real cert; nothing else in the pipeline changes.
+
 ## Technology Notes
 - **Thin-client model:** the shell loads the REMOTE site, so it needs the server (the separate
   always-on box) reachable. It does NOT bundle the app — a deploy updates the desktop app with no
@@ -61,3 +78,7 @@ the last run's output. `node_modules/` + `release/` are gitignored.
 | Windows build target / installer opts | `package.json` `build.win` + `build.nsis` |
 | App icon | `desktop/icon.png` (copied from `frontend/public/icons/icon-512.png`) |
 | Build command / wine image | this file, "Build" section; log at `desktop/build.log` |
+| Installer served to users | nginx `/download/` (`frontend/nginx.conf.template`) ← `downloads/` mount (`docker-compose.yml`) |
+| In-app install/download UI | `frontend/src/pages/GetAppPage.jsx` (nav `/get-app`); PWA prompt capture `frontend/src/pwa/installPrompt.js` |
+| Publish a new .exe | rebuild → `cp desktop/release/*.exe downloads/ObsidianOptimizer-Setup.exe` (live, no rebuild) |
+| Enable code signing | electron-builder `CSC_LINK` + `CSC_KEY_PASSWORD` with a paid cert (currently unsigned by choice) |
