@@ -124,7 +124,7 @@ def health():
 
 
 @app.get("/pdf-page")
-def pdf_page(path: str, page: int = 1, dpi: int = 110, box: str | None = None):
+def pdf_page(path: str, page: int = 1, dpi: int = 110, box: str | None = None, crop: int = 0):
     """Rasterize ONE page of a vault PDF → PNG for the review "source" panel, so a note's
     referenced page is visible inline (and a mis-sourced note — e.g. one the pipeline built
     from the table-of-contents page — is immediately obvious). The PDF is already served
@@ -135,7 +135,12 @@ def pdf_page(path: str, page: int = 1, dpi: int = 110, box: str | None = None):
     1-based; `dpi` is clamped 40–200. `box`="x0,y0,x1,y1" (PDF points — the SAME space the
     ingest bbox is stored in) draws a highlight rectangle on the page BEFORE rasterizing, so
     the frontend's "show region" toggle is just this param present/absent — no client-side
-    coordinate math. Absent → the clean page."""
+    coordinate math. Absent → the clean page.
+
+    `crop=1` (needs `box`) renders ONLY the boxed region (+ a small margin) instead of the
+    whole page with a highlight — so a chapter that starts/ends mid-page shows just its own
+    content, not the confusing rest of the page. No highlight rectangle in crop mode: the crop
+    IS the region."""
     from fastapi import Response
     from mcp_server import _resolve_in_vault
     import fitz
@@ -153,11 +158,21 @@ def pdf_page(path: str, page: int = 1, dpi: int = 110, box: str | None = None):
         doc = fitz.open(pdf)
         n_pages = doc.page_count
         pg = doc[max(1, min(int(page), n_pages)) - 1]   # clamp to a real page, 0-based
+        clip = None
         if rect is not None:
-            # Stroked rect only (no fill) so the highlighted content stays readable. fitz
-            # draw-space == text-block bbox space (top-left origin) → coords map directly.
-            pg.draw_rect(fitz.Rect(*rect), color=(0.95, 0.25, 0.25), width=2.0)
-        png = pg.get_pixmap(dpi=dpi).tobytes("png")
+            r = fitz.Rect(*rect)
+            if crop:
+                # Crop to JUST the sourced region (+ margin), clamped to the page. `clip` makes
+                # get_pixmap rasterize only this sub-rect — the rest of the page never renders.
+                pad = 8.0
+                pr = pg.rect
+                clip = fitz.Rect(max(pr.x0, r.x0 - pad), max(pr.y0, r.y0 - pad),
+                                 min(pr.x1, r.x1 + pad), min(pr.y1, r.y1 + pad))
+            else:
+                # Stroked rect only (no fill) so the highlighted content stays readable. fitz
+                # draw-space == text-block bbox space (top-left origin) → coords map directly.
+                pg.draw_rect(r, color=(0.95, 0.25, 0.25), width=2.0)
+        png = pg.get_pixmap(dpi=dpi, clip=clip).tobytes("png")
         doc.close()
     except HTTPException:
         raise

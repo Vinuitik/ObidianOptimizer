@@ -26,9 +26,11 @@ function renditionUrl(vaultPath) {
 // EXPORTED and reused by SourceSplicePanel so the warm caches byte-identical keys — any drift
 // in encoding/param order would make the cached page miss offline. `box` = optional sub-page
 // highlight (v2 bbox), rounded exactly as the panel rounds it.
-export function pdfPageUrl(vaultPath, page, box) {
+export function pdfPageUrl(vaultPath, page, box, crop = false) {
   let u = `/pdf-page?path=${encodeURIComponent(vaultPath)}&page=${page}`;
   if (box && box.length === 4) u += `&box=${box.map(n => Math.round(n * 10) / 10).join(',')}`;
+  // crop=1 (needs a box) renders ONLY the region — the default review view for a mid-page unit.
+  if (crop && box && box.length === 4) u += `&crop=1`;
   return u;
 }
 
@@ -87,9 +89,12 @@ export function mediaEntriesForNote(content, source) {
         if (vp) {
           const pages = region.pages && region.pages.length ? region.pages : [1];
           for (const p of pages) {
-            add(pdfPageUrl(vp, p, null));                       // plain page (Show-region OFF)
+            add(pdfPageUrl(vp, p, null));                       // clean full page (no-box notes / full-page toggle)
             const box = region.bboxes?.[p];
-            if (box && box.length === 4) add(pdfPageUrl(vp, p, box)); // highlighted variant (default ON)
+            if (box && box.length === 4) {
+              add(pdfPageUrl(vp, p, box, true));               // cropped region — the DEFAULT review view
+              add(pdfPageUrl(vp, p, box));                     // full page + highlight — the toggle-off state
+            }
           }
         }
       } else {

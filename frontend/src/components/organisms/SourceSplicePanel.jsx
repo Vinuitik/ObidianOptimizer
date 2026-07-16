@@ -129,13 +129,14 @@ function ClipVideo({ src, start, end, onOrientation }) {
 
 // The referenced PDF page(s), rasterized server-side by the embedder (/pdf-page) so we see
 // exactly what the note claims as its source — not the clunky whole-doc <embed>. When the
-// note carries a sub-page bbox (v2 ingest), a "Show region" toggle asks the endpoint to draw
-// the highlight (box= param); the user can disable it when the region is wrong. v1 notes have
-// no bbox → just the clean page(s), which already exposes TOC/agenda mis-sourcing at a glance.
+// note carries a sub-page bbox (v2 ingest), we CROP to just that region by default (crop=1) so a
+// chapter that starts/ends mid-page isn't drowned in the rest of the page. "Full page" unchecks
+// the crop → the whole page with the region highlighted (for context / when the crop is wrong).
+// v1 notes have no bbox → the clean page(s), which already exposes TOC/agenda mis-sourcing.
 function PdfPages({ path, pages, bboxes }) {
   const list = pages && pages.length ? pages : [1];
   const hasBoxes = bboxes && list.some(p => bboxes[p]);
-  const [showRegion, setShowRegion] = useState(true);
+  const [cropRegion, setCropRegion] = useState(true);   // default: show ONLY the sourced region
   const [fullDoc, setFullDoc] = useState(false);   // escape hatch: scroll the whole PDF
   const [failed, setFailed] = useState(false);
   const raw = mediaUrl(path);
@@ -145,8 +146,8 @@ function PdfPages({ path, pages, bboxes }) {
       <div className={styles.pdfControls}>
         {hasBoxes && !fullDoc && (
           <label className={styles.pdfToggle}>
-            <input type="checkbox" checked={showRegion} onChange={e => setShowRegion(e.target.checked)} />
-            Show region
+            <input type="checkbox" checked={cropRegion} onChange={e => setCropRegion(e.target.checked)} />
+            Crop to region
           </label>
         )}
         {/* v2 can clip a unit mid-page; this lets the user scroll the whole doc to find the
@@ -167,8 +168,8 @@ function PdfPages({ path, pages, bboxes }) {
       ) : (
         <div className={styles.pdfPages}>
           {list.map(p => (
-            <img key={`${p}-${showRegion}`} className={styles.pdfPage} loading="lazy"
-                 alt={`page ${p}`} src={pdfPageUrl(path, p, showRegion ? bboxes?.[p] : null)}
+            <img key={`${p}-${cropRegion}`} className={styles.pdfPage} loading="lazy"
+                 alt={`page ${p}`} src={pdfPageUrl(path, p, bboxes?.[p] || null, cropRegion)}
                  onError={() => setFailed(true)} />
           ))}
         </div>
