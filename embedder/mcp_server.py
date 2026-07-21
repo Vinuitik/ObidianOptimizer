@@ -84,15 +84,21 @@ def _vector_candidates(query_vec: list[float]) -> list[tuple]:
 
 
 def _text_candidates(query: str) -> list[tuple]:
+    # Real BM25 keyword ranking via ParadeDB pg_search (Tantivy), NOT stock
+    # Postgres ts_rank_cd. paradedb.match() tokenizes the query safely — the raw
+    # `@@@ 'string'` form throws a Tantivy parse error on punctuation ("C++",
+    # "a/b", ":"), match() treats the input as plain terms. Ranked by BM25 score.
+    if not query or not query.strip():
+        return []
     return _query_db(
         """
         SELECT note_path, chunk_index, text
         FROM note_chunks
-        WHERE fts_vector @@ plainto_tsquery('english', %s)
-        ORDER BY ts_rank_cd(fts_vector, plainto_tsquery('english', %s)) DESC
+        WHERE id @@@ paradedb.match('text', %s)
+        ORDER BY paradedb.score(id) DESC
         LIMIT %s
         """,
-        (query, query, FETCH_LIMIT),
+        (query, FETCH_LIMIT),
     )
 
 
@@ -154,7 +160,8 @@ def _resolve_in_vault(note_path: str) -> Path:
 @mcp.tool()
 def search_notes(query: str, limit: int = 10) -> list[dict]:
     """Hybrid search over the Obsidian vault: semantic (pgvector cosine) +
-    full-text keyword (Postgres FTS), order fused with reciprocal rank fusion.
+    keyword (real BM25 via ParadeDB pg_search), order fused with reciprocal
+    rank fusion.
 
     Returns [{notePath, snippet, similarity, matchedBy}] sorted by relevance.
     - similarity: cosine similarity of the best semantically-matched chunk
@@ -162,7 +169,7 @@ def search_notes(query: str, limit: int = 10) -> list[dict]:
       EmbeddingGemma space (asymmetric query/doc prompts, multilingual —
       cross-language matches work), measured against this vault: ≥0.5 strong
       match, 0.4–0.5 related, ≤0.35 likely noise (nonsense queries still
-      surface ~0.30–0.34 hits from a 13k-chunk corpus — do not trust
+      surface ~0.30–0.34 hits from a ~22k-chunk corpus — do not trust
       bottom-of-band results just because they exist).
     - matchedBy: 'semantic', 'keyword', or 'keyword+semantic' — found by
       both rankers is the strongest relevance signal.

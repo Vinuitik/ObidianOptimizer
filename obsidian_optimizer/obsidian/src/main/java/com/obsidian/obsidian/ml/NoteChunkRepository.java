@@ -44,6 +44,15 @@ public class NoteChunkRepository {
             "ALTER TABLE note_chunks DROP CONSTRAINT IF EXISTS note_chunks_note_path_chunk_index_key");
         jdbc.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_note_chunks_path_source_idx ON note_chunks(note_path, source, chunk_index)");
+        // Real BM25 keyword ranking via ParadeDB pg_search (Tantivy). Indexes the raw
+        // `text` column directly; key_field must be the table PK (id). This is the index
+        // findByTextSearch queries through the @@@ operator + paradedb.score().
+        jdbc.execute("CREATE EXTENSION IF NOT EXISTS pg_search");
+        jdbc.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_chunks_bm25 ON note_chunks USING bm25 (id, text) WITH (key_field='id')");
+        // LEGACY: stock-Postgres FTS index. No longer used by search (superseded by the
+        // BM25 index above). Kept only until the fts_vector column is dropped in a
+        // follow-up migration; still populated by the upsert methods for now.
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_chunks_fts ON note_chunks USING GIN(fts_vector)");
         // ivfflat index requires rows to exist first; created lazily by EmbeddingService after bulk insert
@@ -150,16 +159,21 @@ public class NoteChunkRepository {
             """, new NoteChunkRowMapper(), floatArrayToString(queryVec), limit);
     }
 
-    /** Full-text search using PostgreSQL ts_rank_cd (BM25-approximating). */
+    /**
+     * Keyword search using real BM25 relevance (ParadeDB pg_search / Tantivy).
+     * paradedb.match() tokenizes the query safely — the raw {@code @@@ 'string'}
+     * syntax throws Tantivy parse errors on punctuation like "C++" or "a/b",
+     * whereas match() treats the input as plain terms. Ranked by BM25 score.
+     */
     public List<NoteChunk> findByTextSearch(String query, int limit) {
         if (query == null || query.isBlank()) return List.of();
         return jdbc.query("""
             SELECT note_path, chunk_index, text
             FROM note_chunks
-            WHERE fts_vector @@ plainto_tsquery('english', ?)
-            ORDER BY ts_rank_cd(fts_vector, plainto_tsquery('english', ?)) DESC
+            WHERE id @@@ paradedb.match('text', ?)
+            ORDER BY paradedb.score(id) DESC
             LIMIT ?
-            """, new NoteChunkRowMapper(), query, query, limit);
+            """, new NoteChunkRowMapper(), query, limit);
     }
 
     /** Returns the highest chunk_index for a note within one source, or null if none exist. */

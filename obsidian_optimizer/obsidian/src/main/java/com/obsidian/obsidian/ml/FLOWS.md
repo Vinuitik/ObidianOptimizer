@@ -152,7 +152,10 @@ EmbeddingService.embedQuery(query)
 NoteChunkRepository.findByVectorSimilarity(vec, 60)
   → ORDER BY embedding <=> ?::vector LIMIT 60
 NoteChunkRepository.findByTextSearch(query, 60)
-  → WHERE fts_vector @@ plainto_tsquery('english', ?) ORDER BY ts_rank_cd LIMIT 60
+  → real BM25 via ParadeDB pg_search: WHERE id @@@ paradedb.match('text', ?)
+    ORDER BY paradedb.score(id) LIMIT 60   (idx_note_chunks_bm25, key_field=id)
+  → NOTE: use paradedb.match(), NOT raw `@@@ 'string'` — raw form throws a
+    Tantivy parse error on punctuation ("C++", "a/b", ":"). match() tokenizes safely.
 RRF merge: score = 1/(60 + vectorRank) + 1/(60 + bm25Rank)
 deduplicate: MAX(score) per note_path → top-limit SearchResult(path, snippet, score)
 ```
@@ -256,7 +259,8 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 
 - **ONNX vs GGUF**: GGUF targets autoregressive decoder LLMs. ONNX is the correct format for encoder-only embedding models and supports the fine-tuning export path.
 - **optimum + export=True**: downloads PyTorch model, converts to ONNX on first startup, caches to mounted volume. Container restart without volume re-runs conversion.
-- **paradedb**: `<=>` cosine operator from pgvector + `@@@` / `pg_search` BM25 from Tantivy. Both required for hybrid search.
+- **paradedb**: `<=>` cosine operator from pgvector (vector arm) + `@@@` / `pg_search` BM25 from Tantivy (keyword arm). Both are the live hybrid arms. Query the BM25 arm through `paradedb.match('text', ?)` — the raw `@@@ 'string'` operator runs Tantivy's query parser, which throws on punctuation (`C++`, `a/b`, `:`); match() treats input as plain tokens. BM25 index: `idx_note_chunks_bm25 USING bm25 (id, text) WITH (key_field='id')`, created in `NoteChunkRepository.initSchema`.
+- **LEGACY fts_vector**: the `fts_vector` TSVECTOR column + `idx_note_chunks_fts` GIN index + `ts_rank_cd` are the OLD keyword ranker (stock Postgres FTS). Superseded by BM25 above; column still populated by the upsert methods but no longer read by any search path. Safe to drop in a follow-up migration (column + GIN index + the `to_tsvector` calls in `upsertChunk`/`upsertChunkTextOnly`).
 - **RRF**: order-invariant rank fusion — stable rankings regardless of raw score scales from different retrievers.
 - **CPU fallback dimension**: always 768 — gte-base (`Xenova/gte-base`, mean-pooled) used in both GPU and CPU paths. No schema migration if GPU unavailable.
 - **MCP session manager**: `mcp.session_manager.run()` must be entered in the FastAPI lifespan or `/mcp` 500s. It can only be started once per process — relevant for tests (module-scoped client).
@@ -277,6 +281,8 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 | Embedding model | `EMBED_MODEL` docker-compose env → rebuild embedder |
 | Embedder URL | `EMBEDDER_URL` env / `application.properties → embedder.url` |
 | GPU provider detection | `embedder/main.py → _detect_provider()` |
+| Keyword ranker (BM25) | `NoteChunkRepository.findByTextSearch` (Java) + `mcp_server._text_candidates` (Python) — both `id @@@ paradedb.match('text', ?)` |
+| BM25 index definition | `NoteChunkRepository.initSchema` — `idx_note_chunks_bm25 USING bm25 (id, text)` |
 | RRF weights | `SearchService` — edit RRF formula |
 | Search result limit | `SearchService.SEARCH_LIMIT` |
 | Chunk size / overlap | `MarkdownPreprocessor` constants |
