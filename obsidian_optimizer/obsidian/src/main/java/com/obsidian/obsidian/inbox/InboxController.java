@@ -59,7 +59,11 @@ public class InboxController {
     public record InboxItem(String path, String title, String source,
                      String suggestedFolder, String content,
                      String captureId, Integer captureSeq, Integer captureSeqMinor,
-                     boolean inPlace) {}
+                     boolean inPlace,
+                     // Grouping metadata for the Learn folder tree: sourceTitle names the
+                     // source folder (`Dest/<sourceTitle>/` on file); chapter is the PDF
+                     // chapter sub-bucket (null ⇒ flat under the source).
+                     String sourceTitle, String chapter) {}
 
     // ── List staged notes ──────────────────────────────────────────────────────
 
@@ -74,8 +78,12 @@ public class InboxController {
 
         Path dir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
         if (Files.isDirectory(dir)) {
-            try (var stream = Files.list(dir)) {
-                stream.filter(p -> p.toString().endsWith(".md"))
+            // Recursive: standalone notes now live in per-source subfolders
+            // (_inbox/<captureId>/[chapter]/note.md). Legacy flat _inbox/*.md still list.
+            // _sources/ (pre-rewrite snapshots) is excluded — it is never a real note.
+            try (var stream = Files.walk(dir)) {
+                stream.filter(p -> p.toString().endsWith(".md")
+                                && !dir.relativize(p).toString().replace('\\', '/').startsWith("_sources/"))
                       .forEach(p -> {
                           try {
                               String content = Files.readString(p);
@@ -94,7 +102,9 @@ public class InboxController {
                                   emptyToNull(frontmatterValue(content, "capture-id")),
                                   seq,
                                   seqMinor,
-                                  false));
+                                  false,
+                                  emptyToNull(frontmatterValue(content, "ingest-source-title")),
+                                  emptyToNull(frontmatterValue(content, "ingest-chapter"))));
                           } catch (IOException e) {
                               log.warn("[inbox] could not read {}: {}", p, e.getMessage());
                           }
@@ -110,7 +120,7 @@ public class InboxController {
             for (String path : noteIndex.findNotesByCapture(c.id())) {
                 String content = repository.getText(path);
                 String title = Paths.get(path).getFileName().toString().replaceAll("\\.md$", "");
-                items.add(new InboxItem(path, title, null, null, content, c.id(), 1, 0, true));
+                items.add(new InboxItem(path, title, null, null, content, c.id(), 1, 0, true, null, null));
             }
         }
 
@@ -259,9 +269,11 @@ public class InboxController {
             // Duplicate the original (same source region) and stamp the sub-order onto it.
             String newContent = upsertFrontmatter(content, "capture-seq-minor", String.valueOf(newMinor));
 
-            Path inboxDir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
+            // Keep the split sibling in the SAME source subfolder as the original so it stays
+            // in that source's (and chapter's) folder in the Learn tree.
+            Path parentDir = Paths.get(req.path()).getParent();
             String base = Paths.get(req.path()).getFileName().toString().replaceAll("\\.md$", "");
-            String newPath = createUniqueInboxNote(inboxDir.toString(), base + " (split)", newContent);
+            String newPath = createUniqueInboxNote(parentDir.toString(), base + " (split)", newContent);
             log.info("[inbox] split {} -> {} (capture-seq-minor {})", req.path(), newPath, newMinor);
             return ResponseEntity.ok(Map.of("path", newPath, "captureSeqMinor", newMinor));
         } catch (IOException e) {
@@ -278,7 +290,7 @@ public class InboxController {
         Path dir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
         int max = 0;
         if (Files.isDirectory(dir)) {
-            try (var stream = Files.list(dir)) {
+            try (var stream = Files.walk(dir)) {
                 for (Path p : (Iterable<Path>) stream.filter(x -> x.toString().endsWith(".md"))::iterator) {
                     String c;
                     try { c = Files.readString(p); } catch (IOException e) { continue; }
@@ -364,9 +376,10 @@ public class InboxController {
         return root.resolve(rel).normalize().toString();
     }
 
-    /** Remove the inbox-only frontmatter lines when the note graduates to a folder. */
+    /** Remove the inbox-only frontmatter lines when the note graduates to a folder.
+     *  ingest-chapter is inbox-only too (it drove the staging subfolder, not a vault fact). */
     private static String stripInboxFrontmatter(String content) {
-        return content.replaceAll("(?m)^ingest-(inbox|source|suggested-folder):.*\\n", "");
+        return content.replaceAll("(?m)^ingest-(inbox|source|source-title|suggested-folder|chapter):.*\\n", "");
     }
 
     record FileRequest(String path, String targetFolder, String content) {}

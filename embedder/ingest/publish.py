@@ -20,6 +20,30 @@ DEFAULT_FOLDER = os.environ.get("INGEST_DEFAULT_FOLDER", "ingest")
 # is demoted to a SUGGESTED destination stamped into the frontmatter, not acted on.
 INBOX_FOLDER = os.environ.get("INGEST_INBOX_FOLDER", "_inbox")
 
+
+def _slug_seg(s: str) -> str:
+    """A filesystem-safe single path segment (chapter folder names). Keeps it readable —
+    spaces→'-', strips anything that isn't word/dash, collapses repeats. Empty → ''."""
+    s = re.sub(r"[^\w\s-]", "", (s or "").strip()).strip()
+    s = re.sub(r"[\s_-]+", "-", s)
+    return s[:80].strip("-")
+
+
+def inbox_folder(capture_id: str | None = None, chapter_slug: str | None = None) -> str:
+    """Vault-relative staging folder for a standalone note. Each source gets its OWN
+    subfolder under `_inbox` (keyed by the capture id) so the Learn queue presents it as a
+    collapsible folder and "file the whole folder" is one clean move (rename the uuid dir to
+    a real title on the way out). PDF chapters nest one level deeper. No capture id → the flat
+    `_inbox` (older callers / defensive)."""
+    parts = [INBOX_FOLDER]
+    if capture_id:
+        parts.append(capture_id)
+        seg = _slug_seg(chapter_slug or "")
+        if seg:
+            parts.append(seg)
+    return "/".join(parts)
+
+
 _EMBED_RE = re.compile(r"!\[\[([^\]]+)\]\]")
 
 # A/V/PDF resource embeds (same extensions Java ResourceScanService.RESOURCE_EMBED matches).
@@ -115,12 +139,17 @@ def _insert_frontmatter(content: str, extra: str) -> str:
     return f"---\n{extra}---\n\n{content}"
 
 
-def stamp_inbox(content: str, source: str, suggested_folder: str) -> str:
+def stamp_inbox(content: str, source: str, suggested_folder: str,
+                source_title: str = "") -> str:
     """Inject the inbox-triage frontmatter into a standalone note's `---` block so
     the Learn Inbox can list it, show where it came from, and pre-pick a destination.
-    Stripped again by the backend when the note is filed (POST /inbox/file)."""
+    `source_title` is the human name of the source (video/PDF/page) — it becomes the
+    folder name when the whole source is filed as `Dest/<source_title>/`. Stripped again
+    by the backend when the note is filed (POST /inbox/file)."""
+    title = (source_title or "").replace("\n", " ").strip()   # cheap scalar; no newlines
     extra = (f"ingest-inbox: true\n"
              f"ingest-source: {source}\n"
+             f"ingest-source-title: {title}\n"
              f"ingest-suggested-folder: {suggested_folder}\n")
     return _insert_frontmatter(content, extra)
 

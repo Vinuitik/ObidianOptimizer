@@ -284,7 +284,7 @@ def _stub_publish(monkeypatch):
     from ingest import publish
     monkeypatch.setattr(publish, "find_home", lambda t: "Study")
     monkeypatch.setattr(publish, "ensure_folder", lambda f: None)
-    monkeypatch.setattr(publish, "stamp_inbox", lambda md, s, f: md)
+    monkeypatch.setattr(publish, "stamp_inbox", lambda md, s, f, t="": md)
     monkeypatch.setattr(publish, "create_note",
                         lambda folder, name, content: f"{folder}/{name}.md")
 

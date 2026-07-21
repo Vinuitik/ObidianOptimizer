@@ -578,8 +578,13 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     # Folder suggestion is PER NOTE, from each note's own content (title + body) — not once
     # from the source title, which used to file every sibling to the same wrong folder.
     source_ref = bundle["source"].get("ref", "")
-    publish.ensure_folder(publish.INBOX_FOLDER)
-    capture_id = job.get("capture_id")
+    source_title = bundle["source"].get("title", "") or ""
+    # Every standalone source gets its OWN _inbox subfolder so the Learn queue shows it as one
+    # collapsible folder. Generate a group id if the job didn't carry one (e.g. direct MCP).
+    capture_id = job.get("capture_id") or uuid.uuid4().hex[:12]
+    job["capture_id"] = capture_id
+    inbox_dir = publish.inbox_folder(capture_id)
+    publish.ensure_folder(inbox_dir)
     mini_bundle = {"source": bundle["source"], "media": bundle.get("media", [])}
     # SEQUENTIAL links (§5): deterministic prev/next along order_index — res.notes is already
     # in order, so seq-1 / seq+1 ARE the chronological neighbours. We inject these, not the LLM.
@@ -609,10 +614,9 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             if problems:
                 raise publish.PublishError("; ".join(problems))
             suggested = publish.find_home(n.title + "\n\n" + n.body)
-            note_md = publish.stamp_inbox(note_md, source_ref, suggested)
-            if capture_id:
-                note_md = publish.stamp_capture(note_md, capture_id, seq)
-            path = publish.create_note(publish.INBOX_FOLDER,
+            note_md = publish.stamp_inbox(note_md, source_ref, suggested, source_title)
+            note_md = publish.stamp_capture(note_md, capture_id, seq)
+            path = publish.create_note(inbox_dir,
                                        synthesize.slugify(n.title), note_md)
             created.append(path)
         except Exception as e:  # one bad note must not sink its siblings
@@ -641,8 +645,12 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     # stamped into each note for the triage UI to pre-pick — computed PER NOTE below from
     # each note's own content, not once from the source title.
     source_ref = bundle["source"].get("ref", "")
-    publish.ensure_folder(publish.INBOX_FOLDER)
-    capture_id = job.get("capture_id")
+    source_title = bundle["source"].get("title", "") or ""
+    # Every standalone source gets its OWN _inbox subfolder (collapsible in the Learn queue).
+    capture_id = job.get("capture_id") or uuid.uuid4().hex[:12]
+    job["capture_id"] = capture_id
+    inbox_dir = publish.inbox_folder(capture_id)
+    publish.ensure_folder(inbox_dir)
     # Deterministic links are appended at the very end of each note (linking.py):
     #   CHRONO — every note links to the PREVIOUS one from this same source (first has none).
     #   SEMANTIC — LLM probes → hybrid search_notes → top-N existing notes.
@@ -658,15 +666,14 @@ def _synthesize_and_publish(job: dict, bundle: dict):
             if problems:
                 raise publish.PublishError("; ".join(problems))
             suggested = publish.find_home(plan["title"] + "\n\n" + note_md)
-            note_md = publish.stamp_inbox(note_md, source_ref, suggested)
-            if capture_id:
-                note_md = publish.stamp_capture(note_md, capture_id, seq)
+            note_md = publish.stamp_inbox(note_md, source_ref, suggested, source_title)
+            note_md = publish.stamp_capture(note_md, capture_id, seq)
             # Append links LAST so they sit at the very end of the note, verbatim.
             prev_stem = sibling_stems[seq - 1] if seq > 0 else None
             semantic = linking.semantic_link_stems(
                 plan["title"], note_md, exclude_stems=sibling_stems)
             note_md = linking.append_links(note_md, ([prev_stem] if prev_stem else []) + semantic)
-            path = publish.create_note(publish.INBOX_FOLDER,
+            path = publish.create_note(inbox_dir,
                                        synthesize.slugify(plan["title"]), note_md)
             created.append(path)
         except Exception as e:  # one bad note must not sink its siblings
