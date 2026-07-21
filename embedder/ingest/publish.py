@@ -29,6 +29,18 @@ def _slug_seg(s: str) -> str:
     return s[:80].strip("-")
 
 
+def chapter_for_page(page: int | None, chapters: list[dict]) -> str:
+    """Which real chapter (from extract_pdf's PDF-outline TOC — see extract_pdf._toc_chapters)
+    a note's first page falls in. '' (no match / no page / no chapters) → the note stays flat
+    under its source, no invented subfolder."""
+    if page is None:
+        return ""
+    for c in chapters:
+        if c.get("start_page", 1) <= page <= c.get("end_page", 10**9):
+            return c.get("title", "") or ""
+    return ""
+
+
 def inbox_folder(capture_id: str | None = None, chapter_slug: str | None = None) -> str:
     """Vault-relative staging folder for a standalone note. Each source gets its OWN
     subfolder under `_inbox` (keyed by the capture id) so the Learn queue presents it as a
@@ -140,16 +152,20 @@ def _insert_frontmatter(content: str, extra: str) -> str:
 
 
 def stamp_inbox(content: str, source: str, suggested_folder: str,
-                source_title: str = "") -> str:
+                source_title: str = "", chapter: str = "") -> str:
     """Inject the inbox-triage frontmatter into a standalone note's `---` block so
     the Learn Inbox can list it, show where it came from, and pre-pick a destination.
     `source_title` is the human name of the source (video/PDF/page) — it becomes the
-    folder name when the whole source is filed as `Dest/<source_title>/`. Stripped again
-    by the backend when the note is filed (POST /inbox/file)."""
-    title = (source_title or "").replace("\n", " ").strip()   # cheap scalar; no newlines
+    folder name when the whole source is filed as `Dest/<source_title>/`. `chapter`
+    (PDF only, from a real PDF-outline TOC) becomes the subfolder one level deeper —
+    empty means the note stays flat under its source. Stripped again by the backend
+    when the note is filed (POST /inbox/file)."""
+    title = (source_title or "").replace("\n", " ").strip()   # cheap scalars; no newlines
+    chap = (chapter or "").replace("\n", " ").strip()
     extra = (f"ingest-inbox: true\n"
              f"ingest-source: {source}\n"
              f"ingest-source-title: {title}\n"
+             f"ingest-chapter: {chap}\n"
              f"ingest-suggested-folder: {suggested_folder}\n")
     return _insert_frontmatter(content, extra)
 

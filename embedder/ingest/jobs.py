@@ -585,6 +585,8 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     job["capture_id"] = capture_id
     inbox_dir = publish.inbox_folder(capture_id)
     publish.ensure_folder(inbox_dir)
+    ensured_dirs = {inbox_dir}
+    chapters = bundle["source"].get("chapters") or []
     mini_bundle = {"source": bundle["source"], "media": bundle.get("media", [])}
     # SEQUENTIAL links (§5): deterministic prev/next along order_index — res.notes is already
     # in order, so seq-1 / seq+1 ARE the chronological neighbours. We inject these, not the LLM.
@@ -594,6 +596,16 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     for seq, n in enumerate(res.notes):
         try:
             segs = synthesize._span_to_segs(n.unit.locator_span)
+            # PDF chapter subfolder: bucket by this note's first page against the source's
+            # real TOC-derived chapters (extract_pdf._toc_chapters). No chapters / no page
+            # (video, text) → note_dir == inbox_dir (flat under the source), same as before.
+            pages = n.unit.locator_span.get("pages") or [] \
+                if n.unit.locator_span.get("kind") == "page" else []
+            chapter_title = publish.chapter_for_page(min(pages), chapters) if pages else ""
+            note_dir = publish.inbox_folder(capture_id, chapter_title) if chapter_title else inbox_dir
+            if note_dir not in ensured_dirs:
+                publish.ensure_folder(note_dir)
+                ensured_dirs.add(note_dir)
             prev_title = titles[seq - 1] if seq > 0 else None
             next_title = titles[seq + 1] if seq < len(titles) - 1 else None
             chron = synthesize.chronology_block(prev_title, next_title)
@@ -614,9 +626,9 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             if problems:
                 raise publish.PublishError("; ".join(problems))
             suggested = publish.find_home(n.title + "\n\n" + n.body)
-            note_md = publish.stamp_inbox(note_md, source_ref, suggested, source_title)
+            note_md = publish.stamp_inbox(note_md, source_ref, suggested, source_title, chapter_title)
             note_md = publish.stamp_capture(note_md, capture_id, seq)
-            path = publish.create_note(inbox_dir,
+            path = publish.create_note(note_dir,
                                        synthesize.slugify(n.title), note_md)
             created.append(path)
         except Exception as e:  # one bad note must not sink its siblings
@@ -651,6 +663,9 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     job["capture_id"] = capture_id
     inbox_dir = publish.inbox_folder(capture_id)
     publish.ensure_folder(inbox_dir)
+    ensured_dirs = {inbox_dir}
+    chapters = bundle["source"].get("chapters") or []
+    by_id = {s["id"]: s for s in numbered}
     # Deterministic links are appended at the very end of each note (linking.py):
     #   CHRONO — every note links to the PREVIOUS one from this same source (first has none).
     #   SEMANTIC — LLM probes → hybrid search_notes → top-N existing notes.
@@ -665,15 +680,24 @@ def _synthesize_and_publish(job: dict, bundle: dict):
             problems = publish.validate_note(note_md, stored_names)
             if problems:
                 raise publish.PublishError("; ".join(problems))
+            # PDF chapter subfolder: bucket by this note's first page against the source's
+            # real TOC-derived chapters. No chapters / no page (video, text) → flat.
+            pages = [by_id[i]["loc"].get("page") for i in plan["segment_ids"] if i in by_id]
+            pages = [p for p in pages if p is not None]
+            chapter_title = publish.chapter_for_page(min(pages), chapters) if pages else ""
+            note_dir = publish.inbox_folder(capture_id, chapter_title) if chapter_title else inbox_dir
+            if note_dir not in ensured_dirs:
+                publish.ensure_folder(note_dir)
+                ensured_dirs.add(note_dir)
             suggested = publish.find_home(plan["title"] + "\n\n" + note_md)
-            note_md = publish.stamp_inbox(note_md, source_ref, suggested, source_title)
+            note_md = publish.stamp_inbox(note_md, source_ref, suggested, source_title, chapter_title)
             note_md = publish.stamp_capture(note_md, capture_id, seq)
             # Append links LAST so they sit at the very end of the note, verbatim.
             prev_stem = sibling_stems[seq - 1] if seq > 0 else None
             semantic = linking.semantic_link_stems(
                 plan["title"], note_md, exclude_stems=sibling_stems)
             note_md = linking.append_links(note_md, ([prev_stem] if prev_stem else []) + semantic)
-            path = publish.create_note(inbox_dir,
+            path = publish.create_note(note_dir,
                                        synthesize.slugify(plan["title"]), note_md)
             created.append(path)
         except Exception as e:  # one bad note must not sink its siblings

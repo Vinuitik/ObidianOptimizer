@@ -28,13 +28,36 @@ def extract(ref: str, resolved_path: Path) -> dict:
         media.extend(_page_images(doc, page, page_no, resolved_path.stem))
     title = (doc.metadata or {}).get("title") or _title_heuristic(segments) \
         or resolved_path.stem
+    chapters = _toc_chapters(doc, len(doc))
     doc.close()
     return {
         "source": {"type": "pdf", "ref": ref, "title": title,
-                   "duration_s": 0, "chapters": []},
+                   "duration_s": 0, "chapters": chapters},
         "segments": segments,
         "media": _keep_diagrams(media),
     }
+
+
+def _toc_chapters(doc, page_count: int) -> list[dict]:
+    """Real chapter boundaries from the PDF's embedded outline/bookmarks (free, no LLM).
+    Top-level (level 1) entries only — deeper nesting would over-fragment. Each chapter's
+    end page = the next top-level entry's start page - 1 (last chapter runs to page_count).
+    Most arXiv-style papers ship no outline at all → returns [] (caller falls back to flat,
+    no invented chapters)."""
+    try:
+        toc = [t for t in doc.get_toc(simple=True) if t[0] == 1 and t[2] >= 1]
+    except Exception as e:
+        log.warning("PDF TOC read failed: %s", e)
+        return []
+    if not toc:
+        return []
+    chapters = []
+    for i, (_level, title, start_page) in enumerate(toc):
+        end_page = (toc[i + 1][2] - 1) if i + 1 < len(toc) else page_count
+        if end_page < start_page:
+            end_page = start_page
+        chapters.append({"title": title.strip(), "start_page": start_page, "end_page": end_page})
+    return chapters
 
 
 def _keep_diagrams(media: list[dict]) -> list[dict]:
