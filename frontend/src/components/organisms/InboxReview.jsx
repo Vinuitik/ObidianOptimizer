@@ -7,7 +7,7 @@ import {
 } from '../../pwa/offlineApi';
 import { fetchChildren, updateNote } from '../../api/notes';
 import { splitInboxNote } from '../../api/inbox';
-import { buildSourceColors, groupBySource, captureLabel } from '../../utils/sourceColor';
+import { buildSourceColors, groupBySource, captureLabel, buildInboxTree, folderAllItems } from '../../utils/sourceColor';
 import { markLearnTaskDone } from '../../utils/dailyDuty';
 import useStore from '../../store/useStore';
 import { useIsMobile } from '../../utils/useMediaQuery';
@@ -57,6 +57,11 @@ export default function InboxReview({ onCount }) {
   const [status,   setStatus]   = useState('');
   const [checked,  setChecked]  = useState(() => new Set());  // paths selected for bulk delete
   const [barOpen,  setBarOpen]  = useState(() => !isMobile);  // mobile: collapse the action bar
+  // Collapsible Learn queue tree: source folders (keyed captureId) and, within a PDF
+  // source, chapter subfolders (keyed `${captureId}::${chapter}`). Collapsed by default —
+  // an inbox with several sources open at once shouldn't dump every note on screen at once.
+  const [expandedFolders,  setExpandedFolders]  = useState(() => new Set());
+  const [expandedChapters, setExpandedChapters] = useState(() => new Set());
 
   const current = items.find(i => i.path === selected) || null;
   const workingItem = current ? { ...current, content: draft } : null;
@@ -76,7 +81,19 @@ export default function InboxReview({ onCount }) {
     setPreview(true);   // land on Preview each note; user opts into Edit
     setStatus('');
     setOrient(null);
+    // Selecting a note inside a collapsed folder/chapter must reveal it — otherwise the
+    // active row silently disappears (e.g. auto-advance after filing a sibling).
+    if (item.captureId && !item.inPlace) {
+      setExpandedFolders(s => (s.has(item.captureId) ? s : new Set(s).add(item.captureId)));
+      if (item.chapter) {
+        const ck = `${item.captureId}::${item.chapter}`;
+        setExpandedChapters(s => (s.has(ck) ? s : new Set(s).add(ck)));
+      }
+    }
   }, []);
+
+  const toggleFolder  = key => setExpandedFolders(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  const toggleChapter = key => setExpandedChapters(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
   // opts.preferGroup (a source group key): after an action, auto-advance to the next note in
   // THAT group and stop (select nothing) once it's exhausted — instead of jumping to list[0].
@@ -129,6 +146,53 @@ export default function InboxReview({ onCount }) {
       initialPath: dest || null,
       confirmLabel: 'Choose this folder',
       onSelect: (p) => { setDest(p); setPicker(null); },
+      onClose: () => setPicker(null),
+    });
+  }
+
+  // ── file a whole folder/chapter node in one shot ──────────────────────────────
+  // Loops the SAME per-note file() action the single-note bar uses (fileInboxNote —
+  // already offline-aware via offlineApi) for every member, into one shared destination:
+  // <picked base>/<source title>[/<chapter>]. No new backend endpoint — filing a group
+  // is just filing its notes into the same place, one at a time; a bad note in the
+  // group must not block the rest (same "one bad note" tolerance as the ingest pipeline).
+  const segClean = s => (s || '').replace(/[\\/]+/g, '-').trim() || 'Untitled';
+
+  async function fileGroup(items, base, segments) {
+    if (!items.length) return;
+    const target = [base.replace(/\/+$/, ''), ...segments.map(segClean)].join('/');
+    const group = groupKeyOf(items[0]);
+    setBusy(true); setStatus(`Filing ${items.length} note(s)…`);
+    let failed = 0;
+    for (const it of items) {
+      const content = it.path === selected ? draft : it.content;
+      try { await fileInboxNote(it.path, target, content); }
+      catch { failed++; }
+    }
+    markLearnTaskDone();
+    setStatus(failed ? `Filed with ${failed} error(s).` : '');
+    setBusy(false);
+    load({ preferGroup: group });
+  }
+
+  function openFolderFilePicker(folder) {
+    setPicker({
+      title: `File "${folder.title}" into…`,
+      loadPath: loadVaultDir,
+      initialPath: folder.suggestedFolder || null,
+      confirmLabel: 'File here',
+      onSelect: (base) => { setPicker(null); fileGroup(folderAllItems(folder), base, [folder.title]); },
+      onClose: () => setPicker(null),
+    });
+  }
+
+  function openChapterFilePicker(folder, chapter) {
+    setPicker({
+      title: `File "${folder.title} / ${chapter.label}" into…`,
+      loadPath: loadVaultDir,
+      initialPath: chapter.suggestedFolder || folder.suggestedFolder || null,
+      confirmLabel: 'File here',
+      onSelect: (base) => { setPicker(null); fileGroup(chapter.items, base, [folder.title, chapter.label]); },
       onClose: () => setPicker(null),
     });
   }
@@ -210,6 +274,81 @@ export default function InboxReview({ onCount }) {
     load();
   }
 
+  // ── collapsible tree rendering ───────────────────────────────────────────────
+  function renderNoteRow(it, depth) {
+    const color = sourceColors.get(it.captureId || it.path);
+    return (
+      <div key={it.path} className={styles.rowWrap}
+           style={{ ...(color ? { '--row-src': color } : {}), '--row-depth': depth }}>
+        {!it.inPlace && (
+          <input type="checkbox" className={styles.rowCheck}
+                 checked={checked.has(it.path)} onChange={() => toggleOne(it.path)}
+                 aria-label={`Select ${it.title} for delete`} />
+        )}
+        <button
+          className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
+          onClick={() => select(it)} title={it.title}>
+          {color && <span className={styles.srcDot} aria-hidden="true" />}
+          <span className={styles.rowTitle}>{it.title}</span>
+          {it.inPlace
+            ? <span className={styles.rowTag}>in place</span>
+            : captureLabel(it) && <span className={styles.rowTag}>{captureLabel(it)}</span>}
+        </button>
+      </div>
+    );
+  }
+
+  function renderFolderHeader({ key, title, color, count, expanded, onToggle, suggestedFolder, onFile, depth }) {
+    return (
+      <div key={key} className={styles.folderRow}
+           style={{ ...(color ? { '--row-src': color } : {}), '--row-depth': depth }}>
+        <button className={styles.folderToggle} onClick={onToggle} aria-expanded={expanded}
+                title={title}>
+          <span className={styles.folderChevron} aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+          {color && <span className={styles.srcDot} aria-hidden="true" />}
+          <span className={styles.folderTitle}>{title}</span>
+          <span className={styles.folderCount}>{count}</span>
+        </button>
+        <button className={styles.folderFileBtn} onClick={onFile}
+                title={suggestedFolder ? `Proposed: ${suggestedFolder}` : 'File this folder'}>
+          📁{suggestedFolder ? ` ${baseName(suggestedFolder)}` : ''}
+        </button>
+      </div>
+    );
+  }
+
+  // Standalone notes group into source folders (color band + count), PDF sources further
+  // nest chapter subfolders — both collapsible, both carry their own "file the whole thing
+  // here?" pre-pick from the group-centroid classifier (groupSuggestedFolder/
+  // chapterSuggestedFolder, GET /inbox). in-place notes render as plain rows, unchanged.
+  function renderTree() {
+    const tree = buildInboxTree(orderedItems);
+    const out = [];
+    for (const node of tree) {
+      if (node.type === 'leaf') { out.push(renderNoteRow(node.item, 0)); continue; }
+      const color = sourceColors.get(node.key);
+      const expanded = expandedFolders.has(node.key);
+      out.push(renderFolderHeader({
+        key: node.key, title: node.title, color, count: folderAllItems(node).length, expanded,
+        onToggle: () => toggleFolder(node.key), suggestedFolder: node.suggestedFolder,
+        onFile: () => openFolderFilePicker(node), depth: 0,
+      }));
+      if (!expanded) continue;
+      for (const it of node.items) out.push(renderNoteRow(it, 1));
+      for (const ch of node.chapters) {
+        const chExpanded = expandedChapters.has(ch.key);
+        out.push(renderFolderHeader({
+          key: ch.key, title: ch.label, color, count: ch.items.length, expanded: chExpanded,
+          onToggle: () => toggleChapter(ch.key), suggestedFolder: ch.suggestedFolder,
+          onFile: () => openChapterFilePicker(node, ch), depth: 1,
+        }));
+        if (!chExpanded) continue;
+        for (const it of ch.items) out.push(renderNoteRow(it, 2));
+      }
+    }
+    return out;
+  }
+
   // ── panels ──────────────────────────────────────────────────────────────────
   const sourcePanel = <SourceSplicePanel item={workingItem} onOrientation={setOrient} />;
 
@@ -257,28 +396,7 @@ export default function InboxReview({ onCount }) {
                 )}
               </div>
             )}
-            {orderedItems.map(it => {
-              const color = sourceColors.get(it.captureId || it.path);
-              return (
-                <div key={it.path} className={styles.rowWrap}
-                     style={color ? { '--row-src': color } : undefined}>
-                  {!it.inPlace && (
-                    <input type="checkbox" className={styles.rowCheck}
-                           checked={checked.has(it.path)} onChange={() => toggleOne(it.path)}
-                           aria-label={`Select ${it.title} for delete`} />
-                  )}
-                  <button
-                    className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
-                    onClick={() => select(it)} title={it.title}>
-                    {color && <span className={styles.srcDot} aria-hidden="true" />}
-                    <span className={styles.rowTitle}>{it.title}</span>
-                    {it.inPlace
-                      ? <span className={styles.rowTag}>in place</span>
-                      : captureLabel(it) && <span className={styles.rowTag}>{captureLabel(it)}</span>}
-                  </button>
-                </div>
-              );
-            })}
+            {renderTree()}
           </div>
         )}
       </aside>

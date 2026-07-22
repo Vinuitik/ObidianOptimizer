@@ -76,3 +76,51 @@ export function captureLabel(item) {
   const minor = item.captureSeqMinor ?? 0;
   return minor > 0 ? `#${major}-${minor}` : `#${major}`;
 }
+
+// Build the collapsible Learn-queue tree from a flat, already-ordered item list
+// (groupBySource output). A standalone note with a captureId becomes a member of a
+// FOLDER node keyed on that source; within a source, a note with `chapter` set nests one
+// level deeper into a CHAPTER node (PDF only — see backend extract_pdf._toc_chapters).
+// in-place notes and any note without a captureId (legacy, pre-folder-staging inbox
+// notes) pass through as plain LEAF nodes, exactly like the old flat row list.
+// `groupSuggestedFolder`/`chapterSuggestedFolder` (from GET /inbox) ride along on the
+// folder/chapter nodes as the "file this whole folder here?" pre-pick.
+export function buildInboxTree(items) {
+  const nodes = [];
+  const folderByKey = new Map();
+  for (const it of items) {
+    if (it.inPlace || !it.captureId) { nodes.push({ type: 'leaf', item: it }); continue; }
+    let folder = folderByKey.get(it.captureId);
+    if (!folder) {
+      folder = {
+        type: 'folder', key: it.captureId,
+        title: it.sourceTitle || it.title || 'Source',
+        suggestedFolder: it.groupSuggestedFolder,
+        items: [], chapters: [], _chapterByKey: new Map(),
+      };
+      folderByKey.set(it.captureId, folder);
+      nodes.push(folder);
+    }
+    if (it.chapter) {
+      let ch = folder._chapterByKey.get(it.chapter);
+      if (!ch) {
+        ch = {
+          type: 'chapter', key: `${it.captureId}::${it.chapter}`, label: it.chapter,
+          suggestedFolder: it.chapterSuggestedFolder, items: [],
+        };
+        folder._chapterByKey.set(it.chapter, ch);
+        folder.chapters.push(ch);
+      }
+      ch.items.push(it);
+    } else {
+      folder.items.push(it);
+    }
+  }
+  return nodes;
+}
+
+// Every note under a folder node (its direct items + every chapter's items) — the set
+// "File folder" moves as one unit.
+export function folderAllItems(folder) {
+  return [...folder.items, ...folder.chapters.flatMap(c => c.items)];
+}
