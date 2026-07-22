@@ -123,16 +123,20 @@ exactly one source, so the source is the pre-rewrite note itself.
 ### _synthesize_and_publish (standalone)
 ```
 _store_media → outline → write_note() per plan (frontmatter + sr fields + #review)
-→ publish.validate_note → publish.stamp_inbox(source, suggested=find_home)
-→ publish.create_note in INBOX_FOLDER (_inbox staging, NOT the find_home folder)
-one bad note never sinks its siblings; all-fail raises.
+→ publish.validate_note → chapter_title = chapter_for_page(min page, source.chapters)
+→ publish.stamp_inbox(source, suggested=find_home, source_title, chapter_title)
+→ publish.create_note in publish.inbox_folder(capture_id, chapter_title)
+    (_inbox/<captureId>/[chapter]/ — see "Per-source staging folders" below)
+one bad note never sinks its siblings; all-fail raises. Same shape in
+_synthesize_and_publish_v2 (bucket key = n.unit.locator_span pages instead of plan segment_ids).
 ```
-- **find_home is now only a SUGGESTION.** Standalone notes land in `_inbox/` (env
-  `INGEST_INBOX_FOLDER`, default `_inbox`) with frontmatter `ingest-inbox: true` +
-  `ingest-source` + `ingest-suggested-folder`. The Java `InboxController` lists them
-  for the Learn **Inbox** triage view; the user edits + files them to a real folder
-  (which moves them into the FSRS review queue). `NoteIndexRepository` keeps `_inbox/`
-  out of the review query until then. To change the staging folder: `publish.INBOX_FOLDER`.
+- **find_home is now only a SUGGESTION.** Standalone notes land in `_inbox/<captureId>/`
+  (env `INGEST_INBOX_FOLDER`, default `_inbox`) with frontmatter `ingest-inbox: true` +
+  `ingest-source` + `ingest-source-title` + `ingest-chapter` + `ingest-suggested-folder`.
+  The Java `InboxController` lists them for the Learn **Inbox** triage view (now a
+  collapsible source/chapter tree); the user edits + files them to a real folder (which
+  moves them into the FSRS review queue). `NoteIndexRepository` keeps `_inbox/` out of the
+  review query until then. To change the staging folder name: `publish.INBOX_FOLDER`.
 - **Folder suggestion = hierarchical nearest-centroid** (`ingest.placement`), computed PER
   NOTE from its own content (`publish.find_home(title + body)`), NOT once per source. Each
   folder is modeled as the centroid of its notes' embeddings; `suggest()` walks the tree to the
@@ -142,6 +146,44 @@ one bad note never sinks its siblings; all-fail raises.
   "" (unsorted, no pre-pick) rather than a wrong guess. Centroids cached (`PLACEMENT_CACHE_TTL_S`).
   Same engine backs MCP `find_home_for_note` (`suggested_folder`). Replaced the old kNN-title-vote
   that suggested `_inbox` back to itself (770 unfiled chunks polluted the index).
+- **Group (folder-level) suggestion = the SAME classifier, symmetric at any level.**
+  `placement.suggest_group(paths)` means the group's own note vectors first (one vector per
+  note = mean of that note's chunks, so a long note doesn't outweigh a short one), then walks
+  the identical centroid tree — a folder IS the mean of what's downstream of it, same as a
+  vault folder is modeled as the centroid of its notes. Exposed as `POST /placement/group
+  {paths}` (embedder `main.py`); Java `InboxController.list()` calls it once per distinct
+  source and once per distinct chapter, surfaced as `groupSuggestedFolder`/
+  `chapterSuggestedFolder` on `GET /inbox`. Empty/unembedded group → None (no pre-pick), same
+  fail-open contract as the per-note case.
+
+### Per-source staging folders + PDF chapter subfolders (LEARN_FOLDERS_ARCH.md)
+
+Each standalone source gets its OWN real `_inbox` subfolder instead of a flat dump, so the
+Learn queue can show it — and file it — as one collapsible unit:
+```
+_inbox/<captureId>/note.md                    ← video / text / no-chapter PDF: flat
+_inbox/<captureId>/<chapter title>/note.md    ← PDF WITH a real outline: one folder per chapter
+publish.inbox_folder(capture_id, chapter_title="")  → builds this path (`_slug_seg` sanitizes
+    the chapter segment; capture_id itself is already filesystem-safe, a uuid hex)
+```
+- **Chapter detection is real, not invented.** `extract_pdf._toc_chapters(doc, page_count)`
+  reads the PDF's embedded outline/bookmarks via `PyMuPDF doc.get_toc(simple=True)` — top-level
+  (level 1) entries only, each chapter's `end_page` = the next entry's `start_page - 1` (last
+  chapter runs to `page_count`). **No LLM call, no heuristic heading-detection.** Most
+  arXiv-style papers ship no outline at all → `chapters: []` → every note from that PDF stays
+  flat under the source, same as a video or a page of prose. Books/ebooks with a real ToC get
+  real chapter folders.
+- `publish.chapter_for_page(page, chapters)` buckets a note by its FIRST page against those
+  ranges (pure, no I/O) — the same "min page decides position" convention `sourceColor.js`
+  already used for reading-order in the frontend. A note with no page anchor (video, text)
+  never gets a chapter.
+- **Split** (`InboxController.split()`) keeps a manually-split sibling in the SAME on-disk
+  subfolder as its original (`Paths.get(req.path()).getParent()`), so it stays in that
+  source's (and chapter's) Learn-tree folder rather than falling back to the top-level `_inbox`.
+- **`GET /inbox` scan is recursive** (`Files.walk`, was `Files.list`) — `_inbox/_sources/`
+  (pre-rewrite in-place snapshots) is excluded by relative-path prefix, same exclusion the
+  old flat scan didn't need. Legacy flat `_inbox/*.md` (pre-dating this change) still lists
+  fine — the scan doesn't assume any particular depth.
 
 ## Extractors (deterministic, zero LLM)
 
@@ -463,3 +505,8 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | Source-footer sub-page bbox (v2) | `synthesize._span_to_segs()` attaches `loc.bbox` for SINGLE-page spans (`bbox_start/end` pts) → `_source_section()` emits `bbox: <page> x0 y0 x1 y1`. Multi-page/v1 → omitted. Read by frontend `inboxParse.parseSourceRegion.bboxes` |
 | v2 note title (reuse chapter names) | `pipeline_v2._title_for()` = `_structural_title()` (in-unit HEADING → enclosing TOC chapter name, `ir.toc` leaf ≤ unit start page) → injected `title_fn` (LLM names the unit from its content) → `<source> (n)`. `_dedup_titles()` appends "(part k)" when a chapter splits into ≥2 Units. Set BEFORE drafting in `run()` |
 | v2 title_fn (A/V + unstructured) | `title_fn` wired in `jobs._run_pipeline_v2` → `synthesize.write_unit_title(raw_text, source)` (one LLM call, `TITLE_PROMPT`/`TITLE_SYSTEM`). Called ONLY when there's no HEADING/TOC name — chiefly A/V transcripts (videos rarely ship yt-dlp chapters). A 503 (providers cooling) propagates so the job DEFERs; other errors fall back to `<source> (n)` |
+| **Per-source `_inbox` staging folder** | `publish.inbox_folder(capture_id, chapter_slug)`; called from both `jobs._synthesize_and_publish[_v2]` |
+| **PDF chapter boundaries (real, no LLM)** | `extract_pdf._toc_chapters()` (`PyMuPDF doc.get_toc()`) → `source.chapters`; bucketed per note via `publish.chapter_for_page()` |
+| **Chapter/source-title inbox frontmatter** | `publish.stamp_inbox(content, source, suggested, source_title, chapter)` — `ingest-source-title` / `ingest-chapter` keys; stripped on file (`InboxController.stripInboxFrontmatter`) |
+| **Folder-level (group) find_home** | `placement.suggest_group(paths)` / `placement._note_vectors()`; embedder `POST /placement/group`; Java `InboxController.withGroupSuggestions()` |
+| **Learn queue folder tree (frontend)** | `frontend/.../utils/sourceColor.js` (`buildInboxTree`, `folderAllItems`); `organisms/InboxReview.jsx` (`renderTree`, `fileGroup`) |

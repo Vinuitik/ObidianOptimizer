@@ -40,13 +40,27 @@ fileCapture(captureId): capture.status='filed' → softDeleteFile(source_path �
 
 ## Endpoints (nginx strips `/api/` → controller maps `/inbox`)
 - `GET /inbox` — `InboxController.list()` merges two sources → `{path(absolute), title,
-  source, suggestedFolder(absolute), content, captureId, captureSeq, inPlace}` per item.
-  Standalone: scans `vault/_inbox/*.md` (`_sources/` excluded, it's an EXCLUDED_DIR).
+  source, suggestedFolder(absolute), content, captureId, captureSeq, captureSeqMinor, inPlace,
+  sourceTitle, chapter, groupSuggestedFolder, chapterSuggestedFolder}` per item.
+  Standalone: **recursively** scans `vault/_inbox/**/*.md` (real per-source subfolders —
+  `_inbox/<captureId>/[chapter]/note.md`, see embedder `ingest/FLOWS.md` "Per-source staging
+  folders"; `_sources/` excluded by relative-path prefix, not `EXCLUDED_DIRS`, since it must
+  stay indexable — same reason `_inbox` itself isn't in that set).
   In-place: `captureRepo.listAll()` filtered to `source_type='note'` +
   status `processing|ready`, expanded via `noteIndex.findNotesByCapture`.
-- `POST /inbox/file {path, targetFolder, content}` — **standalone only.** Save edits +
-  move out of `_inbox`; strips `ingest-*` frontmatter, `updateNote`, `moveNote`, then
-  `fileCapture` when the capture's last note leaves `_inbox`.
+  After the scan, `withGroupSuggestions()` groups standalone items by `captureId` (and, within
+  a source, by `chapter`) and calls the embedder's group-centroid classifier once per distinct
+  group (`groupSuggestion()` → `POST embedder /placement/group`) — the "file the whole folder
+  here?" pre-pick the Learn queue tree shows per source/chapter. `InboxItem.staged(...)` /
+  `.withGroupSuggestions(...)` are the record's two construction shapes (factory + wither —
+  chosen over a Builder since there are exactly two, and this codebase has no Lombok).
+- `POST /inbox/file {path, targetFolder, content}` — **standalone only, single note.** Save
+  edits + move; strips `ingest-*` frontmatter (now includes `ingest-source-title`/
+  `ingest-chapter` too), `updateNote`, `moveNote`, then `fileCapture` when the capture's last
+  note leaves `_inbox`. Filing a WHOLE folder/chapter (frontend "File folder") is NOT a
+  separate endpoint — it's the frontend looping this same call for every member note into one
+  shared destination (`organisms/InboxReview.jsx fileGroup()`); `Files.createDirectories`
+  already makes `Dest/<sourceTitle>[/<chapter>]/` on the first note filed into it.
 - `POST /inbox/acknowledge {captureId}` — **in-place only.** No move (note is already
   home) — just `fileCapture(captureId)`. Save edits first via the session notes PUT.
 - `DELETE /inbox {path}` — discard a standalone generated note (soft-delete).
@@ -60,6 +74,11 @@ out of the review query: `NoteIndexRepository.getReviewNotesPaged` adds
 that SQL and embedder `publish.INBOX_FOLDER`.
 
 ## Technology Notes (constraints / failure modes)
+- **Group suggestions cost N+1 embedder round-trips per `GET /inbox` call** (one per distinct
+  source, one per distinct chapter — `withGroupSuggestions()`), on top of the existing
+  per-note `find_home` calls made at CREATE time (not list time). Fine at personal-backlog
+  scale (a handful of open sources); each call fails soft to `null` (embedder down → no
+  group pre-pick, not an error) so a slow/dead embedder degrades the queue, never breaks it.
 - **Path dialect.** The public notes API speaks ABSOLUTE paths (`moveNote`,
   `updateNote`, the review bundle); the embedder INTERNAL API takes vault-relative
   folders. The Inbox endpoints return/accept absolute paths to match the frontend.
@@ -92,4 +111,7 @@ that SQL and embedder `publish.INBOX_FOLDER`.
 | Review-queue exclusion | `NoteIndexRepository.getReviewNotesPaged` (`path NOT LIKE '%/_inbox/%'`) |
 | Frontmatter keys stripped on file | `InboxController.stripInboxFrontmatter()` |
 | Suggested-folder resolution | `InboxController.suggestedFolderAbs()` |
-| Triage UI | `frontend/.../organisms/InboxPanel.jsx` + `api/inbox.js` |
+| Triage UI | `frontend/.../organisms/InboxReview.jsx` (collapsible tree — see `pages/FLOWS.md` "LearnPage") + `api/inbox.js` |
+| Standalone scan (now recursive per-source subfolders) | `InboxController.list()` (`Files.walk`, was `Files.list`) |
+| Group (folder-level) find_home | `InboxController.withGroupSuggestions()` / `groupSuggestion()` → embedder `POST /placement/group` |
+| Split sibling stays in its source's subfolder | `InboxController.split()` (`Paths.get(req.path()).getParent()`, was the flat `_inbox` dir) |

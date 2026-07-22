@@ -76,6 +76,19 @@ components stay in-tree, unimported (restore by reinstating the view toggle in `
 - **Inbox review** (`InboxReview.jsx` + `api/inbox.js`): the ingest consume layer
   (INGESTION_V2_FLOWS §7). Layout REUSES the old Library shell the user liked:
   `[collapsible queue] · LearnLayout( ORIGINAL | NEW ) · [proposed-folder bar]`.
+  - **The queue itself is now a collapsible folder tree, not a flat list**
+    (`utils/sourceColor.js buildInboxTree` + `InboxReview.jsx renderTree`). Standalone notes
+    group into a source-folder node (color band + note count + a "📁 <suggestion> · File
+    folder" button, from `groupSuggestedFolder`) — collapsed by default. A PDF source with a
+    real embedded ToC nests one level deeper into chapter sub-nodes (`chapterSuggestedFolder`),
+    same collapse/file affordance. "File folder" opens `FolderPicker` seeded at the group's
+    suggestion, then `fileGroup()` loops the ordinary per-note `fileInboxOffline` action (no
+    new backend call) for every member note into one shared `Dest/<sourceTitle>[/<chapter>]/`
+    — reuses the existing offline-queue-aware file action as-is. in-place notes and any
+    legacy captureId-less note render as plain leaf rows, unchanged from before.
+    Selecting a note auto-expands its ancestor folder/chapter so the active row never
+    disappears behind a collapsed group. Backend: `inbox/FLOWS.md` "Per-source staging
+    folders" (embedder side) + `GET /inbox` group-suggestion fields (Java side).
   - `LearnLayout` gives the adjustable, swappable, **orientation-aware** split for free —
     landscape video → horizontal, else vertical. `SourceSplicePanel` reports orientation via
     `onOrientation` (YouTube→landscape; local `<video>` from `loadedmetadata`; else vertical).
@@ -152,6 +165,8 @@ local `reviewMode` pref:
 | Chrono result display | `SettingsPage.jsx` chrono status section |
 | Learn split orientation | `LearnPage.jsx` orientation ternary (video orient via `ResourcePanel` Viewer) |
 | Learn Library/Inbox toggle | `LearnPage.jsx` `view` state |
-| Inbox triage UI | `organisms/InboxPanel.jsx` + `api/inbox.js` (backend `inbox/InboxController`) |
+| Inbox triage UI | `organisms/InboxReview.jsx` + `api/inbox.js` (backend `inbox/InboxController`) |
+| Inbox folder tree grouping | `utils/sourceColor.js` (`buildInboxTree`, `folderAllItems`) |
+| File a whole folder/chapter | `InboxReview.jsx` (`fileGroup`, `openFolderFilePicker`, `openChapterFilePicker`) |
 | Dashboard poll rate | `DashboardPage.jsx → POLL_MS` |
 | Dashboard counters | `stats/StatsController.java` (backend) |
