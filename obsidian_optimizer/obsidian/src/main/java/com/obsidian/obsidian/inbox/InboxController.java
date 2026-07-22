@@ -1,6 +1,9 @@
 package com.obsidian.obsidian.inbox;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.capture.CaptureRepository;
+import com.obsidian.obsidian.common.IngestClient;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
@@ -15,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -47,13 +51,17 @@ public class InboxController {
     private final SettingsRepository settingsRepo;
     private final NoteIndexRepository noteIndex;
     private final CaptureRepository captureRepo;
+    private final IngestClient ingestClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public InboxController(FileRepository repository, SettingsRepository settingsRepo,
-                           NoteIndexRepository noteIndex, CaptureRepository captureRepo) {
+                           NoteIndexRepository noteIndex, CaptureRepository captureRepo,
+                           IngestClient ingestClient) {
         this.repository = repository;
         this.settingsRepo = settingsRepo;
         this.noteIndex = noteIndex;
         this.captureRepo = captureRepo;
+        this.ingestClient = ingestClient;
     }
 
     public record InboxItem(String path, String title, String source,
@@ -63,7 +71,28 @@ public class InboxController {
                      // Grouping metadata for the Learn folder tree: sourceTitle names the
                      // source folder (`Dest/<sourceTitle>/` on file); chapter is the PDF
                      // chapter sub-bucket (null ⇒ flat under the source).
-                     String sourceTitle, String chapter) {}
+                     String sourceTitle, String chapter,
+                     // Folder-level find_home (placement.suggest_group): the SAME centroid
+                     // classifier as suggestedFolder, just averaged over a whole group's note
+                     // vectors instead of one note's — symmetric at any level (source or
+                     // chapter). Null when nothing confident, or the group isn't embedded yet.
+                     String groupSuggestedFolder, String chapterSuggestedFolder) {
+
+        /** Construct with group suggestions unset (computed in a later pass, see
+         *  {@code withGroupSuggestions} below) — call sites don't spell out trailing nulls. */
+        static InboxItem staged(String path, String title, String source, String suggestedFolder,
+                String content, String captureId, Integer captureSeq, Integer captureSeqMinor,
+                boolean inPlace, String sourceTitle, String chapter) {
+            return new InboxItem(path, title, source, suggestedFolder, content, captureId,
+                captureSeq, captureSeqMinor, inPlace, sourceTitle, chapter, null, null);
+        }
+
+        InboxItem withGroupSuggestions(String groupSuggestedFolder, String chapterSuggestedFolder) {
+            return new InboxItem(path, title, source, suggestedFolder, content, captureId,
+                captureSeq, captureSeqMinor, inPlace, sourceTitle, chapter,
+                groupSuggestedFolder, chapterSuggestedFolder);
+        }
+    }
 
     // ── List staged notes ──────────────────────────────────────────────────────
 
@@ -93,7 +122,7 @@ public class InboxController {
                               // source region (e.g. one PDF page range → two chapter notes). Absent
                               // ⇒ 0 (the original / un-split note). See #split endpoint.
                               Integer seqMinor = parseIntOrNull(frontmatterValue(content, "capture-seq-minor"));
-                              items.add(new InboxItem(
+                              items.add(InboxItem.staged(
                                   p.toAbsolutePath().toString(),
                                   title,
                                   frontmatterValue(content, "ingest-source"),
@@ -120,12 +149,62 @@ public class InboxController {
             for (String path : noteIndex.findNotesByCapture(c.id())) {
                 String content = repository.getText(path);
                 String title = Paths.get(path).getFileName().toString().replaceAll("\\.md$", "");
-                items.add(new InboxItem(path, title, null, null, content, c.id(), 1, 0, true, null, null));
+                items.add(InboxItem.staged(path, title, null, null, content, c.id(), 1, 0, true,
+                                           null, null));
             }
         }
 
-        items.sort((a, b) -> b.path().compareToIgnoreCase(a.path()));
-        return ResponseEntity.ok(items);
+        List<InboxItem> finalItems = withGroupSuggestions(items);
+        finalItems.sort((a, b) -> b.path().compareToIgnoreCase(a.path()));
+        return ResponseEntity.ok(finalItems);
+    }
+
+    /** Folder-level find_home: group standalone items by source (captureId) and, within a
+     *  source, by chapter — one embedder call per distinct group (a personal backlog has a
+     *  handful of open sources at once, same scale note as the in-place capture scan below).
+     *  In-place items pass through with both group fields null (they're already home). */
+    private List<InboxItem> withGroupSuggestions(List<InboxItem> items) {
+        Map<String, List<String>> bySource = new LinkedHashMap<>();
+        Map<String, List<String>> byChapter = new LinkedHashMap<>();
+        for (InboxItem it : items) {
+            if (it.inPlace() || it.captureId() == null) continue;
+            bySource.computeIfAbsent(it.captureId(), k -> new ArrayList<>()).add(it.path());
+            if (it.chapter() != null) {
+                byChapter.computeIfAbsent(it.captureId() + " " + it.chapter(), k -> new ArrayList<>())
+                          .add(it.path());
+            }
+        }
+        Map<String, String> sourceSuggestion = new LinkedHashMap<>();
+        for (var e : bySource.entrySet()) sourceSuggestion.put(e.getKey(), groupSuggestion(e.getValue()));
+        Map<String, String> chapterSuggestion = new LinkedHashMap<>();
+        for (var e : byChapter.entrySet()) chapterSuggestion.put(e.getKey(), groupSuggestion(e.getValue()));
+
+        List<InboxItem> out = new ArrayList<>(items.size());
+        for (InboxItem it : items) {
+            if (it.inPlace() || it.captureId() == null) { out.add(it); continue; }
+            String group = sourceSuggestion.get(it.captureId());
+            String chapterGroup = it.chapter() != null
+                ? chapterSuggestion.get(it.captureId() + " " + it.chapter()) : null;
+            out.add(it.withGroupSuggestions(group, chapterGroup));
+        }
+        return out;
+    }
+
+    /** One embedder round-trip: POST /placement/group {paths} -> {suggestedFolder}. Absolute
+     *  paths only (matches the frontend's folder-tree destination datalist). Fails soft to
+     *  null — same "no confident pick" contract as the per-note classifier. */
+    private String groupSuggestion(List<String> paths) {
+        var result = ingestClient.submit(Map.of("paths", paths), "/placement/group");
+        if (!result.ok()) return null;
+        try {
+            JsonNode root = objectMapper.readTree(result.body());
+            String folder = root.path("suggestedFolder").asText(null);
+            return (folder == null || folder.isBlank()) ? null
+                : Paths.get(settingsRepo.getVaultPath()).resolve(folder).normalize().toString();
+        } catch (Exception e) {
+            log.warn("[inbox] group suggestion parse failed: {}", e.getMessage());
+            return null;
+        }
     }
 
     // ── File a note: save edits + move to a real folder ─────────────────────────

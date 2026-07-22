@@ -63,3 +63,26 @@ def test_subtree_centroid_is_count_weighted():
     m = _model()
     ai = m["/vault/AI"]
     assert ai.sub_n == 40 and ai.sub_c is not None    # rolls up both AI children
+
+
+# ── suggest_group: folder-level find_home (mean of a group's note vectors) ────────────────
+
+def test_suggest_group_averages_member_vectors(monkeypatch):
+    # Two inbox notes, both pulling toward AI/Agents — the group mean should land there too,
+    # same as if it were a single note with that averaged content.
+    monkeypatch.setattr(placement, "_model", lambda: _model())
+    monkeypatch.setattr(placement, "_note_vectors",
+                        lambda paths: [np.asarray([1.0, 0.0, 0.0], dtype=np.float32),
+                                       np.asarray([0.9, 0.1, 0.0], dtype=np.float32)])
+    got = placement.suggest_group(["/vault/_inbox/x/a.md", "/vault/_inbox/x/b.md"])
+    assert got == "/vault/AI/Agents"
+
+
+def test_suggest_group_empty_paths_returns_none():
+    assert placement.suggest_group([]) is None
+
+
+def test_suggest_group_no_vectors_returns_none(monkeypatch):
+    # None of the group's notes are embedded yet (fresh inbox burst) → no crash, just None.
+    monkeypatch.setattr(placement, "_note_vectors", lambda paths: [])
+    assert placement.suggest_group(["/vault/_inbox/x/a.md"]) is None

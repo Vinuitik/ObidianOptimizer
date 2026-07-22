@@ -74,6 +74,10 @@ class JudgeRequest(BaseModel):
     key_points: list[str] | None = None
 
 
+class PlacementGroupRequest(BaseModel):
+    paths: List[str]                # absolute note paths — a source's notes, or one chapter's
+
+
 class IngestRequest(BaseModel):
     ref: str = ""                   # /vault-relative path or URL (blank for text route)
     force_whisper: bool = False     # re-transcribe even if captions exist
@@ -434,6 +438,18 @@ def ingest_resume(req: ResumeRequest):
         req.ref or "", None, resume_bundle=bp,
         note_path=req.note_path, embed_ref=req.embed_ref,
         capture_id=req.capture_id, source_type=req.source_type, title=req.title)
+
+
+@app.post("/placement/group")
+def placement_group(req: PlacementGroupRequest):
+    """Folder suggestion for a GROUP of inbox notes (a whole source, or one PDF chapter
+    subfolder) — same hierarchical centroid classifier as per-note find_home, just averaged
+    over the group's own vectors first (`ingest.placement.suggest_group`). Called by
+    InboxController when building the Learn queue tree; a folder is "symmetric" with a
+    note here — same walk, just a group-mean vector instead of one note's."""
+    from ingest import placement
+
+    return {"suggestedFolder": placement.suggest_group(req.paths)}
 
 
 @app.post("/ingest/split-note")

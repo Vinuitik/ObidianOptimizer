@@ -177,6 +177,49 @@ def invalidate_cache() -> None:
         _cache["model"], _cache["ts"] = None, 0.0
 
 
+def _note_vectors(paths: list[str]) -> list[np.ndarray]:
+    """Per-note embedding = the mean of that note's OWN chunks, one vector per path — so a
+    long note doesn't outweigh a short one when the group is averaged in `suggest_group`.
+    Missing/unembedded paths are silently skipped (fresh inbox notes may not be indexed
+    yet)."""
+    from mcp_server import _query_db
+    if not paths:
+        return []
+    placeholders = ",".join(["%s"] * len(paths))
+    rows = _query_db(
+        f"""
+        SELECT AVG(embedding)::text AS centroid
+        FROM note_chunks
+        WHERE embedding IS NOT NULL AND note_path IN ({placeholders})
+        GROUP BY note_path
+        """, tuple(paths))
+    out = []
+    for (cen_txt,) in rows:
+        try:
+            out.append(np.fromstring(cen_txt.strip()[1:-1], sep=",", dtype=np.float32))
+        except Exception:
+            continue
+    return out
+
+
+def suggest_group(paths: list[str]) -> Optional[str]:
+    """Best folder for a GROUP of notes — a whole ingest source, or one of its chapter
+    subfolders — computed exactly like a single note: average the group's own note vectors
+    into one vector, walk the same centroid tree (`suggest`). This is the "symmetric at any
+    level" version of `suggest_folder`: a folder IS the mean of what's downstream of it,
+    same as a folder in the vault is modeled as the centroid of its notes. None on empty
+    input or failure — the triage UI just shows no group pre-pick."""
+    try:
+        vecs = _note_vectors(paths)
+        if not vecs:
+            return None
+        vec = np.mean(vecs, axis=0)
+        return suggest(_model(), vec)
+    except Exception as e:
+        log.warning("placement.suggest_group failed: %s", e)
+        return None
+
+
 def suggest_folder(text: str) -> Optional[str]:
     """Best folder for a note's own content (title + body), or None ("unsorted"). One embed
     call; centroids are cached. Never raises — a failure just yields None so ingest continues."""
