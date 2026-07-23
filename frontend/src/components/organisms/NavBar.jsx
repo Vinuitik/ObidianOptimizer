@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import ObsidianMark from '../atoms/ObsidianMark';
+import RefreshButton from '../atoms/RefreshButton';
 import styles from './NavBar.module.css';
 
 const NAV_ITEMS = [
@@ -61,6 +62,7 @@ export default function NavBar() {
       </div>
 
       <div className={styles.right}>
+        <RefreshButton />
         <span className={styles.avatar}>V</span>
         {isAuthenticated ? (
           <button className={styles.authBtn} onClick={logout}>Sign out</button>

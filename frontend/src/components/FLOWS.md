@@ -1,6 +1,6 @@
 # Components Flows
 
-Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/QuitGuard.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx
+Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, atoms/RefreshButton.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/QuitGuard.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx
 
 ---
 
@@ -232,6 +232,14 @@ Drawer backdrop (tap-to-close) DONE (`SplitLayout.jsx .scrim`). [NOT IMPLEMENTED
 
 `atoms/Toast.jsx` — fixed bottom, auto-dismisses after 4 s.  
 Controlled by `store.toastMessage` + `showToast()`.
+
+---
+
+## RefreshButton
+
+`atoms/RefreshButton.jsx` — see `pwa/FLOWS.md` "update detection + manual refresh" for
+the full flow (SW update signal, `registerSW.js`, desktop shell). Mounted in
+`organisms/NavBar.jsx` and `pwa/MobileLayout.jsx`.
 
 ---
 

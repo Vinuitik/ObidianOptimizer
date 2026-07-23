@@ -17,6 +17,14 @@ The duty probe MIRRORS the web `utils/dailyDuty.js`: `localStorage['obsOpt_learn
 AND `GET /api/review?limit=1` empty. Runs IN the page so it shares the session cookie/origin.
 To change the rule: `main.js onCloseAttempt` (keep in sync with `frontend/src/utils/dailyDuty.js`).
 
+## Flow — force reload (Ctrl/Cmd+R, F5)
+`main.js` `before-input-event` on `win.webContents` → `reloadIgnoringCache()`. Bound
+explicitly because `autoHideMenuBar` means there's no menu carrying Electron's default
+reload accelerator. This is a fallback for a hung/unclickable page — the primary reload
+path is the same `RefreshButton` the web app renders in `NavBar` (the shell loads the
+live site, so it gets that button for free; see `frontend/src/pwa/FLOWS.md` "update
+detection + manual refresh"). To change: `main.js` `before-input-event` handler.
+
 ## Config
 - **`OBSOPT_URL`** env var — the site the shell loads. Default `https://obsidianoptimizer.uk` (the
   Cloudflare tunnel domain). The URL carries no `?pwa=1`, so it loads the full desktop site; append
@@ -75,6 +83,7 @@ none of it self-serviceable in a build step. Decision: skip it; acceptable for a
 | Quote list | `desktop/quotes.json` (copy of `frontend/src/utils/quotes.js`) |
 | Window size / theme | `main.js` `createWindow` (`width/height/backgroundColor`) |
 | External-link handling | `main.js` `setWindowOpenHandler` → `shell.openExternal` |
+| Force-reload shortcut | `main.js` `before-input-event` (Ctrl/Cmd+R, F5) → `reloadIgnoringCache()` |
 | Windows build target / installer opts | `package.json` `build.win` + `build.nsis` |
 | App icon | `desktop/icon.png` (copied from `frontend/public/icons/icon-512.png`) |
 | Build command / wine image | this file, "Build" section; log at `desktop/build.log` |

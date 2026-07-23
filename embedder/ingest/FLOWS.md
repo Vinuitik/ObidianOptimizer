@@ -223,6 +223,7 @@ create_capture(capture_id, source_ref, content): POST /api/internal/capture — 
 stamp_capture(content, capture_id, seq): inject capture-id/capture-seq frontmatter (durable
     note↔capture link, mirrored to notes.capture_id/seq). Shared with standalone captures.
 stamp_inbox(content, source, folder): inject ingest-inbox/-source/-suggested-folder (standalone)
+stamp_auto_filed(content): inject ingest-auto-filed: true (agent-chosen direct placement, bypasses inbox)
 find_home : ingest.placement.suggest_folder(title+body) → folder, else "" (unsorted)
 ```
 
@@ -486,6 +487,7 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | Embed → file resolution | `main._resolve_embed()` (basename rglob fallback) |
 | MCP: agent-authored text → notes | `mcp_server.create_note(text, title)` → `jobs.submit(text=…)` (text route → segment → _inbox) |
 | MCP: short-note gate (skip LLM split) | `mcp_server.create_note` → `_stage_note_as_is()` when `< INGEST_SPLIT_MIN_WORDS`(700); stages raw text in _inbox, note is its own source, zero tokens |
+| **MCP: agent-chosen direct folder (skip inbox review)** | `mcp_server.create_note(..., folder="Reference/X")` → `_stage_note_as_is(..., folder)`: non-empty `folder` skips `stamp_inbox`/`find_home` and writes straight to that vault-relative folder via `publish.ensure_folder`+`publish.create_note`, stamped `publish.stamp_auto_filed` instead. Only wired on the sync as-is path — the async re-process path (`already_processed=False`, long text) always still lands in `_inbox`. Added 2026-07-23 so an agent can group several notes from one conversation under a folder it names itself instead of scattering flat in `_inbox` — deliberately bypasses the human review-before-filing step, so the caller (agent) should only pass it when confident of placement (`get_vault_tree`/`find_home_for_note` first) |
 | Routing rules | `router.py → ROUTE_TABLE` (ext→route) + `VIDEO_HOST_RE` (remote video platforms → "youtube"/yt-dlp branch) |
 | Add a video platform (IG/TikTok/Vimeo/X…) | `router.py VIDEO_HOST_RE` — narrow per-host patterns; route value "youtube" = yt-dlp remote (captions→whisper), site-agnostic. IG/TikTok best-effort (login/rate-limit/cookies) |
 | Web page with embedded video (Prong A) | `_run` (web branch) → `_fanout_web_videos(job)` → `embed_detect.detect_content_videos(html)` (main-content players + og:video, NOT prose `<a>` links; capped `MAX_VIDEOS`) → `submit()` each under the SAME `capture_id` (bands with page text). Toggle `INGEST_WEB_VIDEO_FANOUT` (default on). v1 limitation: child capture-seq restarts at 0 (intra-band order approximate) |

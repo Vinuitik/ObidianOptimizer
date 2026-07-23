@@ -170,6 +170,14 @@ def stamp_inbox(content: str, source: str, suggested_folder: str,
     return _insert_frontmatter(content, extra)
 
 
+def stamp_auto_filed(content: str) -> str:
+    """Mark a note filed DIRECTLY at a caller-chosen folder, bypassing the normal Learn
+    Inbox review step (see mcp_server.create_note `folder` param). Unlike ingest-inbox,
+    this is NOT stripped on filing — there's no filing step left to strip it — so the
+    user can grep `ingest-auto-filed: true` to audit what an agent placed unreviewed."""
+    return _insert_frontmatter(content, "ingest-auto-filed: true\n")
+
+
 def stamp_capture(content: str, capture_id: str, seq: int) -> str:
     """Link a proposed note to the Capture that produced it (see CAPTURE_ARCH.md).
     Frontmatter is the DURABLE source of truth — the Java NoteIndexRepository mirrors

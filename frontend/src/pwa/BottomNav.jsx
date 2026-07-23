@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import Icon from '../components/atoms/Icon';
+import RefreshButton from '../components/atoms/RefreshButton';
 import styles from './BottomNav.module.css';
 
 // Thumb-reachable tab bar for the installed PWA. Deliberately only the app's four
@@ -25,6 +26,9 @@ export default function BottomNav() {
           <span className={styles.label}>{label}</span>
         </NavLink>
       ))}
+      <div className={styles.refreshSlot}>
+        <RefreshButton />
+      </div>
     </nav>
   );
 }

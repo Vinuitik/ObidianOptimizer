@@ -1,5 +1,5 @@
 # PWA / Mobile — FLOWS
-Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, SyncPage.jsx, CapturePage.jsx, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, reviewPlan.js, drivePull.js, registerSW.js, vite-pwa.config.js, ../../public/sw.js, ../../public/manifest.webmanifest
+Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, SyncPage.jsx, CapturePage.jsx, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, reviewPlan.js, drivePull.js, registerSW.js, vite-pwa.config.js, ../../public/sw.js, ../../public/manifest.webmanifest, ../components/atoms/RefreshButton.jsx
 > Unused (dropped from the narrow PWA, kept in-tree): MobileNotesPage.jsx, MobileSearchPage.jsx.
 
 > The installed PWA is a **narrow, offline-capable app** — three jobs: **Review**
@@ -164,6 +164,32 @@ embedder `/ingest` (standalone, `find_home`).
   shows real per-type counts on completion ("Pulled 40 notes · 12 images · 3 video/audio · 8 PDF pages").
   To rename phases: `SyncPage.STAGE_LABELS`. To add a phase: emit a new `stage` + add its label.
 
+## Flow — update detection + manual refresh
+`registerSW.js`, `../components/atoms/RefreshButton.jsx`, `NavBar.jsx`, `MobileLayout.jsx`, `../../desktop/main.js`.
+- **Why this exists:** SPA route changes never re-fetch `index.html`/JS — there was no
+  path to a real reload short of reinstalling the PWA (which nukes the SW + caches and
+  forces a clean fetch as a side effect). Vite's content-hashed filenames already make
+  a fresh build cache-safe (a new hash = an automatic cache miss in `sw.js`
+  `staleWhileRevalidate`); the missing piece was ever TRIGGERING a real navigation.
+- `registerServiceWorker()` records whether the page already had a controller before
+  registering. `controllerchange` firing afterward is a real update (a new SW —
+  `sw.js` self-activates via `skipWaiting()`/`clients.claim()` — took over an
+  already-running page); firing with no prior controller is just the first install and
+  is ignored. `onUpdateAvailable(cb)` subscribes to that signal.
+- `RefreshButton` (icon-only atom) subscribes to `onUpdateAvailable`; renders as a
+  plain refresh icon normally, expands to a pulsing "Update" pill once one fires.
+  Either state, click → `checkForUpdate()` (`registration.update()`, nudges the browser
+  to re-check `sw.js` now) → `reloadApp()` (`location.reload()`), which forces the
+  real navigation that was missing — `sw.js handleNavigate()` is network-first, so this
+  alone re-fetches a fresh `index.html` even with no SW update in play.
+- Mounted in `NavBar.jsx` (`.right`, full site — also what the desktop Electron shell
+  loads, so it gets this button for free, no separate native UI) and `MobileLayout.jsx`
+  (`.refreshFab`, fixed top-right corner — the installed PWA has no header to live in).
+- **Desktop Electron shell:** `main.js` also binds Ctrl/Cmd+R and F5 to
+  `webContents.reloadIgnoringCache()` — a fallback for when the page is hung/unclickable,
+  not the primary path (the button above already renders inside the loaded page).
+- To change: `registerSW.js` (detection/reload logic), `RefreshButton.jsx` (UI).
+
 ## Flow — offline auth (persisted flag, not a re-login)
 `store/useStore.js` (`AUTH_KEY='obsOpt_authOk'`), `MobileLayout.jsx`, `api/notes.checkAuth`.
 - The Spring **session cookie** already persists in the browser; the bug was the app's in-memory
@@ -248,4 +274,6 @@ embedder `/ingest` (standalone, `find_home`).
 | Embedder URL | backend `embedder.url` (`${embedder.url:http://embedder:8000}`) |
 | Switch to Workbox | install `vite-plugin-pwa`, merge `vite-pwa.config.js` |
 | Persist-storage / SW register | `registerSW.js` |
+| Update detection / manual refresh | `registerSW.js` (`onUpdateAvailable`, `checkForUpdate`, `reloadApp`) + `../components/atoms/RefreshButton.jsx` |
+| Desktop shell force-reload shortcut | `../../desktop/main.js` `before-input-event` handler |
 | **Offline boot on origin-down (Cloudflare 1033)** | `public/sw.js handleNavigate()` — network-first with timeout, falls back to cached shell on thrown error, timeout, OR non-ok RESPONSE (a down tunnel returns a real 5xx, so a plain `.catch()` leaked the error page). Bump `VERSION` to force re-cache. Needs ONE online load to install the new SW |

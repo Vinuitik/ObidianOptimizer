@@ -33,6 +33,20 @@ function createWindow() {
   // External links (http/https to other origins) open in the system browser, not in-shell.
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
 
+  // Ctrl/Cmd+R and F5 force a real reload, bypassing Chromium's HTTP cache — the shell
+  // has no menu bar (autoHideMenuBar) so Electron's default reload accelerator isn't
+  // wired without this. Same fix as the web RefreshButton: a plain in-app navigation
+  // never happens on its own, so without an explicit reload path the only way users
+  // found to pick up a new deploy was reinstalling.
+  win.webContents.on('before-input-event', (event, input) => {
+    const isReload = input.type === 'keyDown'
+      && (input.key === 'F5' || ((input.control || input.meta) && input.key.toLowerCase() === 'r'));
+    if (isReload) {
+      event.preventDefault();
+      win.webContents.reloadIgnoringCache();
+    }
+  });
+
   win.on('close', onCloseAttempt);
 }
 

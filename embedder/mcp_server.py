@@ -334,9 +334,21 @@ def split_note(note_path: str) -> dict:
 
 
 @mcp.tool()
-def create_note(text: str, title: str = "", already_processed: bool = True) -> dict:
-    """Create a note from text YOU authored and stage it in the Learn Inbox for the user
-    to review and file. Don't hand-write a note file — pass the whole body here.
+def create_note(text: str, title: str = "", already_processed: bool = True, folder: str = "") -> dict:
+    """Create a note from text YOU authored. Don't hand-write a note file — pass the
+    whole body here.
+
+    `folder` (optional, default ""): leave empty to stage the note in the Learn Inbox
+    for the user to review and file — the normal, safe default. Pass a vault-relative
+    folder (e.g. "Reference/Mobile & PWA") to skip the inbox and file the note DIRECTLY
+    there instead (created if missing) — use this ONLY when you're actually confident of
+    placement (check get_vault_tree()/list_folder() first, or use
+    find_home_for_note()'s suggestion), since it bypasses the user's review-before-filing
+    step. Good for: grouping several notes from one conversation into a folder you name
+    yourself instead of a random/date-based one. The note is stamped
+    `ingest-auto-filed: true` (not stripped) so the user can audit what got placed
+    without review. `folder` only applies to the synchronous as-is path below — the
+    async re-process path always still goes to the inbox.
 
     `already_processed` (default True): the text was authored by an LLM (you), so it is
     already good — stage it AS-IS with NO further LLM synthesis and NO async job. The
@@ -358,27 +370,34 @@ def create_note(text: str, title: str = "", already_processed: bool = True) -> d
     # Default: LLM-authored content is already good — stage it as-is (no tokens, no queue,
     # durable synchronous write). See [[mcp-ingest-durability-gap]] for the reasoning.
     if already_processed:
-        return _stage_note_as_is(text.strip(), title)
+        return _stage_note_as_is(text.strip(), title, folder.strip())
 
     split_min = int(os.environ.get("INGEST_SPLIT_MIN_WORDS", "700"))
     if len(text.split()) < split_min:
-        return _stage_note_as_is(text.strip(), title)
+        return _stage_note_as_is(text.strip(), title, folder.strip())
 
     return ingest_jobs.submit("", None, text=text, source_type="text",
                               title=(title or None))
 
 
-def _stage_note_as_is(text: str, title: str = "") -> dict:
-    """Short-note path: stage the text in the Inbox with NO LLM (no split, no re-synthesis).
-    The note is its own source. Reuses the ingest publish helpers so it lands in the queue
-    exactly like a synthesized note, minus the token spend."""
+def _stage_note_as_is(text: str, title: str = "", folder: str = "") -> dict:
+    """Short-note path: stage the text with NO LLM (no split, no re-synthesis) — the note
+    is its own source. Reuses the ingest publish helpers so it lands in the vault exactly
+    like a synthesized note, minus the token spend. `folder` set → file DIRECTLY there
+    (agent-chosen placement, marked `ingest-auto-filed`); empty → the usual Inbox staging
+    (`ingest-inbox` + classifier-suggested folder, awaiting user review)."""
     from ingest import publish, synthesize
     t = (title or "").strip() or _title_from_text(text)
     bundle = {"source": {"ref": "", "title": t, "type": "text"}, "media": []}
     note_md = synthesize.assemble(bundle, {"title": t, "tags": []}, [], text)
-    note_md = publish.stamp_inbox(note_md, "", publish.find_home(t))
-    publish.ensure_folder(publish.INBOX_FOLDER)
-    path = publish.create_note(publish.INBOX_FOLDER, synthesize.slugify(t), note_md)
+    target = folder.strip()
+    if target:
+        note_md = publish.stamp_auto_filed(note_md)
+    else:
+        target = publish.INBOX_FOLDER
+        note_md = publish.stamp_inbox(note_md, "", publish.find_home(t))
+    publish.ensure_folder(target)
+    path = publish.create_note(target, synthesize.slugify(t), note_md)
     return {"status": "DONE", "ingested": False, "words": len(text.split()),
             "notes_created": [path]}
 
