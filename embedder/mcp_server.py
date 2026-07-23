@@ -8,23 +8,33 @@ SDK (FastMCP) and is mounted into the FastAPI app in main.py at /mcp.
 Protocol: initialize → tools/list → tools/call, stateless JSON responses.
 Auth: X-API-Key header compared in constant time against MCP_API_TOKEN.
 
-Tools query Postgres directly (same note_chunks table the Java backend
-maintains) and read note files from the read-only /vault mount. No write
-tools are exposed — writes must go through the Java backend so the notes
-index and sync queue stay consistent.
+This file owns the shared machinery every tool depends on: the FastMCP
+instance, DB access, vault-path resolution, RRF merging, and the auth
+middleware. The tools themselves (query Postgres directly — same
+note_chunks table the Java backend maintains — and read note files from
+the read-only /vault mount) live in mcp_tools/, grouped by concern:
+  mcp_tools/search.py — search_notes, get_note_content
+  mcp_tools/vault.py  — find_home_for_note, get_vault_tree, list_folder
+  mcp_tools/write.py  — ingest_resource, split_note, create_note
+Importing them below (see bottom of file) registers each function as an
+MCP tool (@mcp.tool() runs at import time) and re-exports it here too, so
+`from mcp_server import X` / `mcp_server.X` keep working exactly as before
+the split — this module is still the one stable public interface (main.py,
+ingest/placement.py, ingest/linking.py, and the tests all import from here,
+not from mcp_tools directly).
+
+No write tools bypass the backend — writes must go through the Java backend
+so the notes index and sync queue stay consistent.
 """
 import hmac
 import json
 import logging
 import os
-from collections import Counter
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import psycopg
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-
-from model_runtime import embed_texts
 
 log = logging.getLogger("embedder.mcp")
 
@@ -53,7 +63,9 @@ mcp = FastMCP("obsidian-vault", stateless_http=True, json_response=True,
 
 
 # ---------------------------------------------------------------------------
-# DB + helpers (kept small so tests can monkeypatch _query_db)
+# DB + vault-path helpers (kept small so tests can monkeypatch _query_db;
+# also imported directly by ingest/placement.py and ingest/linking.py — keep
+# these names+signatures stable, don't move them without updating those).
 # ---------------------------------------------------------------------------
 
 def _query_db(sql: str, params: tuple = ()) -> list[tuple]:
@@ -154,260 +166,6 @@ def _resolve_in_vault(note_path: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
-def search_notes(query: str, limit: int = 10) -> list[dict]:
-    """Hybrid search over the Obsidian vault: semantic (pgvector cosine) +
-    keyword (real BM25 via ParadeDB pg_search), order fused with reciprocal
-    rank fusion.
-
-    Returns [{notePath, snippet, similarity, matchedBy}] sorted by relevance.
-    - similarity: cosine similarity of the best semantically-matched chunk
-      (null when only the keyword ranker found it). CALIBRATION for the
-      EmbeddingGemma space (asymmetric query/doc prompts, multilingual —
-      cross-language matches work), measured against this vault: ≥0.5 strong
-      match, 0.4–0.5 related, ≤0.35 likely noise (nonsense queries still
-      surface ~0.30–0.34 hits from a ~22k-chunk corpus — do not trust
-      bottom-of-band results just because they exist).
-    - matchedBy: 'semantic', 'keyword', or 'keyword+semantic' — found by
-      both rankers is the strongest relevance signal.
-    Results are candidates, not ground truth: for filing/placement decisions
-    verify against the real structure with get_vault_tree / list_folder."""
-    limit = max(1, min(limit, 50))
-    query_vec = embed_texts([query], kind="query")[0]
-    vector_rows = _vector_candidates(query_vec)
-    text_rows = _text_candidates(query)
-    return _rrf_merge([("semantic", vector_rows), ("keyword", text_rows)], limit)
-
-
-@mcp.tool()
-def get_note_content(note_path: str) -> str:
-    """Read the full markdown content of a note. Accepts the notePath values
-    returned by search_notes, or a vault-relative path like 'folder/note.md'."""
-    resolved = _resolve_in_vault(note_path)
-    if not resolved.is_file():
-        raise ValueError(f"Note not found: {note_path}")
-    return resolved.read_text(encoding="utf-8")
-
-
-@mcp.tool()
-def find_home_for_note(proposed_title: str, content: str = "") -> dict:
-    """Suggest where a new note belongs. `suggested_folder` is the primary answer, from a
-    hierarchical nearest-centroid classifier (`ingest.placement`): each folder is modeled as
-    the centroid of its notes and the tree is walked to the closest branch (min depth 2; staging
-    folders excluded; null when nothing is confident). PASS `content` (the note body) as well as
-    the title — the classifier is far better on real content than on a short title alone.
-
-    `similar_notes`/`name_examples` are extra context (nearest existing notes + their naming),
-    NOT a placement vote. Still verify with get_vault_tree() / list_folder() before filing."""
-    text = (proposed_title + "\n\n" + content).strip() if content else proposed_title
-    try:
-        from ingest import placement
-        suggested = placement.suggest_folder(text)
-    except Exception as e:
-        log.warning("placement failed in find_home_for_note: %s", e)
-        suggested = None
-
-    # Context only: nearest existing notes (staging folders filtered so the loop that made the
-    # old tool suggest _inbox back to itself can't reappear here either).
-    query_vec = embed_texts([text[:4000]], kind="query")[0]
-    similar_notes: list[str] = []
-    for row in _vector_candidates(query_vec):
-        note_path = row[0]
-        if "/_inbox/" in note_path or note_path.startswith(("ingest/", "/vault/ingest/")):
-            continue
-        if note_path not in similar_notes:
-            similar_notes.append(note_path)
-        if len(similar_notes) >= 10:
-            break
-
-    return {
-        "suggested_folder": suggested,          # primary — may be null ("unsorted")
-        "similar_notes": similar_notes,
-        "name_examples": [PurePosixPath(p).stem for p in similar_notes[:5]],
-    }
-
-
-# Folders that hold media/build artifacts, not knowledge notes — excluded
-# from traversal output so the tree stays signal, not noise.
-TREE_SKIP_DIRS = {"resources", "_workspace", "_reports"}
-LIST_NOTES_CAP = 200
-
-
-@mcp.tool()
-def get_vault_tree(max_depth: int = 3) -> list[dict]:
-    """Read-only map of the vault's folder structure: every folder (down to
-    max_depth) with its direct note count, e.g.
-    [{"folder": "/vault/Programming/Cloud", "noteCount": 12}, ...].
-
-    Embedding-based suggestions (search_notes, find_home_for_note) are
-    imperfect — when deciding where a note belongs, start here to see what
-    actually exists, then list_folder(candidate) to check its contents and
-    naming conventions. Skips media/system folders (resources, _workspace,
-    _reports, dotfolders)."""
-    max_depth = max(1, min(max_depth, 8))
-    root = VAULT_DIR.resolve()
-    out: list[dict] = []
-
-    def walk(d: Path, depth: int):
-        try:
-            entries = sorted(d.iterdir(), key=lambda p: p.name.lower())
-        except (PermissionError, OSError):
-            return
-        note_count = sum(1 for e in entries if e.is_file() and e.suffix == ".md")
-        rel = d.relative_to(root).as_posix()
-        out.append({
-            "folder": "/vault" if rel == "." else f"/vault/{rel}",
-            "noteCount": note_count,
-        })
-        if depth >= max_depth:
-            return
-        for e in entries:
-            if e.is_dir() and not e.name.startswith(".") and e.name not in TREE_SKIP_DIRS:
-                walk(e, depth + 1)
-
-    walk(root, 1)
-    return out
-
-
-@mcp.tool()
-def list_folder(folder_path: str = "/vault", include_notes: bool = False) -> dict:
-    """List ONE vault folder read-only. By default returns subfolder names and
-    a note COUNT only (folders can hold hundreds of notes — keep the signal).
-    Pass include_notes=true to also get the note names (capped at 200,
-    notesTruncated flags it) — do this when you need a folder's scope and
-    naming conventions before filing a note there. Accepts '/vault/...' or a
-    vault-relative path. Use after get_vault_tree."""
-    resolved = _resolve_in_vault(folder_path)
-    if not resolved.is_dir():
-        raise ValueError(f"Not a folder in the vault: {folder_path}")
-    subfolders: list[str] = []
-    notes: list[str] = []
-    for e in sorted(resolved.iterdir(), key=lambda p: p.name.lower()):
-        if e.name.startswith("."):
-            continue
-        if e.is_dir():
-            subfolders.append(e.name)
-        elif e.is_file() and e.suffix == ".md":
-            notes.append(e.stem)
-    rel = resolved.relative_to(VAULT_DIR.resolve()).as_posix()
-    out = {
-        "folder": "/vault" if rel == "." else f"/vault/{rel}",
-        "subfolders": subfolders,
-        "noteCount": len(notes),
-    }
-    if include_notes:
-        out["notes"] = notes[:LIST_NOTES_CAP]
-        out["notesTruncated"] = len(notes) > LIST_NOTES_CAP
-    return out
-
-
-@mcp.tool()
-def ingest_resource(ref: str, force_whisper: bool = False) -> dict:
-    """Turn a resource into Obsidian notes (async job). ref is a vault-relative
-    path (resources/videos/x.mp4, folder/slides.pdf) or a URL (article,
-    YouTube). Returns the job descriptor — poll status via job id at
-    GET /ingest/{id}. Pipeline: deterministic extraction (whisper/PyMuPDF/
-    trafilatura/keyframes) → constrained LLM synthesis → notes via backend."""
-    from ingest import jobs as ingest_jobs
-    from ingest import router as ingest_router
-
-    ingest_router.route(ref)  # raises ValueError on unroutable input
-    resolved = None
-    if not ref.startswith(("http://", "https://")):
-        resolved = _resolve_in_vault(ref)
-        if not resolved.exists():
-            raise ValueError(f"not in vault: {ref}")
-    return ingest_jobs.submit(ref, resolved, force_whisper)
-
-
-@mcp.tool()
-def split_note(note_path: str) -> dict:
-    """Split an oversized note (>6000 chars) into focused concept notes and
-    rewrite the original as a hub of [[links]]. Synchronous — a few LLM calls."""
-    from ingest import split_note as splitter
-
-    content = _resolve_in_vault(note_path).read_text(encoding="utf-8")
-    return splitter.split(note_path, content)
-
-
-@mcp.tool()
-def create_note(text: str, title: str = "", already_processed: bool = True, folder: str = "") -> dict:
-    """Create a note from text YOU authored. Don't hand-write a note file — pass the
-    whole body here.
-
-    `folder` (optional, default ""): leave empty to stage the note in the Learn Inbox
-    for the user to review and file — the normal, safe default. Pass a vault-relative
-    folder (e.g. "Reference/Mobile & PWA") to skip the inbox and file the note DIRECTLY
-    there instead (created if missing) — use this ONLY when you're actually confident of
-    placement (check get_vault_tree()/list_folder() first, or use
-    find_home_for_note()'s suggestion), since it bypasses the user's review-before-filing
-    step. Good for: grouping several notes from one conversation into a folder you name
-    yourself instead of a random/date-based one. The note is stamped
-    `ingest-auto-filed: true` (not stripped) so the user can audit what got placed
-    without review. `folder` only applies to the synchronous as-is path below — the
-    async re-process path always still goes to the inbox.
-
-    `already_processed` (default True): the text was authored by an LLM (you), so it is
-    already good — stage it AS-IS with NO further LLM synthesis and NO async job. The
-    write is SYNCHRONOUS: the note exists on disk when this returns, so it is durable
-    without needing the async ingest queue, and it never re-spends tokens re-processing
-    content tokens already produced. This is the normal path for agent-authored notes.
-
-    Pass `already_processed=False` ONLY to deliberately treat the text as a RAW source to
-    be re-processed by the ingest pipeline (deterministically segmented into linked concept
-    notes when long). That spends tokens and runs async — use it for pasted third-party
-    material, not for your own output. Short inputs stage as-is either way (splitting a
-    short note is meaningless). Returns notes_created (as-is) or a job descriptor to poll
-    GET /ingest/{id} (re-process). `title` is an optional display hint."""
-    from ingest import jobs as ingest_jobs
-
-    if not text or not text.strip():
-        raise ValueError("text is empty")
-
-    # Default: LLM-authored content is already good — stage it as-is (no tokens, no queue,
-    # durable synchronous write). See [[mcp-ingest-durability-gap]] for the reasoning.
-    if already_processed:
-        return _stage_note_as_is(text.strip(), title, folder.strip())
-
-    split_min = int(os.environ.get("INGEST_SPLIT_MIN_WORDS", "700"))
-    if len(text.split()) < split_min:
-        return _stage_note_as_is(text.strip(), title, folder.strip())
-
-    return ingest_jobs.submit("", None, text=text, source_type="text",
-                              title=(title or None))
-
-
-def _stage_note_as_is(text: str, title: str = "", folder: str = "") -> dict:
-    """Short-note path: stage the text with NO LLM (no split, no re-synthesis) — the note
-    is its own source. Reuses the ingest publish helpers so it lands in the vault exactly
-    like a synthesized note, minus the token spend. `folder` set → file DIRECTLY there
-    (agent-chosen placement, marked `ingest-auto-filed`); empty → the usual Inbox staging
-    (`ingest-inbox` + classifier-suggested folder, awaiting user review)."""
-    from ingest import publish, synthesize
-    t = (title or "").strip() or _title_from_text(text)
-    bundle = {"source": {"ref": "", "title": t, "type": "text"}, "media": []}
-    note_md = synthesize.assemble(bundle, {"title": t, "tags": []}, [], text)
-    target = folder.strip()
-    if target:
-        note_md = publish.stamp_auto_filed(note_md)
-    else:
-        target = publish.INBOX_FOLDER
-        note_md = publish.stamp_inbox(note_md, "", publish.find_home(t))
-    publish.ensure_folder(target)
-    path = publish.create_note(target, synthesize.slugify(t), note_md)
-    return {"status": "DONE", "ingested": False, "words": len(text.split()),
-            "notes_created": [path]}
-
-
-def _title_from_text(text: str) -> str:
-    first = next((ln.strip().lstrip("# ").strip() for ln in text.splitlines() if ln.strip()), "")
-    return (first[:80] or "Note")
-
-
-# ---------------------------------------------------------------------------
 # Auth — constant-time X-API-Key check wrapped around the MCP ASGI app
 # ---------------------------------------------------------------------------
 
@@ -442,3 +200,15 @@ class ApiKeyMiddleware:
             return
 
         await self.app(scope, receive, send)
+
+
+# ---------------------------------------------------------------------------
+# Tools — importing these registers each function as an MCP tool (@mcp.tool()
+# decorators run at import time) and binds it here too, e.g.
+# `mcp_server.search_notes`. Must come after everything above: each submodule
+# does `from mcp_server import mcp, ...`, which needs those names to already
+# exist in this module's namespace. Order between the three doesn't matter.
+# ---------------------------------------------------------------------------
+from mcp_tools.search import search_notes, get_note_content
+from mcp_tools.vault import find_home_for_note, get_vault_tree, list_folder
+from mcp_tools.write import ingest_resource, split_note, create_note
