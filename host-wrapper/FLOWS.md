@@ -66,7 +66,7 @@ Providers without a key in `.env` are skipped silently. `claude-cli` needs no ke
 | gemini | `GEMINI_API_KEY` | gemini-2.5-flash | ✓ | 15 RPM, 1500/day |
 | github | `GITHUB_MODELS_TOKEN` | openai/gpt-4o-mini | ✓ | ~15 RPM + daily cap |
 | mistral | `MISTRAL_API_KEY` | mistral-small-latest | ✓ | ~1 req/s |
-| groq | `GROQ_API_KEY` | llama-3.3-70b / llama-4-scout (vision) | ✓ | ~30 RPM |
+| groq | `GROQ_API_KEY` | llama-3.3-70b (text only) | ✗ | ~30 RPM |
 | deepseek | `DEEPSEEK_API_KEY` | deepseek-chat | ✗ | paid, ~pennies |
 | anthropic | `ANTHROPIC_API_KEY` | claude-haiku-4-5 | ✓ | paid API |
 | claude-cli | (CLI auth) | `SYNTH_MODEL` (haiku) | ✗ | subscription credits |
@@ -133,6 +133,23 @@ generation agent (`embedder/flashcards/generate.py`).
 - **In-memory router state** — cooldowns, ok/fail counters, and rate spacing reset on
   wrapper restart. A provider that was benched for the day will be re-tried once after
   a restart (it just 429s again and re-benches). No persistence by design.
+- **A real network outage looks identical to dead keys on `/providers`.** Every
+  provider that was tried during an outage racks up consecutive failures and lands on
+  the same exponential-backoff cooldown (`Provider.bench`); the counters don't
+  distinguish "network was down" from "key revoked" — both show `ok:0, failed:N,
+  cooldown_s:>0`. `consecutive_failures` only resets on the next actual success
+  (`Provider.succeed`), so the dashboard stays red until traffic resumes AND one
+  request gets through, not the instant connectivity returns. Confirmed 2026-07-23:
+  groq/gemini/mistral/claude-cli all showed 100% failure after a host network blip;
+  direct `curl`/CLI probes against each provider succeeded immediately — no code fix
+  needed for that, the state self-heals on the next real request.
+- **Groq retired every vision-capable Llama model** (llama-4-scout/maverick,
+  llama-3.2-*-vision) — confirmed 2026-07-23 via `GET /openai/v1/models`, nothing on
+  the free-tier key takes image input anymore. `GROQ_VISION_MODEL` now has no default
+  (was 404 model_not_found on every vision call) and `groq` is out of
+  `VISION_PRIORITY`. Text (`llama-3.3-70b-versatile`) is unaffected — Groq still
+  serves that. If Groq ships a vision model again: set `GROQ_VISION_MODEL` in `.env`
+  and add `groq` back into `LLM_VISION_PRIORITY`.
 - **`in_flight ≤ 1` per provider** — throughput ceiling is (number of configured
   providers) concurrent requests. The Java worker's thread pool should be sized ≈ the
   number of configured vision providers.

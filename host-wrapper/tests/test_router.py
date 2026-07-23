@@ -22,8 +22,9 @@ def test_chain_respects_priority_and_skips_unconfigured(router):
 
 def test_vision_chain_excludes_text_only_providers(router):
     names = [p.name for p in router._chain("vision")]
-    # claude-cli and deepseek have no vision model; anthropic has no key
-    assert names == ["gemini", "github", "mistral", "groq"]
+    # claude-cli, deepseek, and groq (Groq retired vision-capable Llama models) have
+    # no vision model; anthropic has no key
+    assert names == ["gemini", "github", "mistral"]
 
 
 def test_cli_configured_without_key(router):
@@ -164,7 +165,7 @@ def test_run_exhausts_all_providers(router, no_rate_spacing, monkeypatch):
         lambda p, model, messages, max_tokens: (_ for _ in ()).throw(RuntimeError("down")))
     with pytest.raises(RouterError, match="failures:"):
         r.complete_vision("prompt", b"x", "image/png")
-    for name in ("gemini", "github", "mistral", "groq"):
+    for name in ("gemini", "github", "mistral"):   # groq has no vision model
         assert r.providers[name].fail_count == 1
 
 

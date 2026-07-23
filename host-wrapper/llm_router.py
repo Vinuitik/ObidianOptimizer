@@ -141,8 +141,12 @@ def _build_providers():
         Provider("groq", "openai", _env("GROQ_API_KEY"),
                  url="https://api.groq.com/openai/v1/chat/completions",
                  text_model=_env("GROQ_TEXT_MODEL", "llama-3.3-70b-versatile"),
-                 vision_model=_env("GROQ_VISION_MODEL",
-                                   "meta-llama/llama-4-scout-17b-16e-instruct"),
+                 # Groq retired every vision-capable Llama model (llama-4-scout/maverick,
+                 # llama-3.2-*-vision) — confirmed 2026-07-23 via GET /openai/v1/models,
+                 # none of the models on this key take image input anymore. No default
+                 # here (was a 404 model_not_found on every vision call); set
+                 # GROQ_VISION_MODEL in .env if Groq ships a vision model again.
+                 vision_model=_env("GROQ_VISION_MODEL") or None,
                  min_interval=2.0),    # 30 RPM free tier
         Provider("deepseek", "openai", _env("DEEPSEEK_API_KEY"),
                  url="https://api.deepseek.com/chat/completions",
@@ -166,8 +170,9 @@ def _priority(env_name, default):
 
 
 # Vision: Gemini first (1500 req/day, native vision). Claude API dead last.
+# groq excluded — no vision-capable model left on the free tier (see _build_providers).
 VISION_PRIORITY = _priority("LLM_VISION_PRIORITY",
-                            "gemini,github,mistral,groq,anthropic")
+                            "gemini,github,mistral,anthropic")
 # Text: Gemini deliberately LATE — its daily quota is reserved for the image
 # backlog. Claude CLI (subscription credits) dead last.
 TEXT_PRIORITY = _priority("LLM_TEXT_PRIORITY",
