@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.capture;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
@@ -56,6 +57,11 @@ public class CaptureController {
         "(?:^|\\.)(youtube\\.com|youtu\\.be|vimeo\\.com|dailymotion\\.com)$", Pattern.CASE_INSENSITIVE);
     private static final Pattern PDF_URL   = Pattern.compile("\\.pdf(?:[?#]|$)", Pattern.CASE_INSENSITIVE);
     private static final Pattern AV_URL    = Pattern.compile("\\.(mp4|mov|mkv|webm|avi|mp3|m4a|wav|ogg|flac)(?:[?#]|$)", Pattern.CASE_INSENSITIVE);
+    // A dedicated playlist LISTING page (e.g. youtube.com/playlist?list=...) — deliberately
+    // NOT any URL that merely carries a list= param, since a shared /watch?v=...&list=...
+    // link is a single video the user meant to capture, not "expand the whole playlist".
+    private static final Pattern PLAYLIST_PATH = Pattern.compile("/playlist(?:[/?]|$)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LIST_PARAM    = Pattern.compile("[?&]list=", Pattern.CASE_INSENSITIVE);
 
     private final FileRepository repository;
     private final CaptureRepository captureRepo;
@@ -108,6 +114,9 @@ public class CaptureController {
                 captureRepo.enqueue(captureId, "text", title, sourcePath, title);
             } else {
                 String ref = url.trim();
+                if (isPlaylistUrl(ref)) {
+                    return capturePlaylist(ref);
+                }
                 // Misclick / re-share guard: if this exact link/file is already in the pipeline,
                 // reject LOUDLY instead of making a duplicate set of notes.
                 if (captureRepo.existsLiveForSource(ref)) {
@@ -126,6 +135,70 @@ public class CaptureController {
             log.warn("[Capture] enqueue failed for {}: {}", captureId, e.toString());
             return ResponseEntity.status(500).body(Map.of("error", "could not queue resource"));
         }
+    }
+
+    /** A dedicated playlist LISTING page for a video host (host-checked, not any URL that
+     *  happens to carry a list= param — a shared /watch?v=...&list=... link is a single
+     *  video the user meant to capture, not "expand the whole playlist"). */
+    static boolean isPlaylistUrl(String url) {
+        String host = "";
+        try { host = URI.create(url).getHost(); } catch (Exception ignored) {}
+        if (host == null || !VIDEO_HOST.matcher(host).find()) return false;
+        return PLAYLIST_PATH.matcher(url).find() && LIST_PARAM.matcher(url).find();
+    }
+
+    /** Expand a playlist URL into individual queued captures — one durable capture row
+     *  per video, sharing a playlistId — instead of a single row. Listing (no download)
+     *  happens on the embedder, where yt-dlp already lives (download/downloader.py
+     *  list_playlist_entries); each row then rides the SAME drain worker + single-worker
+     *  ingest queue as any other capture, so videos download and get noted one at a time,
+     *  each in its own capture-id folder, without the caller waiting for the playlist. */
+    private ResponseEntity<Map<String, Object>> capturePlaylist(String playlistUrl) {
+        List<Map<String, String>> entries;
+        try {
+            String payload = objectMapper.writeValueAsString(Map.of("url", playlistUrl));
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(embedderUrl + "/playlist/expand"))
+                .timeout(Duration.ofSeconds(30))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload))
+                .build();
+            HttpResponse<String> r = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() != 200) {
+                log.warn("[Capture] playlist expand rejected ({}) for {}", r.statusCode(), playlistUrl);
+                return ResponseEntity.status(422).body(Map.of(
+                    "error", "could not expand playlist",
+                    "message", "That link doesn't look like a playlist the downloader can list."));
+            }
+            entries = new ArrayList<>();
+            for (JsonNode e : objectMapper.readTree(r.body()).path("entries")) {
+                entries.add(Map.of("url", e.path("url").asText(), "title", e.path("title").asText()));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ResponseEntity.status(503).body(Map.of("error", "interrupted"));
+        } catch (Exception e) {
+            log.warn("[Capture] playlist expand failed for {}: {}", playlistUrl, e.toString());
+            return ResponseEntity.status(502).body(Map.of("error", "downloader unreachable"));
+        }
+
+        String playlistId = UUID.randomUUID().toString().substring(0, 12);
+        int queued = 0, skipped = 0;
+        for (int i = 0; i < entries.size(); i++) {
+            String videoUrl = entries.get(i).get("url");
+            String title = entries.get(i).get("title");
+            if (videoUrl == null || videoUrl.isBlank()) continue;
+            if (captureRepo.existsLiveForSource(videoUrl)) { skipped++; continue; }
+            String childId = UUID.randomUUID().toString().substring(0, 12);
+            captureRepo.enqueuePlaylistItem(childId, classifyUrl(videoUrl), videoUrl, null, title,
+                playlistId, i);
+            queued++;
+        }
+        ingestWorker.nudge();
+        log.info("[Capture] playlist {} expanded: {} queued, {} already in pipeline",
+            playlistId, queued, skipped);
+        return ResponseEntity.ok(Map.of(
+            "status", "queued", "playlistId", playlistId, "count", queued, "skipped", skipped));
     }
 
     /**

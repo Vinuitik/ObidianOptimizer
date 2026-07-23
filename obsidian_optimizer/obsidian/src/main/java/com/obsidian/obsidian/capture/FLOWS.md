@@ -22,6 +22,19 @@ POST /api/capture/file (multipart)                           CaptureController.c
   storeBinaryResource() writes resources/files/{id}.{ext}    → BOTH source_ref and local copy
   captureRepo.enqueue(id, type, path, path, filename)        → 'queued' → same drain → standalone
 
+POST /api/capture {url: playlist page}                       CaptureController.capturePlaylist()
+  isPlaylistUrl(url): video host + /playlist path + list= param (NOT any watch?...&list=
+    link — that's a single video the user meant to capture, so it's excluded on purpose)
+  → embedder POST /playlist/expand {url}                      list ONLY, no download
+    (embedder: download/downloader.list_playlist_entries — extract_flat, skip_download)
+  per entry: existsLiveForSource dedup → captureRepo.enqueuePlaylistItem(…, playlistId, i)
+    → N rows, status='queued', SAME playlist_id, playlist_position = original order
+  ingestWorker.nudge() → same drain below picks them up FIFO (already serial: batchLimit
+    per tick + the embedder's own ingest queue is a single worker thread) — videos
+    download and get noted ONE AT A TIME, each under its own capture-id folder, and the
+    caller gets an immediate response instead of waiting for the whole playlist
+  → 200 {status:"queued", playlistId, count, skipped}         (skipped = already in pipeline)
+
 CaptureIngestWorker (continuous)                             capture/CaptureIngestWorker.java
   @Scheduled tick (15s) ─┐
   nudge() (on capture)  ─┼─→ WorkerLane("capture-ingest").trigger(drain)   (1 drain at a time)
@@ -90,6 +103,21 @@ duplicate. `deferred` blocks the dedup guard (live) and is excluded from orphan 
 - **`embedder.url` default drift fixed.** Pre-centralization, ResourceScanService defaulted to
   `localhost:8000` and CaptureController to `embedder:8000`. `IngestClient` has one default
   (`localhost:8000`); the real value is `EMBEDDER_URL` in application.properties.
+- **Playlist rows reuse `capture`, not a separate table.** No new queue was needed: `drain()`
+  already claims/submits rows independently and in FIFO order regardless of how many were
+  inserted in one request, so N playlist rows behave exactly like N separate captures — the
+  "one at a time" and "own folder per video" requirements were already properties of the
+  existing pipeline (folder = `publish.inbox_folder(capture_id)`, one worker thread on the
+  embedder side). `playlist_id`/`playlist_position` are metadata for future grouping/progress
+  UI only — nothing currently reads them back.
+- **Playlist expand call is unbounded/untimed on the Java side beyond a 30s HTTP timeout.** A
+  very large playlist (hundreds of videos) means one slow `/playlist/expand` round-trip before
+  any row is queued; there's no pagination. If this becomes a problem, cap entries or stream them.
+- **Partial-failure handling is best-effort.** If `enqueuePlaylistItem` throws partway through the
+  loop (e.g. a DB hiccup), rows already inserted stay `queued` (durable, will still drain) but the
+  HTTP response falls through to the outer `catch` and reports a generic 500 — the user may see an
+  error even though most of the playlist was queued successfully. Re-submitting the same playlist
+  URL is safe (the dedup check skips already-live videos).
 
 ## Change Index
 
@@ -111,3 +139,6 @@ duplicate. `deferred` blocks the dedup guard (live) and is excluded from orphan 
 | **Orphan-source cleanup** ("no children → trash source") | `CaptureIngestWorker.cleanupOrphanSources()` (age + no-active-job + `countLiveReferencesToFile` guards) → `FileRepository.softDeleteFile`; env `ingest.cleanup.min-age-ms` |
 | **Duplicate-capture guard** (409) | `CaptureController.capture()` → `CaptureRepository.existsLiveForSource()`; extension shows ⚠️ |
 | Per-note retention (last note deleted → trash media) | `inbox/InboxController.discard()` (`local:` + `trashLocalMedia`; LOCAL_MEDIA_RETENTION §4) |
+| **Playlist URL detection** | `CaptureController.isPlaylistUrl()` (`PLAYLIST_PATH`/`LIST_PARAM` regexes, video-host gated) |
+| **Playlist expansion (list-only, no download)** | `CaptureController.capturePlaylist()` → embedder `POST /playlist/expand` → `download/downloader.list_playlist_entries` (embedder `FLOWS.md`) |
+| **Playlist row insert** | `CaptureRepository.enqueuePlaylistItem(id, type, ref, path, title, playlistId, position)`; columns `playlist_id`/`playlist_position` |

@@ -32,12 +32,12 @@ class CaptureIngestWorkerTest {
 
     private static CaptureRepository.Capture url(String id) {
         return new CaptureRepository.Capture(id, "video", "https://youtu.be/" + id, null,
-            id, "queued", null, 0L);
+            id, "queued", null, 0L, null, null);
     }
 
     private static CaptureRepository.Capture deferred(String id, String bundleRef) {
         return new CaptureRepository.Capture(id, "video", "https://youtu.be/" + id, null,
-            id, "deferred", bundleRef, 0L);
+            id, "deferred", bundleRef, 0L, null, null);
     }
 
     @BeforeEach

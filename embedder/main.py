@@ -520,6 +520,22 @@ def download_list():
     return {"jobs": download_jobs.list_jobs()}
 
 
+@app.post("/playlist/expand")
+def playlist_expand(req: DownloadRequest):
+    """List a playlist's videos (no download) so the Java capture endpoint can
+    enqueue one durable capture row per video. See download/downloader.list_playlist_entries."""
+    from download.downloader import list_playlist_entries
+
+    url = (req.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=422, detail="url cannot be empty")
+    try:
+        entries = list_playlist_entries(url)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"entries": entries}
+
+
 @app.post("/subs")
 def subs_fetch(req: SubsRequest):
     """Captions only, no download — the ingest captions-fast-path, also exposed

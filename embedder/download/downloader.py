@@ -64,6 +64,35 @@ def download_sync(url: str, progress_hook: Callable | None = None,
         return ydl.prepare_filename(info)
 
 
+def list_playlist_entries(url: str) -> list[dict]:
+    """List a playlist's videos WITHOUT downloading (extract_flat) — lets the Java
+    capture endpoint expand a playlist URL into individual queued captures, each
+    downloaded/ingested one at a time by the existing capture pipeline. Raises
+    ValueError if the URL has no entries (i.e. it's a single video, not a playlist).
+    Returns [{"url": ..., "title": ...}, ...] in playlist order."""
+    opts = {
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    entries = [e for e in (info or {}).get("entries", []) if e]
+    if not entries:
+        raise ValueError("not a playlist (no entries)")
+    out = []
+    for e in entries:
+        video_url = e.get("url") or e.get("webpage_url")
+        if not video_url:
+            continue
+        # extract_flat entries carry a bare video id as "url" for YouTube.
+        if not video_url.startswith("http"):
+            video_url = f"https://www.youtube.com/watch?v={video_url}"
+        out.append({"url": video_url, "title": e.get("title") or video_url})
+    return out
+
+
 def fetch_audio(url: str, dest_dir: str | None = None) -> Path:
     """Download bestaudio only, to a temp/given dir. Used by the YouTube
     force_whisper path (extract_av) — cheaper than pulling the full video.

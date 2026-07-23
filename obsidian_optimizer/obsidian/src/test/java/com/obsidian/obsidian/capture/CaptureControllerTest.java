@@ -2,6 +2,8 @@ package com.obsidian.obsidian.capture;
 
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,15 +11,19 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -37,11 +43,34 @@ class CaptureControllerTest {
 
     @TempDir Path vault;
     private MockMvc mvc;
+    private CaptureController controller;
+    private HttpServer embedderStub;
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.standaloneSetup(
-            new CaptureController(repository, captureRepo, ingestWorker, settingsRepo)).build();
+        controller = new CaptureController(repository, captureRepo, ingestWorker, settingsRepo);
+        mvc = MockMvcBuilders.standaloneSetup(controller).build();
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (embedderStub != null) embedderStub.stop(0);
+    }
+
+    /** Starts a local stub embedder that always answers {@code /playlist/expand} with the
+     *  given JSON body, and points the controller at it. Returns the bound port (unused). */
+    private void stubPlaylistExpand(int status, String jsonBody) throws Exception {
+        embedderStub = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        embedderStub.createContext("/playlist/expand", exchange -> {
+            byte[] bytes = jsonBody.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        embedderStub.start();
+        ReflectionTestUtils.setField(controller, "embedderUrl",
+            "http://127.0.0.1:" + embedderStub.getAddress().getPort());
     }
 
     @Test
@@ -91,6 +120,105 @@ class CaptureControllerTest {
 
         mvc.perform(multipart("/capture/file").file(empty))
             .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(captureRepo, ingestWorker);
+    }
+
+    // ── Playlist URL classification ──────────────────────────────────────────
+
+    @Test
+    void isPlaylistUrl_playlistPage_isTrue() {
+        assertThat(CaptureController.isPlaylistUrl(
+            "https://www.youtube.com/playlist?list=PL123")).isTrue();
+    }
+
+    @Test
+    void isPlaylistUrl_singleVideoWithListParam_isFalse() {
+        // A shared /watch?v=...&list=... link is a single video the user meant to
+        // capture, not "expand the whole playlist".
+        assertThat(CaptureController.isPlaylistUrl(
+            "https://www.youtube.com/watch?v=abc&list=PL123")).isFalse();
+    }
+
+    @Test
+    void isPlaylistUrl_plainVideoUrl_isFalse() {
+        assertThat(CaptureController.isPlaylistUrl("https://youtu.be/abc")).isFalse();
+    }
+
+    @Test
+    void isPlaylistUrl_nonVideoHost_isFalse() {
+        assertThat(CaptureController.isPlaylistUrl(
+            "https://example.com/playlist?list=PL123")).isFalse();
+    }
+
+    // ── Playlist expansion ───────────────────────────────────────────────────
+
+    @Test
+    void capture_playlistUrl_expandsIntoOneQueuedCapturePerVideo() throws Exception {
+        stubPlaylistExpand(200, """
+            {"entries":[
+                {"url":"https://youtu.be/a","title":"Part 1"},
+                {"url":"https://youtu.be/b","title":"Part 2"}
+            ]}
+            """);
+        when(captureRepo.existsLiveForSource(anyString())).thenReturn(false);
+
+        mvc.perform(post("/capture").contentType("application/json")
+                .content("{\"url\":\"https://www.youtube.com/playlist?list=PL1\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("queued"))
+            .andExpect(jsonPath("$.playlistId").isNotEmpty())
+            .andExpect(jsonPath("$.count").value(2))
+            .andExpect(jsonPath("$.skipped").value(0));
+
+        verify(captureRepo).enqueuePlaylistItem(anyString(), eq("video"),
+            eq("https://youtu.be/a"), isNull(), eq("Part 1"), anyString(), eq(0));
+        verify(captureRepo).enqueuePlaylistItem(anyString(), eq("video"),
+            eq("https://youtu.be/b"), isNull(), eq("Part 2"), anyString(), eq(1));
+        verify(ingestWorker).nudge();
+    }
+
+    @Test
+    void capture_playlistUrl_skipsEntriesAlreadyInPipeline() throws Exception {
+        stubPlaylistExpand(200, """
+            {"entries":[
+                {"url":"https://youtu.be/a","title":"Part 1"},
+                {"url":"https://youtu.be/b","title":"Part 2"}
+            ]}
+            """);
+        when(captureRepo.existsLiveForSource("https://youtu.be/a")).thenReturn(true);
+        when(captureRepo.existsLiveForSource("https://youtu.be/b")).thenReturn(false);
+
+        mvc.perform(post("/capture").contentType("application/json")
+                .content("{\"url\":\"https://www.youtube.com/playlist?list=PL1\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.count").value(1))
+            .andExpect(jsonPath("$.skipped").value(1));
+
+        verify(captureRepo, never()).enqueuePlaylistItem(anyString(), anyString(),
+            eq("https://youtu.be/a"), any(), anyString(), anyString(), anyInt());
+        verify(captureRepo).enqueuePlaylistItem(anyString(), eq("video"),
+            eq("https://youtu.be/b"), isNull(), eq("Part 2"), anyString(), eq(1));
+    }
+
+    @Test
+    void capture_playlistUrl_embedderDown_returns502AndEnqueuesNothing() throws Exception {
+        ReflectionTestUtils.setField(controller, "embedderUrl", "http://127.0.0.1:1");
+
+        mvc.perform(post("/capture").contentType("application/json")
+                .content("{\"url\":\"https://www.youtube.com/playlist?list=PL1\"}"))
+            .andExpect(status().isBadGateway());
+
+        verifyNoInteractions(captureRepo, ingestWorker);
+    }
+
+    @Test
+    void capture_playlistUrl_embedderRejects_returns422() throws Exception {
+        stubPlaylistExpand(422, "{\"detail\":\"not a playlist\"}");
+
+        mvc.perform(post("/capture").contentType("application/json")
+                .content("{\"url\":\"https://www.youtube.com/playlist?list=PL1\"}"))
+            .andExpect(status().isUnprocessableEntity());
 
         verifyNoInteractions(captureRepo, ingestWorker);
     }

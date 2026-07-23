@@ -31,7 +31,8 @@ public class CaptureRepository {
 
     public record Capture(String id, String sourceType, String sourceRef,
                           String sourcePath, String title, String status,
-                          String bundleRef, long createdAt) {}
+                          String bundleRef, long createdAt,
+                          String playlistId, Integer playlistPosition) {}
 
     @PostConstruct
     public void initSchema() {
@@ -50,6 +51,12 @@ public class CaptureRepository {
         // bundle_ref: the embedder's saved-bundle path for a DEFERRED synthesis, so the retry
         // resumes without re-extracting. Added by migration (existing DBs predate the column).
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS bundle_ref TEXT");
+        // playlist_id/playlist_position: set only for captures expanded from a playlist URL
+        // (CaptureController) — groups the individual video rows and preserves their original
+        // order for progress display. Null for every other capture.
+        jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS playlist_id TEXT");
+        jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS playlist_position INTEGER");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_capture_playlist ON capture(playlist_id)");
     }
 
     public void create(String id, String sourceType, String sourceRef,
@@ -70,6 +77,21 @@ public class CaptureRepository {
             VALUES (?, ?, ?, ?, ?, 'queued', ?)
             ON CONFLICT (id) DO NOTHING
             """, id, sourceType, sourceRef, sourcePath, title, System.currentTimeMillis());
+    }
+
+    /** Same as {@link #enqueue} but tags the row as part of a playlist expansion
+     *  (CaptureController) — {@code playlistId} groups the sibling rows, {@code position}
+     *  preserves their order in the source playlist. */
+    public void enqueuePlaylistItem(String id, String sourceType, String sourceRef,
+                                    String sourcePath, String title,
+                                    String playlistId, int position) {
+        jdbc.update("""
+            INSERT INTO capture(id, source_type, source_ref, source_path, title, status,
+                                created_at, playlist_id, playlist_position)
+            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)
+            ON CONFLICT (id) DO NOTHING
+            """, id, sourceType, sourceRef, sourcePath, title,
+            System.currentTimeMillis(), playlistId, position);
     }
 
     public void updateStatus(String id, String status) {
@@ -174,9 +196,12 @@ public class CaptureRepository {
     }
 
     private static Capture map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
+        int rawPosition = rs.getInt("playlist_position");
+        Integer playlistPosition = rs.wasNull() ? null : rawPosition;
         return new Capture(
             rs.getString("id"), rs.getString("source_type"), rs.getString("source_ref"),
             rs.getString("source_path"), rs.getString("title"), rs.getString("status"),
-            rs.getString("bundle_ref"), rs.getLong("created_at"));
+            rs.getString("bundle_ref"), rs.getLong("created_at"),
+            rs.getString("playlist_id"), playlistPosition);
     }
 }

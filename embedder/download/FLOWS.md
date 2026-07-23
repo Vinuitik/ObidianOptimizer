@@ -5,9 +5,10 @@ Files: downloader.py, jobs.py, ../main.py (endpoints), ../ingest/extract_av.py (
 > VideoManager sister app (which is now deleted from this repo) — only the yt-dlp
 > core came over; the agent/RAG/MCP/Playwright escalation half did NOT.
 
-## Two consumers
+## Three consumers
 1. **Ingest captions fast-path** — `ingest/extract_av._youtube_captions()` → `downloader.fetch_subs(url)` → VTT → `parse_vtt`. force_whisper → `downloader.fetch_audio()` → `_whisper_transcribe`.
 2. **Offline download feature** — browser extension → backend `CaptureController /download` (proxy) → embedder `POST /download` → `jobs.submit()`.
+3. **Playlist expansion (list-only, no download)** — Java `CaptureController.capturePlaylist()` → `POST /playlist/expand` → `downloader.list_playlist_entries()`, so Java can insert one durable `capture` row per video (see Java `capture/FLOWS.md`).
 
 ## Flow — captions (no download, synchronous, seconds)
 `extract_av._youtube_captions(url)` → `downloader.fetch_subs(url, lang='en')`
@@ -33,6 +34,19 @@ GET /download      → jobs.list_jobs()
 - Output dir: `DOWNLOAD_DIR` env (default `/workspace`, bind-mounted in `docker-compose.yml` → host `${HOST_VAULT_PATH}/_workspace`). Downloaded media therefore lands in the vault's `_workspace/` and shows up directly in the Learn page (same dir `WorkspaceController /workspace/files` lists and nginx serves). The old standalone `./downloads` mount was removed.
 - Format/quality: `downloader.build_ydl_opts()` `format` key.
 
+## Flow — playlist expand (sync, no download)
+`POST /playlist/expand {url}` (main.py) → `downloader.list_playlist_entries(url)`
+```
+yt-dlp {extract_flat:"in_playlist", skip_download:True} → info["entries"]
+  raises ValueError("not a playlist") if entries is empty (single video, not a playlist)
+  per entry: bare id → normalized to https://www.youtube.com/watch?v={id} (flat extraction
+    doesn't resolve full URLs for YouTube); title falls back to the url if missing
+→ 200 {entries: [{url, title}, …]}   (playlist order preserved)   |   422 if not a playlist
+```
+This never downloads anything — it exists purely so the Java capture endpoint can enqueue each
+video as its own durable `capture` row instead of the "download everything, keep only the last
+file" behavior `download_sync` has for playlists (below).
+
 ## Technology Notes (constraints / failure modes)
 - **No agent escalation.** VideoManager fell back to a headless-browser + RAG agent when yt-dlp failed (login walls, JS-only streams). That heavy half (Ollama/Chroma/Playwright/MCP) was deliberately NOT salvaged. Here a yt-dlp failure is just `status:error` — fine for YouTube/MIT OCW/most uni lecture portals, which yt-dlp handles directly. Sites needing auth/scraping are out of scope now.
 - **In-memory jobs.** `jobs._jobs` is a process-local dict — a container restart drops in-flight + finished jobs. Accepted: downloads are idempotent and re-triggerable (same as `ingest/jobs.py`). No persistence.
@@ -40,6 +54,11 @@ GET /download      → jobs.list_jobs()
 - **ffmpeg dependency.** `download_sync` merges bestvideo+bestaudio → mp4 via ffmpeg; `fetch_audio` + whisper also need it. ffmpeg is installed in the embedder image (already used by `extract_av._to_wav`).
 - **Disk + quota.** `DOWNLOAD_DIR` is unbounded — a big playlist can fill the host disk. No cleanup/rotation. Unlike the URL-save path (`WorkspaceController /workspace/save`, 512 MB cap), yt-dlp has **no size guard**, and it now writes straight into the vault's `_workspace/` — a big playlist piles into the vault. The old `videos` list/delete endpoint was NOT salvaged; manage files on the host.
 - **yt-dlp staleness.** YouTube breaks extractors periodically; bump `yt-dlp` in `requirements.txt` when downloads start failing site-wide.
+- **`list_playlist_entries` YouTube-id normalization is a heuristic.** `extract_flat` returns a
+  bare video id (not a full URL) as `"url"` for YouTube specifically; the function detects this
+  by checking for an `http` prefix and rebuilds a `watch?v=` URL. A non-YouTube playlist host
+  (Vimeo, Dailymotion) may return a different shape here — untested, since only YouTube playlists
+  have been exercised end-to-end.
 
 ## Change Index
 | Touch this | Where |
@@ -49,7 +68,8 @@ GET /download      → jobs.list_jobs()
 | Caption language | `downloader.fetch_subs(url, lang=…)` |
 | Progress fields | `jobs._run()` hook + `downloader.parse_progress()` |
 | Concurrency model | `jobs.submit()` (thread-per-job → swap for a worker queue) |
-| Endpoints | `../main.py` (`/download`, `/download/{id}`, `/subs`) |
+| Endpoints | `../main.py` (`/download`, `/download/{id}`, `/subs`, `/playlist/expand`) |
+| Playlist listing (no download) | `downloader.list_playlist_entries()` (`extract_flat`, raises `ValueError` if not a playlist) |
 | Browser-facing proxy | Java `capture/CaptureController` (`POST /api/download`, `GET /api/download/{id}`) |
 | Host download folder | `docker-compose.yml` embedder `${HOST_VAULT_PATH}/_workspace:/workspace` + `DOWNLOAD_DIR=/workspace` |
 | yt-dlp version | `requirements.txt` `yt-dlp` |

@@ -97,6 +97,62 @@ def test_download_sync_reports_last_playlist_entry(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# list_playlist_entries
+# ---------------------------------------------------------------------------
+
+def test_list_playlist_entries_returns_url_and_title(monkeypatch):
+    info = {"entries": [
+        {"id": "vid1", "url": "vid1", "title": "Part 1"},
+        {"id": "vid2", "url": "https://www.youtube.com/watch?v=vid2", "title": "Part 2"},
+    ]}
+    monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL", _fake_ydl(info))
+    out = downloader.list_playlist_entries("https://www.youtube.com/playlist?list=PL1")
+    assert out == [
+        {"url": "https://www.youtube.com/watch?v=vid1", "title": "Part 1"},
+        {"url": "https://www.youtube.com/watch?v=vid2", "title": "Part 2"},
+    ]
+
+
+def test_list_playlist_entries_skips_download(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL",
+                        _fake_ydl({"entries": [{"id": "v", "url": "v", "title": "T"}]}, captured))
+    downloader.list_playlist_entries("https://www.youtube.com/playlist?list=PL1")
+    assert captured["opts"]["skip_download"] is True
+    assert captured["opts"]["extract_flat"] == "in_playlist"
+
+
+def test_list_playlist_entries_raises_when_not_a_playlist(monkeypatch):
+    monkeypatch.setattr(downloader.yt_dlp, "YoutubeDL", _fake_ydl({"title": "single video"}))
+    with pytest.raises(ValueError, match="not a playlist"):
+        downloader.list_playlist_entries("https://youtu.be/x")
+
+
+# ---------------------------------------------------------------------------
+# /playlist/expand endpoint
+# ---------------------------------------------------------------------------
+
+def test_playlist_expand_endpoint_success(monkeypatch, client):
+    monkeypatch.setattr(downloader, "list_playlist_entries",
+                        lambda url: [{"url": "https://youtu.be/a", "title": "A"}])
+    resp = client.post("/playlist/expand", json={"url": "https://www.youtube.com/playlist?list=PL1"})
+    assert resp.status_code == 200
+    assert resp.json()["entries"] == [{"url": "https://youtu.be/a", "title": "A"}]
+
+
+def test_playlist_expand_endpoint_422_when_not_a_playlist(monkeypatch, client):
+    def boom(url):
+        raise ValueError("not a playlist (no entries)")
+    monkeypatch.setattr(downloader, "list_playlist_entries", boom)
+    resp = client.post("/playlist/expand", json={"url": "https://youtu.be/x"})
+    assert resp.status_code == 422
+
+
+def test_playlist_expand_endpoint_422_when_empty_url(client):
+    assert client.post("/playlist/expand", json={"url": "  "}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # fetch_subs
 # ---------------------------------------------------------------------------
 
