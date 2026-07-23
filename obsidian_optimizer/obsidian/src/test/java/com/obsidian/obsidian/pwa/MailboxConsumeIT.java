@@ -54,7 +54,7 @@ class MailboxConsumeIT {
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>(org.testcontainers.utility.DockerImageName
-            .parse("pgvector/pgvector:pg16").asCompatibleSubstituteFor("postgres"));
+            .parse("paradedb/paradedb:latest").asCompatibleSubstituteFor("postgres"));
 
     static final Path VAULT;
     static {
