@@ -61,22 +61,24 @@ class NotesControllerTest {
 
     @Test
     void getReview_returns200WithPageAndHasMoreFlag() throws Exception {
-        var page = new FileRepository.ReviewPage(List.of("/v/A.md"), true);
-        when(fileRepository.getReviewNotesPaged(0, 40)).thenReturn(page);
+        var page = new FileRepository.ReviewPageInfo(
+            List.of(new FileRepository.ReviewNoteInfo("/v/A.md", true)), true);
+        when(fileRepository.getReviewNotesPagedWithCards(0, 40)).thenReturn(page);
         mvc.perform(get("/review"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.notes[0]").value("/v/A.md"))
+            .andExpect(jsonPath("$.notes[0].path").value("/v/A.md"))
+            .andExpect(jsonPath("$.notes[0].hasCards").value(true))
             .andExpect(jsonPath("$.hasMore").value(true));
     }
 
     @Test
     void getReview_customOffsetAndLimit() throws Exception {
-        var page = new FileRepository.ReviewPage(List.of(), false);
-        when(fileRepository.getReviewNotesPaged(10, 5)).thenReturn(page);
+        var page = new FileRepository.ReviewPageInfo(List.of(), false);
+        when(fileRepository.getReviewNotesPagedWithCards(10, 5)).thenReturn(page);
         mvc.perform(get("/review?offset=10&limit=5"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.hasMore").value(false));
-        verify(fileRepository).getReviewNotesPaged(10, 5);
+        verify(fileRepository).getReviewNotesPagedWithCards(10, 5);
     }
 
     // ── GET /text ─────────────────────────────────────────────────────────────
