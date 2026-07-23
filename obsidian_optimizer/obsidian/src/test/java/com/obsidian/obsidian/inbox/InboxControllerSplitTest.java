@@ -1,6 +1,7 @@
 package com.obsidian.obsidian.inbox;
 
 import com.obsidian.obsidian.capture.CaptureRepository;
+import com.obsidian.obsidian.common.IngestClient;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
@@ -34,6 +35,7 @@ class InboxControllerSplitTest {
     @Mock SettingsRepository settingsRepo;
     @Mock NoteIndexRepository noteIndex;
     @Mock CaptureRepository captureRepo;
+    @Mock IngestClient ingestClient;
 
     private InboxController controller;
     private Path vault;
@@ -43,7 +45,7 @@ class InboxControllerSplitTest {
     void setUp() throws IOException {
         vault = Files.createTempDirectory("vault");
         inbox = Files.createDirectories(vault.resolve("_inbox"));
-        controller = new InboxController(repository, settingsRepo, noteIndex, captureRepo);
+        controller = new InboxController(repository, settingsRepo, noteIndex, captureRepo, ingestClient);
 
         lenient().when(settingsRepo.getVaultPath()).thenReturn(vault.toString());
         // getText reads the file back off disk.
