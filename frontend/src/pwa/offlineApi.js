@@ -199,25 +199,38 @@ async function dropFromInbox(pred) {
 
 export async function fetchInboxOffline() {
   if (driveMode) return pulledInbox();
-  return netFetchInbox();
+  if (isOnline()) {
+    try { return await netFetchInbox(); }
+    catch (e) { if (!(e instanceof TypeError)) throw e; }  // network blip → fall through
+  }
+  return pulledInbox();   // offline and not driveMode: still show whatever was last pulled
 }
 
 export async function fileInboxOffline(path, targetFolder, content) {
-  if (!driveMode) return netFileInbox(path, targetFolder, content);
+  if (!driveMode && isOnline()) {
+    try { return await netFileInbox(path, targetFolder, content); }
+    catch (e) { if (!(e instanceof TypeError)) throw e; }
+  }
   await enqueueFile(path, targetFolder, content);
   await dropFromInbox(i => i.path !== path);
   return { path, queued: true };
 }
 
 export async function discardInboxOffline(path) {
-  if (!driveMode) return netDiscardInbox(path);
+  if (!driveMode && isOnline()) {
+    try { return await netDiscardInbox(path); }
+    catch (e) { if (!(e instanceof TypeError)) throw e; }
+  }
   await enqueueDiscard(path);
   await dropFromInbox(i => i.path !== path);
   return { queued: true };
 }
 
 export async function acknowledgeOffline(captureId) {
-  if (!driveMode) return netAcknowledge(captureId);
+  if (!driveMode && isOnline()) {
+    try { return await netAcknowledge(captureId); }
+    catch (e) { if (!(e instanceof TypeError)) throw e; }
+  }
   await enqueueAcknowledge(captureId);
   await dropFromInbox(i => i.captureId !== captureId);
   return { queued: true };

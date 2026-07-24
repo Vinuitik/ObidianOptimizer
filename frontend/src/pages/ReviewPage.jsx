@@ -134,6 +134,7 @@ export default function ReviewPage() {
       <div className={styles.sessionPane}>
         {inlineNote ? (
           <InlineNoteReview
+            key={inlineNote.fullPath}
             note={inlineNote}
             onBack={() => setInlineNote(null)}
             onClose={() => handleClose(inlineNote.fullPath)}
