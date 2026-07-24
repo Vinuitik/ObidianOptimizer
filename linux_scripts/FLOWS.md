@@ -1,5 +1,5 @@
 # Deploy / Boot FLOWS
-Files: start.sh, obsidian-optimizer.service, install-service.sh, redeploy.sh, deploy-extension.sh, build-firefox-extension.sh
+Files: start.sh, obsidian-optimizer.service, install-service.sh, redeploy.sh, deploy-extension.sh, build-firefox-extension.sh, test.sh, ingest_live_e2e.py
 
 Boot → always-online stack:
 
@@ -37,6 +37,40 @@ docker compose ps                         # all 5 Up; postgres/embedder healthy
 - `.xpi` + `updates.json` land in host `./ext-dist` (gitignored), mounted `:ro` at `/ext-dist` — new versions appear live, **no** frontend rebuild. Only editing the nginx `/ext/` block or the compose mount needs `systemctl restart obsidian-optimizer`.
 - Requires `AMO_KEY`/`AMO_SECRET` (AMO JWT issuer/secret) exported. Signing JWT capped via `--timeout=240000` (< AMO's 5-min `exp`, sign-addon#1273).
 
+## Testing — `test.sh` + `ingest_live_e2e.py`
+
+`./linux_scripts/test.sh` (no args) runs the offline suites (host-wrapper/embedder/
+java-unit/java-it/frontend). `./linux_scripts/test.sh live` runs the LIVE suites against
+the real running stack instead — currently `drive-live` (real Google Drive, needs creds)
+and `ingest-live` (`ingest_live_e2e.py`, no creds needed, self-cleaning).
+
+`ingest_live_e2e.py` phases (each PASS/FAIL/SKIP, timed):
+```
+1 preflight        health + provider snapshot + backend login
+2 video-captions   yt-dlp caption fast-path (no LLM)
+3 page-web         trafilatura web extraction (no LLM)
+4 ytdlp-download   yt-dlp FULL download proxy (heavy; SKIP_DOWNLOAD=1 to skip)
+5 dedup-guard      backend /capture on an already-live URL → 409
+6 synthesis        full ingest pipeline → _inbox note — SKIPs if every LLM
+                   provider is cooling (environmental, not a defect)
+7 journey          create → file → grade → sync, NO LLM involved so it never SKIPs:
+                     journey-create             POST /notes lands a note in _inbox
+                     journey-inbox-visible       shows up on GET /inbox
+                     journey-file                POST /inbox/file → real folder
+                     journey-grade               POST /reviews/grade →
+                                                  note_reviews.due moves into the future
+                     journey-frontmatter-mirror  fsrs-* fields land in the local .md
+                     journey-sync-queued         sync_queue gets a PENDING row
+```
+Phase 7 exists because phase 6 depends on LLM provider quota and SKIPs often — it alone
+can't be trusted to catch a break in create→review→sync. Phase 7 exercises the exact
+same REST endpoints the UI calls (`/notes`, `/inbox`, `/inbox/file`, `/reviews/grade`),
+never touches the real vault content (its own `_e2e_journey` folder + note, soft-deleted
+via the normal `/notes`/`/folders` DELETE endpoints — same trash path a real delete
+takes), and asserts against Postgres directly (`note_reviews.due`, `sync_queue.status`)
+rather than trusting API response shape alone.
+To change: `linux_scripts/ingest_live_e2e.py` `journey()`.
+
 ## Technology Notes
 - **Firefox self-distribution (`--channel=unlisted`)**: AMO signs but does **not** host — you serve the `.xpi` yourself. Firefox polls `update_url` on its own cadence (~daily), not instantly; `about:addons → ⚙ → Check for Updates` forces it. An add-on installed from a build **without** `update_url` (e.g. the pre-auto-update 0.2.1) will never auto-update — reinstall once from a URL-carrying build. `drive.file`-style gotcha: the `.xpi` must be reachable over **real HTTPS** (the Cloudflare tunnel), not the self-signed `:8443`.
 - **systemd `Restart=always` + `--build`**: every boot/restart re-runs `docker compose up --build`. A broken build (no network, bad Dockerfile) → the service crash-loops every 10s. Symptom: `journalctl` shows repeated build attempts. Not silent — check the log.
@@ -61,3 +95,6 @@ docker compose ps                         # all 5 Up; postgres/embedder healthy
 | Extension version scheme | `deploy-extension.sh` → `NEW=` bump line |
 | Where signed `.xpi`/`updates.json` live | host `./ext-dist` → nginx `/ext/` (compose `frontend` volume) |
 | Signing timeout / JWT cap | `deploy-extension.sh` → `--timeout=240000` |
+| Run live E2E suites | `./linux_scripts/test.sh live` |
+| Create→file→grade→sync journey check | `ingest_live_e2e.py` → `journey()` |
+| Live E2E suite list | `test.sh` → `LIVE_SUITES` |
