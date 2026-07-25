@@ -54,6 +54,19 @@ cleanup() {
     echo "[$phase] Removing old containers..."
     docker compose "${COMPOSE_ARGS[@]}" down --remove-orphans 2>/dev/null || true
 
+    # `down` can report success while a container from a just-crashed prior
+    # instance is still lingering in the daemon (seen 2026-07-25: a stale
+    # postgres-1 survived `down` and made the next `up` fail with "Conflict:
+    # name already in use", crashing the new instance too). Force-remove
+    # anything still sitting under this project before continuing.
+    local leftover
+    leftover=$(docker compose "${COMPOSE_ARGS[@]}" ps -aq 2>/dev/null || true)
+    if [[ -n "$leftover" ]]; then
+        echo "[$phase] Force-removing leftover container(s) 'down' didn't clear..."
+        # shellcheck disable=SC2086
+        docker rm -f $leftover 2>/dev/null || true
+    fi
+
     # Kill whatever holds the wrapper port (a stale host-wrapper).
     local pids
     pids=$(lsof -ti :"$WRAPPER_PORT" 2>/dev/null || true)
