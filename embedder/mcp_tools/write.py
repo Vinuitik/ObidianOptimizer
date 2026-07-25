@@ -8,7 +8,27 @@ see publish.py's own docstring for why.
 """
 import os
 
+import mcp_server
 from mcp_server import mcp, _resolve_in_vault
+
+_NON_CONTENT_TOP_LEVEL = {"_inbox", "_trash", "resources", "_workspace", "_reports"}
+
+
+def _top_level_folders_hint() -> str:
+    """Comma list of the vault's real top-level folders, for grounding create_note's
+    `folder` docstring in actual taxonomy instead of the agent inventing names blind.
+    Filesystem read (no DB/embedder dependency) so it's safe at import time. Computed
+    ONCE, at process start — not live: a folder added after the embedder container is
+    up won't show here until the next restart. Fine for top-level areas (rarely change);
+    would need a real fix if this ever needs to reflect same-session vault edits."""
+    try:
+        names = sorted(
+            p.name for p in mcp_server.VAULT_DIR.iterdir()
+            if p.is_dir() and not p.name.startswith(".") and p.name not in _NON_CONTENT_TOP_LEVEL
+        )
+        return ", ".join(names) if names else "(vault has no top-level folders yet)"
+    except OSError:
+        return "(unavailable)"
 
 
 @mcp.tool()
@@ -40,33 +60,7 @@ def split_note(note_path: str) -> dict:
     return splitter.split(note_path, content)
 
 
-@mcp.tool()
 def create_note(text: str, title: str = "", already_processed: bool = True, folder: str = "") -> dict:
-    """Create a note from text YOU authored. Don't hand-write a note file — pass the
-    whole body here.
-
-    `folder` (optional, default ""): leave empty to stage the note directly in the Learn
-    Inbox root. Pass a name (e.g. "Mobile PWA Notes") to group several notes from one
-    conversation into their OWN named subfolder — but this is ALWAYS created under the
-    Inbox (`_inbox/<folder>/`), NEVER elsewhere in the vault. There is no way to write
-    outside the Inbox from this tool — every note still awaits the user's review-and-file
-    step in the Learn page, grouped notes just get their own folder in that queue instead
-    of landing flat. The note is stamped `ingest-auto-filed: true` so the user can see at a
-    glance it didn't go through LLM re-synthesis. `folder` only applies to the synchronous
-    as-is path below — the async re-process path always still goes to the inbox root.
-
-    `already_processed` (default True): the text was authored by an LLM (you), so it is
-    already good — stage it AS-IS with NO further LLM synthesis and NO async job. The
-    write is SYNCHRONOUS: the note exists on disk when this returns, so it is durable
-    without needing the async ingest queue, and it never re-spends tokens re-processing
-    content tokens already produced. This is the normal path for agent-authored notes.
-
-    Pass `already_processed=False` ONLY to deliberately treat the text as a RAW source to
-    be re-processed by the ingest pipeline (deterministically segmented into linked concept
-    notes when long). That spends tokens and runs async — use it for pasted third-party
-    material, not for your own output. Short inputs stage as-is either way (splitting a
-    short note is meaningless). Returns notes_created (as-is) or a job descriptor to poll
-    GET /ingest/{id} (re-process). `title` is an optional display hint."""
     from ingest import jobs as ingest_jobs
 
     if not text or not text.strip():
@@ -85,6 +79,41 @@ def create_note(text: str, title: str = "", already_processed: bool = True, fold
                               title=(title or None))
 
 
+# Built once at import time — see _top_level_folders_hint's docstring for why this can't
+# just be an f-string docstring literal (FastMCP reads __doc__ at decoration time below).
+create_note.__doc__ = f"""Create a note from text YOU authored. Don't hand-write a note file — pass the
+    whole body here.
+
+    `folder` (optional, default ""): leave empty to stage the note directly in the Learn
+    Inbox root. Pass a name (e.g. "Mobile PWA Notes") to group several notes from one
+    conversation into their OWN named subfolder — but this is ALWAYS created under the
+    Inbox (`_inbox/<folder>/`), NEVER elsewhere in the vault. There is no way to write
+    outside the Inbox from this tool — every note still awaits the user's review-and-file
+    step in the Learn page, grouped notes just get their own folder in that queue instead
+    of landing flat. The note is stamped `ingest-auto-filed: true` so the user can see at a
+    glance it didn't go through LLM re-synthesis. `folder` only applies to the synchronous
+    as-is path below — the async re-process path always still goes to the inbox root.
+    Existing top-level vault areas, for context/judgment when naming `folder` (NOT a menu
+    it must match — this only ever creates a subfolder under `_inbox`): {_top_level_folders_hint()}.
+    You do NOT need to guess a real destination here — every note (grouped or not) already
+    gets a `suggested_folder` computed automatically from its own content and shown to the
+    user at review time; `find_home_for_note` is there if you want to preview that pick.
+
+    `already_processed` (default True): the text was authored by an LLM (you), so it is
+    already good — stage it AS-IS with NO further LLM synthesis and NO async job. The
+    write is SYNCHRONOUS: the note exists on disk when this returns, so it is durable
+    without needing the async ingest queue, and it never re-spends tokens re-processing
+    content tokens already produced. This is the normal path for agent-authored notes.
+
+    Pass `already_processed=False` ONLY to deliberately treat the text as a RAW source to
+    be re-processed by the ingest pipeline (deterministically segmented into linked concept
+    notes when long). That spends tokens and runs async — use it for pasted third-party
+    material, not for your own output. Short inputs stage as-is either way (splitting a
+    short note is meaningless). Returns notes_created (as-is) or a job descriptor to poll
+    GET /ingest/{{id}} (re-process). `title` is an optional display hint."""
+create_note = mcp.tool()(create_note)
+
+
 def _stage_note_as_is(text: str, title: str = "", folder: str = "") -> dict:
     """Short-note path: stage the text with NO LLM (no split, no re-synthesis) — the note
     is its own source. Reuses the ingest publish helpers so it lands in the vault exactly
@@ -97,6 +126,9 @@ def _stage_note_as_is(text: str, title: str = "", folder: str = "") -> dict:
     t = (title or "").strip() or _title_from_text(text)
     bundle = {"source": {"ref": "", "title": t, "type": "text"}, "media": []}
     note_md = synthesize.assemble(bundle, {"title": t, "tags": []}, [], text)
+    # Computed regardless of grouping — batching notes into a named review-queue subfolder
+    # (below) shouldn't cost a note its individual placement suggestion.
+    suggested = publish.find_home(t)
     sub = folder.strip().strip("/")
     if sub:
         # Always nested under the inbox — strip an accidental leading "_inbox/" from the
@@ -107,10 +139,10 @@ def _stage_note_as_is(text: str, title: str = "", folder: str = "") -> dict:
         elif sub.startswith(prefix):
             sub = sub[len(prefix):]
         target = f"{publish.INBOX_FOLDER}/{sub}" if sub else publish.INBOX_FOLDER
-        note_md = publish.stamp_auto_filed(note_md)
+        note_md = publish.stamp_auto_filed(note_md, suggested)
     else:
         target = publish.INBOX_FOLDER
-        note_md = publish.stamp_inbox(note_md, "", publish.find_home(t))
+        note_md = publish.stamp_inbox(note_md, "", suggested)
     publish.ensure_folder(target)
     path = publish.create_note(target, synthesize.slugify(t), note_md)
     return {"status": "DONE", "ingested": False, "words": len(text.split()),

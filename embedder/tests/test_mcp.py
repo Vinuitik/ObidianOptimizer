@@ -285,6 +285,8 @@ def _stub_publish(monkeypatch):
     monkeypatch.setattr(publish, "find_home", lambda t: "Study")
     monkeypatch.setattr(publish, "ensure_folder", lambda f: None)
     monkeypatch.setattr(publish, "stamp_inbox", lambda md, *a, **k: md)
+    monkeypatch.setattr(publish, "stamp_auto_filed",
+                        lambda md, suggested_folder="": md + f"\nSUGGESTED={suggested_folder}")
     monkeypatch.setattr(publish, "create_note",
                         lambda folder, name, content: f"{folder}/{name}.md")
 
@@ -330,3 +332,18 @@ def test_create_note_short_stages_as_is_even_when_reprocess_requested(monkeypatc
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("no job for short text")))
     res = mcp_server.create_note("a short thought", already_processed=False)
     assert res["status"] == "DONE" and res["ingested"] is False
+
+
+def test_create_note_grouped_folder_still_gets_suggested_folder(monkeypatch):
+    """Regression: a note filed via folder= (batch grouping under _inbox) must still get
+    a placement suggestion, same as the flat-inbox-root path — grouping for review and
+    suggesting a real destination are orthogonal (see mcp_tools/write.py _stage_note_as_is)."""
+    _stub_publish(monkeypatch)
+    written = {}
+    from ingest import publish
+    monkeypatch.setattr(publish, "create_note",
+                        lambda folder, name, content: written.setdefault("content", content) or f"{folder}/{name}.md")
+
+    res = mcp_server.create_note("a short thought", folder="Some Group")
+    assert res["status"] == "DONE"
+    assert "SUGGESTED=Study" in written["content"]

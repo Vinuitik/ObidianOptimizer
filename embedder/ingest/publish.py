@@ -170,12 +170,20 @@ def stamp_inbox(content: str, source: str, suggested_folder: str,
     return _insert_frontmatter(content, extra)
 
 
-def stamp_auto_filed(content: str) -> str:
+def stamp_auto_filed(content: str, suggested_folder: str = "") -> str:
     """Mark a note filed DIRECTLY at a caller-chosen folder, bypassing the normal Learn
     Inbox review step (see mcp_server.create_note `folder` param). Unlike ingest-inbox,
     this is NOT stripped on filing — there's no filing step left to strip it — so the
-    user can grep `ingest-auto-filed: true` to audit what an agent placed unreviewed."""
-    return _insert_frontmatter(content, "ingest-auto-filed: true\n")
+    user can grep `ingest-auto-filed: true` to audit what an agent placed unreviewed.
+
+    `suggested_folder` (optional): also stamps `ingest-suggested-folder` so a note staged
+    into a caller-chosen review-queue subfolder still gets the same per-note placement
+    pre-pick as the flat-inbox path (stamp_inbox) — grouping for batch review and
+    suggesting a real destination are orthogonal, a note shouldn't lose one for the other."""
+    extra = "ingest-auto-filed: true\n"
+    if suggested_folder:
+        extra += f"ingest-suggested-folder: {suggested_folder}\n"
+    return _insert_frontmatter(content, extra)
 
 
 def stamp_capture(content: str, capture_id: str, seq: int) -> str:
