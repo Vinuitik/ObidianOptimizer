@@ -12,6 +12,7 @@ const paths = {
   link:     <><path d="M10 14a4 4 0 0 0 5.66 0l2.5-2.5a4 4 0 0 0-5.66-5.66L11 7.34" /><path d="M14 10a4 4 0 0 0-5.66 0l-2.5 2.5a4 4 0 0 0 5.66 5.66L13 16.66" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></>,
   refresh:  <><path d="M20 11A8 8 0 0 0 6.3 6.3L4 8.6" /><path d="M4 4v4.6h4.6" /><path d="M4 13a8 8 0 0 0 13.7 4.7L20 15.4" /><path d="M20 20v-4.6h-4.6" /></>,
+  user:     <><circle cx="12" cy="8" r="3.5" /><path d="M5.5 19a6.5 6.5 0 0 1 13 0" /></>,
 };
 
 export default function Icon({ name, size = 16, color = 'currentColor', strokeWidth = 1.6 }) {

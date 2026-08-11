@@ -31,6 +31,15 @@
   color: var(--color-accent, #7c5cff);
 }
 
+/* The auth control is a <button>, not a NavLink — strip the native button chrome so it
+   sits flush with the tabs. */
+.authTab {
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
 .label {
   line-height: 1;
 }
