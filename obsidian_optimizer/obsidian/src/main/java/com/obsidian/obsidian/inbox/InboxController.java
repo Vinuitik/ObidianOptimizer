@@ -72,6 +72,14 @@ public class InboxController {
                      // source folder (`Dest/<sourceTitle>/` on file); chapter is the PDF
                      // chapter sub-bucket (null ⇒ flat under the source).
                      String sourceTitle, String chapter,
+                     // The note's on-disk subfolder RELATIVE to _inbox (forward slashes),
+                     // null when the note sits directly in _inbox root. This is the general
+                     // grouping key: ingest notes get `<captureId>[/<chapter>]`, MCP/agent
+                     // notes get their `create_note(folder=…)` name, and the user's own
+                     // drag-drop mini-folders get whatever they named. The frontend groups
+                     // un-captured notes by this so an agent conversation's notes show as one
+                     // folder even though they carry no captureId. See [[obsidian-mcp-folder-param]].
+                     String inboxFolder,
                      // Folder-level find_home (placement.suggest_group): the SAME centroid
                      // classifier as suggestedFolder, just averaged over a whole group's note
                      // vectors instead of one note's — symmetric at any level (source or
@@ -82,14 +90,14 @@ public class InboxController {
          *  {@code withGroupSuggestions} below) — call sites don't spell out trailing nulls. */
         static InboxItem staged(String path, String title, String source, String suggestedFolder,
                 String content, String captureId, Integer captureSeq, Integer captureSeqMinor,
-                boolean inPlace, String sourceTitle, String chapter) {
+                boolean inPlace, String sourceTitle, String chapter, String inboxFolder) {
             return new InboxItem(path, title, source, suggestedFolder, content, captureId,
-                captureSeq, captureSeqMinor, inPlace, sourceTitle, chapter, null, null);
+                captureSeq, captureSeqMinor, inPlace, sourceTitle, chapter, inboxFolder, null, null);
         }
 
         InboxItem withGroupSuggestions(String groupSuggestedFolder, String chapterSuggestedFolder) {
             return new InboxItem(path, title, source, suggestedFolder, content, captureId,
-                captureSeq, captureSeqMinor, inPlace, sourceTitle, chapter,
+                captureSeq, captureSeqMinor, inPlace, sourceTitle, chapter, inboxFolder,
                 groupSuggestedFolder, chapterSuggestedFolder);
         }
     }
@@ -122,6 +130,9 @@ public class InboxController {
                               // source region (e.g. one PDF page range → two chapter notes). Absent
                               // ⇒ 0 (the original / un-split note). See #split endpoint.
                               Integer seqMinor = parseIntOrNull(frontmatterValue(content, "capture-seq-minor"));
+                              // The note's directory relative to _inbox, forward-slashed.
+                              // "" (note sits in _inbox root) → null.
+                              String relDir = dir.relativize(p.getParent()).toString().replace('\\', '/');
                               items.add(InboxItem.staged(
                                   p.toAbsolutePath().toString(),
                                   title,
@@ -133,7 +144,8 @@ public class InboxController {
                                   seqMinor,
                                   false,
                                   emptyToNull(frontmatterValue(content, "ingest-source-title")),
-                                  emptyToNull(frontmatterValue(content, "ingest-chapter"))));
+                                  emptyToNull(frontmatterValue(content, "ingest-chapter")),
+                                  emptyToNull(relDir)));
                           } catch (IOException e) {
                               log.warn("[inbox] could not read {}: {}", p, e.getMessage());
                           }
@@ -150,7 +162,7 @@ public class InboxController {
                 String content = repository.getText(path);
                 String title = Paths.get(path).getFileName().toString().replaceAll("\\.md$", "");
                 items.add(InboxItem.staged(path, title, null, null, content, c.id(), 1, 0, true,
-                                           null, null));
+                                           null, null, null));
             }
         }
 
@@ -166,26 +178,43 @@ public class InboxController {
     private List<InboxItem> withGroupSuggestions(List<InboxItem> items) {
         Map<String, List<String>> bySource = new LinkedHashMap<>();
         Map<String, List<String>> byChapter = new LinkedHashMap<>();
+        // Un-captured (MCP/agent + user drag-drop) notes group by their on-disk _inbox
+        // subfolder instead of a captureId — same "file this whole folder here?" pre-pick,
+        // just keyed on the folder name the agent chose (or the user made) rather than a
+        // capture. Notes loose in _inbox root (inboxFolder == null) get no folder pre-pick.
+        Map<String, List<String>> byInboxFolder = new LinkedHashMap<>();
         for (InboxItem it : items) {
-            if (it.inPlace() || it.captureId() == null) continue;
-            bySource.computeIfAbsent(it.captureId(), k -> new ArrayList<>()).add(it.path());
-            if (it.chapter() != null) {
-                byChapter.computeIfAbsent(it.captureId() + " " + it.chapter(), k -> new ArrayList<>())
-                          .add(it.path());
+            if (it.inPlace()) continue;
+            if (it.captureId() != null) {
+                bySource.computeIfAbsent(it.captureId(), k -> new ArrayList<>()).add(it.path());
+                if (it.chapter() != null) {
+                    byChapter.computeIfAbsent(it.captureId() + " " + it.chapter(), k -> new ArrayList<>())
+                              .add(it.path());
+                }
+            } else if (it.inboxFolder() != null) {
+                byInboxFolder.computeIfAbsent(it.inboxFolder(), k -> new ArrayList<>()).add(it.path());
             }
         }
         Map<String, String> sourceSuggestion = new LinkedHashMap<>();
         for (var e : bySource.entrySet()) sourceSuggestion.put(e.getKey(), groupSuggestion(e.getValue()));
         Map<String, String> chapterSuggestion = new LinkedHashMap<>();
         for (var e : byChapter.entrySet()) chapterSuggestion.put(e.getKey(), groupSuggestion(e.getValue()));
+        Map<String, String> folderSuggestion = new LinkedHashMap<>();
+        for (var e : byInboxFolder.entrySet()) folderSuggestion.put(e.getKey(), groupSuggestion(e.getValue()));
 
         List<InboxItem> out = new ArrayList<>(items.size());
         for (InboxItem it : items) {
-            if (it.inPlace() || it.captureId() == null) { out.add(it); continue; }
-            String group = sourceSuggestion.get(it.captureId());
-            String chapterGroup = it.chapter() != null
-                ? chapterSuggestion.get(it.captureId() + " " + it.chapter()) : null;
-            out.add(it.withGroupSuggestions(group, chapterGroup));
+            if (it.inPlace()) { out.add(it); continue; }
+            if (it.captureId() != null) {
+                String group = sourceSuggestion.get(it.captureId());
+                String chapterGroup = it.chapter() != null
+                    ? chapterSuggestion.get(it.captureId() + " " + it.chapter()) : null;
+                out.add(it.withGroupSuggestions(group, chapterGroup));
+            } else if (it.inboxFolder() != null) {
+                out.add(it.withGroupSuggestions(folderSuggestion.get(it.inboxFolder()), null));
+            } else {
+                out.add(it);
+            }
         }
         return out;
     }
@@ -252,6 +281,61 @@ public class InboxController {
             return ResponseEntity.ok().build();
         } catch (IOException e) {
             log.error("[inbox] acknowledge failed for {}: {}", req.captureId(), e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // ── Reorganize inbox staging: create mini-folders and move notes between them ──
+    // The Learn tree groups staged notes by their on-disk _inbox subfolder (inboxFolder).
+    // These two endpoints let the user reshape that grouping BEFORE filing — make an empty
+    // mini-folder, and drag a staged note into it / back out to _inbox root. Everything stays
+    // under _inbox (still excluded from FSRS review); filing into the REAL vault is the
+    // separate /inbox/file action. Only standalone notes move; in-place notes never left home.
+
+    @PostMapping("/folder")
+    public ResponseEntity<?> createFolder(@RequestBody CreateFolderRequest req) {
+        if (req == null || req.name() == null || req.name().isBlank()) {
+            return ResponseEntity.badRequest().body("name required");
+        }
+        String name = req.name().trim();
+        // A mini-folder is a single flat segment directly under _inbox — no nesting, no
+        // escaping, and never the reserved snapshot dir.
+        if (name.contains("/") || name.contains("\\") || name.contains("..")
+                || name.equals("_sources") || name.startsWith(".")) {
+            return ResponseEntity.badRequest().body("invalid folder name");
+        }
+        try {
+            Path inbox = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
+            Files.createDirectories(inbox);
+            String path = repository.createFolder(inbox.toString(), name);
+            log.info("[inbox] created mini-folder {}", path);
+            return ResponseEntity.ok(Map.of("path", path, "folder", name));
+        } catch (IOException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/move")
+    public ResponseEntity<?> move(@RequestBody MoveRequest req) {
+        if (req == null || req.path() == null || !req.path().contains(INBOX_DIR)) {
+            return ResponseEntity.badRequest().body("inbox path required");
+        }
+        try {
+            Path inbox = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR).normalize();
+            // folder is a subfolder RELATIVE to _inbox; blank/null → _inbox root.
+            String rel = req.folder() == null ? "" : req.folder().trim().replace('\\', '/')
+                            .replaceAll("^/+", "").replaceAll("/+$", "");
+            Path target = rel.isEmpty() ? inbox : inbox.resolve(rel).normalize();
+            // A move must stay under _inbox and never touch the snapshot area.
+            if (!target.startsWith(inbox) || target.startsWith(inbox.resolve("_sources"))) {
+                return ResponseEntity.badRequest().body("target must be an _inbox subfolder");
+            }
+            Files.createDirectories(target);
+            String newPath = repository.moveNote(req.path(), target.toString());
+            log.info("[inbox] moved {} -> {}", req.path(), newPath);
+            return ResponseEntity.ok(Map.of("path", newPath));
+        } catch (IOException e) {
+            log.error("[inbox] move failed for {}: {}", req.path(), e.getMessage());
             return ResponseEntity.badRequest().body(e.getMessage());
         }
     }
@@ -465,6 +549,8 @@ public class InboxController {
     record DiscardRequest(String path) {}
     record AcknowledgeRequest(String captureId) {}
     record SplitRequest(String path) {}
+    record CreateFolderRequest(String name) {}
+    record MoveRequest(String path, String folder) {}
 
     // ── Programmatic API for the offline PWA (export + mailbox consume) ──────────
     // Thin delegates to the endpoint methods above, so all the triage logic + private
