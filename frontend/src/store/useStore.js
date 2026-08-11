@@ -442,15 +442,18 @@ const useStore = create((set, get) => ({
     let status;
     try {
       status = await checkAuth();
-    } catch {
+    } catch (e) {
       // Server UNREACHABLE (offline / down) — not a sign-out. Keep the persisted state so
       // the downloaded set stays usable; retry on the next focus/reconnect.
+      console.warn('[AUTH] checkAuth: /api/me threw (unreachable) → keeping session', e?.message || e);
       return;
     }
+    console.info('[AUTH] checkAuth: /api/me status =', status);
     // Only a real 401/403 means the session is actually gone (e.g. backend restarted →
     // cookie invalid). Anything else non-200 (502/503/504 from a dead proxy, unexpected
     // gateway errors) means "couldn't tell" — treat like unreachable, don't wipe the session.
     if (status === 401 || status === 403) {
+      console.warn('[AUTH] checkAuth: real', status, '→ signing out');
       if (get().isAuthenticated) { get().sessionExpired(); return; }
       set({ isAuthenticated: false });
       setPersistedAuth(false);
@@ -459,13 +462,22 @@ const useStore = create((set, get) => ({
     if (status >= 200 && status < 300) {
       set({ isAuthenticated: true });
       setPersistedAuth(true);
+      return;
     }
+    // Any other status (530 tunnel-down, 5xx, gateway) = "couldn't tell" → keep session.
+    console.warn('[AUTH] checkAuth: status', status, 'is NOT 401/403 → keeping session (no sign-out)');
   },
 
   // Session lost server-side. Wipe all vault data like logout (note content must not
   // linger) but skip the logout endpoint (backend may be gone) and show the login modal.
   // Fixes: after a server restart the app still showed "Sign out" with stale data loaded.
   sessionExpired: () => {
+    // Instrumentation: this is the ONLY code path that wipes vault data + pops the login
+    // modal from a server response. If you ever get signed out unexpectedly, this stack
+    // names the exact caller (which action's 401 handler fired it). A 530/5xx must NEVER
+    // reach here — checkAuth and every action gate on status === 401 first.
+    console.warn('[AUTH] sessionExpired() — wiping session + showing login. Triggered by:',
+      new Error('sessionExpired trigger stack').stack);
     Object.values(get().pendingFiles).forEach(({ blobURL }) => {
       try { URL.revokeObjectURL(blobURL); } catch {}
     });

@@ -6,7 +6,7 @@ import {
   acknowledgeOffline as acknowledgeCapture,
 } from '../../pwa/offlineApi';
 import { fetchChildren, updateNote } from '../../api/notes';
-import { splitInboxNote } from '../../api/inbox';
+import { splitInboxNote, moveInboxNote, createInboxFolder } from '../../api/inbox';
 import { buildSourceColors, groupBySource, captureLabel, buildInboxTree, folderAllItems } from '../../utils/sourceColor';
 import { markLearnTaskDone } from '../../utils/dailyDuty';
 import useStore from '../../store/useStore';
@@ -62,6 +62,11 @@ export default function InboxReview({ onCount }) {
   // an inbox with several sources open at once shouldn't dump every note on screen at once.
   const [expandedFolders,  setExpandedFolders]  = useState(() => new Set());
   const [expandedChapters, setExpandedChapters] = useState(() => new Set());
+  // Drag-drop reorg of staging mini-folders: dragPath = the note being dragged (only
+  // un-captured standalone notes are draggable — capture/in-place notes are pipeline-owned);
+  // dropKey = the folder/zone highlighted under the cursor. Online-only, like split.
+  const [dragPath, setDragPath] = useState(null);
+  const [dropKey,  setDropKey]  = useState(null);
 
   const current = items.find(i => i.path === selected) || null;
   const workingItem = current ? { ...current, content: draft } : null;
@@ -248,6 +253,37 @@ export default function InboxReview({ onCount }) {
     finally { setBusy(false); }
   }
 
+  // ── drag-drop reorg (move staged notes between mini-folders) ─────────────────
+  // Only un-captured standalone notes drag — capture/in-place notes are pipeline-owned and
+  // their on-disk folder is meaningful (source/chapter). Targets: a mini-folder header,
+  // the "Inbox root" zone, or "New folder…". All online-only (offline the move endpoint is
+  // unreachable — surfaces as a status, same as split). `folder` is relative to _inbox.
+  const isDraggable = it => !it.inPlace && !it.captureId;
+
+  async function moveTo(path, folder) {
+    if (!path) return;
+    setBusy(true); setStatus('Moving…');
+    try { await moveInboxNote(path, folder); setStatus(''); load(); }
+    catch (e) { setStatus(`Move failed: ${e.message || e}`); }
+    finally { setBusy(false); setDragPath(null); setDropKey(null); }
+  }
+
+  async function newFolderFromDrag(path) {
+    const name = window.prompt('New mini-folder name');
+    setDragPath(null); setDropKey(null);
+    if (!name || !name.trim()) return;
+    setBusy(true); setStatus('Creating folder…');
+    try {
+      await createInboxFolder(name.trim());
+      if (path) await moveInboxNote(path, name.trim());
+      setStatus(''); load();
+    } catch (e) { setStatus(`Failed: ${e.message || e}`); }
+    finally { setBusy(false); }
+  }
+
+  const onDropTo = (folder) => (e) => { e.preventDefault(); moveTo(dragPath, folder); };
+  const allowDrop = (key) => (e) => { e.preventDefault(); if (dropKey !== key) setDropKey(key); };
+
   // ── bulk delete (email-style multi-select) ──────────────────────────────────
   // Only standalone _inbox notes can be discarded (in-place notes are acknowledged, not
   // deleted). Deleting a source's LAST note trashes its media too (backend Stage 4 retention).
@@ -276,10 +312,15 @@ export default function InboxReview({ onCount }) {
 
   // ── collapsible tree rendering ───────────────────────────────────────────────
   function renderNoteRow(it, depth) {
-    const color = sourceColors.get(it.captureId || it.path);
+    const color = sourceColors.get(it.captureId || it.inboxFolder || it.path);
+    const drag = isDraggable(it);
     return (
-      <div key={it.path} className={styles.rowWrap}
-           style={{ ...(color ? { '--row-src': color } : {}), '--row-depth': depth }}>
+      <div key={it.path}
+           className={`${styles.rowWrap} ${drag ? styles.rowDraggable : ''} ${dragPath === it.path ? styles.dragging : ''}`}
+           style={{ ...(color ? { '--row-src': color } : {}), '--row-depth': depth }}
+           draggable={drag}
+           onDragStart={drag ? (e => { setDragPath(it.path); e.dataTransfer.effectAllowed = 'move'; }) : undefined}
+           onDragEnd={drag ? (() => { setDragPath(null); setDropKey(null); }) : undefined}>
         {!it.inPlace && (
           <input type="checkbox" className={styles.rowCheck}
                  checked={checked.has(it.path)} onChange={() => toggleOne(it.path)}
@@ -298,10 +339,16 @@ export default function InboxReview({ onCount }) {
     );
   }
 
-  function renderFolderHeader({ key, title, color, count, expanded, onToggle, suggestedFolder, onFile, depth }) {
+  function renderFolderHeader({ key, title, color, count, expanded, onToggle, suggestedFolder, onFile, depth, dropFolder }) {
+    // dropFolder (relative _inbox path) set → this header is a drag-drop target for reorg.
+    const droppable = dropFolder != null && dragPath;
     return (
-      <div key={key} className={styles.folderRow}
-           style={{ ...(color ? { '--row-src': color } : {}), '--row-depth': depth }}>
+      <div key={key}
+           className={`${styles.folderRow} ${dropKey === key ? styles.dropTarget : ''}`}
+           style={{ ...(color ? { '--row-src': color } : {}), '--row-depth': depth }}
+           onDragOver={droppable ? allowDrop(key) : undefined}
+           onDragLeave={droppable ? (() => setDropKey(k => k === key ? null : k)) : undefined}
+           onDrop={droppable ? onDropTo(dropFolder) : undefined}>
         <button className={styles.folderToggle} onClick={onToggle} aria-expanded={expanded}
                 title={title}>
           <span className={styles.folderChevron} aria-hidden="true">{expanded ? '▾' : '▸'}</span>

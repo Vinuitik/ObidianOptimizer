@@ -31,6 +31,7 @@ export default function MobileLayout() {
     const gate = async () => {
       try { await checkAuth(); } catch { /* offline / server down */ }
       if (alive && navigator.onLine && !useStore.getState().isAuthenticated) {
+        console.warn('[AUTH] MobileLayout gate: online && !authenticated → opening login modal');
         setShowLogin(true);
       }
     };
