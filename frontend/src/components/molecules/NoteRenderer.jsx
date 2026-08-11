@@ -1,10 +1,11 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { MilkdownProvider } from '@milkdown/react';
 import useStore from '../../store/useStore';
 import { splitFrontmatter } from '../../utils/frontmatter';
 import FrontmatterTable from './FrontmatterTable';
 import EditorErrorBoundary from '../organisms/EditorErrorBoundary';
 import { MilkdownEditorInner } from '../organisms/MilkdownEditor';
+import ImageLightbox from './ImageLightbox';
 import styles from '../organisms/MilkdownEditor.module.css';
 
 const noop = () => {};
@@ -18,6 +19,7 @@ const noop = () => {};
 export default function NoteRenderer({ content, resetKey = 0 }) {
   const noteIndex = useStore(s => s.noteIndex);
   const openTab   = useStore(s => s.openTab);
+  const [zoom, setZoom] = useState(null); // { src, alt } while an image is open fullscreen
 
   const { frontmatter, body } = splitFrontmatter(content || '');
   // Trailing blank lines at the very END of a note render as dead empty space in the read
@@ -28,6 +30,15 @@ export default function NoteRenderer({ content, resetKey = 0 }) {
   // Read-only click delegation: [[wikilinks]] open the target note; external links open
   // in a new tab. Mirrors MilkdownEditor's non-editable handleClick.
   const handleClick = useCallback((e) => {
+    // Embedded image → open the fullscreen zoom lightbox (read-only view, so this never
+    // fights the editor). Standalone PWAs kill browser pinch-zoom, so this is how the
+    // too-small inline images get enlarged.
+    const img = e.target.closest('img');
+    if (img) {
+      e.preventDefault();
+      setZoom({ src: img.currentSrc || img.src, alt: img.alt || '' });
+      return;
+    }
     const wiki = e.target.closest('[data-wiki-link]');
     if (wiki) {
       e.preventDefault();
@@ -63,6 +74,7 @@ export default function NoteRenderer({ content, resetKey = 0 }) {
           </MilkdownProvider>
         </EditorErrorBoundary>
       </div>
+      {zoom && <ImageLightbox src={zoom.src} alt={zoom.alt} onClose={() => setZoom(null)} />}
     </div>
   );
 }

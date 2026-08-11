@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { renderMarkdown } from '../../utils/markdown';
+import ImageLightbox from './ImageLightbox';
 
 // Presentational markdown renderer — the ONE place vault markdown becomes HTML with
 // all the vault rules (frontmatter table, ![[image]] → <img>, [[wikilink]] → anchor,
@@ -11,8 +12,17 @@ import { renderMarkdown } from '../../utils/markdown';
 // raw link target — the caller resolves it against its own note index and navigates.
 export default function MarkdownContent({ content, html, onOpenNote, className = '' }) {
   const rendered = html ?? (content != null ? renderMarkdown(content) : '');
+  const [zoom, setZoom] = useState(null); // { src, alt } while an image is open fullscreen
 
   const handleClick = useCallback((e) => {
+    // Embedded image → open the zoom lightbox. Standalone PWAs disable browser pinch-zoom,
+    // so this is the only way to enlarge the (max-width:100%) inline images.
+    const img = e.target.closest('img');
+    if (img) {
+      e.preventDefault();
+      setZoom({ src: img.currentSrc || img.src, alt: img.alt || '' });
+      return;
+    }
     const wiki = e.target.closest('[data-wiki-link]');
     if (wiki) {
       e.preventDefault();
@@ -30,10 +40,13 @@ export default function MarkdownContent({ content, html, onOpenNote, className =
   }, [onOpenNote]);
 
   return (
-    <div
-      className={`markdown-body ${className}`.trim()}
-      dangerouslySetInnerHTML={{ __html: rendered }}
-      onClick={handleClick}
-    />
+    <>
+      <div
+        className={`markdown-body ${className}`.trim()}
+        dangerouslySetInnerHTML={{ __html: rendered }}
+        onClick={handleClick}
+      />
+      {zoom && <ImageLightbox src={zoom.src} alt={zoom.alt} onClose={() => setZoom(null)} />}
+    </>
   );
 }

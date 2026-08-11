@@ -149,4 +149,5 @@
   display: block;
   margin: var(--sp-3) 0;
   border: 1px solid var(--color-border);
+  cursor: zoom-in;   /* tap/click opens the fullscreen zoom lightbox */
 }
