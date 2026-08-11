@@ -16,6 +16,12 @@
  */
 
 const VERSION = 'v4';
+// Replaced at build time by the `sw-build-stamp` plugin (vite.config.js) with the hashed
+// entry-bundle filename. sw.js is served verbatim from public/, so without this its bytes
+// never change across deploys and the browser never sees a "new" service worker — meaning
+// the in-app "Update available" prompt (registerSW.js → RefreshButton) would never fire.
+// Stamping it makes every code change produce new sw.js bytes → new SW → update detected.
+const BUILD_ID = '__BUILD_ID__';
 const SHELL_CACHE = `obsopt-shell-${VERSION}`;
 const MEDIA_CACHE = 'obsopt-media'; // unversioned: managed by the offline sync, not the SW
 
@@ -53,6 +59,7 @@ async function enqueueOutbox(entry) {
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
+  console.info('[sw] installing build', BUILD_ID);
   event.waitUntil(
     caches.open(SHELL_CACHE).then((c) => c.addAll(SHELL_URLS)).then(() => self.skipWaiting())
   );

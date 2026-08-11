@@ -30,6 +30,14 @@ export async function registerServiceWorker() {
     registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
     requestPersistentStorage();
 
+    // Auto-check for a new deploy: immediately on launch, then every 15 minutes. This is
+    // what makes the "Update available" prompt appear on its own instead of only when the
+    // user manually taps refresh. Purely best-effort — checkForUpdate() just nudges the
+    // browser to re-fetch sw.js; it NEVER touches auth, so if the server is down the check
+    // silently no-ops and you stay signed in (see useStore.checkAuth for the auth side).
+    checkForUpdate();
+    setInterval(checkForUpdate, 15 * 60 * 1000);
+
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!hadController || notified) return;
       notified = true;
