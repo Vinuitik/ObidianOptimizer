@@ -46,6 +46,7 @@ function mediaSummary(byPhase) {
 export default function SyncPage() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const setShowLogin    = useStore(s => s.setShowLogin);
+  const logout          = useStore(s => s.logout);
   const online          = useOffline();
 
   const [lastSync, setLastSync] = useState(null);
@@ -123,6 +124,29 @@ export default function SyncPage() {
   return (
     <div className={styles.page}>
       <h1 className={styles.pageTitle}>Sync</h1>
+
+      {/* ── Account ─────────────────────────────────────────────── */}
+      {/* Always-reachable sign in / sign out. Without this, dismissing the auto-login
+          modal left no way back in (and no way to sign out) from the installed PWA. */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--color-border, #262a35)',
+      }}>
+        <span className={styles.hint} style={{ margin: 0 }}>
+          {isAuthenticated ? '✓ Signed in' : 'Not signed in'}
+        </span>
+        {isAuthenticated ? (
+          <button className={styles.captureBtn} onClick={logout}
+                  style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--color-border, #262a35)', color: 'var(--color-muted, #8a90a0)' }}>
+            Sign out
+          </button>
+        ) : (
+          <button className={styles.captureBtn} onClick={() => setShowLogin(true)}
+                  style={{ padding: '8px 16px' }}>
+            Sign in
+          </button>
+        )}
+      </div>
 
       <p className={styles.hint}>
         {online ? 'Online.' : 'Offline — working from your downloaded set.'}{' '}
