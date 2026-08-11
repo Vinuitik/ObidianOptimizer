@@ -439,19 +439,27 @@ const useStore = create((set, get) => ({
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   checkAuth: async () => {
-    let ok;
+    let status;
     try {
-      ok = await checkAuth();
+      status = await checkAuth();
     } catch {
       // Server UNREACHABLE (offline / down) — not a sign-out. Keep the persisted state so
       // the downloaded set stays usable; retry on the next focus/reconnect.
       return;
     }
-    // Was signed in, server now says no (e.g. backend restarted → session cookie
-    // invalid): tear down stale data + surface login, don't just flip the flag.
-    if (!ok && get().isAuthenticated) { get().sessionExpired(); return; }
-    set({ isAuthenticated: ok });
-    setPersistedAuth(ok);
+    // Only a real 401/403 means the session is actually gone (e.g. backend restarted →
+    // cookie invalid). Anything else non-200 (502/503/504 from a dead proxy, unexpected
+    // gateway errors) means "couldn't tell" — treat like unreachable, don't wipe the session.
+    if (status === 401 || status === 403) {
+      if (get().isAuthenticated) { get().sessionExpired(); return; }
+      set({ isAuthenticated: false });
+      setPersistedAuth(false);
+      return;
+    }
+    if (status >= 200 && status < 300) {
+      set({ isAuthenticated: true });
+      setPersistedAuth(true);
+    }
   },
 
   // Session lost server-side. Wipe all vault data like logout (note content must not

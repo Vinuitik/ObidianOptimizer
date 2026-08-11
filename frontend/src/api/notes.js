@@ -62,9 +62,12 @@ export async function fetchNoteContent(fullPath) {
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
+// Returns the raw HTTP status so callers can tell "really signed out" (401/403)
+// apart from "server errored" (5xx / gateway errors) — those must not be treated
+// the same, see useStore.js checkAuth().
 export async function checkAuth() {
   const res = await fetch(`${BASE}/me`, { credentials: 'same-origin' });
-  return res.ok;
+  return res.status;
 }
 
 export async function login(username, password) {

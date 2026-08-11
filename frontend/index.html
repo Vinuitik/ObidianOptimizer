@@ -7,7 +7,10 @@
     <!-- PWA: installable manifest + Android theming. SW is registered from JS (src/pwa/registerSW.js). -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0f1115" />
-    <link rel="apple-touch-icon" href="/icons/icon.svg" />
+    <!-- iOS applies its own mask/rounding regardless of source image, so this must be the
+         full-bleed maskable variant (icon-192.png has its own baked-in rounded corners +
+         transparent margins, which double-crops under iOS's mask). -->
+    <link rel="apple-touch-icon" href="/icons/icon-maskable-512.png" />
     <title>Obsidian Optimizer</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

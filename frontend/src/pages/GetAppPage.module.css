@@ -20,39 +20,21 @@
   max-width: 60ch;
 }
 
-.note {
-  font-size: var(--text-sm);
-  color: var(--color-text-2);
-  line-height: var(--leading-normal);
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-accent-border);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-3) var(--sp-4);
-  margin-bottom: var(--sp-5);
-  max-width: 70ch;
-}
-
-.note strong { color: var(--color-text); }
-
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--sp-4);
-}
-
 .card {
+  max-width: 420px;
+  margin: 0 auto;
   background: var(--color-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--sp-5);
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: var(--sp-3);
 }
 
 .badge {
-  align-self: flex-start;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   text-transform: uppercase;
@@ -73,13 +55,13 @@
 .cardBody {
   font-size: var(--text-sm);
   color: var(--color-text-2);
-  flex: 1;
 }
 
 .hint {
   font-size: var(--text-xs);
   color: var(--color-muted);
   line-height: var(--leading-normal);
+  max-width: 36ch;
 }
 
 .hint strong { color: var(--color-text-2); }
@@ -95,20 +77,3 @@
   color: var(--color-success, #4caf50);
 }
 
-/* Download is an <a>, styled to match the primary Button atom. */
-.dlBtn {
-  align-self: flex-start;
-  display: inline-block;
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: #fff;
-  background: var(--color-accent);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-2) var(--sp-4);
-  text-decoration: none;
-  transition: opacity var(--ease-fast);
-}
-
-.dlBtn:hover { opacity: 0.9; }
