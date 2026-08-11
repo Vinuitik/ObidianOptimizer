@@ -20,6 +20,10 @@ export default function NoteRenderer({ content, resetKey = 0 }) {
   const openTab   = useStore(s => s.openTab);
 
   const { frontmatter, body } = splitFrontmatter(content || '');
+  // Trailing blank lines at the very END of a note render as dead empty space in the read
+  // view — invisible before, but obvious now that the review grade bar sits right below.
+  // Trim trailing whitespace/newlines, end only. Display-only: the stored note is untouched.
+  const trimmedBody = body.trimEnd();
 
   // Read-only click delegation: [[wikilinks]] open the target note; external links open
   // in a new tab. Mirrors MilkdownEditor's non-editable handleClick.
@@ -50,7 +54,7 @@ export default function NoteRenderer({ content, resetKey = 0 }) {
         <EditorErrorBoundary>
           <MilkdownProvider key={resetKey}>
             <MilkdownEditorInner
-              body={body}
+              body={trimmedBody}
               isMutable={false}
               onBodyChange={noop}
               onFilePaste={noop}
