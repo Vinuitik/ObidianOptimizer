@@ -52,6 +52,34 @@ export async function splitInboxNote(path) {
   return res.json();
 }
 
+// Create an empty mini-folder directly under _inbox (a single flat segment, never nested,
+// never outside the inbox). Returns { path, folder }. Online-only — a staging reorg, not
+// something the offline queue replays. See InboxController.createFolder.
+export async function createInboxFolder(name) {
+  const res = await fetch(`${BASE}/inbox/folder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await res.text() || res.status);
+  return res.json();
+}
+
+// Move a staged note between _inbox subfolders (drag-drop reorg). `folder` is a subfolder
+// RELATIVE to _inbox; "" moves the note back to _inbox root. The note stays in the inbox
+// (still excluded from FSRS review) — this is NOT filing into the real vault. Returns { path }.
+export async function moveInboxNote(path, folder) {
+  const res = await fetch(`${BASE}/inbox/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ path, folder }),
+  });
+  if (!res.ok) throw new Error(await res.text() || res.status);
+  return res.json();
+}
+
 // Acknowledge an in-place note (rewritten below an embed, never left its folder).
 // Nothing to move — clears it from the queue and soft-deletes the capture's
 // pre-rewrite source snapshot to _trash. Save any edits with updateNote first.

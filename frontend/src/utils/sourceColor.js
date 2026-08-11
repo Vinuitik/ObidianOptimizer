@@ -12,13 +12,19 @@ const GOLDEN_ANGLE = 137.508;
 const SAT = 72;    // %
 const LIGHT = 63;  // % — bright enough to read as a 3px bar + 8px dot on #0e0d15
 
-// Map of source key → color, keyed on captureId (falls back to path for un-captured items).
+// A note's grouping key: its capture (ingest pipeline), else its on-disk _inbox subfolder
+// (agent `create_note(folder=)` sessions + the user's own drag-drop mini-folders), else its
+// own path (a note loose in _inbox root is its own group). This one key drives color banding,
+// contiguous ordering, AND the folder tree, so all three agree on what "one group" means.
+export const inboxGroupKey = it => it.captureId || it.inboxFolder || it.path;
+
+// Map of source key → color, keyed on the group key above.
 // Built from an ordered list so the i-th distinct source gets hue = i * goldenAngle.
 export function buildSourceColors(items) {
   const colors = new Map();
   let i = 0;
   for (const it of items) {
-    const key = it.captureId || it.path;
+    const key = inboxGroupKey(it);
     if (!colors.has(key)) {
       const hue = Math.round((i * GOLDEN_ANGLE) % 360);
       colors.set(key, `hsl(${hue} ${SAT}% ${LIGHT}%)`);
@@ -37,14 +43,14 @@ export function buildSourceColors(items) {
 export function groupBySource(items) {
   const firstSeen = new Map();
   items.forEach((it, i) => {
-    const k = it.captureId || it.path;
+    const k = inboxGroupKey(it);
     if (!firstSeen.has(k)) firstSeen.set(k, i);
   });
   return items
     .map((it, i) => ({ it, i, pos: sourcePosition(it) }))
     .sort((a, b) => {
-      const ga = firstSeen.get(a.it.captureId || a.it.path);
-      const gb = firstSeen.get(b.it.captureId || b.it.path);
+      const ga = firstSeen.get(inboxGroupKey(a.it));
+      const gb = firstSeen.get(inboxGroupKey(b.it));
       if (ga !== gb) return ga - gb;
       // Positional order within the source (page / timestamp). Positionless notes sort last.
       if (a.pos !== b.pos) return a.pos - b.pos;
@@ -88,7 +94,28 @@ export function captureLabel(item) {
 export function buildInboxTree(items) {
   const nodes = [];
   const folderByKey = new Map();
+  const mcpByKey = new Map();
   for (const it of items) {
+    // Un-captured note living in an _inbox subfolder (agent session or user mini-folder):
+    // group into a MCP folder node keyed on that subfolder. `folderPath` is the subfolder
+    // RELATIVE to _inbox — the move/file target. `mcp: true` marks it a drop target for
+    // drag-drop reorg (capture/chapter nodes are pipeline-owned and stay non-droppable).
+    if (!it.inPlace && !it.captureId && it.inboxFolder) {
+      let mf = mcpByKey.get(it.inboxFolder);
+      if (!mf) {
+        mf = {
+          type: 'folder', mcp: true, key: `folder:${it.inboxFolder}`,
+          folderPath: it.inboxFolder,
+          title: it.inboxFolder.split('/').pop(),
+          suggestedFolder: it.groupSuggestedFolder,
+          items: [], chapters: [], _chapterByKey: new Map(),
+        };
+        mcpByKey.set(it.inboxFolder, mf);
+        nodes.push(mf);
+      }
+      mf.items.push(it);
+      continue;
+    }
     if (it.inPlace || !it.captureId) { nodes.push({ type: 'leaf', item: it }); continue; }
     let folder = folderByKey.get(it.captureId);
     if (!folder) {
