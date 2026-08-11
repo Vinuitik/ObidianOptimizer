@@ -1,6 +1,7 @@
 import App from '../App';
 import PwaApp from './MobileApp';
 import useMediaQuery from './useMediaQuery';
+import { isElectron } from './installPrompt';
 
 // The layout seam. Two SEPARATE experiences, chosen by HOW the app was opened —
 // not by screen width:
@@ -18,6 +19,11 @@ export default function ResponsiveApp() {
   const iosStandalone = typeof navigator !== 'undefined' && navigator.standalone === true;
 
   let usePwa = standalone || iosStandalone;
+  // The Electron desktop shell reports display-mode: standalone like an installed PWA, but
+  // it's a WIDE window — the narrow phone shell renders squished with empty space there.
+  // Force the full desktop site (sidebar, editor, tree), which is the right fit for a desktop
+  // window. ?pwa=1 below still overrides for testing.
+  if (isElectron()) usePwa = false;
   if (typeof window !== 'undefined') {
     const forced = new URLSearchParams(window.location.search).get('pwa');
     if (forced === '1') usePwa = true;
