@@ -36,6 +36,24 @@ let driveMode = false;
 export function setDriveMode(on) { driveMode = on; }
 export function isDriveMode() { return driveMode; }
 
+// "Couldn't reach a working origin" — the signal to fall through to the IndexedDB cache
+// instead of surfacing an error. Two shapes count:
+//   • TypeError            → fetch itself threw (DNS down, connection refused, CORS) — truly
+//                            offline even though navigator.onLine may still read true.
+//   • ApiError 5xx / 530   → the origin/proxy ANSWERED but is broken: Cloudflare tunnel down
+//                            (530), gateway errors (502/503/504), or a crashed backend (500).
+//                            These are NOT the app's fault and NOT a sign-out — treat exactly
+//                            like offline and serve the downloaded set.
+// A real 401/403 (needs login) or other 4xx (bad request) is a genuine error → re-throw.
+function isServerUnreachable(e) {
+  if (e instanceof TypeError) return true;
+  if (e instanceof ApiError) {
+    return e.status === 530 || e.status === 500 || e.status === 502 ||
+           e.status === 503 || e.status === 504;
+  }
+  return false;
+}
+
 // Review list — network when online, downloaded IDB subset when offline. Every branch
 // yields { notes: [{ path, hasCards }], hasMore } so the store's allocator (reviewPlan.js)
 // can split flashcard vs read tracks identically on desktop and phone.
@@ -46,7 +64,7 @@ export async function fetchReviewOffline(offset = 0, limit = 40) {
       const res = await netFetchReview(offset, limit);
       return { notes: normalizeNotes(res?.notes), hasMore: Boolean(res?.hasMore) };
     }
-    catch (e) { if (!(e instanceof TypeError)) throw e; }     // network blip → fall through
+    catch (e) { if (!isServerUnreachable(e)) throw e; }       // server down/blip → use cache
   }
   return localReviewPage(offset, limit);
 }
@@ -83,7 +101,7 @@ export async function fetchNoteContentOffline(fullPath) {
   }
   if (isOnline()) {
     try { return await netFetchNoteContent(fullPath); }
-    catch (e) { if (!(e instanceof TypeError)) throw e; }
+    catch (e) { if (!isServerUnreachable(e)) throw e; }       // server down/blip → use cache
   }
   const rec = await getReviewNote(fullPath);
   if (rec?.content != null) return rec.content;
@@ -201,7 +219,7 @@ export async function fetchInboxOffline() {
   if (driveMode) return pulledInbox();
   if (isOnline()) {
     try { return await netFetchInbox(); }
-    catch (e) { if (!(e instanceof TypeError)) throw e; }  // network blip → fall through
+    catch (e) { if (!isServerUnreachable(e)) throw e; }  // network blip → fall through
   }
   return pulledInbox();   // offline and not driveMode: still show whatever was last pulled
 }
@@ -209,7 +227,7 @@ export async function fetchInboxOffline() {
 export async function fileInboxOffline(path, targetFolder, content) {
   if (!driveMode && isOnline()) {
     try { return await netFileInbox(path, targetFolder, content); }
-    catch (e) { if (!(e instanceof TypeError)) throw e; }
+    catch (e) { if (!isServerUnreachable(e)) throw e; }
   }
   await enqueueFile(path, targetFolder, content);
   await dropFromInbox(i => i.path !== path);
@@ -219,7 +237,7 @@ export async function fileInboxOffline(path, targetFolder, content) {
 export async function discardInboxOffline(path) {
   if (!driveMode && isOnline()) {
     try { return await netDiscardInbox(path); }
-    catch (e) { if (!(e instanceof TypeError)) throw e; }
+    catch (e) { if (!isServerUnreachable(e)) throw e; }
   }
   await enqueueDiscard(path);
   await dropFromInbox(i => i.path !== path);
@@ -229,7 +247,7 @@ export async function discardInboxOffline(path) {
 export async function acknowledgeOffline(captureId) {
   if (!driveMode && isOnline()) {
     try { return await netAcknowledge(captureId); }
-    catch (e) { if (!(e instanceof TypeError)) throw e; }
+    catch (e) { if (!isServerUnreachable(e)) throw e; }
   }
   await enqueueAcknowledge(captureId);
   await dropFromInbox(i => i.captureId !== captureId);
