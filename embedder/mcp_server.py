@@ -52,10 +52,27 @@ SNIPPET_LEN = 150
 # MCP_ALLOWED_HOSTS to a comma-separated list — origins are derived from it.
 _extra_hosts = [h.strip() for h in os.environ.get("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
 _allowed_hosts = ["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*", *_extra_hosts]
+
+# Remote MCP connectors (Claude.ai, ChatGPT, Gemini) run browser-side and
+# send an Origin header that will never match _allowed_hosts (that list is
+# obsidianoptimizer.uk, not claude.ai). Host-header validation above is
+# what actually stops DNS rebinding here; auth is a bearer token, not
+# cookies, so same-origin Origin checks add little beyond that. So Origin
+# is allowed for a fixed, named set of AI-assistant origins instead of
+# being wildcarded open — add more via MCP_EXTRA_ORIGINS (comma-separated)
+# rather than relaxing this to "*".
+_known_client_origins = [
+    "https://claude.ai",
+    "https://chatgpt.com",
+    "https://chat.openai.com",
+    "https://gemini.google.com",
+]
+_extra_origins = [o.strip() for o in os.environ.get("MCP_EXTRA_ORIGINS", "").split(",") if o.strip()]
 _security = TransportSecuritySettings(
     enable_dns_rebinding_protection=True,
     allowed_hosts=_allowed_hosts,
-    allowed_origins=[f"{scheme}://{h}" for h in _allowed_hosts for scheme in ("http", "https")],
+    allowed_origins=[f"{scheme}://{h}" for h in _allowed_hosts for scheme in ("http", "https")]
+        + _known_client_origins + _extra_origins,
 )
 
 mcp = FastMCP("obsidian-vault", stateless_http=True, json_response=True,

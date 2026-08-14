@@ -148,6 +148,18 @@ server {
         add_header Content-Disposition "attachment" always;
     }
 
+    # MCP clients (claude.ai, ChatGPT, Gemini connectors) probe RFC 9728 OAuth
+    # Protected Resource Metadata right after a successful /mcp initialize, to
+    # decide whether to layer Bearer-token OAuth on top. We don't implement OAuth
+    # here (auth is the ?token= query param — see the /mcp block above), so this
+    # MUST 404 — a clear "no OAuth metadata" signal. Without this block it fell
+    # through to the SPA catch-all below, which served index.html as 200
+    # text/html; connectors expecting JSON (or a 404) choked on that and quietly
+    # gave up post-initialize, with no error surfaced anywhere in the UI.
+    location ~ ^/\.well-known/oauth-(protected-resource|authorization-server)(/.*)?$ {
+        return 404;
+    }
+
     location / {
         root       /usr/share/nginx/html;
         try_files  $uri $uri/ /index.html;
