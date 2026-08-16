@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/',         label: 'Notes' },
   { to: '/learn',    label: 'Learn' },
   { to: '/review',   label: 'Review', flashcardsOnly: true },
+  { to: '/tracks',   label: 'Tracks', tracksOnly: true },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/get-app',  label: 'Get App' },
   { to: '/settings', label: 'Settings' },
@@ -21,7 +22,11 @@ export default function NavBar() {
   // Flashcards off → the review-list system runs inline on the Notes page, so the
   // dedicated flashcard Review tab disappears (mutually exclusive systems).
   const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
-  const items = NAV_ITEMS.filter(it => !it.flashcardsOnly || flashcardsEnabled);
+  // Tracks off → nav item hidden, but the feature stays reachable at /tracks directly.
+  const tracksEnabled = useStore(s => s.settings.tracksEnabled ?? true);
+  const items = NAV_ITEMS
+    .filter(it => !it.flashcardsOnly || flashcardsEnabled)
+    .filter(it => !it.tracksOnly || tracksEnabled);
 
   // Mobile: the links row is collapsed behind a hamburger so the header stays a
   // single slim strip (brand + auth) instead of eating a quarter of the screen.

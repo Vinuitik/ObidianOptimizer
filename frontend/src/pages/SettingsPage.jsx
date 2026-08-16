@@ -72,6 +72,24 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'tracks',
+    title: 'Learning Tracks',
+    description: 'Structured curricula (books, courses, article series) with a daily schedule — separate from FSRS review.',
+    fields: [
+      {
+        key: 'tracksEnabled',
+        label: 'Tracks tab',
+        type: 'select',
+        options: [
+          { value: true,  label: 'On — show the Tracks tab in the nav' },
+          { value: false, label: 'Off — hide it (existing tracks/schedules are kept, not deleted)' },
+        ],
+        hint: 'Purely a nav-visibility toggle. Turning this off does not stop capture-time track '
+          + 'tagging or delete any track data — it only hides the tab.',
+      },
+    ],
+  },
+  {
     id: 'advanced',
     title: 'Advanced',
     description: 'Performance and startup behaviour.',

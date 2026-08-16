@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import MainPage from './pages/MainPage';
 import SettingsPage from './pages/SettingsPage';
 import ReviewPage from './pages/ReviewPage';
+import TracksPage from './pages/TracksPage';
 import LearnPage from './pages/LearnPage';
 import DashboardPage from './pages/DashboardPage';
 import GetAppPage from './pages/GetAppPage';
@@ -39,6 +40,7 @@ function AnimatedRoutes() {
           <Route path="/" element={<MainPage />} />
           <Route path="/learn" element={<LearnPage />} />
           <Route path="/review" element={<ReviewPage />} />
+          <Route path="/tracks" element={<TracksPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/get-app" element={<GetAppPage />} />
           <Route path="/settings" element={<SettingsPage />} />

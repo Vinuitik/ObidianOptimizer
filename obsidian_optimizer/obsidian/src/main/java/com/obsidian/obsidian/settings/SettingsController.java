@@ -40,6 +40,7 @@ public class SettingsController {
             settingsRepo.getChronicNeglectDays(),
             settingsRepo.getEmbedModel(),
             settingsRepo.isFlashcardsEnabled(),
+            settingsRepo.isTracksEnabled(),
             settingsRepo.isSyncEnabled(),
             settingsRepo.getSyncClientId(),
             // Secrets never leave the server — the UI only needs "is it saved?"
@@ -97,6 +98,9 @@ public class SettingsController {
             if (req.flashcardsEnabled() != null) {
                 settingsRepo.set("flashcardsEnabled", String.valueOf(req.flashcardsEnabled()));
             }
+            if (req.tracksEnabled() != null) {
+                settingsRepo.set("tracksEnabled", String.valueOf(req.tracksEnabled()));
+            }
             if (req.embedModel() != null) {
                 String model = req.embedModel().trim();
                 if (model.isBlank()) {
@@ -134,12 +138,14 @@ public class SettingsController {
                                    String startupSyncMode, int maxDailyReviews, int maxDailyFlashcards,
                                    int bankruptcyLimit,
                                    int chronicNeglectDays, String embedModel, boolean flashcardsEnabled,
+                                   boolean tracksEnabled,
                                    boolean syncEnabled, String syncClientId,
                                    boolean syncClientSecretSet, boolean syncPassphraseSet) {}
     record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize,
                                  String startupSyncMode, Integer maxDailyReviews, Integer maxDailyFlashcards,
                                  Integer bankruptcyLimit,
                                  Integer chronicNeglectDays, String embedModel, Boolean flashcardsEnabled,
+                                 Boolean tracksEnabled,
                                  Boolean syncEnabled, String syncClientId,
                                  String syncClientSecret, String syncPassphrase) {}
 }

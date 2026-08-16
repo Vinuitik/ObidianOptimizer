@@ -72,6 +72,8 @@ public class SettingsRepository {
         insertDefault("sync.device_id", "");
         insertDefault("flashcardsEnabled", "true");
         insertDefault("chronicNeglectDays", "7");
+        // Learning Tracks — default ON (finished work ships live, not behind a flag).
+        insertDefault("tracksEnabled", "true");
 
         // Google Drive sync (SyncController / DriveService / VaultEncryptionService).
         // Env-backed keys use seedIfBlank, NOT insertDefault: on live installs the rows
@@ -169,6 +171,10 @@ public class SettingsRepository {
 
     public int getChronicNeglectDays() {
         return Integer.parseInt(getOrDefault("chronicNeglectDays", "7"));
+    }
+
+    public boolean isTracksEnabled() {
+        return Boolean.parseBoolean(getOrDefault("tracksEnabled", "true"));
     }
 
     // ── Google Drive sync ─────────────────────────────────────────────────────

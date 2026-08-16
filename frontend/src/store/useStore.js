@@ -10,6 +10,14 @@ import {
   fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings,
   uploadFile as apiUploadFile,
 } from '../api/notes';
+import {
+  fetchTracks as apiFetchTracks, createTrack as apiCreateTrack, updateTrack as apiUpdateTrack,
+  deleteTrack as apiDeleteTrack, fetchTrackItems as apiFetchTrackItems,
+  addTrackItem as apiAddTrackItem, updateTrackItem as apiUpdateTrackItem,
+  deleteTrackItem as apiDeleteTrackItem, completeTrackItem as apiCompleteTrackItem,
+  fetchTrackSchedule as apiFetchTrackSchedule, saveTrackSchedule as apiSaveTrackSchedule,
+  fetchTodayPlan as apiFetchTodayPlan,
+} from '../api/tracks';
 // Offline-aware drop-ins: identical to the api/notes versions when online (they
 // just delegate), but fall back to the downloaded IndexedDB subset when offline.
 // This is what makes review work with no network — see pwa/offlineApi.js.
@@ -161,8 +169,15 @@ const initialDataState = () => ({
   reviewOffset: 0,
   reviewHasMore: false,
 
+  // Learning Tracks (see tracks/FLOWS.md) — trackItems keyed by trackId, populated
+  // lazily as "Manage tracks" opens each track's detail.
+  tracks: [],
+  todayItems: [],
+  trackItems: {},
+  trackSchedules: {},
+
   // Settings (loaded from backend on startup)
-  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true, maxDailyReviews: 50, maxDailyFlashcards: 20 },
+  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true, tracksEnabled: true, maxDailyReviews: 50, maxDailyFlashcards: 20 },
 
   // Toast notification: null | { message: string }
   toast: null,
@@ -312,6 +327,113 @@ const useStore = create((set, get) => ({
   // A flashcard test finished → count it against today's flashcard budget so a reload
   // won't re-offer flashcard slots past the cap. (Read/self-grade reviews don't count.)
   recordFlashcardDone: () => { bumpFlashcardsDone(); },
+
+  // ── Tracks ────────────────────────────────────────────────────────────────
+
+  fetchTracks: async () => {
+    try {
+      const tracks = await apiFetchTracks();
+      set({ tracks });
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 401)) throw e;
+    }
+  },
+
+  fetchTodayPlan: async () => {
+    try {
+      const todayItems = await apiFetchTodayPlan();
+      set({ todayItems });
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) set({ todayItems: [] });
+      else throw e;
+    }
+  },
+
+  createTrack: async (title, type) => {
+    const track = await apiCreateTrack(title, type);
+    set(s => ({ tracks: [track, ...s.tracks] }));
+    return track;
+  },
+
+  updateTrack: async (id, patch) => {
+    const updated = await apiUpdateTrack(id, patch);
+    set(s => ({ tracks: s.tracks.map(t => t.id === id ? updated : t) }));
+    return updated;
+  },
+
+  deleteTrack: async (id) => {
+    await apiDeleteTrack(id);
+    set(s => ({
+      tracks: s.tracks.filter(t => t.id !== id),
+      trackItems: Object.fromEntries(Object.entries(s.trackItems).filter(([k]) => Number(k) !== id)),
+      todayItems: s.todayItems.filter(i => i.trackId !== id),
+    }));
+  },
+
+  fetchTrackItems: async (trackId) => {
+    const items = await apiFetchTrackItems(trackId);
+    set(s => ({ trackItems: { ...s.trackItems, [trackId]: items } }));
+    return items;
+  },
+
+  addTrackItem: async (trackId, title, notePath) => {
+    const item = await apiAddTrackItem(trackId, title, notePath);
+    set(s => ({ trackItems: { ...s.trackItems, [trackId]: [...(s.trackItems[trackId] ?? []), item] } }));
+    return item;
+  },
+
+  updateTrackItem: async (trackId, itemId, patch) => {
+    const updated = await apiUpdateTrackItem(itemId, patch);
+    set(s => {
+      const current = s.trackItems[trackId] ?? [];
+      let next;
+      if (patch.position != null) {
+        // A reorder: sibling positions in the cache go stale the moment this item moves
+        // (the server renumbers everyone, we only get this item's row back), so sorting
+        // by position would misplace ties. Simulate the same remove+reinsert+renumber the
+        // backend does instead of trusting stale sibling data.
+        const withoutMoved = current.filter(i => i.id !== itemId);
+        const insertAt = Math.max(0, Math.min(patch.position, withoutMoved.length));
+        withoutMoved.splice(insertAt, 0, updated);
+        next = withoutMoved.map((item, idx) => ({ ...item, position: idx }));
+      } else {
+        next = current.map(i => i.id === itemId ? updated : i);
+      }
+      return { trackItems: { ...s.trackItems, [trackId]: next } };
+    });
+    return updated;
+  },
+
+  deleteTrackItem: async (trackId, itemId) => {
+    await apiDeleteTrackItem(itemId);
+    set(s => ({
+      trackItems: { ...s.trackItems, [trackId]: (s.trackItems[trackId] ?? []).filter(i => i.id !== itemId) },
+    }));
+  },
+
+  // Optimistically removes the item from Today (mirrors dismissFromReview) — the item
+  // itself just flips to 'done' server-side, no persisted plan to invalidate.
+  completeTrackItem: async (itemId, addToReview = false) => {
+    const result = await apiCompleteTrackItem(itemId, addToReview);
+    set(s => ({
+      todayItems: s.todayItems.filter(i => i.itemId !== itemId),
+      trackItems: Object.fromEntries(Object.entries(s.trackItems).map(([trackId, items]) =>
+        [trackId, items.map(i => i.id === itemId ? result : i)])),
+    }));
+    return result;
+  },
+
+  fetchTrackSchedule: async (trackId) => {
+    const schedule = await apiFetchTrackSchedule(trackId);
+    set(s => ({ trackSchedules: { ...s.trackSchedules, [trackId]: schedule } }));
+    return schedule;
+  },
+
+  updateSchedule: async (trackId, weekdayBudgets) => {
+    const schedule = await apiSaveTrackSchedule(trackId, weekdayBudgets);
+    set(s => ({ trackSchedules: { ...s.trackSchedules, [trackId]: schedule } }));
+    return schedule;
+  },
 
   // ── Note open ─────────────────────────────────────────────────────────────
 

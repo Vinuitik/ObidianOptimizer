@@ -28,8 +28,26 @@ vi.mock('../utils/obsidianImagePlugin', () => ({
   setPendingBlobs: vi.fn(),
 }));
 
+// ── api/tracks mock ────────────────────────────────────────────────────────────
+
+vi.mock('../api/tracks', () => ({
+  fetchTracks:        vi.fn(),
+  createTrack:        vi.fn(),
+  updateTrack:        vi.fn(),
+  deleteTrack:        vi.fn(),
+  fetchTrackItems:    vi.fn(),
+  addTrackItem:       vi.fn(),
+  updateTrackItem:    vi.fn(),
+  deleteTrackItem:    vi.fn(),
+  completeTrackItem:  vi.fn(),
+  fetchTrackSchedule: vi.fn(),
+  saveTrackSchedule:  vi.fn(),
+  fetchTodayPlan:     vi.fn(),
+}));
+
 import useStore from './useStore';
 import * as api from '../api/notes';
+import * as tracksApi from '../api/tracks';
 import * as imagePlugin from '../utils/obsidianImagePlugin';
 
 // Global browser API stubs
@@ -52,6 +70,10 @@ const INITIAL = {
   noteIndex: new Map(),
   pendingFiles: {},
   toast: null,
+  tracks: [],
+  todayItems: [],
+  trackItems: {},
+  trackSchedules: {},
 };
 
 function resetStore() {
@@ -553,5 +575,167 @@ describe('logout wipes loaded data', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:logout-test');
     expect(imagePlugin.setPendingBlobs).toHaveBeenCalledWith({});
     expect(getState().pendingFiles).toEqual({});
+  });
+});
+
+// ── Tracks ────────────────────────────────────────────────────────────────────
+
+describe('tracks: fetchTracks / fetchTodayPlan', () => {
+  it('fetchTracks loads the track list', async () => {
+    tracksApi.fetchTracks.mockResolvedValue([{ id: 1, title: 'Rust Book' }]);
+
+    await getState().fetchTracks();
+
+    expect(getState().tracks).toEqual([{ id: 1, title: 'Rust Book' }]);
+  });
+
+  it('fetchTracks on 401 leaves tracks untouched (no throw)', async () => {
+    useStore.setState({ tracks: [{ id: 1, title: 'existing' }] });
+    tracksApi.fetchTracks.mockRejectedValue(new api.ApiError('unauthorized', 401));
+
+    await expect(getState().fetchTracks()).resolves.toBeUndefined();
+    expect(getState().tracks).toEqual([{ id: 1, title: 'existing' }]);
+  });
+
+  it('fetchTodayPlan loads today items', async () => {
+    const items = [{ itemId: 10, trackId: 1, trackTitle: 'Rust Book', title: 'Ch1' }];
+    tracksApi.fetchTodayPlan.mockResolvedValue(items);
+
+    await getState().fetchTodayPlan();
+
+    expect(getState().todayItems).toEqual(items);
+  });
+
+  it('fetchTodayPlan on 401 clears todayItems', async () => {
+    useStore.setState({ todayItems: [{ itemId: 1 }] });
+    tracksApi.fetchTodayPlan.mockRejectedValue(new api.ApiError('unauthorized', 401));
+
+    await getState().fetchTodayPlan();
+
+    expect(getState().todayItems).toEqual([]);
+  });
+});
+
+describe('tracks: create / update / delete', () => {
+  it('createTrack prepends the new track', async () => {
+    useStore.setState({ tracks: [{ id: 1, title: 'Old' }] });
+    tracksApi.createTrack.mockResolvedValue({ id: 2, title: 'New Track' });
+
+    await getState().createTrack('New Track', 'book');
+
+    expect(tracksApi.createTrack).toHaveBeenCalledWith('New Track', 'book');
+    expect(getState().tracks).toEqual([{ id: 2, title: 'New Track' }, { id: 1, title: 'Old' }]);
+  });
+
+  it('updateTrack replaces the matching track in place', async () => {
+    useStore.setState({ tracks: [{ id: 1, title: 'Old' }, { id: 2, title: 'Other' }] });
+    tracksApi.updateTrack.mockResolvedValue({ id: 1, title: 'Renamed' });
+
+    await getState().updateTrack(1, { title: 'Renamed' });
+
+    expect(getState().tracks).toEqual([{ id: 1, title: 'Renamed' }, { id: 2, title: 'Other' }]);
+  });
+
+  it('deleteTrack removes the track and its cached items/today entries', async () => {
+    useStore.setState({
+      tracks: [{ id: 1, title: 'Gone' }, { id: 2, title: 'Stays' }],
+      trackItems: { 1: [{ id: 10 }], 2: [{ id: 20 }] },
+      todayItems: [{ itemId: 10, trackId: 1 }, { itemId: 20, trackId: 2 }],
+    });
+    tracksApi.deleteTrack.mockResolvedValue();
+
+    await getState().deleteTrack(1);
+
+    expect(getState().tracks).toEqual([{ id: 2, title: 'Stays' }]);
+    expect(getState().trackItems).toEqual({ 2: [{ id: 20 }] });
+    expect(getState().todayItems).toEqual([{ itemId: 20, trackId: 2 }]);
+  });
+});
+
+describe('tracks: items', () => {
+  it('addTrackItem appends to the cached list for that track', async () => {
+    useStore.setState({ trackItems: { 1: [{ id: 10, title: 'Ch1' }] } });
+    tracksApi.addTrackItem.mockResolvedValue({ id: 11, title: 'Ch2' });
+
+    await getState().addTrackItem(1, 'Ch2', null);
+
+    expect(getState().trackItems[1]).toEqual([{ id: 10, title: 'Ch1' }, { id: 11, title: 'Ch2' }]);
+  });
+
+  it('updateTrackItem replaces the item and re-sorts by position', async () => {
+    useStore.setState({
+      trackItems: { 1: [{ id: 10, position: 0 }, { id: 11, position: 1 }, { id: 12, position: 2 }] },
+    });
+    // Server response reflects the full reorder: 12 moved to the front.
+    tracksApi.updateTrackItem.mockResolvedValue({ id: 12, position: 0 });
+
+    await getState().updateTrackItem(1, 12, { position: 0 });
+
+    // Local reorder: 12 removed, reinserted at index 0, everyone renumbered.
+    expect(getState().trackItems[1].map(i => i.id)).toEqual([12, 10, 11]);
+    expect(getState().trackItems[1].map(i => i.position)).toEqual([0, 1, 2]);
+  });
+
+  it('deleteTrackItem removes it from the cached list', async () => {
+    useStore.setState({ trackItems: { 1: [{ id: 10 }, { id: 11 }] } });
+    tracksApi.deleteTrackItem.mockResolvedValue();
+
+    await getState().deleteTrackItem(1, 10);
+
+    expect(getState().trackItems[1]).toEqual([{ id: 11 }]);
+  });
+
+  it('completeTrackItem removes it from todayItems and updates trackItems caches', async () => {
+    useStore.setState({
+      todayItems: [{ itemId: 10, trackId: 1 }, { itemId: 20, trackId: 2 }],
+      trackItems: { 1: [{ id: 10, status: 'pending' }], 2: [{ id: 20, status: 'pending' }] },
+    });
+    tracksApi.completeTrackItem.mockResolvedValue({ id: 10, status: 'done' });
+
+    await getState().completeTrackItem(10, false);
+
+    expect(tracksApi.completeTrackItem).toHaveBeenCalledWith(10, false);
+    expect(getState().todayItems).toEqual([{ itemId: 20, trackId: 2 }]);
+    expect(getState().trackItems['1']).toEqual([{ id: 10, status: 'done' }]);
+    expect(getState().trackItems['2']).toEqual([{ id: 20, status: 'pending' }]);
+  });
+});
+
+describe('tracks: schedule', () => {
+  it('fetchTrackSchedule caches by trackId', async () => {
+    tracksApi.fetchTrackSchedule.mockResolvedValue({ 0: 2 });
+
+    await getState().fetchTrackSchedule(1);
+
+    expect(getState().trackSchedules[1]).toEqual({ 0: 2 });
+  });
+
+  it('updateSchedule saves and re-caches the returned schedule', async () => {
+    tracksApi.saveTrackSchedule.mockResolvedValue({ 0: 3, 2: 1 });
+
+    await getState().updateSchedule(1, { 0: 3, 2: 1 });
+
+    expect(tracksApi.saveTrackSchedule).toHaveBeenCalledWith(1, { 0: 3, 2: 1 });
+    expect(getState().trackSchedules[1]).toEqual({ 0: 3, 2: 1 });
+  });
+});
+
+describe('tracks: wiped on logout', () => {
+  it('clears tracks, todayItems, trackItems, trackSchedules', async () => {
+    api.logout.mockResolvedValue();
+    useStore.setState({
+      isAuthenticated: true,
+      tracks: [{ id: 1 }],
+      todayItems: [{ itemId: 1 }],
+      trackItems: { 1: [{ id: 10 }] },
+      trackSchedules: { 1: { 0: 2 } },
+    });
+
+    await getState().logout();
+
+    expect(getState().tracks).toEqual([]);
+    expect(getState().todayItems).toEqual([]);
+    expect(getState().trackItems).toEqual({});
+    expect(getState().trackSchedules).toEqual({});
   });
 });

@@ -1,0 +1,477 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-page);
+}
+
+/* ── Tab bar ─────────────────────────────────────────────────────────────── */
+
+.tabBar {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.tabBtn {
+  padding: 6px var(--sp-4);
+  border-radius: var(--radius-sm2);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-muted);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ease-fast), color var(--ease-fast);
+}
+
+.tabBtn:hover { color: var(--color-text); }
+
+.tabBtnActive {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+}
+
+/* ── Shared ──────────────────────────────────────────────────────────────── */
+
+.emptyMsg {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  padding: var(--sp-5) var(--sp-4);
+  text-align: center;
+}
+
+.emptySession {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-7);
+}
+
+.emptySessionText {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  text-align: center;
+  max-width: 340px;
+  line-height: var(--leading-normal);
+}
+
+.gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.gateText {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  color: var(--color-muted);
+}
+
+.textInput, .select, .dateInput, .budgetInput, .titleInput {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm2);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  padding: 7px var(--sp-3);
+  outline: none;
+  transition: border-color var(--ease-fast);
+}
+
+.textInput:focus, .select:focus, .dateInput:focus, .budgetInput:focus, .titleInput:focus {
+  border-color: var(--color-accent-border);
+}
+
+.primaryBtn {
+  padding: 7px var(--sp-4);
+  border-radius: var(--radius-sm2);
+  border: 1px solid var(--color-accent-border);
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--ease-fast);
+  white-space: nowrap;
+}
+
+.primaryBtn:hover { opacity: 0.85; }
+.primaryBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.dangerBtn {
+  padding: 6px var(--sp-3);
+  border-radius: var(--radius-sm2);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-danger);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dangerBtn:hover { border-color: var(--color-danger); }
+
+.sectionTitle {
+  font-family: var(--font-heading);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: var(--sp-5) 0 var(--sp-2);
+}
+
+/* ── Today tab ───────────────────────────────────────────────────────────── */
+
+.todayList {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.todayItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.todayItemMain {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.trackBadge {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 1px 7px;
+  color: var(--color-accent-soft);
+  background: var(--color-accent-dim);
+}
+
+.todayItemTitle {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todayItemActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+
+.reviewCheck {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.doneBtn {
+  padding: 6px var(--sp-3);
+  border-radius: var(--radius-sm2);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ease-fast), border-color var(--ease-fast);
+}
+
+.doneBtn:hover { background: var(--color-accent-dim); border-color: var(--color-accent-soft); }
+.doneBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Manage tab ──────────────────────────────────────────────────────────── */
+
+.manage {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.trackList {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.newTrackForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.trackItems {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-2) 0;
+}
+
+.trackListItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-4);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-text-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background var(--ease-fast), color var(--ease-fast);
+}
+
+.trackListItem:hover { background: var(--color-card); color: var(--color-text); }
+
+.trackListItemActive {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+}
+
+.trackListItemTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackListItemMeta {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.trackListItemMeta[data-status="archived"], .trackListItemMeta[data-status="done"] {
+  opacity: 0.6;
+}
+
+.divider {
+  width: 1px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+.trackDetail {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.detailBody {
+  padding: var(--sp-5);
+}
+
+.detailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.titleInput {
+  flex: 1;
+  font-family: var(--font-heading);
+  font-size: var(--text-base);
+  font-weight: 600;
+  border-color: transparent;
+  background: transparent;
+  padding: 4px 6px;
+}
+
+.titleInput:hover, .titleInput:focus { border-color: var(--color-border); background: var(--color-surface); }
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.fieldLabel {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  flex-shrink: 0;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-2);
+  cursor: pointer;
+  margin-bottom: var(--sp-2);
+}
+
+/* ── Items editor ────────────────────────────────────────────────────────── */
+
+.itemsEditor { margin-top: var(--sp-4); }
+
+.newItemForm {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.newItemForm .textInput { flex: 1; }
+
+.itemList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.itemRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+}
+
+.itemRow:active { cursor: grabbing; }
+
+.dragHandle {
+  flex-shrink: 0;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.itemTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemDone {
+  text-decoration: line-through;
+  color: var(--color-muted);
+}
+
+.itemNote {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+}
+
+.removeBtn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: var(--text-base);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.removeBtn:hover { color: var(--color-danger); background: var(--color-card); }
+
+/* ── Schedule editor ─────────────────────────────────────────────────────── */
+
+.scheduleEditor { margin-top: var(--sp-5); }
+
+.weekRow {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.dayCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.dayToggle {
+  width: 44px;
+  padding: 6px 0;
+  border-radius: var(--radius-sm2);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ease-fast), color var(--ease-fast), border-color var(--ease-fast);
+}
+
+.dayToggle:hover { border-color: var(--color-border-hover); }
+
+.dayToggleActive {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-soft);
+  border-color: var(--color-accent-border);
+}
+
+.budgetInput {
+  width: 44px;
+  padding: 4px;
+  text-align: center;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .manage { flex-direction: column; }
+  .trackList { width: 100%; border-right: none; border-bottom: 1px solid var(--color-border); max-height: 40%; }
+  .divider { display: none; }
+  .todayItem { flex-direction: column; align-items: flex-start; }
+  .todayItemActions { width: 100%; justify-content: space-between; }
+}
