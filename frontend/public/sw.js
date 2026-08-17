@@ -86,6 +86,21 @@ async function evictStrandedIcons() {
   );
 }
 
+// Quit-guard nudge (fired from src/pwa/quitNotify.js via reg.showNotification) — tapping
+// it should jump straight to Review, focusing an already-open tab if there is one instead
+// of stacking a new one.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const c of clientList) {
+        if ('focus' in c) return c.focus().then(() => c.navigate?.('/review'));
+      }
+      return self.clients.openWindow('/review');
+    })
+  );
+});
+
 // ── Fetch routing ────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;

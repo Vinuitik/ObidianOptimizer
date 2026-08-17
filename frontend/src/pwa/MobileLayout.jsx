@@ -6,6 +6,7 @@ import { flushOutbox, setDriveMode } from './offlineApi';
 import { pushMailbox } from './mailbox';
 import { hasCreds } from './setup';
 import { maybeAutoSync } from './autoSync';
+import { armQuitNotify } from './quitNotify';
 import LoginModal from '../components/organisms/LoginModal';
 import RouteErrorBoundary from '../components/organisms/RouteErrorBoundary';
 import BottomNav from './BottomNav';
@@ -67,6 +68,10 @@ export default function MobileLayout() {
     const id = setInterval(() => maybeAutoSync(), 30 * 60 * 1000);
     return () => { document.removeEventListener('visibilitychange', onVis); clearInterval(id); };
   }, [online]);
+
+  // "Are you a quitter?" nag, mobile flavor — see quitNotify.js for why this is a
+  // notification-on-background instead of the web modal / desktop dialog.
+  useEffect(() => armQuitNotify(isAuthenticated), [isAuthenticated]);
 
   return (
     <div className={styles.shell}>

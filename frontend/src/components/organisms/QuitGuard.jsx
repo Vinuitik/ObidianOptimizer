@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import Button from '../atoms/Button';
-import { dutyUnfinished } from '../../utils/dailyDuty';
+import { dutyUnfinished, canNag, markNagged } from '../../utils/dailyDuty';
 import { randomQuote } from '../../utils/quotes';
 import styles from './QuitGuard.module.css';
 
@@ -10,10 +10,10 @@ import styles from './QuitGuard.module.css';
 // review OR no Learn item processed today — two things happen:
 //   1. beforeunload arms the browser's native "Leave site?" prompt (the ONLY real
 //      close-blocker a web page gets — no custom UI is possible at true unload).
-//   2. When you return to the tab (visibility → visible) we surface a custom modal
-//      with a great-man quote — the actual "are you a quitter?" nag, shown where the
-//      browser lets us render. In the desktop app this same modal will fire on the
-//      real window-close intercept.
+//   2. Exit-intent: the moment the cursor heads for the tab/URL bar (mouseleave off
+//      the top of the viewport) we surface a custom modal with a great-man quote —
+//      caught in the act of leaving. Deliberately does NOT nag on return — that's
+//      exactly the moment friction should be lowest, not raised.
 //
 // See utils/dailyDuty.js for what counts as "done". Never nags when signed out or on
 // verification errors (dutyUnfinished swallows those → treats duty as done).
@@ -21,11 +21,12 @@ export default function QuitGuard() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const navigate = useNavigate();
   const [quote, setQuote] = useState(null); // non-null ⇒ modal open
-  const unfinishedRef = useRef(false);      // latest known duty state, for beforeunload
+  const unfinishedRef = useRef(false);      // latest known duty state, for beforeunload + exit-intent
 
-  // Keep an up-to-date "still owes work" flag while signed in: on mount, on tab
-  // refocus, and whenever auth flips. beforeunload reads it synchronously (it can't
-  // await), so the async probe result is stashed in a ref.
+  // Keep an up-to-date "still owes work" flag while signed in: on mount and on tab
+  // refocus (so exit-intent has fresh data next time you leave), and whenever auth
+  // flips. beforeunload reads it synchronously (it can't await), so the async probe
+  // result is stashed in a ref.
   useEffect(() => {
     if (!isAuthenticated) { unfinishedRef.current = false; return; }
     let cancelled = false;
@@ -33,15 +34,27 @@ export default function QuitGuard() {
     refresh();
 
     const onVisible = () => {
-      if (document.visibilityState !== 'visible' || !isAuthenticated) return;
-      dutyUnfinished().then(v => {
-        if (cancelled) return;
-        unfinishedRef.current = v;
-        if (v) setQuote(randomQuote());   // came back with work outstanding → nag
-      });
+      if (document.visibilityState === 'visible') refresh();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => { cancelled = true; document.removeEventListener('visibilitychange', onVisible); };
+  }, [isAuthenticated]);
+
+  // Exit-intent: cursor crossing the top edge of the viewport is the standard signal
+  // someone is reaching for the tab bar / URL bar / window controls — the page is
+  // still fully visible/focused at that instant, unlike a real tab-hide, so a custom
+  // modal can actually render (unlike the close-time case beforeunload handles below).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const onMouseLeave = (e) => {
+      if (e.clientY > 0) return;               // only the top-edge exit, not side/bottom
+      if (!unfinishedRef.current) return;
+      if (!canNag()) return;
+      markNagged();
+      setQuote(randomQuote());
+    };
+    document.documentElement.addEventListener('mouseleave', onMouseLeave);
+    return () => document.documentElement.removeEventListener('mouseleave', onMouseLeave);
   }, [isAuthenticated]);
 
   // Native close-guard. Present only while duty is outstanding, so a caught-up user

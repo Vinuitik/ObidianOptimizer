@@ -1,4 +1,5 @@
 .claude/
+CLAUDE.md
 
 # Local config (vault path, vault location choice — never commit)
 .env

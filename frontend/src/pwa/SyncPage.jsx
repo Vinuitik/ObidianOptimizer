@@ -7,6 +7,7 @@ import { getMeta } from './db';
 import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
 import { refreshAndPull, pullReviewFromDrive } from './drivePull';
 import { pushMailbox } from './mailbox';
+import { notificationsSupported, notificationPermission, requestNotificationPermission } from './quitNotify';
 import styles from './MobilePages.module.css';
 
 // The PWA's Sync tab. "Download for offline" seeds the review subset (notes + text
@@ -55,11 +56,16 @@ export default function SyncPage() {
   const [status, setStatus]     = useState(null);  // { text, tone }
   const [linked, setLinked]     = useState(false);
   const [driveMsg, setDriveMsg] = useState(null);  // { text, tone }
+  const [notifPerm, setNotifPerm] = useState(() => notificationPermission());
 
   useEffect(() => {
     getMeta('lastSync').then(v => setLastSync(v || null)).catch(() => {});
     hasCreds().then(setLinked).catch(() => {});
   }, []);
+
+  async function enableNotifications() {
+    setNotifPerm(await requestNotificationPermission());
+  }
 
   async function link() {
     setBusy(true); setDriveMsg(null);
@@ -176,6 +182,30 @@ export default function SyncPage() {
         Tip: install this app and open it over the tunnel domain once on wifi, then hit
         Download — after that Review works with no connection.
       </p>
+
+      {/* ── Quit-guard notifications ─────────────────────────────────────────── */}
+      {notificationsSupported() && (
+        <>
+          <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>Notifications</h2>
+          <p className={styles.hint}>
+            Get a nudge the moment you switch away with today's duty unfinished. On iOS this
+            only works if the app is installed to your home screen (iOS 16.4+) — there's no
+            fallback otherwise.
+          </p>
+          {notifPerm === 'granted' ? (
+            <p className={styles.hint}>✓ Enabled</p>
+          ) : notifPerm === 'denied' ? (
+            <p className={`${styles.hint} ${styles.warn}`}>
+              Blocked — re-enable in your browser/OS notification settings for this app.
+            </p>
+          ) : (
+            <button className={styles.captureBtn} onClick={enableNotifications}
+                    style={{ marginTop: 4, width: '100%', padding: '12px 16px' }}>
+              Enable "are you a quitter?" nudges
+            </button>
+          )}
+        </>
+      )}
 
       {/* ── Drive link (server-independent offline) ─────────────────────────── */}
       <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>Drive link</h2>

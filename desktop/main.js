@@ -9,7 +9,7 @@
 //   (no Learn item processed today  ->  localStorage 'obsOpt_learnDoneDate' != today)
 //   OR (a review is still due  ->  GET /api/review?limit=1 returns a note).
 // Evaluated IN the loaded page so it shares that page's session cookie + origin.
-const { app, BrowserWindow, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog, shell, Notification } = require('electron');
 const quotes = require('./quotes.json');
 
 const APP_URL = process.env.OBSOPT_URL || 'https://obsidianoptimizer.uk';
@@ -48,28 +48,39 @@ function createWindow() {
   });
 
   win.on('close', onCloseAttempt);
+  win.on('minimize', onMinimize);
 }
+
+// Shared by close (blocking dialog) and minimize (non-blocking notification). Errors are
+// logged instead of silently swallowed to false — a swallowed exception here used to look
+// identical to "duty genuinely done," making a real bug (e.g. not signed in inside this
+// window's own cookie jar, separate from your regular browser) undiagnosable from outside.
+async function checkUnfinished() {
+  try {
+    return await win.webContents.executeJavaScript(`(async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      if (localStorage.getItem('obsOpt_learnDoneDate') !== today) return true;
+      const r = await fetch('/api/review?offset=0&limit=1', { credentials: 'same-origin', cache: 'no-store' });
+      if (!r.ok) throw new Error('review probe HTTP ' + r.status);
+      const j = await r.json();
+      return Array.isArray(j.notes) && j.notes.length > 0;
+    })()`);
+  } catch (err) {
+    console.error('[quit-guard] duty probe failed — treating as done, but this is likely a bug:', err);
+    return false;   // offline / server down / not signed in here → don't nag on what we can't verify
+  }
+}
+
+function randomQuote() { return quotes[Math.floor(Math.random() * quotes.length)]; }
 
 async function onCloseAttempt(e) {
   if (allowClose) return;          // second pass after the user confirmed quit
   e.preventDefault();
 
-  let unfinished = false;
-  try {
-    unfinished = await win.webContents.executeJavaScript(`(async () => {
-      const today = new Date().toISOString().slice(0, 10);
-      if (localStorage.getItem('obsOpt_learnDoneDate') !== today) return true;
-      try {
-        const r = await fetch('/api/review?offset=0&limit=1', { credentials: 'same-origin', cache: 'no-store' });
-        const j = await r.json();
-        return Array.isArray(j.notes) && j.notes.length > 0;
-      } catch { return false; }   // offline / server down → don't nag on what we can't verify
-    })()`);
-  } catch { unfinished = false; }
-
+  const unfinished = await checkUnfinished();
   if (!unfinished) { allowClose = true; win.close(); return; }   // caught up → quit silently
 
-  const q = quotes[Math.floor(Math.random() * quotes.length)];
+  const q = randomQuote();
   const { response } = await dialog.showMessageBox(win, {
     type: 'warning',
     title: 'Are you a quitter?',
@@ -82,6 +93,19 @@ async function onCloseAttempt(e) {
   });
 
   if (response === 1) { allowClose = true; win.close(); }   // chose to quit → let it close
+}
+
+// Minimize can't be intercepted/cancelled the way close can (Electron has no "about to
+// minimize" hook) — so unlike close, this only reacts after the fact with a non-blocking
+// OS notification rather than snapping the window back open (that flicker read as janky).
+async function onMinimize() {
+  const unfinished = await checkUnfinished();
+  if (!unfinished) return;
+  const q = randomQuote();
+  new Notification({
+    title: 'Are you a quitter?',
+    body: `${q.text}\n— ${q.author}`,
+  }).show();
 }
 
 app.whenReady().then(createWindow);

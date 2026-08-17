@@ -8,6 +8,10 @@
 import { fetchReview } from '../api/notes.js';
 
 const LEARN_KEY = 'obsOpt_learnDoneDate';
+const NAG_KEY = 'obsOpt_lastNagAt';
+const NAG_COOLDOWN_MS = 20 * 60 * 1000; // shared by web (mouseleave) + mobile (backgrounding) —
+// both triggers can fire many times an hour, so without this the nag would spam. Desktop
+// close/minimize skip this (rare, deliberate actions) and call the quote dialog directly.
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -34,4 +38,18 @@ async function reviewsPending() {
 export async function dutyUnfinished() {
   if (!learnTaskDoneToday()) return true;
   return reviewsPending();
+}
+
+// Exit-intent / backgrounding cooldown — call canNag() right before showing a nag, and
+// markNagged() right after. Prevents mouseleave/visibilitychange from re-firing every
+// time the user's cursor drifts near the tab bar or they briefly switch apps.
+export function canNag() {
+  try {
+    const last = Number(localStorage.getItem(NAG_KEY) || 0);
+    return Date.now() - last > NAG_COOLDOWN_MS;
+  } catch { return true; }
+}
+
+export function markNagged() {
+  try { localStorage.setItem(NAG_KEY, String(Date.now())); } catch { /* private mode */ }
 }
