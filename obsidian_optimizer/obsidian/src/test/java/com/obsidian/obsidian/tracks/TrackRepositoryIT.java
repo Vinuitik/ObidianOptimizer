@@ -218,4 +218,33 @@ class TrackRepositoryIT {
         assertThat(repo.getScheduleBudget(t.id(), 0)).isNull();
         assertThat(repo.getScheduleBudget(t.id(), 2)).isEqualTo(5);
     }
+
+    // ── Capacity (Phase 1c) ──────────────────────────────────────────────────
+
+    @Test
+    void capacity_seedsDefaultMonFri4SatSun6() {
+        Map<Integer, Double> capacity = repo.getCapacityMap();
+
+        for (int weekday = 0; weekday <= 4; weekday++) {
+            assertThat(capacity.get(weekday)).isEqualTo(4.0);
+        }
+        assertThat(capacity.get(5)).isEqualTo(6.0); // Sat
+        assertThat(capacity.get(6)).isEqualTo(6.0); // Sun
+    }
+
+    @Test
+    void setCapacity_partialUpdate_onlyChangesGivenWeekday() {
+        // daily_capacity is seeded once at context startup and NOT truncated by cleanTables()
+        // (it's not per-track state) — restore Wednesday afterward so this test's order
+        // relative to capacity_seedsDefaultMonFri4SatSun6 doesn't matter.
+        try {
+            repo.setCapacity(Map.of(2, 9.0)); // Wednesday only
+
+            assertThat(repo.getCapacity(2)).isEqualTo(9.0);
+            assertThat(repo.getCapacity(0)).isEqualTo(4.0); // Monday untouched
+            assertThat(repo.getCapacity(5)).isEqualTo(6.0); // Saturday untouched
+        } finally {
+            repo.setCapacity(Map.of(2, 4.0));
+        }
+    }
 }

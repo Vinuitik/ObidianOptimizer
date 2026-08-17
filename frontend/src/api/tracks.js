@@ -99,10 +99,39 @@ export async function saveTrackSchedule(trackId, weekdayBudgets) {
   return res.json();
 }
 
-// ── Today ────────────────────────────────────────────────────────────────────
+// ── Today (Phase 1c: capacity/deadline/MoSCoW-aware) ──────────────────────────
 
-// Returns [{ itemId, trackId, trackTitle, trackType, title, notePath }, ...].
+// Returns { items: [{ itemId, trackId, trackTitle, trackType, title, notePath }, ...],
+//   mode: 'normal'|'lockin', overBudget: bool }.
+// overBudget = Normal mode's must-priority deadline tracks alone exceeded today's capacity
+// and got pro-rata trimmed anyway (not a silent drop) — show the "you're behind" banner.
 export async function fetchTodayPlan() {
   const res = await req(`${BASE}/tracks/today`);
+  return res.json();
+}
+
+// weekday(0=Mon..6=Sun) -> items/day ceiling for that day (Normal mode only).
+export async function fetchCapacity() {
+  const res = await req(`${BASE}/tracks/capacity`);
+  return res.json();
+}
+
+// weekdayCapacities: { [weekday]: capacity } — partial upsert, only given days change.
+export async function saveCapacity(weekdayCapacities) {
+  const res = await req(`${BASE}/tracks/capacity`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(weekdayCapacities),
+  });
+  return res.json();
+}
+
+// mode: 'normal' | 'lockin'.
+export async function setTrackMode(mode) {
+  const res = await req(`${BASE}/tracks/mode`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
   return res.json();
 }

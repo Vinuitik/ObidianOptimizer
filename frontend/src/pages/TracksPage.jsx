@@ -46,11 +46,15 @@ export default function TracksPage() {
 
 function TodayTab() {
   const todayItems     = useStore(s => s.todayItems);
+  const todayMode      = useStore(s => s.todayMode);
+  const todayOverBudget = useStore(s => s.todayOverBudget);
   const fetchTodayPlan = useStore(s => s.fetchTodayPlan);
+  const setTrackMode   = useStore(s => s.setTrackMode);
   const completeTrackItem = useStore(s => s.completeTrackItem);
   const showToast       = useStore(s => s.showToast);
   const [addToReview, setAddToReview] = useState({}); // itemId -> bool
   const [busy, setBusy] = useState(null); // itemId currently completing
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => { fetchTodayPlan(); }, [fetchTodayPlan]);
 
@@ -65,8 +69,37 @@ function TodayTab() {
     }
   }
 
+  async function toggleMode() {
+    setSwitching(true);
+    try {
+      await setTrackMode(todayMode === 'lockin' ? 'normal' : 'lockin');
+    } catch (e) {
+      showToast(`Couldn't switch mode: ${e.message ?? e}`);
+    } finally {
+      setSwitching(false);
+    }
+  }
+
   return (
     <div className={styles.todayList}>
+      <div className={styles.modeRow}>
+        <span className={styles.modeLabel}>
+          {todayMode === 'lockin' ? 'Lock-in mode — single-track focus' : 'Normal mode'}
+        </span>
+        <button className={styles.secondaryBtn} onClick={toggleMode} disabled={switching}>
+          Switch to {todayMode === 'lockin' ? 'Normal' : 'Lock-in'}
+        </button>
+      </div>
+
+      {todayOverBudget && (
+        <div className={styles.overBudgetBanner}>
+          <span>You're behind — must-priority deadlines alone exceed today's capacity.</span>
+          <button className={styles.secondaryBtn} onClick={toggleMode} disabled={switching}>
+            Switch to Lock-in?
+          </button>
+        </div>
+      )}
+
       {todayItems.length === 0 && (
         <p className={styles.emptyMsg}>Nothing scheduled for today — create a track and set its weekly schedule under "Manage tracks".</p>
       )}
@@ -135,6 +168,7 @@ function ManageTab() {
   return (
     <div className={styles.manage}>
       <div className={styles.trackList}>
+        <CapacityPanel />
         <form className={styles.newTrackForm} onSubmit={handleCreate}>
           <input
             className={styles.textInput}
@@ -176,6 +210,57 @@ function ManageTab() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Daily capacity ceiling used by Phase 1c's Today allocation (Normal mode only) — plain
+// per-weekday numbers, not a base×multiplier, so any single day can be hand-tuned without
+// touching the others. Lives on the Tracks page (not generic Settings) since it's
+// tracks-specific, same as the weekly schedule editor.
+function CapacityPanel() {
+  const trackCapacity      = useStore(s => s.trackCapacity);
+  const fetchTrackCapacity = useStore(s => s.fetchTrackCapacity);
+  const saveTrackCapacity  = useStore(s => s.saveTrackCapacity);
+  const showToast          = useStore(s => s.showToast);
+  const [values, setValues] = useState({});
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => { fetchTrackCapacity(); }, [fetchTrackCapacity]);
+  useEffect(() => { setValues(trackCapacity); }, [trackCapacity]);
+
+  async function save(weekday, value) {
+    const n = Number(value);
+    if (!value || Number.isNaN(n) || n < 0) return;
+    try {
+      await saveTrackCapacity({ [weekday]: n });
+    } catch (e) {
+      showToast(`Couldn't save capacity: ${e.message ?? e}`);
+    }
+  }
+
+  return (
+    <div className={styles.capacityPanel}>
+      <button className={styles.capacityToggle} onClick={() => setOpen(o => !o)}>
+        Daily capacity {open ? '▾' : '▸'}
+      </button>
+      {open && (
+        <div className={styles.capacityRow}>
+          {WEEKDAYS.map((label, i) => (
+            <div key={i} className={styles.capacityCell}>
+              <span className={styles.capacityLabel}>{label[0]}</span>
+              <input
+                type="number"
+                min={0}
+                className={styles.capacityInput}
+                value={values[i] ?? ''}
+                onChange={e => setValues(v => ({ ...v, [i]: e.target.value }))}
+                onBlur={e => save(i, e.target.value)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

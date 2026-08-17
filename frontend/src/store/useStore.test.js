@@ -43,6 +43,9 @@ vi.mock('../api/tracks', () => ({
   fetchTrackSchedule: vi.fn(),
   saveTrackSchedule:  vi.fn(),
   fetchTodayPlan:     vi.fn(),
+  fetchCapacity:      vi.fn(),
+  saveCapacity:       vi.fn(),
+  setTrackMode:       vi.fn(),
 }));
 
 import useStore from './useStore';
@@ -72,8 +75,11 @@ const INITIAL = {
   toast: null,
   tracks: [],
   todayItems: [],
+  todayMode: 'normal',
+  todayOverBudget: false,
   trackItems: {},
   trackSchedules: {},
+  trackCapacity: {},
 };
 
 function resetStore() {
@@ -597,22 +603,56 @@ describe('tracks: fetchTracks / fetchTodayPlan', () => {
     expect(getState().tracks).toEqual([{ id: 1, title: 'existing' }]);
   });
 
-  it('fetchTodayPlan loads today items', async () => {
+  it('fetchTodayPlan loads today items, mode, and overBudget', async () => {
     const items = [{ itemId: 10, trackId: 1, trackTitle: 'Rust Book', title: 'Ch1' }];
-    tracksApi.fetchTodayPlan.mockResolvedValue(items);
+    tracksApi.fetchTodayPlan.mockResolvedValue({ items, mode: 'lockin', overBudget: false });
 
     await getState().fetchTodayPlan();
 
     expect(getState().todayItems).toEqual(items);
+    expect(getState().todayMode).toBe('lockin');
+    expect(getState().todayOverBudget).toBe(false);
   });
 
-  it('fetchTodayPlan on 401 clears todayItems', async () => {
-    useStore.setState({ todayItems: [{ itemId: 1 }] });
+  it('fetchTodayPlan surfaces overBudget for the "you\'re behind" banner', async () => {
+    tracksApi.fetchTodayPlan.mockResolvedValue({ items: [], mode: 'normal', overBudget: true });
+
+    await getState().fetchTodayPlan();
+
+    expect(getState().todayOverBudget).toBe(true);
+  });
+
+  it('fetchTodayPlan on 401 clears todayItems and resets mode', async () => {
+    useStore.setState({ todayItems: [{ itemId: 1 }], todayMode: 'lockin', todayOverBudget: true });
     tracksApi.fetchTodayPlan.mockRejectedValue(new api.ApiError('unauthorized', 401));
 
     await getState().fetchTodayPlan();
 
     expect(getState().todayItems).toEqual([]);
+    expect(getState().todayMode).toBe('normal');
+    expect(getState().todayOverBudget).toBe(false);
+  });
+
+  it('setTrackMode persists the mode then re-fetches Today', async () => {
+    tracksApi.setTrackMode.mockResolvedValue({ mode: 'lockin' });
+    tracksApi.fetchTodayPlan.mockResolvedValue({ items: [], mode: 'lockin', overBudget: false });
+
+    await getState().setTrackMode('lockin');
+
+    expect(tracksApi.setTrackMode).toHaveBeenCalledWith('lockin');
+    expect(getState().todayMode).toBe('lockin');
+    expect(tracksApi.fetchTodayPlan).toHaveBeenCalled();
+  });
+
+  it('fetchTrackCapacity / saveTrackCapacity round-trip the weekday map', async () => {
+    tracksApi.fetchCapacity.mockResolvedValue({ 0: 4, 5: 6, 6: 6 });
+    await getState().fetchTrackCapacity();
+    expect(getState().trackCapacity).toEqual({ 0: 4, 5: 6, 6: 6 });
+
+    tracksApi.saveCapacity.mockResolvedValue({ 0: 4, 2: 9, 5: 6, 6: 6 });
+    await getState().saveTrackCapacity({ 2: 9 });
+    expect(tracksApi.saveCapacity).toHaveBeenCalledWith({ 2: 9 });
+    expect(getState().trackCapacity).toEqual({ 0: 4, 2: 9, 5: 6, 6: 6 });
   });
 });
 

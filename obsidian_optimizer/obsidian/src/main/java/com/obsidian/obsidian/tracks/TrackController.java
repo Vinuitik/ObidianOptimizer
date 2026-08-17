@@ -1,6 +1,6 @@
 package com.obsidian.obsidian.tracks;
 
-import com.obsidian.obsidian.tracks.TodayPlanService.TodayItem;
+import com.obsidian.obsidian.tracks.TodayPlanService.TodayPlan;
 import com.obsidian.obsidian.tracks.TrackRepository.Track;
 import com.obsidian.obsidian.tracks.TrackRepository.TrackItem;
 import org.springframework.http.ResponseEntity;
@@ -138,8 +138,35 @@ public class TrackController {
     // ── Today ────────────────────────────────────────────────────────────────
 
     @GetMapping("today")
-    public List<TodayItem> today() {
+    public TodayPlan today() {
         return todayPlan.today();
+    }
+
+    // ── Capacity + mode (Phase 1c) ──────────────────────────────────────────────
+
+    @GetMapping("capacity")
+    public Map<Integer, Double> getCapacity() {
+        return trackRepo.getCapacityMap();
+    }
+
+    /** Partial upsert — only the given weekdays change (weekday(string) -> capacity). */
+    @PutMapping("capacity")
+    public Map<Integer, Double> setCapacity(@RequestBody Map<String, Double> weekdayCapacities) {
+        Map<Integer, Double> parsed = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Double> e : weekdayCapacities.entrySet()) {
+            parsed.put(Integer.parseInt(e.getKey()), e.getValue());
+        }
+        trackRepo.setCapacity(parsed);
+        return trackRepo.getCapacityMap();
+    }
+
+    @PutMapping("mode")
+    public ResponseEntity<?> setMode(@RequestBody ModeRequest req) {
+        if (!TodayPlanService.MODE_NORMAL.equals(req.mode()) && !TodayPlanService.MODE_LOCKIN.equals(req.mode())) {
+            return ResponseEntity.badRequest().body("mode must be 'normal' or 'lockin'");
+        }
+        todayPlan.setMode(req.mode());
+        return ResponseEntity.ok(Map.of("mode", req.mode()));
     }
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
@@ -150,4 +177,5 @@ public class TrackController {
     record AddItemRequest(String title, String notePath) {}
     record UpdateItemRequest(String title, Integer position) {}
     record CompleteItemRequest(Boolean addToReview) {}
+    record ModeRequest(String mode) {}
 }

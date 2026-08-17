@@ -70,6 +70,25 @@ public class TrackRepository {
               PRIMARY KEY (track_id, weekday)
             )
             """);
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS daily_capacity (
+              weekday   SMALLINT PRIMARY KEY,
+              capacity  NUMERIC NOT NULL
+            )
+            """);
+        seedDefaultCapacity();
+    }
+
+    /** Mon-Fri=4, Sat/Sun=6 ("weekends 1.5x") — plain per-day numbers, hand-tunable later
+     *  without touching the others. ON CONFLICT DO NOTHING so a user edit is never clobbered
+     *  on restart. */
+    private void seedDefaultCapacity() {
+        for (int weekday = 0; weekday <= 6; weekday++) {
+            double def = (weekday == 5 || weekday == 6) ? 6.0 : 4.0;
+            jdbc.update(
+                "INSERT INTO daily_capacity(weekday, capacity) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                weekday, def);
+        }
     }
 
     // ── Tracks ───────────────────────────────────────────────────────────────
@@ -221,6 +240,33 @@ public class TrackRepository {
             "SELECT daily_item_budget FROM track_schedule WHERE track_id = ? AND weekday = ?",
             Integer.class, trackId, weekday);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    // ── Capacity (Phase 1c) ─────────────────────────────────────────────────────
+
+    /** Falls back to 4.0 if the row is somehow missing (initSchema always seeds all 7). */
+    public double getCapacity(int weekday) {
+        List<Double> rows = jdbc.queryForList(
+            "SELECT capacity FROM daily_capacity WHERE weekday = ?", Double.class, weekday);
+        return rows.isEmpty() ? 4.0 : rows.get(0);
+    }
+
+    public Map<Integer, Double> getCapacityMap() {
+        Map<Integer, Double> map = new LinkedHashMap<>();
+        jdbc.query("SELECT weekday, capacity FROM daily_capacity ORDER BY weekday",
+            rs -> { map.put(rs.getInt("weekday"), rs.getDouble("capacity")); });
+        return map;
+    }
+
+    /** Partial upsert — unlike {@link #setSchedule}, only the given weekdays change; any
+     *  day not present in the map keeps its current value. */
+    public void setCapacity(Map<Integer, Double> weekdayCapacities) {
+        for (Map.Entry<Integer, Double> e : weekdayCapacities.entrySet()) {
+            jdbc.update("""
+                INSERT INTO daily_capacity(weekday, capacity) VALUES (?, ?)
+                ON CONFLICT (weekday) DO UPDATE SET capacity = EXCLUDED.capacity
+                """, e.getKey(), e.getValue());
+        }
     }
 
     // ── Mapping ──────────────────────────────────────────────────────────────

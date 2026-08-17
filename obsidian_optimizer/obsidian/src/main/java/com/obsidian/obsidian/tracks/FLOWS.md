@@ -1,6 +1,7 @@
 # Tracks Domain Flows
 
 Files: TrackRepository.java, TrackController.java, TodayPlanService.java, TrackReviewHandoff.java
+Tests: TrackRepositoryIT.java, TodayPlanServiceTest.java, TrackReviewHandoffTest.java
 Frontend: frontend/src/pages/TracksPage.jsx, frontend/src/api/tracks.js, frontend/src/store/useStore.js (Tracks section)
 Plan: /home/victor/.claude/plans/adaptive-finding-bubble.md (Phase 1 of the full Learning Tracks plan)
 
@@ -53,17 +54,55 @@ GET /api/tracks/today → TodayPlanService.today():
 `pwa/reviewPlan.js`'s `allocateTracks()` already uses for the FSRS hybrid split (different
 domain, same "don't persist what you can recompute" idea).
 
-**Phase 1c replaces `TodayPlanService.today()`'s body** with a capacity/deadline/MoSCoW-aware
-version (same method signature, same no-persisted-plan principle) — see the plan doc's
-Phase 1c section. Two design decisions were made for that upgrade, ahead of writing it:
-- **Lock-in mode = single-track focus per day**, not "everything uncapped." Auto-picked (no
-  manual picker — picking has a cost) via `urgency = priorityWeight(must=3/should=2/could=1) ×
-  pace`, `pace` reusing the deadline-track pace formula already in the plan. No explicit
-  recency/rotation state needed: a productive lock-in day burns down `itemsRemaining`, which
-  drops that track's urgency below a rival's, so tomorrow's pick rotates on its own.
+## Today Flow (Phase 1c — capacity/deadline/MoSCoW, IMPLEMENTED)
+
+`TodayPlanService.today(LocalDate)`'s body was replaced with the capacity-weighted version
+below (same method signature and no-persisted-plan principle as Phase 1 — everything here
+is recomputed fresh on every `GET /tracks/today`, nothing cached or stored). Returns
+`TodayPlan{items, mode, overBudget}` instead of a bare list.
+
+```
+mode = settingsRepo.getOrDefault("trackMode", "normal")   // app_settings, same EAV as everything else
+todayCap = trackRepo.getCapacity(weekday)                 // daily_capacity table, ignored in lock-in
+
+split active tracks into deadlineTracks (deadline != null) / manualTracks (deadline == null)
+for each deadlineTrack with pending items:
+  itemsRemaining = countPendingItems(track)
+  capSpan = Σ daily_capacity(d) for d in [today, deadline)     // the pace denominator
+  pace = capSpan > 0 ? itemsRemaining / capSpan : itemsRemaining  // deadline today/past -> wants it ALL now
+
+if mode == lockin and deadlineTracks not empty:
+  chosen = argmax(priorityWeight(must=3/should=2/could=1) * pace)   // single-track focus
+  items = ALL of chosen's remaining pending items, uncapped by todayCap
+  // no manual tracks mixed in — the whole point is context-switch reduction
+else:  // normal mode, or lock-in with nothing on a deadline (falls back to normal's shape)
+  reserved[track] = pace[track] * todayCap
+  if Σreserved > todayCap:
+      trim could first, then should; if musts ALONE still exceed todayCap,
+      pro-rata scale the musts too -> overBudget = true (never a silent drop)
+  take reserved[track] (rounded, capped at itemsRemaining) from each deadline track
+  remainingCap = todayCap - Σtaken
+  manual tracks fill remainingCap per track_schedule budget (Phase 1's flat logic, now capped)
+```
+
+Two design decisions were resolved before implementing this (see
+`learning-tracks-phase1-2026-08-16.md` memory for the reasoning):
+- **Lock-in mode = single-track focus per day**, not "everything uncapped." No explicit
+  recency/rotation state: a productive lock-in day burns down `itemsRemaining`, dropping
+  that track's urgency below a rival's, so tomorrow's pick rotates on its own.
 - **Normal-mode must-overflow**: Normal mode stays capacity-bounded even for `must` tracks
-  (pro-rata trim applies if musts alone exceed capacity) — and that trim event is the trigger
-  for a "you're behind — switch to Lock-in?" banner/CTA on Today, not a silent drop.
+  — that pro-rata-trim event is exactly what `overBudget=true` signals, driving a
+  "you're behind — switch to Lock-in?" banner/CTA on the Today tab (`TracksPage.jsx`
+  `TodayTab`'s `overBudgetBanner`), not a silent drop.
+
+`daily_capacity(weekday, capacity)` seeds Mon-Fri=4/Sat-Sun=6 on first boot
+(`TrackRepository.seedDefaultCapacity()`, `ON CONFLICT DO NOTHING` so a user edit survives
+restarts) — editable per-weekday via `GET/PUT /tracks/capacity` (`setCapacity` is a
+**partial** upsert, unlike schedule's full-replace). Mode toggle: `PUT /tracks/mode
+{mode}` → `TodayPlanService.setMode()` → `settingsRepo.set("trackMode", ...)`. Both
+surfaced directly on `TracksPage`: the mode toggle + overflow banner on the Today tab,
+a collapsible "Daily capacity" 7-input panel at the top of the Manage tab's track sidebar
+(`CapacityPanel`) — tracks-specific, so it lives here rather than generic Settings.
 
 ## FSRS Handoff Flow
 
@@ -156,11 +195,19 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
   Acceptable for v1: AI-generated/captured items usually sit in `_inbox/` until the user
   files them, and staleness here just means "add to spaced review" silently no-ops (item
   still marked done). Add rename-tracking later if this becomes a real problem.
-- **Schema location**: all three tables (`tracks`, `track_items`, `track_schedule`) init in
-  `TrackRepository.initSchema()` — single `@PostConstruct`, `CREATE TABLE IF NOT EXISTS` +
-  (future) `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for additive migrations, same
-  convention as `CardRepository`/`CaptureRepository`. Phase 1c's `daily_capacity` table is a
-  separate small addition — same file unless it grows unwieldy (see plan doc, judgment call).
+- **Schema location**: all four tables (`tracks`, `track_items`, `track_schedule`,
+  `daily_capacity`) init in `TrackRepository.initSchema()` — single `@PostConstruct`,
+  `CREATE TABLE IF NOT EXISTS` + (future) `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for
+  additive migrations, same convention as `CardRepository`/`CaptureRepository`. Kept in the
+  same file rather than a dedicated `CapacityRepository` — small enough not to warrant the
+  split; revisit if it grows.
+- **`daily_capacity` seeding is `ON CONFLICT DO NOTHING`, not an upsert-to-default.** A
+  user's hand-tuned weekday value survives every restart; the seed only ever fills gaps
+  (e.g. a genuinely fresh install, or if a row were somehow deleted).
+- **Phase 1c's numbers are `double`, not integer item counts.** `pace`/`reserved` are
+  fractional (e.g. "1.67 items today"); `Math.round()` happens only at the very end, right
+  before calling `nextPendingItems(track, take)`. Rounding earlier would compound error
+  across the could→should→must trim cascade in `trimByPriority()`.
 - **`reorderItem` is O(track size)** in the worst case (moving item 1→N shifts every sibling
   by one position). Fine at book/course-chapter scale (tens of items); would need a different
   approach (fractional positions, etc.) if tracks ever held thousands of items — not expected.
@@ -183,8 +230,16 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 | Thing to change | Where |
 |---|---|
 | Track/item/schedule schema | `TrackRepository.initSchema()` |
-| Today allocation (Phase 1 flat) | `TodayPlanService.today(LocalDate)` |
-| Today allocation (Phase 1c capacity/deadline/MoSCoW) | same method — body replaced, see plan doc |
+| Today allocation (Phase 1 flat, superseded) | `TodayPlanService.today(LocalDate)` |
+| **Today allocation (Phase 1c capacity/deadline/MoSCoW, live)** | same method — see "Today Flow (Phase 1c)" above |
+| **Daily capacity table + seed** | `TrackRepository.initSchema()` / `seedDefaultCapacity()` (Mon-Fri=4, Sat-Sun=6) |
+| **Capacity CRUD (partial upsert)** | `TrackRepository.getCapacity()`/`getCapacityMap()`/`setCapacity()`; `GET`/`PUT /tracks/capacity` |
+| **Normal vs Lock-in mode** | `TodayPlanService.getMode()`/`setMode()` (`app_settings` key `trackMode`); `PUT /tracks/mode` |
+| **Lock-in track picker (urgency)** | `TodayPlanService.pickLockInTrack()` / `priorityWeight()` |
+| **MoSCoW trim (could→should→must pro-rata)** | `TodayPlanService.trimByPriority()` — return value is the `overBudget` signal |
+| **Deadline-track pace** | `TodayPlanService.capacityBetween()` (Σ daily_capacity over `[today, deadline)`) |
+| Mode toggle + overflow banner UI | `TracksPage.jsx` `TodayTab` (`modeRow`, `overBudgetBanner`) |
+| Capacity settings UI | `TracksPage.jsx` `CapacityPanel` (Manage tab sidebar, collapsible) |
 | Item reorder semantics | `TrackRepository.reorderItem()` |
 | Complete-item → FSRS handoff | `TrackReviewHandoff.seedDueToday()` |
 | FSRS seed grade for brand-new notes | `TrackReviewHandoff` — `FsrsService.GRADE_GOOD` |
