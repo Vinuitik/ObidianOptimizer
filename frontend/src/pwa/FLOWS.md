@@ -1,5 +1,5 @@
 # PWA / Mobile — FLOWS
-Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, SyncPage.jsx, CapturePage.jsx, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, reviewPlan.js, drivePull.js, registerSW.js, vite-pwa.config.js, ../../public/sw.js, ../../public/manifest.webmanifest, ../components/atoms/RefreshButton.jsx
+Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, SyncPage.jsx, CapturePage.jsx, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, reviewPlan.js, drivePull.js, registerSW.js, vite-pwa.config.js, installPrompt.js, ../../public/sw.js, ../../public/manifest.webmanifest, ../components/atoms/RefreshButton.jsx
 > Unused (dropped from the narrow PWA, kept in-tree): MobileNotesPage.jsx, MobileSearchPage.jsx.
 
 > The installed PWA is a **narrow, offline-capable app** — three jobs: **Review**
@@ -47,6 +47,13 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
 - `public/sw.js` `install` precaches the shell; `fetch` navigations are network-first → fall back to cached `/index.html` so the app opens offline.
 - Secure-context gate: SW refuses on the self-signed `:8443` cert. Install over the Cloudflare tunnel domain (real cert). To change shell precache list: `public/sw.js` `SHELL_URLS`.
 - **Desktop install (Windows/Mac):** same PWA installs as a standalone **desktop app** from Edge/Chrome (address-bar install icon, or ⋮ → *Install this site as an app*). `display-mode: standalone` → the app renders `PwaApp` (the narrow phone app) in its own window — the desktop app IS the installed PWA, no separate build. Thin online client → the Docker stack runs on a separate always-on box; the desktop machine no longer needs the local stack. Desktop Chrome/Edge only surface the Install prompt when the manifest advertises **PNG 192+512** icons (SVG-only can suppress it) → `public/icons/icon-192.png` / `icon-512.png` / `icon-maskable-512.png` (regenerate from the SVGs with ImageMagick+librsvg). To change: `manifest.webmanifest` `icons`.
+
+## Flow — browser/device detection (`installPrompt.js`)
+Pure UA-sniff helpers, no state: `isIOS()`, `isWindows()`, `isElectron()`, `isFirefox()`.
+Only consumer today is `pages/GetAppPage.jsx` — see `pages/FLOWS.md` "GetAppPage" for how
+`isFirefox()` branches the extension-install CTA (Firefox gets a direct signed-`.xpi`
+link; everything else gets a zip + manual "Load unpacked" steps, because Chrome blocks
+installing anything from outside its Web Store).
 
 ## Flow — download for offline (P3)
 Settings/Review action → `syncForOffline()` → `fetchReview()` + `fetchNoteContent()` per note → `putReviewNotes()` (IndexedDB) → **`warmReviewMedia()`** (the SAME media engine the Drive path uses).
@@ -259,6 +266,7 @@ embedder `/ingest` (standalone, `find_home`).
 | Learn auto-advance (next in source group, stop at group end) | `components/organisms/InboxReview.jsx` `nextInGroup()` + `load({preferGroup})` (file/acknowledge/discard) |
 | PWA auto-sync cron (launch/focus/interval) | `MobileLayout.jsx` effect → `autoSync.maybeAutoSync()` |
 | Auto-sync freshness window | `autoSync.js` `FRESH_MS` (6h) |
+| Browser/device detection | `installPrompt.js` (`isIOS`/`isWindows`/`isElectron`/`isFirefox`) — used by `pages/GetAppPage.jsx` |
 | Creds re-read / blank-folder heal | `setup.js` `refreshCreds()` (+ `drivePull.js` just-in-time call) |
 | `/pwa/setup` blank-folder guard | `PwaController.setup()` (409 while `folderId` blank) |
 | Activate offline review [PENDING] | swap store `fetchReview`/`fetchNoteContent` + `ReviewPage`/`ReviewRating` `gradeNote` → `pwa/offlineApi`, AND flush outbox in `App` too |

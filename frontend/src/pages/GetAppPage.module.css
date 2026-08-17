@@ -77,3 +77,15 @@
   color: var(--color-success, #4caf50);
 }
 
+.steps {
+  align-self: stretch;
+  text-align: left;
+  font-size: var(--text-xs);
+  color: var(--color-text-2);
+  line-height: var(--leading-normal);
+  padding-left: var(--sp-5);
+}
+
+.steps li + li { margin-top: var(--sp-1); }
+.steps strong { color: var(--color-text); }
+

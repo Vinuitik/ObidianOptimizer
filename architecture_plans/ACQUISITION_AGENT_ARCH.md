@@ -237,5 +237,5 @@ agent prompt: sees ONLY { cookies_present: true, domain } — never a name or va
 | Allowed yt-dlp args (trust boundary) | embedder `acquire.YTDLP_ALLOWED_ARGS` `[NEW]` |
 | Cookie domain scope / jar TTL | `netcap.cookieDomainsFor()` / `acquire.COOKIEJAR_TTL` `[NEW]` |
 | yt-dlp invocation | `download/downloader.py` (shipped; extend for headers/cookies) |
-| New permissions | `manifest.json` / `manifest.firefox.json` → `webRequest`, `cookies` |
+| New permissions | `manifest.json` (shared, both browsers) → `webRequest`, `cookies` |
 | Dispatch routing | `background.routeText()` (shipped, unchanged) |

@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # Generates extension-firefox/ — a Firefox-loadable copy of extension/.
 #
-# Why a copy: Chrome MV3 requires `background.service_worker`; Firefox MV3 wants
-# `background.scripts`. They can't share one manifest.json, and Firefox's
-# "Load Temporary Add-on" always reads the directory's manifest.json. So we copy
-# the source and drop the Firefox manifest in as manifest.json. The JS is shared
-# verbatim (it uses the `browser ?? chrome` shim, so it runs in both engines).
+# SSOT: extension/manifest.json is the ONE canonical manifest (name, icons,
+# permissions, action, etc). extension/manifest.firefox.overlay.json holds ONLY
+# the fields that must differ for Firefox — version, background, and
+# browser_specific_settings.gecko — because Chrome MV3 requires
+# `background.service_worker` while Firefox MV3 wants `background.scripts`, and
+# only Firefox understands `browser_specific_settings`. There is no second full
+# manifest to drift out of sync: any change to permissions/icons/name/etc lives
+# in manifest.json alone and both browsers pick it up automatically.
+#
+# Merge semantics: `jq -s '.[0] + .[1]'` is a SHALLOW merge — every top-level key
+# present in the overlay (version/background/browser_specific_settings) fully
+# REPLACES that key from the base manifest; it does not recurse into nested
+# objects. That's required here: the overlay's `background` object must wholly
+# replace the base's, not field-merge with it.
 #
 # Run after any edit to extension/, then in Firefox:
 #   about:debugging#/runtime/this-firefox -> Load Temporary Add-on -> pick
@@ -21,12 +30,14 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 SRC="$ROOT_DIR/extension"
 OUT="$ROOT_DIR/extension-firefox"
 
+command -v jq >/dev/null || { echo "✖ jq is required (sudo apt install jq)"; exit 1; }
+
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
 cp -r "$SRC/." "$OUT/"
-rm -f "$OUT/manifest.firefox.json"
-cp "$SRC/manifest.firefox.json" "$OUT/manifest.json"
+rm -f "$OUT/manifest.firefox.overlay.json"
+jq -s '.[0] + .[1]' "$SRC/manifest.json" "$SRC/manifest.firefox.overlay.json" > "$OUT/manifest.json"
 
 echo "Firefox extension ready: $OUT"
 echo "Load it: about:debugging#/runtime/this-firefox -> Load Temporary Add-on -> select extension-firefox/manifest.json"

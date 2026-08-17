@@ -32,6 +32,13 @@ export function isElectron() {
   return typeof navigator !== 'undefined' && /Electron/.test(navigator.userAgent);
 }
 
+// Firefox is the only browser that can install a self-hosted signed extension with a
+// plain link (Chrome/Edge/Brave block installing anything from outside their web store —
+// see extension/FLOWS.md). The "Get extension" CTA branches on this.
+export function isFirefox() {
+  return typeof navigator !== 'undefined' && /Firefox\//.test(navigator.userAgent);
+}
+
 // Best-effort "already installed, but we're browsing in a regular tab right now" check.
 // Only Chrome/Edge support this (requires a self-referencing `related_applications` entry
 // in manifest.webmanifest); everywhere else it resolves false and we fall back to the

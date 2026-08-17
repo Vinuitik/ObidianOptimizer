@@ -1,5 +1,5 @@
 # Browser Extension — FLOWS
-Files: manifest.json, manifest.firefox.json, background.js, popup.html, popup.css, popup.js, config.js, onboarding.html, ../linux_scripts/build-firefox-extension.sh
+Files: manifest.json, manifest.firefox.overlay.json, background.js, popup.html, popup.css, popup.js, config.js, onboarding.html, ../linux_scripts/build-firefox-extension.sh
 
 > One job: **capture anything worth reviewing into the Learn queue** without opening
 > the app. Paste text/markdown/a URL, drop a file, or right-click a selection/link/page.
@@ -16,23 +16,34 @@ Files: manifest.json, manifest.firefox.json, background.js, popup.html, popup.cs
 On first install a welcome tab (`onboarding.html`) opens explaining how to pin the
 icon + sign in. Then open the popup → ⚙ Settings → sign in.
 
-## Cross-browser (Chromium + Firefox)
-One codebase, one diverging file: the **background declaration**. Chrome MV3 requires
-`background.service_worker` (`manifest.json`); Firefox MV3 uses an event page
-`background.scripts` (`manifest.firefox.json`). `build-firefox-extension.sh` copies
-`extension/` → `extension-firefox/` with the Firefox manifest dropped in as
-`manifest.json`. The JS is shared verbatim: `config.js` exports `api = browser ?? chrome`,
-so every `await api.*` call is promise-based in both engines. To add a WebExtension API
-call, use `api.*` (imported from `config.js`), never `chrome.*` directly.
+## Cross-browser (Chromium + Firefox) — single source of truth
+There is exactly **one** manifest you hand-edit for shared fields: `manifest.json`
+(name, icons, action, permissions, host_permissions, commands, ...). Chrome/Edge/Brave
+load it directly, unmodified.
 
-> **RULE — the two manifests do NOT sync.** `build-firefox-extension.sh` **swaps** the whole
-> manifest (`manifest.firefox.json` → `extension-firefox/manifest.json`), it does **not** merge.
-> So any manifest change that isn't the `background` block — **permissions, host_permissions,
-> icons, version, name, commands** — MUST be edited in **BOTH** `manifest.json` (Chrome) AND
-> `manifest.firefox.json` (Firefox), then re-run the build script. Editing only Chrome's
-> manifest silently ships Firefox without the change. (Only the JS is shared verbatim.)
-> `extension-firefox/` is a generated artifact — **gitignored**, rebuilt by the script; never
-> edit it by hand.
+`manifest.firefox.overlay.json` is NOT a second manifest — it holds **only** the 3 keys
+that are structurally required to differ, and nothing else:
+- `background` — Chrome MV3 requires `background.service_worker`; Firefox MV3 requires
+  the event-page form `background.scripts`. One key cannot satisfy both engines.
+- `browser_specific_settings.gecko` — Chrome doesn't understand this key at all; Firefox
+  needs it for the extension ID + `update_url` (self-hosted auto-update).
+- `version` — an **independent AMO release counter**, not a code version. Every
+  `deploy-extension.sh` run bumps it because AMO refuses to re-sign a duplicate version
+  number. Chrome has no publish pipeline yet, so its `manifest.json` version never moves.
+  **If Chrome's and Firefox's version numbers differ, that is expected, not drift** — the
+  overlay's `version` tracks AMO submissions, Chrome's tracks nothing yet.
+
+`build-firefox-extension.sh` builds `extension-firefox/` by copying `extension/` then
+**shallow-merging** the overlay onto `manifest.json` (`jq -s '.[0] + .[1]'` — each overlay
+key wholly replaces the base's key, no field-level recursion). **Any field NOT in the
+overlay (permissions, icons, name, host_permissions, commands, ...) is edited in
+`manifest.json` ONCE and both browsers pick it up automatically — there is nothing to
+keep in sync by hand.** `extension-firefox/` is a generated artifact — **gitignored**,
+rebuilt by the script; never edit it by hand.
+
+The JS is shared verbatim: `config.js` exports `api = browser ?? chrome`, so every
+`await api.*` call is promise-based in both engines. To add a WebExtension API call, use
+`api.*` (imported from `config.js`), never `chrome.*` directly.
 
 ## Architecture (why a background worker)
 ```
@@ -172,6 +183,6 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | File-upload path | `background.uploadFile()` → backend `/workspace/upload` |
 | Context-menu items | `background.MENU` + `installMenus()` |
 | Onboarding copy | `onboarding.html` |
-| Icons / branding | `icons/` + `manifest*.json` `icons` / `action.default_icon` |
-| Permissions / hosts | `manifest*.json` `permissions` + `host_permissions` |
+| Icons / branding | `icons/` + `manifest.json` `icons` / `action.default_icon` (shared, both browsers) |
+| Permissions / hosts | `manifest.json` `permissions` + `host_permissions` (shared, both browsers) |
 | Look & feel | `popup.css` (tokens mirrored from `frontend/src/styles/tokens.css`) |

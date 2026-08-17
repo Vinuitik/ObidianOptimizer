@@ -145,4 +145,4 @@ everything lands in Learn as it already does.
 | Probe endpoint | embedder `main.py → POST /probe` (around `downloader`) |
 | Probe proxy | `CaptureController → POST /probe` (copy the `/download` proxy) |
 | Dispatch routing | existing `background.routeText()` — unchanged |
-| New permissions | `manifest.json` / `manifest.firefox.json` → `scripting`, `activeTab` |
+| New permissions | `manifest.json` (shared, both browsers) → `scripting`, `activeTab` |

@@ -1,6 +1,6 @@
 # Pages Flows
 
-Files: MainPage.jsx, LearnPage.jsx, ReviewPage.jsx, DashboardPage.jsx, SettingsPage.jsx
+Files: MainPage.jsx, LearnPage.jsx, ReviewPage.jsx, DashboardPage.jsx, SettingsPage.jsx, GetAppPage.jsx
 
 ---
 
@@ -155,6 +155,37 @@ local `reviewMode` pref:
 
 ---
 
+## GetAppPage — Get app / Get extension (`/get-app`)
+
+Two independent cards, each with a single device-detected CTA (no user choice needed —
+see `pwa/FLOWS.md` for the detection helpers `isWindows`/`isIOS`/`isFirefox`/`isElectron`
+imported from `installPrompt.js`).
+
+**Install as app** card: Windows → `/download/ObsidianOptimizer-Setup.exe` (Electron,
+unsigned, see `desktop/FLOWS.md`) · installed → status line only · install-prompt
+available → native `promptInstall()` · else → "How to install" reveals manual steps.
+
+**Browser extension** card — `isFirefox()` branches the whole CTA:
+- **Firefox**: `GetAppPage` fetches `/ext/updates.json` on mount → takes the last
+  `updates[]` entry's `update_link` → renders it as a plain `<a href>` to the signed
+  `.xpi`. No `download` attribute — Firefox's `application/x-xpinstall` mime type
+  (declared in nginx's `/ext/` block) makes it intercept the navigation and show its own
+  install-confirm dialog instead of downloading the file. Same signed artifact
+  `linux_scripts/deploy-extension.sh` publishes; nothing extra to build per release.
+- **Chrome/Edge/Brave**: `<a download>` to `/ext/obsidian-optimizer-chrome.zip` (built by
+  `linux_scripts/build-chrome-extension-zip.sh` — re-run after any `extension/` edit
+  that should reach this download) + inline numbered "Load unpacked" instructions.
+  Chrome refuses to install anything from outside the Chrome Web Store, signed or not —
+  there's no self-hosted-auto-install path for it like Firefox's, so this is the
+  honest ceiling until/unless the extension is published to the Web Store (see
+  `architecture_plans/EXTENSION_ARCH.md`).
+
+To change either CTA: `GetAppPage.jsx` (the two `<section>` blocks). To change what's in
+the Chrome zip: `build-chrome-extension-zip.sh` (excludes `manifest.firefox.overlay.json`
+and the dev-facing `FLOWS.md`, keeps `README.md`).
+
+---
+
 ## Change Index
 
 | Thing to change | Where |
@@ -170,3 +201,5 @@ local `reviewMode` pref:
 | File a whole folder/chapter | `InboxReview.jsx` (`fileGroup`, `openFolderFilePicker`, `openChapterFilePicker`) |
 | Dashboard poll rate | `DashboardPage.jsx → POLL_MS` |
 | Dashboard counters | `stats/StatsController.java` (backend) |
+| Get-app / get-extension CTAs | `GetAppPage.jsx` (device detection via `pwa/installPrompt.js`) |
+| Chrome extension download zip | `linux_scripts/build-chrome-extension-zip.sh` → `ext-dist/obsidian-optimizer-chrome.zip` |

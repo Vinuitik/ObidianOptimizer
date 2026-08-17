@@ -37,7 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT_DIR"
 
-MANIFEST="extension/manifest.firefox.json"
+MANIFEST="extension/manifest.firefox.overlay.json"
 EXT_ID="obsidian-optimizer@obsidianoptimizer.uk"
 BASE_URL="https://obsidianoptimizer.uk/ext"
 DIST="ext-dist"
