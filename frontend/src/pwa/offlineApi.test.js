@@ -44,7 +44,7 @@ describe('captureText', () => {
 
     expect(res).toEqual({ queued: true });
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(enqueueCaptureText).toHaveBeenCalledWith('later', null);
+    expect(enqueueCaptureText).toHaveBeenCalledWith('later', null, {});
   });
 
   it('online but 401 → queues for replay after login', async () => {
@@ -54,7 +54,7 @@ describe('captureText', () => {
     const res = await captureText('signed out dump', null);
 
     expect(res).toEqual({ queued: true, reason: 'auth' });
-    expect(enqueueCaptureText).toHaveBeenCalledWith('signed out dump', null);
+    expect(enqueueCaptureText).toHaveBeenCalledWith('signed out dump', null, {});
   });
 
   it('network throw → queues (server unreachable mid-request)', async () => {
@@ -64,6 +64,6 @@ describe('captureText', () => {
     const res = await captureText('flaky', null);
 
     expect(res).toEqual({ queued: true });
-    expect(enqueueCaptureText).toHaveBeenCalledWith('flaky', null);
+    expect(enqueueCaptureText).toHaveBeenCalledWith('flaky', null, {});
   });
 });

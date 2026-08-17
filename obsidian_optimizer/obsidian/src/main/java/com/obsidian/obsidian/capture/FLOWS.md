@@ -1,6 +1,6 @@
 # Capture — resource intake → durable ingest queue → notes
 
-Files: CaptureController.java, CaptureRepository.java, CaptureIngestWorker.java, ../common/IngestClient.java
+Files: CaptureController.java, CaptureRepository.java, CaptureIngestWorker.java, ../common/IngestClient.java, ../internalapi/InternalAgentController.java (track fan-out), ../tracks/TrackRepository.java
 
 The user "sends resources from time to time" (shared links, pasted text, PWA share-target).
 Each becomes a durable `capture` row and is drained into the embedder ingest pipeline by a
@@ -10,9 +10,13 @@ the embedder's own job queue is in-memory; this table is authored, backed-up sta
 ## Intake → queue → drain → notes
 
 ```
-POST /api/capture {url|text, title?}                         CaptureController.capture()
+POST /api/capture {url|text, title?, trackId?|newTrackTitle?+newTrackType?}
+                                                              CaptureController.capture()
+  resolveTrackId(): newTrackTitle set → trackRepo.create() first; else the given trackId;
+    neither → null (untagged — today's exact behavior). See tracks/FLOWS.md Phase 1b.
   text → storeTextResource() writes resources/files/{id}.md  (kept for Learn side-by-side)
   captureRepo.enqueue(id, type, ref, sourcePath, title)      → row status = 'queued'
+  trackId resolved → captureRepo.setTrackId(id, trackId)     → capture.track_id set
   ingestWorker.nudge()                                        → drain now (no tick wait)
   → 200 {status:"queued", captureId}
 
@@ -47,6 +51,14 @@ CaptureIngestWorker (continuous)                             capture/CaptureInge
              ok        → stays 'processing'     (embedder now owns it)
              4xx       → 'failed'               (bad ref/route — retry won't help)
              5xx/down  → 'queued'               (released; next tick retries → survives outage)
+
+Per-note track fan-out (Phase 1b, capture.track_id set)          jobs.py + InternalAgentController
+  embedder synthesis, per note produced:
+    publish.create_note(folder, title, content, capture_id=capture_id)
+      → POST /api/internal/notes {folder, name, content, captureId}
+        InternalAgentController.createNote(): write note as always, then linkToTrack():
+          captureRepo.get(captureId).trackId() != null → trackRepo.addItem(trackId, name, path)
+          (best-effort — a track-tagging hiccup never fails note delivery)
 ```
 
 To change drain cadence: `ingest.capture.delay-ms` (tick) / `ingest.capture.batch-limit`.
@@ -142,3 +154,4 @@ duplicate. `deferred` blocks the dedup guard (live) and is excluded from orphan 
 | **Playlist URL detection** | `CaptureController.isPlaylistUrl()` (`PLAYLIST_PATH`/`LIST_PARAM` regexes, video-host gated) |
 | **Playlist expansion (list-only, no download)** | `CaptureController.capturePlaylist()` → embedder `POST /playlist/expand` → `download/downloader.list_playlist_entries` (embedder `FLOWS.md`) |
 | **Playlist row insert** | `CaptureRepository.enqueuePlaylistItem(id, type, ref, path, title, playlistId, position)`; columns `playlist_id`/`playlist_position` |
+| **Capture-time track tag** (Phase 1b) | `capture.track_id` column; `CaptureController.resolveTrackId()`; `CaptureRepository.setTrackId()`; fan-out on note creation via `InternalAgentController.linkToTrack()` — see tracks/FLOWS.md |

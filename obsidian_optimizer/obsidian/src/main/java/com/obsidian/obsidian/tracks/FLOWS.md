@@ -85,6 +85,62 @@ watch. `FsrsStateWriter.mirror()` no-ops silently if the note has no frontmatter
 (common for a fresh AI-generated/captured note) — the DB row (`note_reviews`) is what
 `/reviews/due` actually queries, so the note surfaces for review regardless.
 
+## Capture-time track tagging (Phase 1b)
+
+Goal: tag a capture to a track at the moment of capture, on any surface, without slowing
+the default "just capture it" path. Three surfaces (extension, mobile PWA, MCP) converge
+on two different backend primitives depending on whether the surface goes through the
+Java `capture` table at all.
+
+**Deviation from the original plan doc worth flagging**: the plan speculated a bulk
+`notes_created` callback on job completion. That callback doesn't exist in this codebase —
+standalone notes are published **one at a time**, synchronously, via
+`InternalAgentController.createNote()` (`POST /api/internal/notes`), called once per note
+from Python `publish.create_note()`. The fan-out below hooks that real per-note callback
+instead of inventing a new one.
+
+```
+EXTENSION / PWA (capture-queue path):
+  POST /api/capture {url|text, trackId? | newTrackTitle?+newTrackType?}
+    CaptureController.resolveTrackId(): newTrackTitle set → trackRepo.create() first;
+      else the given trackId; neither → null (untagged, unchanged behavior)
+    captureRepo.enqueue(...) as always, THEN captureRepo.setTrackId(captureId, trackId)
+                                    │
+  CaptureIngestWorker.drain() → IngestClient.submit* → embedder ingest job (async, minutes)
+                                    │
+  embedder synthesis (jobs._synthesize_and_publish[_v2]) calls, per produced note:
+    publish.create_note(folder, title, content, capture_id=capture_id)
+      → POST /api/internal/notes {folder, name, content, captureId}
+        InternalAgentController.createNote():
+          write the note as always, THEN linkToTrack(captureId, name, path):
+            captureRepo.get(captureId).trackId() != null?
+              → trackRepo.addItem(trackId, name, path)   (best-effort, try/catch — a
+                track-tagging hiccup must never fail note delivery)
+
+MCP (never touches the Java capture table — see capture/FLOWS.md "MCP ingest durability
+gap"; track_id has to ride on the embedder job/tool call itself instead):
+  create_track(title, type?)          → POST /api/internal/tracks        → new Track
+  ingest_resource(ref, track_id?)     → ingest_jobs.submit(..., track_id=...)
+    → job dict carries track_id; jobs._link_track_item() called per note produced
+      (parallel to the capture_id-based path above, but self-contained — no Java lookup)
+  create_note(text, track_id?, already_processed=True)   → _stage_note_as_is() calls
+    publish.add_track_item(track_id, title, path) synchronously right after the write
+    (this path is itself synchronous, so no job-dict indirection needed)
+```
+
+Both `POST /api/internal/tracks` and `POST /api/internal/tracks/{id}/items` are new
+internal-token-gated endpoints on `InternalAgentController` — MCP tool calls never carry
+the session cookie the public `/tracks` endpoints require, so track creation/item-append
+from a conversation needs its own internal mirror (same pattern as every other
+agent-write endpoint in that controller).
+
+**Not implemented** (flagged as extras in the plan doc, not required by its own
+verification checklist): the PWA share-target quick-pick ("Add to track" after a
+fire-and-forget share) and the InboxReview drag-onto-a-track fallback for trackless
+captures. The manual capture form (`CapturePage.jsx`, both Link and Note modes) and the
+extension popup both got the full picker; MCP got `create_track` + `track_id` on
+`ingest_resource`/`create_note`.
+
 ## Settings gate (nav visibility only)
 
 `tracksEnabled` (`app_settings`, default `true` — ships live, not behind a flag) controls
@@ -108,6 +164,19 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 - **`reorderItem` is O(track size)** in the worst case (moving item 1→N shifts every sibling
   by one position). Fine at book/course-chapter scale (tens of items); would need a different
   approach (fractional positions, etc.) if tracks ever held thousands of items — not expected.
+- **`capture.track_id` has no FK** (Phase 1b) — same soft-reference convention as
+  `note_path`/`source_path`, but here it's load-bearing on startup ordering too:
+  `CaptureRepository` and `TrackRepository` are separate `@PostConstruct` beans with no
+  guaranteed init order, so a hard FK to `tracks(id)` could fail to create if capture's
+  schema ran first. A stale/deleted track id just means `linkToTrack()`'s `trackRepo.get()`
+  lookup (inside `addItem`, indirectly) errors and is swallowed — the note itself still
+  lands, only the track-item append silently no-ops.
+- **Two independent track-tagging paths, deliberately not unified.** The capture-queue
+  path (extension/PWA) looks the track up server-side from `capture.track_id`, keyed by
+  `captureId`, at note-creation time. The MCP path carries `track_id` directly on the
+  embedder job/tool call, because MCP-originated ingest never creates a `capture` row to
+  look anything up from. They converge on the same effect (`trackRepo.addItem`) through
+  different plumbing — see the Phase 1b flow diagram above.
 
 ## Change Index
 
@@ -123,3 +192,10 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 | Frontend Tracks state | `useStore.js` — `tracks`, `todayItems`, `trackItems`, `trackSchedules` (wiped on logout via `initialDataState()`) |
 | Track item drag-reorder (Manage tab) | `TracksPage.jsx` `TrackItemsEditor` — native HTML5 DnD, position = array index |
 | Weekly schedule editor | `TracksPage.jsx` `TrackScheduleEditor` — full-replace PUT, budget='' means "not scheduled" |
+| **Phase 1b** — capture.track_id column | `CaptureRepository.initSchema()` / `setTrackId()` |
+| **Phase 1b** — resolve trackId or create-on-the-fly | `CaptureController.resolveTrackId()` (used by `capture()` and `captureFile()`) |
+| **Phase 1b** — capture-queue note→track fan-out | `InternalAgentController.createNote()` → `linkToTrack()`; Python side threads `capture_id` through `publish.create_note()` (`ingest/jobs.py` `_synthesize_and_publish[_v2]`) |
+| **Phase 1b** — MCP track creation/item-append (internal, token-gated) | `InternalAgentController.createTrack()` / `addTrackItem()`; Python `publish.create_track()` / `publish.add_track_item()` |
+| **Phase 1b** — MCP tools | `embedder/mcp_tools/write.py` `create_track`, `ingest_resource(track_id=)`, `create_note(track_id=)`; job-side fan-out in `ingest/jobs.py` `_link_track_item()` |
+| **Phase 1b** — extension picker | `extension/popup.html` `#cap-track`; `popup.js` `trackSelection()`/`loadTracks()`; `background.js` `listTracks()` + `trackOpts` threaded through `capture()`/`captureText()`/`routeText()`/`capturePage()`/`escalate()` |
+| **Phase 1b** — PWA picker | `frontend/src/pwa/CapturePage.jsx` (`trackOpts()`); threaded through `offlineApi.js` `captureUrl`/`captureText` and `outbox.js` `enqueueCapture`/`enqueueCaptureText`/`flush()` for offline replay |

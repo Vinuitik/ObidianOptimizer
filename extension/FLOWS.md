@@ -94,6 +94,20 @@ tools *here*. `background.connectAgentWs()` opens `wss://…/agent-ws?token=<age
 *Off unless `agentWsToken` is set.* MV3 caveat: the SW can sleep → the WS drops; it reconnects on
 wake (`scheduleAgentReconnect`) / `setConfig` / startup. *To change tools:* `AGENT_TOOLS`.
 
+## Flow — track picker (Learning Tracks Phase 1b)
+`#cap-track` select next to the capture box: "Just capture" (default, today's exact
+behavior) / an existing active track (populated from `GET /tracks` via `background.
+listTracks()`, called on popup init) / "+ New track…" (reveals `#cap-track-title`).
+`popup.trackSelection()` reads the current pick into `{trackId}` or `{newTrackTitle}` (or
+`{}` for "Just capture") and spreads it into the payload for both capture paths —
+`send('routeText', {text, ...trackSelection()})` and `send('capturePage', {url, tabId,
+...trackSelection()})`. `background.js` threads `trackOpts` through every function in the
+capture call chain (`capture`/`captureText`/`routeText`/`capturePage`/`escalate`) into the
+`/capture` POST body; the backend resolves it (`CaptureController.resolveTrackId` — see
+`tracks/FLOWS.md` Phase 1b). On a successful capture the picker resets to "Just capture"
+(and refreshes the list if a new track was just created). *To change:* `popup.js`
+`trackSelection()`/`loadTracks()`; `background.js` `listTracks()`.
+
 ## Flow — duplicate guard
 `background.capture()` surfaces the backend's **409** (`existsLiveForSource`) as
 `{duplicate:true}`; `routeText`/`capturePage` propagate it; `popup.handleResult` shows it LOUD
@@ -147,6 +161,7 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | Agent WS client / browser tools | `background.connectAgentWs()` + `AGENT_TOOLS` (`agentGetDom/agentGetNetwork/agentBrowserFetch`); token = ⚙ Settings `#cfg-agent-token` → `config.agentWsToken` |
 | Agent activity feed (popup) | `background.recordAgentEvent` → `chrome.storage.agentLog`; popup `renderAgentFeed()` / `#agent-panel` |
 | Duplicate-capture warning | `background.capture()` 409 → `{duplicate}`; `popup.handleResult` (⚠️) |
+| Track picker | `popup.html` `#cap-track`/`#cap-track-title`; `popup.js` `trackSelection()`/`loadTracks()`; `background.js` `listTracks()` + `trackOpts` params |
 | API base override | popup ⚙ Settings → `chrome.storage.local` |
 | Smart page capture / scrape | `background.capturePage()` + `extractPageText()` (`#cap-page` button) |
 | Embedded-video detection (page) | `extractPageText()` video scan + `background.normalizeVideoUrl()` (YouTube-embed→watch, direct-media pass-through); web branch of `capturePage()` |

@@ -152,7 +152,7 @@ def test_tools_list_exposes_the_tools(client):
     tools = {t["name"] for t in resp.json()["result"]["tools"]}
     assert tools == {"search_notes", "get_note_content", "find_home_for_note",
                      "ingest_resource", "create_note", "split_note", "get_vault_tree",
-                     "list_folder"}
+                     "list_folder", "create_track"}
 
 
 def test_tools_call_search_notes_returns_rrf_results(client):

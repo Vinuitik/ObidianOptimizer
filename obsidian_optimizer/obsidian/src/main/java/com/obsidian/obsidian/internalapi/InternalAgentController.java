@@ -4,11 +4,13 @@ import com.obsidian.obsidian.capture.CaptureRepository;
 import com.obsidian.obsidian.media.MediaController;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
+import com.obsidian.obsidian.tracks.TrackRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -46,6 +48,7 @@ public class InternalAgentController {
     private final SettingsRepository settingsRepo;
     private final MediaController mediaController;
     private final CaptureRepository captureRepo;
+    private final TrackRepository trackRepo;
 
     @Value("${mcp.api.token:}")
     private String internalToken;
@@ -53,11 +56,13 @@ public class InternalAgentController {
     public InternalAgentController(FileRepository fileRepository,
                                    SettingsRepository settingsRepo,
                                    MediaController mediaController,
-                                   CaptureRepository captureRepo) {
+                                   CaptureRepository captureRepo,
+                                   TrackRepository trackRepo) {
         this.fileRepository = fileRepository;
         this.settingsRepo = settingsRepo;
         this.mediaController = mediaController;
         this.captureRepo = captureRepo;
+        this.trackRepo = trackRepo;
     }
 
     private boolean badToken(String header) {
@@ -72,7 +77,11 @@ public class InternalAgentController {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("bad internal token");
     }
 
-    /** Create a note with full content. folder is vault-relative ("" = vault root). */
+    /** Create a note with full content. folder is vault-relative ("" = vault root).
+     *  captureId (optional): when the producing capture row is tagged with a Learning
+     *  Track (tracks/FLOWS.md Phase 1b — capture.track_id, set via CaptureController's
+     *  extension/PWA capture-time picker), the note is also appended as a track_items row.
+     *  Best-effort: a track-tagging hiccup must never fail note delivery. */
     @PostMapping("/notes")
     public ResponseEntity<?> createNote(@RequestHeader(value = "X-Internal-Token", required = false) String token,
                                         @RequestBody CreateNoteRequest req) {
@@ -82,10 +91,53 @@ public class InternalAgentController {
             String path = fileRepository.createNote(absFolder, req.name());
             fileRepository.updateNote(path, req.content());
             log.info("[internal.createNote] agent created {}", path);
+            linkToTrack(req.captureId(), req.name(), path);
             return ResponseEntity.ok(Map.of("path", path));
         } catch (IOException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
+    }
+
+    private void linkToTrack(String captureId, String noteTitle, String notePath) {
+        if (captureId == null || captureId.isBlank()) return;
+        try {
+            CaptureRepository.Capture cap = captureRepo.get(captureId);
+            if (cap != null && cap.trackId() != null) {
+                trackRepo.addItem(cap.trackId(), noteTitle, notePath);
+            }
+        } catch (Exception e) {
+            log.warn("[internal.createNote] track link failed for capture {}: {}", captureId, e.toString());
+        }
+    }
+
+    /** MCP-originated track creation ("okay, let's make this a course" mid-conversation) —
+     *  the embedder never gets a session cookie, so this mirrors the session-authed
+     *  POST /tracks (TrackController) behind the same internal-token gate as every other
+     *  agent write. */
+    @PostMapping("/tracks")
+    public ResponseEntity<?> createTrack(@RequestHeader(value = "X-Internal-Token", required = false) String token,
+                                         @RequestBody CreateTrackRequest req) {
+        if (badToken(token)) return unauthorized();
+        if (req.title() == null || req.title().isBlank()) {
+            return ResponseEntity.badRequest().body("title is required");
+        }
+        String type = (req.type() == null || req.type().isBlank()) ? "custom" : req.type();
+        return ResponseEntity.ok(trackRepo.create(req.title().trim(), type, "manual"));
+    }
+
+    /** MCP-originated track item append (ingest_resource/create_note with track_id — the
+     *  async-job path, where the note lands well after the tool call returns, so the
+     *  embedder appends the item itself once synthesis actually produces the note). */
+    @PostMapping("/tracks/{id}/items")
+    public ResponseEntity<?> addTrackItem(@RequestHeader(value = "X-Internal-Token", required = false) String token,
+                                          @PathVariable long id,
+                                          @RequestBody AddTrackItemRequest req) {
+        if (badToken(token)) return unauthorized();
+        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (req.title() == null || req.title().isBlank()) {
+            return ResponseEntity.badRequest().body("title is required");
+        }
+        return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath()));
     }
 
     /** Overwrite an existing note (used by the note splitter's hub rewrite). */
@@ -176,9 +228,11 @@ public class InternalAgentController {
         return target;
     }
 
-    record CreateNoteRequest(String folder, String name, String content) {}
+    record CreateNoteRequest(String folder, String name, String content, String captureId) {}
     record UpdateNoteRequest(String path, String content) {}
     record EnsureFolderRequest(String path) {}
     record StoreMediaRequest(String filename, String dataB64) {}
     record CreateCaptureRequest(String captureId, String sourceRef, String content) {}
+    record CreateTrackRequest(String title, String type) {}
+    record AddTrackItemRequest(String title, String notePath) {}
 }

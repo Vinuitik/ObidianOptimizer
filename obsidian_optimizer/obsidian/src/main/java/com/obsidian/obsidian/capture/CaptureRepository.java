@@ -32,7 +32,7 @@ public class CaptureRepository {
     public record Capture(String id, String sourceType, String sourceRef,
                           String sourcePath, String title, String status,
                           String bundleRef, long createdAt,
-                          String playlistId, Integer playlistPosition) {}
+                          String playlistId, Integer playlistPosition, Long trackId) {}
 
     @PostConstruct
     public void initSchema() {
@@ -57,6 +57,11 @@ public class CaptureRepository {
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS playlist_id TEXT");
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS playlist_position INTEGER");
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_capture_playlist ON capture(playlist_id)");
+        // track_id: capture-time Learning Track tag (tracks/FLOWS.md Phase 1b). Soft reference
+        // (no FK) by the same convention as note_path/source_path — tracks lives in a separate
+        // repository with its own initSchema(), and Spring gives no ordering guarantee between
+        // @PostConstruct methods in different beans.
+        jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS track_id BIGINT");
     }
 
     public void create(String id, String sourceType, String sourceRef,
@@ -96,6 +101,13 @@ public class CaptureRepository {
 
     public void updateStatus(String id, String status) {
         jdbc.update("UPDATE capture SET status = ? WHERE id = ?", status, id);
+    }
+
+    /** Tag a capture with the Learning Track its resulting notes should be filed into
+     *  (tracks/FLOWS.md Phase 1b) — set right after enqueue, read back by
+     *  InternalAgentController.createNote() when each synthesized note lands. */
+    public void setTrackId(String id, long trackId) {
+        jdbc.update("UPDATE capture SET track_id = ? WHERE id = ?", trackId, id);
     }
 
     /** Mark a capture failed ONLY if it's still processing — so a job that fails after a
@@ -198,10 +210,12 @@ public class CaptureRepository {
     private static Capture map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         int rawPosition = rs.getInt("playlist_position");
         Integer playlistPosition = rs.wasNull() ? null : rawPosition;
+        long rawTrackId = rs.getLong("track_id");
+        Long trackId = rs.wasNull() ? null : rawTrackId;
         return new Capture(
             rs.getString("id"), rs.getString("source_type"), rs.getString("source_ref"),
             rs.getString("source_path"), rs.getString("title"), rs.getString("status"),
             rs.getString("bundle_ref"), rs.getLong("created_at"),
-            rs.getString("playlist_id"), playlistPosition);
+            rs.getString("playlist_id"), playlistPosition, trackId);
     }
 }

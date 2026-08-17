@@ -6,10 +6,13 @@ registers @mcp.tool() functions onto it. Every write still goes through the
 Java backend's internal API (ingest/publish.py), never a direct file write —
 see publish.py's own docstring for why.
 """
+import logging
 import os
 
 import mcp_server
 from mcp_server import mcp, _resolve_in_vault
+
+log = logging.getLogger("embedder.mcp_tools.write")
 
 _NON_CONTENT_TOP_LEVEL = {"_inbox", "_trash", "resources", "_workspace", "_reports"}
 
@@ -32,12 +35,17 @@ def _top_level_folders_hint() -> str:
 
 
 @mcp.tool()
-def ingest_resource(ref: str, force_whisper: bool = False) -> dict:
+def ingest_resource(ref: str, force_whisper: bool = False, track_id: str = "") -> dict:
     """Turn a resource into Obsidian notes (async job). ref is a vault-relative
     path (resources/videos/x.mp4, folder/slides.pdf) or a URL (article,
     YouTube). Returns the job descriptor — poll status via job id at
     GET /ingest/{id}. Pipeline: deterministic extraction (whisper/PyMuPDF/
-    trafilatura/keyframes) → constrained LLM synthesis → notes via backend."""
+    trafilatura/keyframes) → constrained LLM synthesis → notes via backend.
+
+    track_id (optional, default ""): tag the note(s) this produces onto an existing
+    Learning Track (see the create_track tool) — each synthesized note is appended as
+    a track item once synthesis actually finishes (this call returns long before that).
+    Empty (default) preserves today's exact untagged behavior."""
     from ingest import jobs as ingest_jobs
     from ingest import router as ingest_router
 
@@ -47,7 +55,24 @@ def ingest_resource(ref: str, force_whisper: bool = False) -> dict:
         resolved = _resolve_in_vault(ref)
         if not resolved.exists():
             raise ValueError(f"not in vault: {ref}")
-    return ingest_jobs.submit(ref, resolved, force_whisper)
+    return ingest_jobs.submit(ref, resolved, force_whisper, track_id=(track_id.strip() or None))
+
+
+@mcp.tool()
+def create_track(title: str, type: str = "") -> dict:
+    """Create a new Learning Track (tracks/FLOWS.md) — a structured curriculum (a book,
+    a course, an article series) the user can attach resources to over time via
+    ingest_resource(track_id=...)/create_note(track_id=...), in this conversation or a
+    later one. Use this when the user decides mid-conversation "let's make this a
+    course" — it creates an empty track ready to receive material as you go; there is
+    no separate step required before attaching the first resource. `type` is free text
+    (book/course/article/custom) purely for display — default "custom" if omitted.
+    Returns the created track, including its id for track_id params elsewhere."""
+    from ingest import publish
+
+    if not title or not title.strip():
+        raise ValueError("title is empty")
+    return publish.create_track(title.strip(), type.strip() or "custom")
 
 
 @mcp.tool()
@@ -60,7 +85,8 @@ def split_note(note_path: str) -> dict:
     return splitter.split(note_path, content)
 
 
-def create_note(text: str, title: str = "", already_processed: bool = True, folder: str = "") -> dict:
+def create_note(text: str, title: str = "", already_processed: bool = True, folder: str = "",
+                track_id: str = "") -> dict:
     from ingest import jobs as ingest_jobs
 
     if not text or not text.strip():
@@ -69,14 +95,14 @@ def create_note(text: str, title: str = "", already_processed: bool = True, fold
     # Default: LLM-authored content is already good — stage it as-is (no tokens, no queue,
     # durable synchronous write). See [[mcp-ingest-durability-gap]] for the reasoning.
     if already_processed:
-        return _stage_note_as_is(text.strip(), title, folder.strip())
+        return _stage_note_as_is(text.strip(), title, folder.strip(), track_id.strip())
 
     split_min = int(os.environ.get("INGEST_SPLIT_MIN_WORDS", "700"))
     if len(text.split()) < split_min:
-        return _stage_note_as_is(text.strip(), title, folder.strip())
+        return _stage_note_as_is(text.strip(), title, folder.strip(), track_id.strip())
 
     return ingest_jobs.submit("", None, text=text, source_type="text",
-                              title=(title or None))
+                              title=(title or None), track_id=(track_id.strip() or None))
 
 
 # Built once at import time — see _top_level_folders_hint's docstring for why this can't
@@ -110,18 +136,24 @@ create_note.__doc__ = f"""Create a note from text YOU authored. Don't hand-write
     notes when long). That spends tokens and runs async — use it for pasted third-party
     material, not for your own output. Short inputs stage as-is either way (splitting a
     short note is meaningless). Returns notes_created (as-is) or a job descriptor to poll
-    GET /ingest/{{id}} (re-process). `title` is an optional display hint."""
+    GET /ingest/{{id}} (re-process). `title` is an optional display hint.
+
+    `track_id` (optional, default ""): tag this note onto an existing Learning Track (see
+    the create_track tool) as one of its items. Empty (default) preserves today's exact
+    untagged behavior."""
 create_note = mcp.tool()(create_note)
 
 
-def _stage_note_as_is(text: str, title: str = "", folder: str = "") -> dict:
+def _stage_note_as_is(text: str, title: str = "", folder: str = "", track_id: str = "") -> dict:
     """Short-note path: stage the text with NO LLM (no split, no re-synthesis) — the note
     is its own source. Reuses the ingest publish helpers so it lands in the vault exactly
     like a synthesized note, minus the token spend. `folder` set → a NAMED SUBFOLDER OF
     THE INBOX (agent-chosen grouping, marked `ingest-auto-filed`), never outside it; empty
     → the inbox root (`ingest-inbox` + classifier-suggested folder, awaiting user review).
     Either way the note lands under `publish.INBOX_FOLDER` — this function has no path to
-    write anywhere else in the vault."""
+    write anywhere else in the vault. `track_id` set → the note is also appended as a
+    track item (synchronous, since this whole path is synchronous) — best-effort, a
+    track-tagging hiccup must never fail the note write itself."""
     from ingest import publish, synthesize
     t = (title or "").strip() or _title_from_text(text)
     bundle = {"source": {"ref": "", "title": t, "type": "text"}, "media": []}
@@ -145,6 +177,11 @@ def _stage_note_as_is(text: str, title: str = "", folder: str = "") -> dict:
         note_md = publish.stamp_inbox(note_md, "", suggested)
     publish.ensure_folder(target)
     path = publish.create_note(target, synthesize.slugify(t), note_md)
+    if track_id:
+        try:
+            publish.add_track_item(track_id, t, path)
+        except Exception as e:
+            log.warning("track item link failed (track_id=%s, note=%r): %s", track_id, t, e)
     return {"status": "DONE", "ingested": False, "words": len(text.split()),
             "notes_created": [path]}
 

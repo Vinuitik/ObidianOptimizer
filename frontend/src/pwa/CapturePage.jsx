@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { captureUrl, captureText } from './offlineApi';
+import { fetchTracks } from '../api/tracks';
 import styles from './MobilePages.module.css';
 
 // Capture tab — two ways in, both landing in the Learn inbox via the ingest pipeline:
@@ -29,6 +30,35 @@ export default function CapturePage() {
   const [status, setStatus] = useState(null); // { text, tone }
   const [busy, setBusy] = useState(false);
 
+  // Track picker (tracks/FLOWS.md Phase 1b) — this manual capture form is already a
+  // deliberate multi-field form (not fire-and-forget like the share-target), so it gets
+  // the same "tag it at capture time" seam as the extension. '' = Just capture (default,
+  // today's exact behavior), '__new__' reveals the new-track title field, else a track id.
+  const [tracks, setTracks] = useState([]);
+  const [trackChoice, setTrackChoice] = useState('');
+  const [newTrackTitle, setNewTrackTitle] = useState('');
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchTracks().then(list => setTracks((list || []).filter(t => t.status === 'active'))).catch(() => {});
+  }, [isAuthenticated]);
+
+  function trackOpts() {
+    if (trackChoice === '__new__') {
+      const title = newTrackTitle.trim();
+      return title ? { newTrackTitle: title } : {};
+    }
+    return trackChoice ? { trackId: Number(trackChoice) } : {};
+  }
+
+  function resetTrackPicker() {
+    if (trackChoice === '__new__') {
+      fetchTracks().then(list => setTracks((list || []).filter(t => t.status === 'active'))).catch(() => {});
+    }
+    setTrackChoice('');
+    setNewTrackTitle('');
+  }
+
   function resultMsg(res) {
     return res.queued
       ? { text: 'Offline — queued. Will send on reconnect.', tone: 'warn' }
@@ -41,8 +71,9 @@ export default function CapturePage() {
     if (!link) return;
     setBusy(true);
     try {
-      setStatus(resultMsg(await captureUrl(link)));
+      setStatus(resultMsg(await captureUrl(link, trackOpts())));
       setUrl('');
+      resetTrackPicker();
     } catch (e) {
       setStatus({ text: `Failed: ${e.message ?? e}`, tone: 'err' });
     } finally {
@@ -56,9 +87,10 @@ export default function CapturePage() {
     if (!text) return;
     setBusy(true);
     try {
-      setStatus(resultMsg(await captureText(text, noteTitle.trim() || null)));
+      setStatus(resultMsg(await captureText(text, noteTitle.trim() || null, trackOpts())));
       setNoteText('');
       setNoteTitle('');
+      resetTrackPicker();
     } catch (e) {
       setStatus({ text: `Failed: ${e.message ?? e}`, tone: 'err' });
     } finally {
@@ -88,6 +120,30 @@ export default function CapturePage() {
           onClick={() => { setMode('note'); setStatus(null); }}
         >Note</button>
       </div>
+
+      {isAuthenticated && (
+        <div className={styles.captureFormCol}>
+          <select
+            className={styles.captureInput}
+            value={trackChoice}
+            onChange={e => setTrackChoice(e.target.value)}
+            aria-label="Track"
+          >
+            <option value="">Just capture</option>
+            {tracks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+            <option value="__new__">+ New track…</option>
+          </select>
+          {trackChoice === '__new__' && (
+            <input
+              className={styles.captureInput}
+              type="text"
+              placeholder="New track title"
+              value={newTrackTitle}
+              onChange={e => setNewTrackTitle(e.target.value)}
+            />
+          )}
+        </div>
+      )}
 
       {mode === 'link' ? (
         <form onSubmit={submitLink} className={styles.captureForm}>

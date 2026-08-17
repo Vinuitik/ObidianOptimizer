@@ -38,6 +38,37 @@ $('cap-input').addEventListener('input', (e) => {
   $('cap-hint').textContent = detectLabel(e.target.value);
 });
 
+// ── Track picker (tracks/FLOWS.md Phase 1b) ──────────────────────────────────────
+// "Just capture" (default, today's exact behavior) / an existing active track / "+ New
+// track…" (reveals an inline title input). Shared by both capture paths below.
+$('cap-track').addEventListener('change', () => {
+  $('cap-track-title').hidden = $('cap-track').value !== '__new__';
+});
+
+async function loadTracks() {
+  const res = await send('listTracks');
+  if (!res?.ok) return;   // not signed in yet / embedder-less list failure — leave the default option
+  const sel = $('cap-track');
+  for (const t of res.tracks || []) {
+    if (t.status && t.status !== 'active') continue;
+    const opt = document.createElement('option');
+    opt.value = String(t.id);
+    opt.textContent = t.title;
+    sel.insertBefore(opt, sel.querySelector('option[value="__new__"]'));
+  }
+}
+
+// { trackId, newTrackTitle } to attach to a capture payload, or {} for "Just capture".
+function trackSelection() {
+  const v = $('cap-track').value;
+  if (!v) return {};
+  if (v === '__new__') {
+    const title = $('cap-track-title').value.trim();
+    return title ? { newTrackTitle: title } : {};
+  }
+  return { trackId: Number(v) };
+}
+
 // ── Prefill from the active tab ────────────────────────────────────────────────
 async function prefill() {
   try {
@@ -62,7 +93,7 @@ async function capturePage() {
   $('cap-page').disabled = true;
   $('cap-send').disabled = true;
   setStatus($('cap-status'), 'Capturing this page…', 'info');
-  const res = await send('capturePage', { url: tab.url, tabId: tab.id });
+  const res = await send('capturePage', { url: tab.url, tabId: tab.id, ...trackSelection() });
   $('cap-page').disabled = false;
   handleResult(res);
 }
@@ -76,7 +107,7 @@ async function submit() {
 
   $('cap-send').disabled = true;
   setStatus($('cap-status'), 'Queuing…', 'info');
-  const res = await send('routeText', { text });
+  const res = await send('routeText', { text, ...trackSelection() });
   handleResult(res);
 }
 
@@ -118,6 +149,10 @@ function handleResult(res) {
     setStatus($('cap-status'), `${res.detail || 'Queued'} ✓`, 'ok');
     $('cap-input').value = '';
     $('cap-hint').textContent = '';
+    if ($('cap-track').value === '__new__') loadTracks();   // the new track now exists — refresh + reset
+    $('cap-track').value = '';
+    $('cap-track-title').value = '';
+    $('cap-track-title').hidden = true;
   } else if (res?.duplicate) {
     // Loud: you already captured this — a misclick / re-share, not an error to hide.
     setStatus($('cap-status'), `⚠️ ${res.detail || 'Already in your inbox!'}`, 'err');
@@ -215,3 +250,4 @@ api.storage.onChanged.addListener((changes, area) => {
 // ── Init ──────────────────────────────────────────────────────────────────────
 prefill();
 renderAgentFeed();
+loadTracks();

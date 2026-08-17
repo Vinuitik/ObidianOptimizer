@@ -127,48 +127,54 @@ export async function gradeNoteOffline(notePath, band) {
 }
 
 // Capture a shared/pasted link → backend ingest. Queues when offline / on 401.
-export async function captureUrl(url) {
+// trackOpts (tracks/FLOWS.md Phase 1b): { trackId } tags an existing track, or
+// { newTrackTitle, newTrackType? } creates one on the fly — resolved server-side
+// (CaptureController.resolveTrackId). Omitted ⇒ today's exact untagged behavior.
+export async function captureUrl(url, trackOpts = {}) {
   if (isOnline()) {
     try {
       const res = await fetch('/api/capture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, ...trackOpts }),
       });
       if (res.ok) return { queued: false };
-      if (res.status === 401) { await enqueueCapture(url); return { queued: true, reason: 'auth' }; }
+      if (res.status === 401) { await enqueueCapture(url, trackOpts); return { queued: true, reason: 'auth' }; }
       throw new ApiError(res.status);
     } catch (e) {
       if (e instanceof ApiError) throw e;
       // network failure → queue
     }
   }
-  await enqueueCapture(url);
+  await enqueueCapture(url, trackOpts);
   return { queued: true };
 }
 
 // Capture a typed raw note (brain dump) → text ingest → Learn inbox. Queues when offline /
 // on 401, replays server-direct on reconnect. Mirrors captureUrl; driveMode is irrelevant
 // (capture always goes server-direct — the ingest pipeline needs the server regardless).
-export async function captureText(text, title) {
+export async function captureText(text, title, trackOpts = {}) {
   if (isOnline()) {
     try {
       const res = await fetch('/api/capture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ text, title }),
+        body: JSON.stringify({ text, title, ...trackOpts }),
       });
       if (res.ok) return { queued: false };
-      if (res.status === 401) { await enqueueCaptureText(text, title); return { queued: true, reason: 'auth' }; }
+      if (res.status === 401) {
+        await enqueueCaptureText(text, title, trackOpts);
+        return { queued: true, reason: 'auth' };
+      }
       throw new ApiError(res.status);
     } catch (e) {
       if (e instanceof ApiError) throw e;
       // network failure → queue
     }
   }
-  await enqueueCaptureText(text, title);
+  await enqueueCaptureText(text, title, trackOpts);
   return { queued: true };
 }
 

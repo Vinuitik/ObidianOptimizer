@@ -77,7 +77,7 @@ def test_v2_publish_branch_one_note_per_unit(monkeypatch):
     monkeypatch.setattr(publish, "validate_note", lambda md, names: [])
     monkeypatch.setattr(publish, "stamp_inbox", lambda md, *a, **k: md)
     monkeypatch.setattr(publish, "create_note",
-                        lambda folder, title, md: created.append((folder, title, md))
+                        lambda folder, title, md, **kw: created.append((folder, title, md))
                         or f"/vault/{folder}/{title}.md")
 
     job = {}

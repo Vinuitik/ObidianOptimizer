@@ -24,6 +24,13 @@
       placeholder="Paste anything — notes, an article link, a YouTube video, a PDF link… or drop a PDF / audio / video file here."></textarea>
     <p id="cap-hint" class="hint"></p>
 
+    <label class="lbl" for="cap-track">Track (optional)</label>
+    <select id="cap-track" class="in">
+      <option value="">Just capture</option>
+      <option value="__new__">+ New track…</option>
+    </select>
+    <input id="cap-track-title" class="in" type="text" placeholder="New track title" hidden />
+
     <button id="cap-send" class="btn ghost">Add to Learn queue</button>
     <p id="cap-status" class="status"></p>
 

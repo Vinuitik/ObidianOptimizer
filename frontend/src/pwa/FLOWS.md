@@ -101,6 +101,9 @@ Three ways in, all landing in the Learn inbox via the ingest pipeline. `CaptureP
   → 303 redirect `/capture?shared=…`.
 Backend: `CaptureController.capture()` (url/text) / `captureFile()` (multipart) → capture queue →
 embedder `/ingest` (standalone, `find_home`).
+- **Track tagging (Phase 1b):** Link/Note modes show a track picker (existing track or
+  "+ New track…"); `trackOpts()` spreads `{trackId}`/`{newTrackTitle}` into the capture POST,
+  carried through the offline outbox too. Full flow: `.../tracks/FLOWS.md#capture-time-track-tagging-phase-1b`.
 - Offline / 401 → `outbox.enqueueCapture()` (link) / `enqueueCaptureText()` (note) /
   SW `enqueueOutbox({kind:'captureFile', blob})` (file); all replayed server-direct by
   `outbox.flush()` on reconnect (ingestion needs the server anyway — no Drive mailbox kind).
@@ -267,6 +270,7 @@ embedder `/ingest` (standalone, `find_home`).
 | Share-target params (incl. file `accept`) | `manifest.webmanifest` + `vite-pwa.config.js` `share_target` |
 | Manifest icons (desktop-install gate) | `manifest.webmanifest` `icons` — needs PNG 192+512 for the Edge/Chrome desktop Install prompt; regen from `public/icons/*.svg` |
 | Raw-note (text) capture | `CapturePage` Note mode → `offlineApi.captureText()` → `POST /api/capture {text,title}` |
+| Capture-time track picker | `CapturePage.jsx` `trackOpts()`/`resetTrackPicker()`; threaded through `offlineApi.js` + `outbox.js` |
 | Shared-file (PDF/av) capture | `public/sw.js handleShareFile()` → `POST /api/capture/file` (multipart) |
 | Offline capture queue kinds | `outbox.js` `enqueueCaptureText` / `captureFile` + `flush()` handlers (server-direct) |
 | Capture → ingest behavior | `CaptureController.capture()` / `captureFile()` (backend) |

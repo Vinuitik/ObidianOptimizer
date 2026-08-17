@@ -219,12 +219,18 @@ def store_media(filename: str, data_b64: str) -> str:
     return res.json()["relPath"]
 
 
-def create_note(folder: str, title: str, content: str) -> str:
-    """Create via backend; on name collision retry with ' (2)', ' (3)'..."""
+def create_note(folder: str, title: str, content: str, capture_id: str | None = None) -> str:
+    """Create via backend; on name collision retry with ' (2)', ' (3)'...
+
+    capture_id (optional): passed through so the backend can auto-append the new note as
+    a track_items row when the producing capture is tagged with a Learning Track
+    (tracks/FLOWS.md Phase 1b — InternalAgentController.linkToTrack). Purely additive:
+    omitted/None reproduces today's exact behavior."""
     for attempt in range(1, 6):
         name = title if attempt == 1 else f"{title} ({attempt})"
         res = httpx.post(f"{BACKEND_URL}/api/internal/notes", headers=_headers(),
-                         json={"folder": folder, "name": name, "content": content},
+                         json={"folder": folder, "name": name, "content": content,
+                               "captureId": capture_id},
                          timeout=60)
         if res.status_code == 200:
             return res.json()["path"]
@@ -238,6 +244,29 @@ def update_note(vault_rel_path: str, content: str) -> None:
                     json={"path": vault_rel_path, "content": content}, timeout=60)
     if res.status_code != 200:
         raise PublishError(f"update_note {res.status_code}: {res.text[:300]}")
+
+
+def create_track(title: str, type: str) -> dict:
+    """MCP-only entry point (tracks/FLOWS.md Phase 1b `create_track` tool) — the embedder
+    never carries a session cookie, so track creation from a conversation goes through
+    this internal-token-gated mirror of the session-authed POST /tracks instead."""
+    res = httpx.post(f"{BACKEND_URL}/api/internal/tracks", headers=_headers(),
+                     json={"title": title, "type": type}, timeout=30)
+    if res.status_code != 200:
+        raise PublishError(f"create_track {res.status_code}: {res.text[:300]}")
+    return res.json()
+
+
+def add_track_item(track_id: str, title: str, note_path: str) -> None:
+    """Append a synthesized note as a track_items row. Called from the async ingest job
+    path (jobs.py) once a note the MCP caller tagged with track_id actually lands — the
+    tool call itself already returned before synthesis finishes, so this can't happen at
+    call time. Best-effort by design: callers swallow failures (a track-tagging hiccup
+    must never sink note delivery, same rule as one-bad-note-in-a-batch elsewhere here)."""
+    res = httpx.post(f"{BACKEND_URL}/api/internal/tracks/{track_id}/items", headers=_headers(),
+                     json={"title": title, "notePath": note_path}, timeout=30)
+    if res.status_code != 200:
+        raise PublishError(f"add_track_item {res.status_code}: {res.text[:300]}")
 
 
 def create_capture(capture_id: str, source_ref: str, content: str) -> str:

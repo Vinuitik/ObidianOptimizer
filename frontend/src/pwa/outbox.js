@@ -10,14 +10,17 @@ export function enqueueGrade(notePath, band) {
   return addToOutbox({ kind: 'grade', notePath, band, eventId: newId() });
 }
 
-export function enqueueCapture(url) {
-  return addToOutbox({ kind: 'capture', url, eventId: newId() });
+// trackOpts (tracks/FLOWS.md Phase 1b): { trackId } or { newTrackTitle, newTrackType? } —
+// carried through the queue so an offline capture still lands on the right track once
+// flush() replays it. {} ⇒ today's exact untagged behavior.
+export function enqueueCapture(url, trackOpts = {}) {
+  return addToOutbox({ kind: 'capture', url, trackOpts, eventId: newId() });
 }
 
 // A typed raw note (brain dump) → text ingest → Learn inbox. Replayed server-direct like
 // `capture` — ingestion needs the server/embedder anyway, so no Drive mailbox is warranted.
-export function enqueueCaptureText(text, title) {
-  return addToOutbox({ kind: 'captureText', text, title, eventId: newId() });
+export function enqueueCaptureText(text, title, trackOpts = {}) {
+  return addToOutbox({ kind: 'captureText', text, title, trackOpts, eventId: newId() });
 }
 
 export function enqueueAssignment(assignmentId, notePath, answers) {
@@ -50,7 +53,7 @@ export async function flush() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ url: item.url }),
+          body: JSON.stringify({ url: item.url, ...item.trackOpts }),
         });
         if (!res.ok) throw new Error('capture ' + res.status);
       } else if (item.kind === 'captureText') {
@@ -58,7 +61,7 @@ export async function flush() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ text: item.text, title: item.title }),
+          body: JSON.stringify({ text: item.text, title: item.title, ...item.trackOpts }),
         });
         if (!res.ok) throw new Error('captureText ' + res.status);
       } else if (item.kind === 'captureFile') {
