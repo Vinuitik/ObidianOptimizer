@@ -19,6 +19,7 @@ import {
   fetchTodayPlan as apiFetchTodayPlan,
   fetchCapacity as apiFetchCapacity, saveCapacity as apiSaveCapacity,
   setTrackMode as apiSetTrackMode,
+  fetchTrackProgress as apiFetchTrackProgress,
 } from '../api/tracks';
 // Offline-aware drop-ins: identical to the api/notes versions when online (they
 // just delegate), but fall back to the downloaded IndexedDB subset when offline.
@@ -180,6 +181,7 @@ const initialDataState = () => ({
   trackItems: {},
   trackSchedules: {},
   trackCapacity: {}, // weekday(0=Mon..6=Sun) -> items/day ceiling (Phase 1c)
+  trackProgress: [], // Phase 1d — [{ id, title, type, itemsDone, itemsTotal, deadline, onTrack }]
 
   // Settings (loaded from backend on startup)
   settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true, tracksEnabled: true, maxDailyReviews: 50, maxDailyFlashcards: 20 },
@@ -374,6 +376,15 @@ const useStore = create((set, get) => ({
     const trackCapacity = await apiSaveCapacity(weekdayCapacities);
     set({ trackCapacity });
     return trackCapacity;
+  },
+
+  fetchTrackProgress: async () => {
+    try {
+      const trackProgress = await apiFetchTrackProgress();
+      set({ trackProgress });
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 401)) throw e;
+    }
   },
 
   createTrack: async (title, type) => {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
+import Ring from '../components/atoms/Ring';
 import styles from './TracksPage.module.css';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -37,7 +38,7 @@ export default function TracksPage() {
 
       {tab === 'today' && <TodayTab />}
       {tab === 'manage' && <ManageTab />}
-      {tab === 'progress' && <ProgressStub />}
+      {tab === 'progress' && <ProgressTab />}
     </div>
   );
 }
@@ -510,10 +511,42 @@ function TrackScheduleEditor({ trackId }) {
 
 // ── Progress (Phase 1d) ──────────────────────────────────────────────────────
 
-function ProgressStub() {
+function ProgressTab() {
+  const trackProgress = useStore(s => s.trackProgress);
+  const fetchTrackProgress = useStore(s => s.fetchTrackProgress);
+
+  useEffect(() => { fetchTrackProgress(); }, [fetchTrackProgress]);
+
+  if (trackProgress.length === 0) {
+    return (
+      <div className={styles.emptySession}>
+        <p className={styles.emptySessionText}>No tracks to show progress for yet — mark "Include in Progress" on a track under "Manage tracks".</p>
+      </div>
+    );
+  }
+
   return (
-    <div className={styles.emptySession}>
-      <p className={styles.emptySessionText}>Progress tab lands in Phase 1d.</p>
+    <div className={styles.progressGrid}>
+      {trackProgress.map(t => {
+        const pct = t.itemsTotal > 0 ? Math.round((t.itemsDone / t.itemsTotal) * 100) : 0;
+        return (
+          <div key={t.id} className={styles.progressCard}>
+            <Ring pct={pct} size={56} />
+            <div className={styles.progressCardBody}>
+              <div className={styles.progressCardHeader}>
+                <span className={styles.trackBadge}>{t.type}</span>
+                <span className={styles.progressCardTitle}>{t.title}</span>
+              </div>
+              <span className={styles.progressCount}>{t.itemsDone}/{t.itemsTotal} done</span>
+              {t.deadline && (
+                <span className={t.onTrack ? styles.onTrackBadge : styles.behindBadge}>
+                  {t.onTrack ? 'On track' : 'Behind'} — due {t.deadline}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -2,6 +2,7 @@ package com.obsidian.obsidian.tracks;
 
 import com.obsidian.obsidian.tracks.TrackRepository.Track;
 import com.obsidian.obsidian.tracks.TrackRepository.TrackItem;
+import com.obsidian.obsidian.tracks.TrackRepository.TrackProgressRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -246,5 +247,43 @@ class TrackRepositoryIT {
         } finally {
             repo.setCapacity(Map.of(2, 4.0));
         }
+    }
+
+    // ── Progress (Phase 1d) ──────────────────────────────────────────────────
+
+    @Test
+    void capacityBetween_sumsSeedShape_monToSat() {
+        // default seed: weekday=4, Sat/Sun=6. Mon..Sat exclusive = Mon,Tue,Wed,Thu,Fri = 5*4=20
+        double sum = repo.capacityBetween(LocalDate.of(2026, 8, 17), LocalDate.of(2026, 8, 22));
+        assertThat(sum).isEqualTo(20.0);
+    }
+
+    @Test
+    void listProgressRows_countsDoneAndTotal_excludesIncludeInProgressFalse() {
+        Track counted = repo.create("Counted", "book", "manual");
+        TrackItem i1 = repo.addItem(counted.id(), "A", null);
+        repo.addItem(counted.id(), "B", null);
+        repo.completeItem(i1.id());
+
+        Track excluded = repo.create("Excluded", "book", "manual");
+        TrackItem e1 = repo.addItem(excluded.id(), "A", null);
+        repo.completeItem(e1.id());
+        repo.update(excluded.id(), null, null, null, null, null, false, false); // include_in_progress=false
+
+        List<TrackProgressRow> rows = repo.listProgressRows();
+
+        assertThat(rows).extracting(r -> r.track().id()).containsExactly(counted.id());
+        TrackProgressRow row = rows.get(0);
+        assertThat(row.itemsDone()).isEqualTo(1);
+        assertThat(row.itemsTotal()).isEqualTo(2);
+    }
+
+    @Test
+    void listProgressRows_excludesArchivedTracks() {
+        Track archived = repo.create("Archived", "book", "manual");
+        repo.addItem(archived.id(), "A", null);
+        repo.update(archived.id(), null, null, "archived", null, null, null, false);
+
+        assertThat(repo.listProgressRows()).isEmpty();
     }
 }

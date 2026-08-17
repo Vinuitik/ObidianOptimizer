@@ -35,6 +35,10 @@ public class TrackRepository {
     public record TrackItem(long id, long trackId, int position, String title, String notePath,
                             String status, Instant completedAt) {}
 
+    /** One row of the Progress tab's source data (Phase 1d) — completion counts joined
+     *  onto the track, before the service layer adds the deadline-aware onTrack signal. */
+    public record TrackProgressRow(Track track, int itemsDone, int itemsTotal) {}
+
     @PostConstruct
     public void initSchema() {
         jdbc.execute("""
@@ -267,6 +271,41 @@ public class TrackRepository {
                 ON CONFLICT (weekday) DO UPDATE SET capacity = EXCLUDED.capacity
                 """, e.getKey(), e.getValue());
         }
+    }
+
+    /** Σ getCapacity(weekday) for each day in [fromInclusive, toExclusive) — the shared
+     *  pace denominator for both Phase 1c's Today allocation (TodayPlanService) and
+     *  Phase 1d's onTrack signal (TrackProgressService). Lives here rather than duplicated
+     *  in each service since it only depends on the capacity table. */
+    public double capacityBetween(LocalDate fromInclusive, LocalDate toExclusive) {
+        double sum = 0;
+        for (LocalDate d = fromInclusive; d.isBefore(toExclusive); d = d.plusDays(1)) {
+            sum += getCapacity(weekdayOf(d));
+        }
+        return sum;
+    }
+
+    private int weekdayOf(LocalDate date) {
+        return date.getDayOfWeek().getValue() - 1;
+    }
+
+    // ── Progress (Phase 1d) ─────────────────────────────────────────────────────
+
+    /** One row per include_in_progress+active track with its completion counts —
+     *  Postgres allows GROUP BY t.id with t.* selected since id is tracks' primary key
+     *  (functional dependency). */
+    public List<TrackProgressRow> listProgressRows() {
+        return jdbc.query("""
+            SELECT t.*,
+                   COUNT(ti.id) AS items_total,
+                   COUNT(ti.id) FILTER (WHERE ti.status = 'done') AS items_done
+            FROM tracks t
+            LEFT JOIN track_items ti ON ti.track_id = t.id
+            WHERE t.include_in_progress = true AND t.status = 'active'
+            GROUP BY t.id
+            ORDER BY t.created_at DESC
+            """, (rs, rowNum) -> new TrackProgressRow(
+                mapTrack(rs, rowNum), rs.getInt("items_done"), rs.getInt("items_total")));
     }
 
     // ── Mapping ──────────────────────────────────────────────────────────────

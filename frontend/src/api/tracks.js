@@ -135,3 +135,13 @@ export async function setTrackMode(mode) {
   });
   return res.json();
 }
+
+// ── Progress (Phase 1d) ─────────────────────────────────────────────────────
+
+// Returns TrackProgress[] — { id, title, type, itemsDone, itemsTotal, deadline, onTrack },
+// excludes archived/paused tracks and anything with includeInProgress=false.
+// onTrack is null for tracks with no deadline (nothing to pace against).
+export async function fetchTrackProgress() {
+  const res = await req(`${BASE}/tracks/progress`);
+  return res.json();
+}

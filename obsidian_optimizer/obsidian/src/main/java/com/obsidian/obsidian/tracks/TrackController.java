@@ -19,12 +19,14 @@ public class TrackController {
     private final TrackRepository trackRepo;
     private final TodayPlanService todayPlan;
     private final TrackReviewHandoff reviewHandoff;
+    private final TrackProgressService progressService;
 
     TrackController(TrackRepository trackRepo, TodayPlanService todayPlan,
-                    TrackReviewHandoff reviewHandoff) {
+                    TrackReviewHandoff reviewHandoff, TrackProgressService progressService) {
         this.trackRepo = trackRepo;
         this.todayPlan = todayPlan;
         this.reviewHandoff = reviewHandoff;
+        this.progressService = progressService;
     }
 
     // ── Tracks ───────────────────────────────────────────────────────────────
@@ -140,6 +142,13 @@ public class TrackController {
     @GetMapping("today")
     public TodayPlan today() {
         return todayPlan.today();
+    }
+
+    // ── Progress (Phase 1d) ────────────────────────────────────────────────────
+
+    @GetMapping("progress")
+    public List<TrackProgressService.TrackProgress> progress() {
+        return progressService.progress();
     }
 
     // ── Capacity + mode (Phase 1c) ──────────────────────────────────────────────

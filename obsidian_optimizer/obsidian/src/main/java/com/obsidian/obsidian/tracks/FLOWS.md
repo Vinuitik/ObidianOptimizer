@@ -1,7 +1,7 @@
 # Tracks Domain Flows
 
-Files: TrackRepository.java, TrackController.java, TodayPlanService.java, TrackReviewHandoff.java
-Tests: TrackRepositoryIT.java, TodayPlanServiceTest.java, TrackReviewHandoffTest.java
+Files: TrackRepository.java, TrackController.java, TodayPlanService.java, TrackProgressService.java, TrackReviewHandoff.java
+Tests: TrackRepositoryIT.java, TodayPlanServiceTest.java, TrackProgressServiceTest.java, TrackReviewHandoffTest.java
 Frontend: frontend/src/pages/TracksPage.jsx, frontend/src/api/tracks.js, frontend/src/store/useStore.js (Tracks section)
 Plan: /home/victor/.claude/plans/adaptive-finding-bubble.md (Phase 1 of the full Learning Tracks plan)
 
@@ -103,6 +103,41 @@ restarts) — editable per-weekday via `GET/PUT /tracks/capacity` (`setCapacity`
 surfaced directly on `TracksPage`: the mode toggle + overflow banner on the Today tab,
 a collapsible "Daily capacity" 7-input panel at the top of the Manage tab's track sidebar
 (`CapacityPanel`) — tracks-specific, so it lives here rather than generic Settings.
+
+## Progress Flow (Phase 1d, IMPLEMENTED)
+
+```
+GET /tracks/progress → TrackProgressService.progress():
+  rows = trackRepo.listProgressRows()   -- one SQL query, GROUP BY t.id:
+    SELECT t.*, COUNT(ti.id) total, COUNT(ti.id) FILTER (done) done
+    FROM tracks t LEFT JOIN track_items ti ON ti.track_id = t.id
+    WHERE t.include_in_progress = true AND t.status = 'active'
+
+  for each row:
+    if track.deadline == null: onTrack = null   -- nothing to pace against
+    else:
+      created = track.createdAt as LocalDate (system zone)
+      capacitySpan    = trackRepo.capacityBetween(created, deadline)
+      capacityElapsed = trackRepo.capacityBetween(created, today)
+      expectedDone = capacitySpan > 0 ? itemsTotal * (capacityElapsed/capacitySpan) : itemsTotal
+      onTrack = itemsDone >= expectedDone
+```
+
+Response shape: `{id, title, type, itemsDone, itemsTotal, deadline?, onTrack?}[]`. `onTrack` is
+`null` (not `false`) for non-deadline tracks — the frontend only renders the on-track/behind
+badge when `deadline` is set. `capacityBetween` is the same pace denominator Phase 1c's
+`TodayPlanService` uses, promoted to a **public method on `TrackRepository`** (rather than
+private in each service) since it only depends on the capacity table — but `TodayPlanService`
+keeps its own private copy rather than switching to call `TrackRepository.capacityBetween()`:
+that service is unit-tested with a fully-mocked `TrackRepository`, and routing through a mocked
+method would silently return 0.0 instead of running the real summation the existing tests stub
+via `getCapacity()`. Two copies of a 6-line loop, not shared, to avoid that breakage — see
+Technology Notes.
+
+Frontend: `TracksPage.jsx` `ProgressTab` — a card grid (`.progressGrid`), each card reusing the
+existing `Ring` atom (`components/atoms/Ring.jsx`, previously unused elsewhere in the app) for
+the completion percentage, plus an on-track/behind badge (`.onTrackBadge`/`.behindBadge`) for
+deadline tracks only.
 
 ## FSRS Handoff Flow
 
@@ -218,6 +253,16 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
   schema ran first. A stale/deleted track id just means `linkToTrack()`'s `trackRepo.get()`
   lookup (inside `addItem`, indirectly) errors and is swallowed — the note itself still
   lands, only the track-item append silently no-ops.
+- **`TrackRepository.capacityBetween()` has two callers, deliberately not consolidated
+  into one.** `TrackProgressService` calls the real `TrackRepository.capacityBetween()`
+  method directly (its Mockito test stubs that method's return value). `TodayPlanService`
+  keeps a private copy of the same 6-line loop over `getCapacity()`, because
+  `TodayPlanServiceTest` mocks `TrackRepository` entirely and stubs `getCapacity(weekday)`
+  per-call to assert on the pace math — routing that service through
+  `trackRepo.capacityBetween(...)` would make the mock return 0.0 (Mockito's default for
+  an unstubbed method) instead of running the real summation, silently breaking every
+  existing Phase 1c test. Small, deliberate duplication over a shared call that would have
+  required rewriting already-passing tests for no behavior change.
 - **Two independent track-tagging paths, deliberately not unified.** The capture-queue
   path (extension/PWA) looks the track up server-side from `capture.track_id`, keyed by
   `captureId`, at note-creation time. The MCP path carries `track_id` directly on the
@@ -254,3 +299,7 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 | **Phase 1b** — MCP tools | `embedder/mcp_tools/write.py` `create_track`, `ingest_resource(track_id=)`, `create_note(track_id=)`; job-side fan-out in `ingest/jobs.py` `_link_track_item()` |
 | **Phase 1b** — extension picker | `extension/popup.html` `#cap-track`; `popup.js` `trackSelection()`/`loadTracks()`; `background.js` `listTracks()` + `trackOpts` threaded through `capture()`/`captureText()`/`routeText()`/`capturePage()`/`escalate()` |
 | **Phase 1b** — PWA picker | `frontend/src/pwa/CapturePage.jsx` (`trackOpts()`); threaded through `offlineApi.js` `captureUrl`/`captureText` and `outbox.js` `enqueueCapture`/`enqueueCaptureText`/`flush()` for offline replay |
+| **Phase 1d** — Progress query (SQL join + counts) | `TrackRepository.listProgressRows()` |
+| **Phase 1d** — onTrack calc | `TrackProgressService.progress(LocalDate)` / `toProgress()` |
+| **Phase 1d** — shared capacity-window sum | `TrackRepository.capacityBetween()` (public; `TodayPlanService` keeps its own private copy — see Technology Notes) |
+| **Phase 1d** — Progress tab UI | `TracksPage.jsx` `ProgressTab`; card styles in `TracksPage.module.css` `.progressGrid`/`.progressCard*` |
