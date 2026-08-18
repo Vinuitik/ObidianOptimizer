@@ -4,11 +4,11 @@ import { searchNotes } from '../api/notes';
 /**
  * Debounced semantic search hook.
  *
- * - 250ms debounce before each request (fast enough to feel live-as-you-type)
+ * - debounceMs before each request (default 250ms; pass lower for snappier UIs like inline popups)
  * - AbortController cancels any in-flight request when query changes
  * - Returns [] immediately if query is null / shorter than minLength
  */
-export function useSearch(query, minLength = 2) {
+export function useSearch(query, minLength = 2, debounceMs = 250) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const abortRef = useRef(null);
@@ -38,8 +38,8 @@ export function useSearch(query, minLength = 2) {
       } finally {
         if (!ctrl.signal.aborted) setLoading(false);
       }
-    }, 250);
-  }, [query, minLength]);
+    }, debounceMs);
+  }, [query, minLength, debounceMs]);
 
   // Cleanup on unmount
   useEffect(() => {

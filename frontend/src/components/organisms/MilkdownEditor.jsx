@@ -35,7 +35,7 @@ import styles from './MilkdownEditor.module.css';
 // ── Wiki-link suggestion dropdown (portal) ────────────────────────────────────
 
 function WikiLinkSuggest({ query, rect, onSelect, onClose }) {
-  const { results, loading } = useSearch(query, 1);
+  const { results, loading } = useSearch(query, 1, 80);
 
   useEffect(() => {
     function handleKey(e) { if (e.key === 'Escape') onClose(); }
