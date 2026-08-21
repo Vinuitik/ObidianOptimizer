@@ -13,6 +13,7 @@
 let registration = null;
 let updateListeners = [];
 let notified = false;
+let reloadOnControllerChange = false;
 
 export async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return null;
@@ -22,11 +23,6 @@ export async function registerServiceWorker() {
     return null;
   }
   try {
-    // A controller already present at load time means an OLDER SW was running this
-    // page — the next controllerchange is therefore a real update, not the very
-    // first install (which has no prior controller to change FROM).
-    const hadController = !!navigator.serviceWorker.controller;
-
     registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
     requestPersistentStorage();
 
@@ -38,10 +34,21 @@ export async function registerServiceWorker() {
     checkForUpdate();
     setInterval(checkForUpdate, 15 * 60 * 1000);
 
+    // sw.js no longer self-activates (no skipWaiting() on install) — a new SW installs and
+    // WAITS, so the tab keeps running on the old cache/old fetch logic until the user
+    // explicitly clicks Update. This just watches for that waiting worker and notifies;
+    // notifyIfWaiting() does the actual "does this represent a real update" check.
+    if (registration.waiting) notifyIfWaiting(registration);
+    registration.addEventListener('updatefound', () => {
+      const installing = registration.installing;
+      if (!installing) return;
+      installing.addEventListener('statechange', () => {
+        if (installing.state === 'installed') notifyIfWaiting(registration);
+      });
+    });
+
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController || notified) return;
-      notified = true;
-      updateListeners.forEach((cb) => cb());
+      if (reloadOnControllerChange) window.location.reload();
     });
 
     return registration;
@@ -51,13 +58,30 @@ export async function registerServiceWorker() {
   }
 }
 
-// Subscribe to "a new version has taken over — reload to see it". Returns an
-// unsubscribe function. Fires at most once per page load — sw.js self-activates
-// via skipWaiting()/clients.claim(), so by the time this fires the new SW is
-// already serving requests; reload just swaps the loaded JS bundle over.
+// A worker sits in `registration.waiting` only once BOTH are true: install finished, and
+// there's already a controller (i.e. this isn't the very first install on a blank tab —
+// there's an old version actively running that the new one would replace).
+function notifyIfWaiting(reg) {
+  if (!reg.waiting || !navigator.serviceWorker.controller || notified) return;
+  notified = true;
+  updateListeners.forEach((cb) => cb());
+}
+
+// Subscribe to "a new version finished downloading and is waiting to take over — ask the
+// user before applying it". Returns an unsubscribe function. Fires at most once per page
+// load. Call applyUpdate() (not reloadApp()) to actually swap it in.
 export function onUpdateAvailable(cb) {
   updateListeners.push(cb);
   return () => { updateListeners = updateListeners.filter((l) => l !== cb); };
+}
+
+// User clicked "Update": tell the waiting worker to activate, then reload once it does.
+// This is the ONLY thing that hands control to the new SW — old cache stays intact and
+// serving until this fires.
+export function applyUpdate() {
+  if (!registration?.waiting) { reloadApp(); return; }
+  reloadOnControllerChange = true;
+  registration.waiting.postMessage('SKIP_WAITING');
 }
 
 // Manual "check now" — nudges the browser to re-fetch sw.js instead of waiting on

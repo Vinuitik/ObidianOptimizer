@@ -60,9 +60,19 @@ async function enqueueOutbox(entry) {
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
   console.info('[sw] installing build', BUILD_ID);
+  // No self.skipWaiting() here on purpose: the new SW installs and then WAITS. The old
+  // SW keeps serving every open tab — old cache, old fetch logic, all of it — until the
+  // user explicitly asks to update (registerSW.js applyUpdate() → postMessage
+  // 'SKIP_WAITING' below). A deploy landing on the server must never silently swap a
+  // running tab onto a build whose hashed assets haven't finished propagating yet.
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((c) => c.addAll(SHELL_URLS)).then(() => self.skipWaiting())
+    caches.open(SHELL_CACHE).then((c) => c.addAll(SHELL_URLS))
   );
+});
+
+// Only path to activation: the user clicked "Update" (RefreshButton → applyUpdate()).
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING' || event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
