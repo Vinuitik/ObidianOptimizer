@@ -266,6 +266,7 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 - **MCP session manager**: `mcp.session_manager.run()` must be entered in the FastAPI lifespan or `/mcp` 500s. It can only be started once per process — relevant for tests (module-scoped client).
 - **MCP stateless mode**: no session persistence; every request is self-contained. Fine for tool calls; would need stateful mode for subscriptions/sampling.
 - **Embedder DB access**: the MCP tools read Postgres directly with psycopg (connection per call, no pool). Low traffic by design; add a pool if MCP usage grows.
+- **Offline semantic search is not achievable without a new client-side capability.** Embedding ANY text (query or document) requires the ONNX model running in the `embedder` container — there is no browser-side embedding runtime in this codebase, and even if a document vector were cached client-side, the model is prompt-asymmetric (`kind`: document vs query, `EmbeddingService.embedBatch`) so it couldn't stand in for a query embedding anyway. A 2026-08-24 attempt to cache per-note vectors for offline cosine-similarity search was scrapped for this reason (frontend fell back to plain filename matching instead — see `frontend/src/utils/offlineSearch.js`). Real offline semantic search would need bundling an embedding model into the frontend (onnxruntime-web + tokenizer + ONNX weights, likely 100MB+) — a separate, large effort.
 
 ---
 

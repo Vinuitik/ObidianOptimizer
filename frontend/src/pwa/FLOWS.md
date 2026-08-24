@@ -174,6 +174,36 @@ embedder `/ingest` (standalone, `find_home`).
   shows real per-type counts on completion ("Pulled 40 notes · 12 images · 3 video/audio · 8 PDF pages").
   To rename phases: `SyncPage.STAGE_LABELS`. To add a phase: emit a new `stage` + add its label.
 
+## Flow — offline name cache (degraded search/linking, 2026-08-24)
+`syncOffline.js`, `drivePull.js`, `../api/notes.js` (`fetchNames`), `../utils/useSearch.js`,
+`../utils/offlineSearch.js`.
+
+**Goal**: search + note-linking (`[[` autocomplete) shouldn't hard-break offline. First
+attempt at this cached per-note embedding vectors for offline cosine-similarity search —
+scrapped: real offline semantic search needs the typed QUERY embedded too, and there's no
+way to do that offline (the embedder is server-only). See `ml/FLOWS.md` Technology Notes
+for that dead end.
+
+What shipped instead is simpler: cache the full vault's note NAME list (just paths, from
+the existing `GET /names` — no new endpoint), and match on filename substring when offline.
+
+1. **Name cache (piggybacked on the existing sync — no new proactive trigger)**: after
+   `syncForOffline()` writes `reviewNotes`, it best-effort calls `fetchNames()` and
+   `setMeta('cachedNoteNames', ...)`. `refreshAndPull()` does the same, but only when
+   `serverUp` (mirrors `warmReviewMedia` — `/names` isn't on Drive, so it can't run in the
+   Drive-only `pullReviewFromDrive()`). Both try/catch best-effort: a failed fetch never
+   fails the review sync, and the cached list just goes stale until the next sync (drift
+   accepted, by design).
+2. **Offline search/linking fallback**: `useSearch.js` (the ONE hook behind both
+   `SearchBar` and `MilkdownEditor`'s `WikiLinkSuggest`) catches a server-unreachable
+   error and calls `offlineSearch.offlineKeywordSearch()`, which substring-matches the
+   query against `cachedNoteNames` — filename only, not content, not semantic.
+
+To change the piggyback scope: `syncOffline.js` / `drivePull.js`. To change match
+scoring: `offlineSearch.js`.
+
+---
+
 ## Flow — update detection + manual refresh
 `registerSW.js`, `../components/atoms/RefreshButton.jsx`, `NavBar.jsx`, `MobileLayout.jsx`, `../../desktop/main.js`.
 - **Why this exists:** SPA route changes never re-fetch `index.html`/JS — there was no
@@ -234,7 +264,8 @@ embedder `/ingest` (standalone, `find_home`).
 - **Service workers need a secure context.** Real HTTPS or `localhost` only. The stack's self-signed `:8443` will BLOCK SW registration in Chrome — `registerSW.js` no-ops via `window.isSecureContext`. Install + first sync MUST be done online over the Cloudflare tunnel (`obsidianoptimizer.uk`, real cert). After that, offline runs from cache.
 - **Hand-written SW, not Workbox.** `public/sw.js` precaches only the shell URLs; hashed JS/CSS are cached lazily (stale-while-revalidate) on first online visit — so a cold-install that immediately goes offline before assets load can fail. First online launch is required. Upgrade path: `vite-pwa.config.js` (Workbox `injectManifest`).
 - **Storage is sandboxed + evictable.** PWA can't roam the phone filesystem. Offline data lives in IndexedDB (`obsopt-offline`) + Cache Storage (`obsopt-shell-*`, `obsopt-media`). `navigator.storage.persist()` is requested but the browser may still deny; under pressure Android can evict the offline set. **No quota guard on media** — the warm now caches images + A/V renditions + PDF pages for the whole due+inbox set (`includeMedia` default on). Renditions/page-PNGs keep it bounded (originals are NOT cached), but a large due set can still be sizable; retention evicts out-of-scope media each warm. If eviction bites, add a byte cap in `warmMedia.warmReviewMedia`.
-- **The SW duplicates the IDB outbox schema** (it writes captures while a client may be closed). `public/sw.js` `openDB()` MUST stay in sync with `db.js` (`DB_NAME='obsopt-offline'`, `DB_VERSION=1`, stores reviewNotes/outbox/meta). Bump both together.
+- **The SW duplicates the IDB outbox schema** (it writes captures while a client may be closed). `public/sw.js` `openDB()` MUST stay in sync with `db.js` (`DB_NAME='obsopt-offline'`, `DB_VERSION=2`, stores reviewNotes/assignments/outbox/meta). Bump both together.
+- **cachedNoteNames (meta key) is all-or-nothing per sync**: `fetchNames()` either returns the full vault list or throws — a failed sync leaves the previous cached list untouched (stale, not empty); a successful one replaces it wholesale. No partial-write case to worry about (unlike the scrapped vector-cache approach, which upserted per-item and could accumulate orphans — see git history if that's ever revisited).
 - **Session cookie in PWA context.** Capture/grade rely on the same-origin Spring session cookie surviving the installed-PWA context. If it doesn't, requests 401 → everything queues until re-login. CSP `connect-src 'self'` is fine (same-origin only).
 - **`navigator.onLine` is a hint, not truth.** It only knows the device has *a* network, not that the server is reachable; the offline layer still falls back to IDB whenever a `fetch` actually throws.
 - **Hybrid split runs CLIENT-side, one function, so desktop and phone always agree.** `reviewPlan.allocateTracks` is fed raw materials (due notes + `hasCards`) by each mode rather than the split being baked server-side into the bundle — avoids re-deriving the same logic in Java and re-running it on the 6-hourly export cron. Cost: the caps must reach the client. Online = `/settings`; **offline = the Drive bundle** (`OfflineExportService` → `bundle.settings` → `drivePull` → IDB meta `reviewCaps` → `store.fetchReviewNotes` in Drive mode). If the bundle predates this field (old export), the phone falls back to store/defaults (50/20) — re-export to fix.
@@ -274,6 +305,9 @@ embedder `/ingest` (standalone, `find_home`).
 | Shell precache list | `public/sw.js` `SHELL_URLS` |
 | Media cache name | `public/sw.js` + `syncOffline.js` `MEDIA_CACHE = 'obsopt-media'` |
 | IndexedDB schema | `db.js` + mirror in `public/sw.js` `openDB()` |
+| Offline name cache (what/when it's fetched) | `syncOffline.js` (after `putReviewNotes`) / `drivePull.js refreshAndPull()` (`if (serverUp)` block) |
+| Offline name cache store | `db.js` `meta` key `cachedNoteNames` (`setMeta`/`getMeta`) |
+| Offline search/linking fallback | `../utils/useSearch.js` `isServerUnreachable()` → `../utils/offlineSearch.js offlineKeywordSearch()` |
 | Offline subset size / media policy | `syncOffline.js` `syncForOffline({ limit, includeMedia })` |
 | Share-target params (incl. file `accept`) | `manifest.webmanifest` + `vite-pwa.config.js` `share_target` |
 | Manifest icons (desktop-install gate) | `manifest.webmanifest` `icons` — needs PNG 192+512 for the Edge/Chrome desktop Install prompt; regen from `public/icons/*.svg` |

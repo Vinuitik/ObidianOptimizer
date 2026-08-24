@@ -6,7 +6,7 @@
 // The media step is delegated to warmReviewMedia (the SAME engine the Drive-linked path
 // uses) so this path also caches EVERYTHING — images, A/V renditions, PDF pages, other
 // source files — not just images. onStage?.({ stage, done, total }) reports each phase.
-import { fetchReview, fetchNoteContent } from '../api/notes';
+import { fetchReview, fetchNoteContent, fetchNames } from '../api/notes';
 import { putReviewNotes, setMeta } from './db';
 import { warmReviewMedia } from './warmMedia';
 
@@ -31,6 +31,14 @@ export async function syncForOffline({ limit = 40, includeMedia = true, onStage 
   }
 
   await putReviewNotes(records);
+
+  // Piggyback: cache the full vault's note names (path list) for offline search/link
+  // fallback (utils/offlineSearch.js) — simple substring match, no embeddings. Best-effort:
+  // a failure here must never fail the review sync; the name cache just stays stale/missing
+  // until the next successful sync (drift accepted).
+  try {
+    await setMeta('cachedNoteNames', await fetchNames());
+  } catch { /* offline name cache is best-effort */ }
 
   let media = { warmed: 0, byPhase: {} };
   if (includeMedia) {

@@ -1,6 +1,6 @@
 # Utils Flows
 
-Files: diff.js, frontmatter.js, markdownCleanup.js, wikiLinkPlugin.js, obsidianImagePlugin.js, hashtagPlugin.js, livePreviewPlugin.js, mathPlugin.js, markdown.js, useSearch.js
+Files: diff.js, frontmatter.js, markdownCleanup.js, wikiLinkPlugin.js, obsidianImagePlugin.js, hashtagPlugin.js, livePreviewPlugin.js, mathPlugin.js, markdown.js, useSearch.js, offlineSearch.js
 
 ---
 
@@ -126,7 +126,9 @@ query changes
   → setTimeout(500ms)
       → new AbortController → store in abortRef
       → searchNotes(q, { signal }) → setResults(data)
-      → AbortError caught silently; other errors → setResults([])
+      → AbortError caught silently
+      → server-unreachable error (TypeError, or ApiError 5xx/530) → offlineKeywordSearch(q)
+      → other errors → setResults([])
 ```
 
 `loading` stays `true` during the 500ms wait — callers can show a spinner immediately on keystroke.  
@@ -134,8 +136,40 @@ Cleanup on unmount: clears timer + aborts any in-flight request.
 
 **Why AbortController vs just ignoring stale results**: without abort, every keystroke launches a request that runs to completion on the server and holds a DB + embedder connection. AbortController tells the browser to close the TCP connection so the server I/O unblocks early.
 
+**This is the ONE chokepoint for both consumers** — `SearchBar.jsx` (main search) and
+`WikiLinkSuggest` inside `MilkdownEditor.jsx` (note-linking `[[` autocomplete) both call
+this hook, so the offline fallback below covers search AND note-linking with one change.
+
 To change debounce: `useSearch.js setTimeout(..., 500)`  
 To change minimum query length: `minLength` arg (default 2; WikiLinkSuggest uses 1)
+
+---
+
+## offlineSearch.js — Offline degraded search (2026-08-24)
+
+`offlineKeywordSearch(query, limit=10)` → `[{notePath, snippet}]` — same shape as the
+online `/search` response, so `useSearch.js` can swap it in transparently.
+
+```
+q = query.toLowerCase()
+getMeta('cachedNoteNames') (db.js meta — the FULL vault path list, piggybacked on sync —
+                            see pwa/FLOWS.md "offline name cache")
+per path: title = filename (no extension); skip if q not a substring of title
+score: prefix match ranks above mid-title match; shorter titles rank above longer ones
+sort desc → slice(0, limit); snippet = the note's folder path (no content available offline)
+```
+
+**This is a NAME (filename) match, not content or semantic search — deliberate, not a
+gap to fill later.** First attempt cached per-note embedding VECTORS for offline
+cosine-similarity search and scrapped it: real semantic search needs the typed QUERY
+embedded too, and there's no offline path to embed new text (the embedder is server-only —
+see `ml/FLOWS.md` Technology Notes). Filename match is simpler, cheap, needs no schema
+bump (reuses the existing `meta` store), and actually covers the real use cases here —
+search-by-title and wiki-link autocomplete — without pretending to be semantic.
+
+To change scoring: `offlineSearch.js`. To widen scope: it already covers the whole vault
+(not just the downloaded review subset) since `cachedNoteNames` comes from `GET /names`,
+not from `reviewNotes`.
 
 ---
 
@@ -159,3 +193,5 @@ General-purpose markdown utilities (non-Milkdown). Check file for current export
 | Math syntax preservation | `mathPlugin.js toMarkdown` |
 | Paste accepted types | `obsidianImagePlugin.js *_EXTS + WHITELISTED_MIME_TYPES` |
 | Filename collision format | `obsidianImagePlugin.js generateFilename()` |
+| Offline search fallback trigger | `useSearch.js isServerUnreachable()` |
+| Offline search scoring | `offlineSearch.js offlineKeywordSearch()` |

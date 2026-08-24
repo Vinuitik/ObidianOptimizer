@@ -6,6 +6,7 @@ import { getAccessToken, driveList, driveDownload } from './drive';
 import { deriveKey, decryptText } from './crypto';
 import { splitFrontmatter, parseFrontmatterFields } from '../utils/frontmatter';
 import { putReviewNotes, putAssignments, setMeta } from './db';
+import { fetchNames } from '../api/notes';
 
 const REVIEW_BUNDLE = 'review-bundle.json.enc';
 const CARDS_BUNDLE = 'cards.json.enc';
@@ -120,6 +121,14 @@ export async function refreshAndPull({ onStage } = {}) {
         onProgress: p => onStage?.({ stage: p.phase, done: p.done, total: p.total }),
       });
     } catch { /* keep the note set even if media warming fails */ }
+
+    // Piggyback: cache the full vault's note names for offline search/link fallback
+    // (utils/offlineSearch.js). Same reasoning as media above — /names is server-direct,
+    // not on Drive, so this can only run while the server answered. Best-effort; drift
+    // accepted otherwise.
+    try {
+      await setMeta('cachedNoteNames', await fetchNames());
+    } catch { /* offline name cache is best-effort */ }
   }
   return res;
 }

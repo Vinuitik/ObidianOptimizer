@@ -5,7 +5,7 @@
 //   reviewNotes  keyPath 'path'     — { path, shortName, content, media:[urls], srDue }
 //   assignments  keyPath 'notePath' — { notePath, assignmentId, cards, variants }  (offline flashcards)
 //   outbox       autoIncrement      — { id, kind:'grade'|'capture'|'assignment', ...payload, eventId, ts }
-//   meta         keyPath 'key'      — { key, value }  (lastSync, driveCreds, doneDate, …)
+//   meta         keyPath 'key'      — { key, value }  (lastSync, driveCreds, doneDate, cachedNoteNames, …)
 
 const DB_NAME = 'obsopt-offline';
 const DB_VERSION = 2;   // bumped for the 'assignments' store — keep public/sw.js openDB in sync

@@ -47,6 +47,13 @@ ctrl.abort(); // cancels in-flight fetch; throws AbortError (caught, ignored)
 
 `useSearch` hook wraps this: new query → cancel previous controller → start 500ms debounce → fire with fresh controller. Prevents stale results arriving out-of-order.
 
+### fetchNames — also the offline name cache source
+
+`fetchNames()` → `GET /api/names` → `string[]` (full vault-relative paths). Used by desktop's
+`noteIndex` rebuild (`store/useStore.js fetchNoteNames`) AND, since 2026-08-24, piggybacked by
+`pwa/syncOffline.js`/`pwa/drivePull.js` to cache the list in IDB `meta.cachedNoteNames` for
+offline search/link fallback — see `utils/FLOWS.md` "offlineSearch.js".
+
 ---
 
 ## Change Index
