@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { captureUrl, captureText } from './offlineApi';
 import { fetchTracks } from '../api/tracks';
+import { getMeta, setMeta } from './db';
 import styles from './MobilePages.module.css';
 
 // Capture tab — two ways in, both landing in the Learn inbox via the ingest pipeline:
@@ -38,9 +39,23 @@ export default function CapturePage() {
   const [trackChoice, setTrackChoice] = useState('');
   const [newTrackTitle, setNewTrackTitle] = useState('');
 
+  // Fetch tracks, caching a successful result to meta so an offline fetch failure can
+  // fall back to the last-known list instead of leaving the picker blank with no
+  // explanation (stale is fine — same cached-state-beats-no-state stance as Drive sync).
+  async function loadTracks() {
+    try {
+      const list = (await fetchTracks() || []).filter(t => t.status === 'active');
+      setTracks(list);
+      setMeta('cachedTracks', list).catch(() => {});
+    } catch {
+      const cached = await getMeta('cachedTracks').catch(() => null);
+      setTracks(cached || []);
+    }
+  }
+
   useEffect(() => {
     if (!isAuthenticated) return;
-    fetchTracks().then(list => setTracks((list || []).filter(t => t.status === 'active'))).catch(() => {});
+    loadTracks();
   }, [isAuthenticated]);
 
   function trackOpts() {
@@ -53,7 +68,7 @@ export default function CapturePage() {
 
   function resetTrackPicker() {
     if (trackChoice === '__new__') {
-      fetchTracks().then(list => setTracks((list || []).filter(t => t.status === 'active'))).catch(() => {});
+      loadTracks();
     }
     setTrackChoice('');
     setNewTrackTitle('');
