@@ -1,6 +1,6 @@
 # Utils Flows
 
-Files: diff.js, frontmatter.js, markdownCleanup.js, wikiLinkPlugin.js, obsidianImagePlugin.js, hashtagPlugin.js, livePreviewPlugin.js, mathPlugin.js, markdown.js, useSearch.js
+Files: diff.js, frontmatter.js, markdownCleanup.js, wikiLinkPlugin.js, obsidianImagePlugin.js, hashtagPlugin.js, livePreviewPlugin.js, mathPlugin.js, markdown.js, useSearch.js, offlineSearch.js
 
 ---
 
@@ -126,7 +126,9 @@ query changes
   → setTimeout(500ms)
       → new AbortController → store in abortRef
       → searchNotes(q, { signal }) → setResults(data)
-      → AbortError caught silently; other errors → setResults([])
+      → AbortError caught silently
+      → server-unreachable error (TypeError, or ApiError 5xx/530) → offlineKeywordSearch(q)
+      → other errors → setResults([])
 ```
 
 `loading` stays `true` during the 500ms wait — callers can show a spinner immediately on keystroke.  
@@ -134,8 +136,49 @@ Cleanup on unmount: clears timer + aborts any in-flight request.
 
 **Why AbortController vs just ignoring stale results**: without abort, every keystroke launches a request that runs to completion on the server and holds a DB + embedder connection. AbortController tells the browser to close the TCP connection so the server I/O unblocks early.
 
+**This is the ONE chokepoint for both consumers** — `SearchBar.jsx` (main search) and
+`WikiLinkSuggest` inside `MilkdownEditor.jsx` (note-linking `[[` autocomplete) both call
+this hook, so the offline fallback below covers search AND note-linking with one change.
+
 To change debounce: `useSearch.js setTimeout(..., 500)`  
 To change minimum query length: `minLength` arg (default 2; WikiLinkSuggest uses 1)
+
+---
+
+## offlineSearch.js — Offline degraded search (2026-08-24)
+
+`offlineKeywordSearch(query, limit=10)` → `[{notePath, snippet, score}]` — same shape as
+the online `/search` response, so `useSearch.js` can swap it in transparently.
+
+```
+tokenize(query) → lowercase words
+getAllReviewNotes() (db.js — the offline-downloaded due-note subset, NOT the whole vault)
+per note: score = Σ over tokens of (title occurrences × 3 + content occurrences)
+keep score > 0 → sort desc → slice(0, limit)
+```
+
+**This is KEYWORD substring matching, not semantic/embedding search — a deliberate,
+documented gap, not an oversight.** True offline semantic search would need the typed
+QUERY embedded, and that's not achievable offline:
+- The embedder (ONNX model) only runs server-side (`embedder/` container) — unreachable
+  by definition when offline.
+- Even if reachable, the backend's vector endpoint (`NoteVectorController` /
+  `/notes/vectors`) only returns pre-computed DOCUMENT-side vectors — the model is
+  prompt-asymmetric (`kind`: document vs query, see the Java `EmbeddingService`), so a
+  document vector isn't a valid query embedding anyway.
+- There is no client-side (in-browser) embedding runtime in this codebase. Building one
+  would mean bundling onnxruntime-web + a tokenizer + the ONNX weights (100MB+) — a
+  separate, large capability, not attempted here.
+
+So `db.js`'s `noteVectors` IDB store IS populated (piggybacked on the review sync — see
+`pwa/FLOWS.md` "offline embeddings"), but currently has **no offline consumer**: neither
+this fallback nor `WikiLinkSuggest` uses it, because their query is always freshly-typed
+text. It's ready infrastructure for a future feature that doesn't need query embedding
+(e.g. "notes similar to the one I'm viewing," which reuses that note's own cached vector).
+
+To change scoring/weights: `offlineSearch.js` — title-vs-content weight, snippet window.  
+To widen scope beyond the downloaded review subset: not possible without downloading more
+(`syncForOffline({ limit })`) — offline search only ever sees what's cached.
 
 ---
 
@@ -159,3 +202,5 @@ General-purpose markdown utilities (non-Milkdown). Check file for current export
 | Math syntax preservation | `mathPlugin.js toMarkdown` |
 | Paste accepted types | `obsidianImagePlugin.js *_EXTS + WHITELISTED_MIME_TYPES` |
 | Filename collision format | `obsidianImagePlugin.js generateFilename()` |
+| Offline search fallback trigger | `useSearch.js isServerUnreachable()` |
+| Offline search scoring | `offlineSearch.js offlineKeywordSearch()` |
