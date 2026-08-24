@@ -49,12 +49,22 @@ export default function MobileLayout() {
   // Reconnect → sync the outbox. Drive-linked: grades go to the Drive mailbox (works with
   // the laptop off); anything left (e.g. captures) still tries the server. Unlinked: just
   // the server-direct flush. All no-ops when the outbox is empty.
+  //
+  // Also retried on visibilitychange, not just the `online` flip: Android/Chrome freezes
+  // a backgrounded tab's JS, so a phone that reconnects while locked/backgrounded never
+  // dispatches 'online' to it — the outbox effect above never reruns even though the
+  // network came back. Unlocking/foregrounding fires visibilitychange reliably, so that's
+  // the actual reconnect signal on mobile (same reasoning as maybeAutoSync below).
   useEffect(() => {
-    if (!online) return;
-    (async () => {
+    const trySync = async () => {
+      if (!navigator.onLine) return;
       if (await hasCreds().catch(() => false)) await pushMailbox().catch(() => {});
       await flushOutbox().catch(() => {});
-    })();
+    };
+    if (online) trySync();
+    const onVis = () => { if (document.visibilityState === 'visible') trySync(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
   }, [online]);
 
   // Auto-sync (cron-like): keep the Drive-linked review set fresh without a manual tap.

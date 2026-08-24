@@ -65,11 +65,15 @@ export default function App() {
   }, [checkAuth]);
 
   // Grades/captures made during a network blip queue to the outbox (offlineApi).
-  // Replay them on load and whenever connectivity returns, so nothing is stranded
-  // on the full site either (no-op when the outbox is empty).
+  // Replay them on load, whenever connectivity returns, and on visibilitychange (a
+  // backgrounded/frozen tab can miss the 'online' event entirely — see MobileLayout.jsx
+  // for the mobile case this actually surfaced in), so nothing is stranded.
   useEffect(() => {
     flushOutbox().catch(() => {});
-    return onConnectivityChange(on => { if (on) flushOutbox().catch(() => {}); });
+    const onVis = () => { if (document.visibilityState === 'visible' && navigator.onLine) flushOutbox().catch(() => {}); };
+    document.addEventListener('visibilitychange', onVis);
+    const offConnectivity = onConnectivityChange(on => { if (on) flushOutbox().catch(() => {}); });
+    return () => { document.removeEventListener('visibilitychange', onVis); offConnectivity(); };
   }, []);
 
   return (
