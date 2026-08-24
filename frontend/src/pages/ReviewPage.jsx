@@ -4,6 +4,7 @@ import { gradeNoteOffline as gradeNote, fetchNoteContentOffline as fetchNoteCont
 import useOffline from '../pwa/useOffline';
 import FlashcardSession from '../components/organisms/FlashcardSession';
 import NoteRenderer from '../components/molecules/NoteRenderer';
+import { pickNextInOrder } from './reviewOrder';
 import styles from './ReviewPage.module.css';
 
 export default function ReviewPage() {
@@ -55,18 +56,16 @@ export default function ReviewPage() {
     }
   }
 
-  // After a note is reviewed, auto-advance to a RANDOM remaining due note (web + PWA use this
-  // same component). `fromPath` is the note just finished — excluded so we never re-open it.
-  // Nothing left → fall back to the empty pane. Read fresh from the store: grading dismisses
-  // the finished note from reviewNotes, so getState() reflects the real remaining set.
-  function pickRandomNext(excludePath) {
-    const list = useStore.getState().reviewNotes.filter(n => n.fullPath !== excludePath);
-    return list.length ? list[Math.floor(Math.random() * list.length)] : null;
-  }
-
+  // After a note is reviewed, auto-advance to the next due note in DFS pre-order
+  // (vault tree order: siblings in a folder before descending into subfolders, files
+  // before subdirectories — see pages/reviewOrder.js). `fromPath` is the note just
+  // finished — used as the walk's reference point so we resume right after it.
+  // Nothing left → fall back to the empty pane. Read fresh from the store: grading
+  // dismisses the finished note from reviewNotes, so getState() reflects the real
+  // remaining set (fromPath itself is already gone from it).
   function handleClose(fromPath) {
     const done = fromPath ?? inlineNote?.fullPath ?? activeNote?.fullPath ?? null;
-    const next = pickRandomNext(done);
+    const next = pickNextInOrder(useStore.getState().reviewNotes, done);
     if (next) {
       startSession(next);   // transitions cleanly (sets/clears active+inline itself)
     } else {
