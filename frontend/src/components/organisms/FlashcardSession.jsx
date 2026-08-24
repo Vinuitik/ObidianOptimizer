@@ -51,9 +51,10 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
   const [error, setError]           = useState(null);
   const [assignment, setAssignment] = useState(null);
   const [idx, setIdx]               = useState(0);
-  const [answers, setAnswers]       = useState({});  // { [cardId]: string }
-  const [verdicts, setVerdicts]     = useState({});  // { [cardId]: {verdict, pointsEarned, maxPoints, feedback} }
+  const [answers, setAnswers]       = useState({});  // { [cardId]: string } — buffered client-side, unsent until Finish
+  const [verdicts, setVerdicts]     = useState({});  // { [cardId]: {verdict, pointsEarned, maxPoints, feedback} } — filled at Finish
   const [completion, setCompletion] = useState(null); // { notes: [{notePath, score, band, due}] }
+  const [submitting, setSubmitting] = useState(false); // true while Finish is grading all buffered answers
 
   useEffect(() => {
     let cancelled = false;
@@ -93,24 +94,34 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
     </div>;
   }
 
-  const cards    = Array.isArray(assignment.cards) ? assignment.cards : [];
-  const variants = assignment.variants ?? {};
-  const card     = cards[idx];
-  const isLocked = Boolean(verdicts[card?.id]);
+  const cards      = Array.isArray(assignment.cards) ? assignment.cards : [];
+  const variants   = assignment.variants ?? {};
+  const card       = cards[idx];
+  const isAnswered = card ? (answers[card.id] != null && answers[card.id] !== '') : false;
 
-  async function submitAnswer(cardId, value) {
+  function setAnswer(cardId, value) {
     setAnswers(prev => ({ ...prev, [cardId]: value }));
-    const sent = value === IDK ? '' : value;  // IDK records a WRONG attempt, not a skip
-    try {
-      const result = await submitAttempt(assignment.id, cardId, sent);
-      setVerdicts(prev => ({ ...prev, [cardId]: result }));
-    } catch (e) {
-      setVerdicts(prev => ({ ...prev, [cardId]: { verdict: 'WRONG', pointsEarned: 0, maxPoints: 0, feedback: 'verification failed' } }));
-    }
   }
 
-  async function next() {
-    if (idx < cards.length - 1) { setIdx(i => i + 1); return; }
+  // Finish: send every buffered answer at once (each card's own submitAttempt,
+  // same per-card verification the server has always done — nothing server-side
+  // changed), then complete the assignment. Cards never touched are treated the
+  // same as an explicit "I don't know" — sent as '' so they still record a WRONG
+  // attempt (keeping their difficulty in the per-note score denominator) rather
+  // than being silently skipped.
+  async function finish() {
+    setSubmitting(true);
+    const results = {};
+    await Promise.all(cards.map(async c => {
+      const raw = answers[c.id];
+      const sent = (raw == null || raw === IDK) ? '' : raw;
+      try {
+        results[c.id] = await submitAttempt(assignment.id, c.id, sent);
+      } catch (e) {
+        results[c.id] = { verdict: 'WRONG', pointsEarned: 0, maxPoints: 0, feedback: 'verification failed' };
+      }
+    }));
+    setVerdicts(results);
     try {
       const result = await completeAssignment(assignment.id);
       setCompletion(result);
@@ -122,7 +133,13 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
       // flashcard slots past the daily cap (see reviewPlan.js / getReviewSession).
       recordFlashcardDone();
     } catch { /* result phase still renders per-card verdicts */ }
+    setSubmitting(false);
     setPhase('result');
+  }
+
+  function next() {
+    if (idx < cards.length - 1) { setIdx(i => i + 1); return; }
+    finish();
   }
 
   // ── Quiz phase ────────────────────────────────────────────────────────────
@@ -131,7 +148,10 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
     return (
       <div className={styles.session} data-testid="flashcard-session">
         <div className={styles.progress}>
-          <span className={styles.progressText}>{idx + 1} / {cards.length}</span>
+          <span className={styles.progressText}>
+            {idx + 1} / {cards.length}
+            {isAnswered && <span data-testid="answered-badge" title="Answered">{' '}✓</span>}
+          </span>
           <div className={styles.progressBar}>
             <div className={styles.progressFill}
                  style={{ width: `${((idx + 1) / cards.length) * 100}%` }} />
@@ -145,42 +165,38 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
           <p className={styles.question}>{questionOf(card, variants)}</p>
 
           {card.type === 'mcq' && (
-            <McqOptions card={card} answer={answers[card.id]} locked={isLocked}
-                        onSelect={val => setAnswers(prev => ({ ...prev, [card.id]: val }))}
-                        onSubmit={() => submitAnswer(card.id, answers[card.id])} />
+            <McqOptions card={card} answer={answers[card.id]}
+                        onSelect={val => setAnswer(card.id, val)} />
           )}
           {card.type === 'open' && (
-            <OpenEndedInput answer={answers[card.id] === IDK ? '' : (answers[card.id] ?? '')} locked={isLocked}
-                            onChange={val => setAnswers(prev => ({ ...prev, [card.id]: val }))}
-                            onSubmit={() => submitAnswer(card.id, answers[card.id] ?? '')} />
+            <OpenEndedInput answer={answers[card.id] === IDK ? '' : (answers[card.id] ?? '')}
+                            onChange={val => setAnswer(card.id, val)} />
           )}
           {card.type === 'exercise' && (
-            <ExerciseInput answer={answers[card.id] === IDK ? '' : (answers[card.id] ?? '')} locked={isLocked}
-                           onChange={val => setAnswers(prev => ({ ...prev, [card.id]: val }))}
-                           onSubmit={() => submitAnswer(card.id, answers[card.id] ?? '')} />
+            <ExerciseInput answer={answers[card.id] === IDK ? '' : (answers[card.id] ?? '')}
+                           onChange={val => setAnswer(card.id, val)} />
           )}
 
-          {/* Exam style: the answer is locked but correctness is NOT revealed here —
-              the full breakdown (your answer, correct answer, feedback) shows only
-              at the end, so earlier questions can't leak answers to later ones. */}
-          {isLocked && (
-            <p className={styles.lockedNote} data-testid="recorded">
-              {answers[card.id] === IDK ? 'Marked “I don’t know”.' : 'Answer recorded.'}
-              {' '}Press {idx === cards.length - 1 ? 'Finish' : 'Next'} to continue.
+          {/* Nothing is sent to the server here — answers stay editable, and can be
+              changed by re-navigating to this card, until Finish grades everything
+              at once. Exam style is preserved: correctness is never revealed here,
+              only in the end-of-test breakdown. */}
+          {isAnswered && (
+            <p className={styles.lockedNote} data-testid="answered-note">
+              {answers[card.id] === IDK ? 'Marked “I don’t know”.' : 'Answered.'}
+              {' '}You can change this until you press Finish.
             </p>
           )}
         </div>
 
         <div className={styles.nav}>
           <button className={styles.navBtn} onClick={() => setIdx(i => Math.max(0, i - 1))}
-                  disabled={idx === 0}>← Prev</button>
-          {!isLocked && (
-            <button className={styles.navBtn} onClick={() => submitAnswer(card.id, IDK)}
-                    data-testid="idk-btn">I don’t know</button>
-          )}
-          <button className={styles.navBtnPrimary} onClick={next} disabled={!isLocked}
+                  disabled={idx === 0 || submitting}>← Prev</button>
+          <button className={styles.navBtn} onClick={() => setAnswer(card.id, IDK)}
+                  disabled={submitting} data-testid="idk-btn">I don’t know</button>
+          <button className={styles.navBtnPrimary} onClick={next} disabled={submitting}
                   data-testid="next-btn">
-            {idx === cards.length - 1 ? 'Finish' : 'Next →'}
+            {submitting ? 'Grading…' : (idx === cards.length - 1 ? 'Finish' : 'Next →')}
           </button>
         </div>
       </div>
@@ -316,11 +332,11 @@ function FlagControl({ flagged, onFlag }) {
   );
 }
 
-function McqOptions({ card, answer, locked, onSelect, onSubmit }) {
-  // Selecting an option only HIGHLIGHTS it — the choice isn't submitted (and thus
-  // isn't locked) until "Submit answer", so the student can freely change picks.
-  // Exam style: never reveal which is correct here — that's in the end-of-test breakdown.
-  const hasChoice = answer != null && answer !== '';
+function McqOptions({ card, answer, onSelect }) {
+  // Picking an option just highlights it and buffers the choice — nothing is sent
+  // to the server, so the student can change their pick freely, including after
+  // navigating away and back. Exam style: never reveal which is correct here —
+  // that's in the end-of-test breakdown.
   return (
     <div className={styles.openBlock}>
       <div className={styles.options} data-testid="mcq-options">
@@ -328,7 +344,7 @@ function McqOptions({ card, answer, locked, onSelect, onSubmit }) {
           const strI   = String(i);
           const chosen = answer === strI;
           return (
-            <button key={i} disabled={locked} onClick={() => onSelect(strI)}
+            <button key={i} onClick={() => onSelect(strI)}
                     className={`${styles.option} ${chosen ? styles.optionChosen : ''}`}
                     data-testid={`option-${i}`}>
               <span className={styles.optionLetter}>{String.fromCharCode(65 + i)}</span>
@@ -337,44 +353,27 @@ function McqOptions({ card, answer, locked, onSelect, onSubmit }) {
           );
         })}
       </div>
-      {!locked && (
-        <button className={styles.navBtnPrimary} onClick={onSubmit} disabled={!hasChoice}
-                data-testid="mcq-submit">
-          Submit answer
-        </button>
-      )}
     </div>
   );
 }
 
-function OpenEndedInput({ answer, locked, onChange, onSubmit }) {
+function OpenEndedInput({ answer, onChange }) {
   return (
     <div className={styles.openBlock}>
       <textarea className={styles.openTextarea} placeholder="Type your answer…"
-                value={answer} readOnly={locked} rows={5}
+                value={answer} rows={5}
                 onChange={e => onChange(e.target.value)} data-testid="open-textarea" />
-      {!locked && (
-        <button className={styles.navBtnPrimary} onClick={onSubmit} disabled={!answer.trim()}>
-          Submit answer
-        </button>
-      )}
     </div>
   );
 }
 
-function ExerciseInput({ answer, locked, onChange, onSubmit }) {
+function ExerciseInput({ answer, onChange }) {
   return (
     <div className={styles.openBlock}>
       <input className={styles.openTextarea} placeholder="Your answer…"
-             value={answer} readOnly={locked}
+             value={answer}
              onChange={e => onChange(e.target.value)}
-             onKeyDown={e => { if (e.key === 'Enter' && answer.trim()) onSubmit(); }}
              data-testid="exercise-input" />
-      {!locked && (
-        <button className={styles.navBtnPrimary} onClick={onSubmit} disabled={!answer.trim()}>
-          Submit answer
-        </button>
-      )}
     </div>
   );
 }
