@@ -14,7 +14,7 @@ import SyncBanner from './components/organisms/SyncBanner';
 import QuitGuard from './components/organisms/QuitGuard';
 import Toast from './components/atoms/Toast';
 import useStore from './store/useStore';
-import { flushOutbox } from './pwa/offlineApi';
+import { flushOutbox, OUTBOX_RETRY_MS } from './pwa/offlineApi';
 import { onConnectivityChange } from './pwa/connectivity';
 import styles from './App.module.css';
 
@@ -66,9 +66,13 @@ export default function App() {
   }, [checkAuth]);
 
   // Grades/captures made during a network blip queue to the outbox (offlineApi).
-  // Replay them on load, whenever connectivity returns, and on visibilitychange (a
+  // Replay them on load, whenever connectivity returns, on visibilitychange (a
   // backgrounded/frozen tab can miss the 'online' event entirely — see MobileLayout.jsx
-  // for the mobile case this actually surfaced in), so nothing is stranded.
+  // for the mobile case this actually surfaced in), AND on a short interval while the tab
+  // stays open and foregrounded — the previous three triggers all fire on some transition
+  // (reconnect, refocus), so a queue built up because the SERVER was down (5xx/530, not a
+  // device connectivity change — see offlineApi.js isServerUnreachable) never got retried
+  // if the user just kept watching the app the whole time. The interval closes that gap.
   useEffect(() => {
     const flushAndNotify = () => flushOutbox().then(({ sent }) => {
       if (sent > 0) showToast(`Back online — ${sent} synced`);
@@ -77,7 +81,12 @@ export default function App() {
     const onVis = () => { if (document.visibilityState === 'visible' && navigator.onLine) flushAndNotify(); };
     document.addEventListener('visibilitychange', onVis);
     const offConnectivity = onConnectivityChange(on => { if (on) flushAndNotify(); });
-    return () => { document.removeEventListener('visibilitychange', onVis); offConnectivity(); };
+    const id = setInterval(() => { if (navigator.onLine) flushAndNotify(); }, OUTBOX_RETRY_MS);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      offConnectivity();
+      clearInterval(id);
+    };
   }, [showToast]);
 
   return (

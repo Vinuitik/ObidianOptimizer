@@ -2,7 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import useStore from '../store/useStore';
 import useOffline from './useOffline';
-import { flushOutbox, setDriveMode } from './offlineApi';
+import { flushOutbox, setDriveMode, OUTBOX_RETRY_MS } from './offlineApi';
 import { pushMailbox } from './mailbox';
 import { hasCreds } from './setup';
 import { maybeAutoSync } from './autoSync';
@@ -56,6 +56,11 @@ export default function MobileLayout() {
   // dispatches 'online' to it — the outbox effect above never reruns even though the
   // network came back. Unlocking/foregrounding fires visibilitychange reliably, so that's
   // the actual reconnect signal on mobile (same reasoning as maybeAutoSync below).
+  //
+  // AND on a short interval while the app stays open and foregrounded: visibilitychange
+  // and the online event both fire on a TRANSITION, so a queue built up because the
+  // SERVER (not the phone's connectivity) was down never retries if the user just keeps
+  // watching the app — the whole point of queueing is that it self-heals unattended.
   useEffect(() => {
     const trySync = async () => {
       if (!navigator.onLine) return;
@@ -71,7 +76,8 @@ export default function MobileLayout() {
     if (online) trySync();
     const onVis = () => { if (document.visibilityState === 'visible') trySync(); };
     document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
+    const id = setInterval(trySync, OUTBOX_RETRY_MS);
+    return () => { document.removeEventListener('visibilitychange', onVis); clearInterval(id); };
   }, [online, showToast]);
 
   // Auto-sync (cron-like): keep the Drive-linked review set fresh without a manual tap.

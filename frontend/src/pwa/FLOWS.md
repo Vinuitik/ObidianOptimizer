@@ -33,8 +33,15 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
   `InboxReview` renders its **mobile single-view** ([Source | Note] toggle) automatically
   (`LearnLayout` branches on `useIsMobile`) — see components/FLOWS.md.
 - To add a tab: `BottomNav.TABS` entry + `MobileApp` `<Route>`.
-- `MobileLayout` flushes the outbox on reconnect (`online` → `flushOutbox()`); harmless
-  no-op until the grade seam lands (only captures queue today).
+- `MobileLayout`'s `trySync()` flushes the outbox (`flushOutbox()`) and, if Drive-linked,
+  the mailbox (`pushMailbox()`) — triggered by the `online` flip, `visibilitychange`
+  (a locked/backgrounded tab can miss `online` entirely — see the effect's own comment),
+  AND a `OUTBOX_RETRY_MS` (60s, `offlineApi.js`) interval while the app stays open and
+  foregrounded. That interval exists because the first two triggers only fire on a
+  connectivity/focus TRANSITION — a queue built up because the SERVER (not the phone) was
+  down never retries on its own if the user just keeps watching the app. Toasts
+  `Back online — N synced` when either flush actually sends something (App.jsx mirrors
+  this for the desktop full site, minus the mailbox push).
 - **Auto sign-in prompt:** the installed PWA has no visible "Sign in" button, so
   `MobileLayout`'s bootstrap effect calls `checkAuth()` and, if it comes back
   unauthenticated **while online**, auto-opens `LoginModal` via `setShowLogin(true)`
@@ -313,7 +320,7 @@ scoring: `offlineSearch.js`.
 | Browser/device detection | `installPrompt.js` (`isIOS`/`isWindows`/`isElectron`/`isFirefox`) — used by `pages/GetAppPage.jsx` |
 | Creds re-read / blank-folder heal | `setup.js` `refreshCreds()` (+ `drivePull.js` just-in-time call) |
 | `/pwa/setup` blank-folder guard | `PwaController.setup()` (409 while `folderId` blank) |
-| Activate offline review [PENDING] | swap store `fetchReview`/`fetchNoteContent` + `ReviewPage`/`ReviewRating` `gradeNote` → `pwa/offlineApi`, AND flush outbox in `App` too |
+| Outbox/mailbox retry cadence (server-down self-heal) | `offlineApi.js OUTBOX_RETRY_MS` (60s) — used by both `App.jsx` and `MobileLayout.jsx`'s flush effects |
 | Shared viewport hook | `src/utils/useMediaQuery.js` (`useIsMobile`, `MOBILE_QUERY`) |
 | Shell precache list | `public/sw.js` `SHELL_URLS` |
 | Media cache name | `public/sw.js` + `syncOffline.js` `MEDIA_CACHE = 'obsopt-media'` |

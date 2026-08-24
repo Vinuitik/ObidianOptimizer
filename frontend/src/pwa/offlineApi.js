@@ -29,6 +29,14 @@ import {
 } from './outbox';
 import { isOnline } from './connectivity';
 
+// How often App.jsx / MobileLayout.jsx retry the outbox/mailbox while the tab stays open
+// and foregrounded — the point of queueing is that a blip self-heals without the user
+// doing anything, and mount/visibilitychange/online-event triggers alone miss the case
+// where the SERVER (not the device) was unreachable and comes back while nobody
+// backgrounds or reloads the tab. flush()/pushMailbox() are cheap no-ops when the outbox
+// is empty, so a short interval costs nothing in the common case.
+export const OUTBOX_RETRY_MS = 60 * 1000;
+
 // Drive mode: the installed PWA reads its review set from the Drive-pulled IndexedDB
 // (drivePull.js), never the server — the laptop may be off. Grades always queue (the
 // Drive mailbox / server replays them later). The desktop full site never sets this, so
