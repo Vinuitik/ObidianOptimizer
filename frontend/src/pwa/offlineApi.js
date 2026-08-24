@@ -143,8 +143,8 @@ export async function captureUrl(url, trackOpts = {}) {
       if (res.status === 401) { await enqueueCapture(url, trackOpts); return { queued: true, reason: 'auth' }; }
       throw new ApiError(res.status);
     } catch (e) {
-      if (e instanceof ApiError) throw e;
-      // network failure → queue
+      if (e instanceof ApiError && !isServerUnreachable(e)) throw e;
+      // network failure or server down (5xx/530) → queue
     }
   }
   await enqueueCapture(url, trackOpts);
@@ -170,8 +170,8 @@ export async function captureText(text, title, trackOpts = {}) {
       }
       throw new ApiError(res.status);
     } catch (e) {
-      if (e instanceof ApiError) throw e;
-      // network failure → queue
+      if (e instanceof ApiError && !isServerUnreachable(e)) throw e;
+      // network failure or server down (5xx/530) → queue
     }
   }
   await enqueueCaptureText(text, title, trackOpts);
