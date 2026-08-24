@@ -6,8 +6,8 @@
 // The media step is delegated to warmReviewMedia (the SAME engine the Drive-linked path
 // uses) so this path also caches EVERYTHING — images, A/V renditions, PDF pages, other
 // source files — not just images. onStage?.({ stage, done, total }) reports each phase.
-import { fetchReview, fetchNoteContent, fetchNoteVectors } from '../api/notes';
-import { putReviewNotes, putNoteVectors, setMeta } from './db';
+import { fetchReview, fetchNoteContent, fetchNames } from '../api/notes';
+import { putReviewNotes, setMeta } from './db';
 import { warmReviewMedia } from './warmMedia';
 
 function shortNameOf(path) {
@@ -32,13 +32,13 @@ export async function syncForOffline({ limit = 40, includeMedia = true, onStage 
 
   await putReviewNotes(records);
 
-  // Piggyback: cache this batch's embedding vectors for offline use (see db.js
-  // 'noteVectors'). Best-effort — a failure here must never fail the review sync;
-  // vectors simply stay stale/missing until the next successful sync (drift accepted).
+  // Piggyback: cache the full vault's note names (path list) for offline search/link
+  // fallback (utils/offlineSearch.js) — simple substring match, no embeddings. Best-effort:
+  // a failure here must never fail the review sync; the name cache just stays stale/missing
+  // until the next successful sync (drift accepted).
   try {
-    const vectors = await fetchNoteVectors(records.map(r => r.path));
-    await putNoteVectors(vectors);
-  } catch { /* offline vector cache is best-effort */ }
+    await setMeta('cachedNoteNames', await fetchNames());
+  } catch { /* offline name cache is best-effort */ }
 
   let media = { warmed: 0, byPhase: {} };
   if (includeMedia) {

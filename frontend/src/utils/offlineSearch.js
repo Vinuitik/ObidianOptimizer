@@ -1,74 +1,35 @@
 // Offline degraded search — used by useSearch.js when the server is unreachable.
 //
-// GAP (see FLOWS.md / task handoff): this is KEYWORD substring matching over the
-// cached reviewNotes content, NOT semantic/embedding search. True offline semantic
-// search would need to embed the typed query text, and there is no way to do that
-// offline — the embedder's model (EmbeddingGemma) only runs server-side (embedder/
-// container), the backend's /notes/vectors endpoint returns pre-computed DOCUMENT
-// vectors only (no query endpoint reachable when offline by definition), and the
-// model is prompt-asymmetric (kind: "document" vs "query" — see EmbeddingService in
-// the Java backend) so a document-side vector cannot stand in for a query embedding
-// even if one were reachable. Making real offline semantic search work would require
-// shipping an embedding model into the browser (onnxruntime-web + tokenizer + the
-// ~100MB+ ONNX weights) — a separate, large capability, not built here.
-//
-// So the cached 'noteVectors' store (db.js) is populated and ready, but currently has
-// no offline consumer: this fallback deliberately does NOT touch it, to avoid
-// misrepresenting keyword matches as semantic ones.
-import { getAllReviewNotes } from '../pwa/db';
+// Simple substring match on note NAME (filename), over the full vault's path list cached
+// in IndexedDB (meta.cachedNoteNames — see pwa/syncOffline.js and pwa/drivePull.js for the
+// piggyback that keeps it filled). Not content search and not semantic — true offline
+// semantic search would need embedding the typed query client-side, which isn't achievable
+// here (the embedder only runs server-side). Name match is simple, cheap, and covers the
+// actual use case (search-by-title, wiki-link autocomplete) without that gap.
+import { getMeta } from '../pwa/db';
 
-const SNIPPET_LEN = 150;
-
-function tokenize(q) {
-  return (q || '').toLowerCase().split(/\s+/).filter(Boolean);
+function folderOf(path) {
+  const i = path.lastIndexOf('/');
+  return i === -1 ? '' : path.slice(0, i);
 }
 
-function countOccurrences(haystack, needle) {
-  if (!needle) return 0;
-  let count = 0;
-  let idx = 0;
-  while ((idx = haystack.indexOf(needle, idx)) !== -1) {
-    count++;
-    idx += needle.length;
-  }
-  return count;
-}
-
-function snippetAround(content, token) {
-  const lower = content.toLowerCase();
-  const at = token ? lower.indexOf(token) : -1;
-  if (at === -1) return content.slice(0, SNIPPET_LEN) + (content.length > SNIPPET_LEN ? '...' : '');
-  const start = Math.max(0, at - 40);
-  const end = Math.min(content.length, start + SNIPPET_LEN);
-  return (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
-}
-
-// Returns [{notePath, snippet, score}] — same shape as the online /search response,
-// scoped to whatever's currently cached for offline review (reviewNotes store).
+// Returns [{notePath, snippet}] — same shape as the online /search response.
 export async function offlineKeywordSearch(query, limit = 10) {
-  const tokens = tokenize(query);
-  if (tokens.length === 0) return [];
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return [];
 
-  const notes = await getAllReviewNotes();
+  const names = (await getMeta('cachedNoteNames')) || [];
   const scored = [];
 
-  for (const note of notes) {
-    const title = (note.shortName || '').toLowerCase();
-    const content = (note.content || '').toLowerCase();
-    let score = 0;
-    for (const t of tokens) {
-      score += countOccurrences(title, t) * 3;   // title hits weighted above body hits
-      score += countOccurrences(content, t);
-    }
-    if (score > 0) {
-      scored.push({
-        notePath: note.path,
-        snippet: snippetAround(note.content || '', tokens[0]),
-        score,
-      });
-    }
+  for (const path of names) {
+    const title = path.split(/[/\\]/).pop().replace(/\.md$/i, '').toLowerCase();
+    const at = title.indexOf(q);
+    if (at === -1) continue;
+    // Prefix matches first, then earlier matches, then shorter titles (tighter match).
+    const score = (at === 0 ? 1000 : 0) - at * 10 - title.length;
+    scored.push({ notePath: path, snippet: folderOf(path), score });
   }
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit);
+  return scored.slice(0, limit).map(({ notePath, snippet }) => ({ notePath, snippet }));
 }

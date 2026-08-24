@@ -1,6 +1,6 @@
 # ML Domain Flows
 
-Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, NoteVectorController.java, NoteVector.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java, NoteEmbeddingWorker.java, ResourceScanService.java
+Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java, NoteEmbeddingWorker.java, ResourceScanService.java
 
 Ingest agent (resource → in-place notes): embedder/ingest/FLOWS.md
 
@@ -165,43 +165,6 @@ To change result limit: `SearchService.SEARCH_LIMIT`
 
 ---
 
-## POST /notes/vectors — offline vector cache (NEW endpoint, 2026-08-24)
-
-`NoteVectorController.vectors({paths})` → `NoteChunkRepository.findAveragedTextVectors(paths)`
-→ `List<NoteVector{path, vector[768]}>`. Session-authed, same as `/search`.
-
-**Why it exists**: no endpoint previously exposed a note's embedding to the frontend
-(`EmbeddingService`/`SearchController` only ever used vectors server-side). Built for the
-frontend offline sync (`frontend/src/pwa/syncOffline.js` / `drivePull.js`) to cache
-per-note vectors into IndexedDB (`db.js` `noteVectors` store) piggybacked on the existing
-review sync — see `frontend/src/pwa/FLOWS.md` "offline embeddings".
-
-```
-findAveragedTextVectors(paths):
-  SELECT note_path, embedding::text FROM note_chunks
-    WHERE source='text' AND embedding IS NOT NULL AND note_path IN (paths)
-  → group by note_path, mean the chunk vectors (image-caption chunks excluded — different
-    semantic domain), parse pgvector's "[0.1,0.2,...]" text form back to float[]
-  → a path with nothing indexed yet is simply ABSENT from the result, not an error
-```
-
-No pgvector JDBC type is registered in this project (writes go through `?::vector` SQL
-casts) — reads cast to `::text` and `parseVectorText()` parses it back manually.
-
-**Hard limit — do not build a "type a query and embed it offline" feature on top of this
-without re-reading EmbeddingService's asymmetric-prompt note first**: this endpoint returns
-DOCUMENT-side vectors only. The embedder's model is prompt-asymmetric (`kind`:
-"document" vs "query" — see `EmbeddingService.embedBatch`), so a document vector is not a
-valid stand-in for a query embedding, and there is no offline path to embed new query text
-at all (the embedder only runs server-side). The frontend's offline search fallback is
-therefore plain keyword matching, not vector similarity — see
-`frontend/src/utils/offlineSearch.js`.
-
-To change the aggregation (e.g. weight recent chunks, or return per-chunk vectors instead
-of one mean): `NoteChunkRepository.findAveragedTextVectors()`.
-
----
-
 ## MarkdownPreprocessor.chunkNote(path, rawContent)
 
 ```
@@ -303,7 +266,7 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 - **MCP session manager**: `mcp.session_manager.run()` must be entered in the FastAPI lifespan or `/mcp` 500s. It can only be started once per process — relevant for tests (module-scoped client).
 - **MCP stateless mode**: no session persistence; every request is self-contained. Fine for tool calls; would need stateful mode for subscriptions/sampling.
 - **Embedder DB access**: the MCP tools read Postgres directly with psycopg (connection per call, no pool). Low traffic by design; add a pool if MCP usage grows.
-- **Offline query embedding is not achievable without a new client-side capability.** Embedding ANY text (query or document) requires the ONNX model running in the `embedder` container — there is no browser-side embedding runtime in this codebase. `/notes/vectors` (above) only serves PRE-COMPUTED document vectors for caching; it cannot embed a freshly-typed search query, and by definition there's no network to reach the embedder when actually offline. Real offline semantic search would require bundling an embedding model into the frontend (onnxruntime-web + tokenizer + the ONNX weights, likely 100MB+) — a separate, large effort, not attempted here. Flagged as a decision point, not guessed around.
+- **Offline semantic search is not achievable without a new client-side capability.** Embedding ANY text (query or document) requires the ONNX model running in the `embedder` container — there is no browser-side embedding runtime in this codebase, and even if a document vector were cached client-side, the model is prompt-asymmetric (`kind`: document vs query, `EmbeddingService.embedBatch`) so it couldn't stand in for a query embedding anyway. A 2026-08-24 attempt to cache per-note vectors for offline cosine-similarity search was scrapped for this reason (frontend fell back to plain filename matching instead — see `frontend/src/utils/offlineSearch.js`). Real offline semantic search would need bundling an embedding model into the frontend (onnxruntime-web + tokenizer + ONNX weights, likely 100MB+) — a separate, large effort.
 
 ---
 
@@ -333,5 +296,3 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 | Embedding work list rule | `NoteIndexRepository.findNotesNeedingEmbedding()` |
 | Readiness gate flag | set: `ResourceScanService.scan` → `NoteIndexRepository.setIngestPending`; gates: `findNotesNeedingEmbedding` + `CardRepository.findNotesNeedingCards` |
 | Orphan chunk cleanup | `NoteEmbeddingWorker.purgeOrphanChunks()` (daily) |
-| Offline note-vector endpoint | `NoteVectorController` (`POST /notes/vectors`) → `NoteChunkRepository.findAveragedTextVectors()` |
-| Note-vector aggregation (mean of text chunks) | `NoteChunkRepository.findAveragedTextVectors()` |

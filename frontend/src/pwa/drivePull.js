@@ -5,8 +5,8 @@ import { getCreds, refreshCreds } from './setup';
 import { getAccessToken, driveList, driveDownload } from './drive';
 import { deriveKey, decryptText } from './crypto';
 import { splitFrontmatter, parseFrontmatterFields } from '../utils/frontmatter';
-import { putReviewNotes, putAssignments, putNoteVectors, setMeta } from './db';
-import { fetchNoteVectors } from '../api/notes';
+import { putReviewNotes, putAssignments, setMeta } from './db';
+import { fetchNames } from '../api/notes';
 
 const REVIEW_BUNDLE = 'review-bundle.json.enc';
 const CARDS_BUNDLE = 'cards.json.enc';
@@ -99,9 +99,7 @@ export async function pullReviewFromDrive({ onStage } = {}) {
 
   await setMeta('lastSync', Date.now());
   await setMeta('driveSource', true);
-  // paths: exposed so refreshAndPull can piggyback the vector-cache fetch (needs the
-  // server, so it can't run in this Drive-only function — see refreshAndPull below).
-  return { notes: records.length, cards, inbox, generatedAt: bundle.generatedAt, paths: records.map(r => r.path) };
+  return { notes: records.length, cards, inbox, generatedAt: bundle.generatedAt };
 }
 
 // Ask the server (while it's up) to rebuild the bundle, then pull it. Used at home so the
@@ -124,13 +122,13 @@ export async function refreshAndPull({ onStage } = {}) {
       });
     } catch { /* keep the note set even if media warming fails */ }
 
-    // Piggyback: cache embedding vectors for offline use (db.js 'noteVectors'). Same
-    // reasoning as media above — the vector endpoint is server-direct, not on Drive, so
-    // this can only run while the server answered. Best-effort; drift accepted otherwise.
+    // Piggyback: cache the full vault's note names for offline search/link fallback
+    // (utils/offlineSearch.js). Same reasoning as media above — /names is server-direct,
+    // not on Drive, so this can only run while the server answered. Best-effort; drift
+    // accepted otherwise.
     try {
-      const vectors = await fetchNoteVectors(res.paths);
-      await putNoteVectors(vectors);
-    } catch { /* offline vector cache is best-effort */ }
+      await setMeta('cachedNoteNames', await fetchNames());
+    } catch { /* offline name cache is best-effort */ }
   }
   return res;
 }

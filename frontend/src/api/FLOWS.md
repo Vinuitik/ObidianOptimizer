@@ -35,7 +35,6 @@ Write calls use `credentials: 'same-origin'` — session cookie included automat
 | `saveSettings(patch)` | `PUT /api/settings` | Yes |
 | `uploadFile(file, filename)` | `POST /api/upload` (multipart) | Yes |
 | `searchNotes(query, {signal?})` | `GET /api/search?q=&limit=10` | Yes |
-| `fetchNoteVectors(paths)` | `POST /api/notes/vectors {paths}` | Yes |
 | `fetchStats()` (stats.js) | `GET /api/stats` | Yes |
 
 ### searchNotes — AbortController pattern
@@ -48,13 +47,12 @@ ctrl.abort(); // cancels in-flight fetch; throws AbortError (caught, ignored)
 
 `useSearch` hook wraps this: new query → cancel previous controller → start 500ms debounce → fire with fresh controller. Prevents stale results arriving out-of-order.
 
-### fetchNoteVectors — offline vector cache, NOT for querying
+### fetchNames — also the offline name cache source
 
-`fetchNoteVectors(paths)` → `[{path, vector[768]}]` — pre-computed DOCUMENT-side vectors
-only (see `NoteVectorController` FLOWS). Called from `pwa/syncOffline.js` / `pwa/drivePull.js`
-to populate the offline `noteVectors` IDB store, piggybacked on the review sync. Never
-called with a typed query — there's no server route that embeds arbitrary query text for
-offline use; see `utils/FLOWS.md` "useSearch.js" for the resulting offline search gap.
+`fetchNames()` → `GET /api/names` → `string[]` (full vault-relative paths). Used by desktop's
+`noteIndex` rebuild (`store/useStore.js fetchNoteNames`) AND, since 2026-08-24, piggybacked by
+`pwa/syncOffline.js`/`pwa/drivePull.js` to cache the list in IDB `meta.cachedNoteNames` for
+offline search/link fallback — see `utils/FLOWS.md` "offlineSearch.js".
 
 ---
 
@@ -67,4 +65,3 @@ offline use; see `utils/FLOWS.md` "useSearch.js" for the resulting offline searc
 | 401 interception | `api/notes.js` fetch wrapper + store `showLogin` check |
 | Search debounce delay | `utils/useSearch.js` — `setTimeout(…, 500)` |
 | Search result limit | `api/notes.js searchNotes()` — `limit=10` query param |
-| Offline vector cache fetch | `api/notes.js fetchNoteVectors()` |

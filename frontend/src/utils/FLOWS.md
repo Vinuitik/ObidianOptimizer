@@ -147,38 +147,29 @@ To change minimum query length: `minLength` arg (default 2; WikiLinkSuggest uses
 
 ## offlineSearch.js — Offline degraded search (2026-08-24)
 
-`offlineKeywordSearch(query, limit=10)` → `[{notePath, snippet, score}]` — same shape as
-the online `/search` response, so `useSearch.js` can swap it in transparently.
+`offlineKeywordSearch(query, limit=10)` → `[{notePath, snippet}]` — same shape as the
+online `/search` response, so `useSearch.js` can swap it in transparently.
 
 ```
-tokenize(query) → lowercase words
-getAllReviewNotes() (db.js — the offline-downloaded due-note subset, NOT the whole vault)
-per note: score = Σ over tokens of (title occurrences × 3 + content occurrences)
-keep score > 0 → sort desc → slice(0, limit)
+q = query.toLowerCase()
+getMeta('cachedNoteNames') (db.js meta — the FULL vault path list, piggybacked on sync —
+                            see pwa/FLOWS.md "offline name cache")
+per path: title = filename (no extension); skip if q not a substring of title
+score: prefix match ranks above mid-title match; shorter titles rank above longer ones
+sort desc → slice(0, limit); snippet = the note's folder path (no content available offline)
 ```
 
-**This is KEYWORD substring matching, not semantic/embedding search — a deliberate,
-documented gap, not an oversight.** True offline semantic search would need the typed
-QUERY embedded, and that's not achievable offline:
-- The embedder (ONNX model) only runs server-side (`embedder/` container) — unreachable
-  by definition when offline.
-- Even if reachable, the backend's vector endpoint (`NoteVectorController` /
-  `/notes/vectors`) only returns pre-computed DOCUMENT-side vectors — the model is
-  prompt-asymmetric (`kind`: document vs query, see the Java `EmbeddingService`), so a
-  document vector isn't a valid query embedding anyway.
-- There is no client-side (in-browser) embedding runtime in this codebase. Building one
-  would mean bundling onnxruntime-web + a tokenizer + the ONNX weights (100MB+) — a
-  separate, large capability, not attempted here.
+**This is a NAME (filename) match, not content or semantic search — deliberate, not a
+gap to fill later.** First attempt cached per-note embedding VECTORS for offline
+cosine-similarity search and scrapped it: real semantic search needs the typed QUERY
+embedded too, and there's no offline path to embed new text (the embedder is server-only —
+see `ml/FLOWS.md` Technology Notes). Filename match is simpler, cheap, needs no schema
+bump (reuses the existing `meta` store), and actually covers the real use cases here —
+search-by-title and wiki-link autocomplete — without pretending to be semantic.
 
-So `db.js`'s `noteVectors` IDB store IS populated (piggybacked on the review sync — see
-`pwa/FLOWS.md` "offline embeddings"), but currently has **no offline consumer**: neither
-this fallback nor `WikiLinkSuggest` uses it, because their query is always freshly-typed
-text. It's ready infrastructure for a future feature that doesn't need query embedding
-(e.g. "notes similar to the one I'm viewing," which reuses that note's own cached vector).
-
-To change scoring/weights: `offlineSearch.js` — title-vs-content weight, snippet window.  
-To widen scope beyond the downloaded review subset: not possible without downloading more
-(`syncForOffline({ limit })`) — offline search only ever sees what's cached.
+To change scoring: `offlineSearch.js`. To widen scope: it already covers the whole vault
+(not just the downloaded review subset) since `cachedNoteNames` comes from `GET /names`,
+not from `reviewNotes`.
 
 ---
 

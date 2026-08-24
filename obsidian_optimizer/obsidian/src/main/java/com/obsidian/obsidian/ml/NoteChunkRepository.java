@@ -7,12 +7,8 @@ import org.springframework.stereotype.Component;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 @Component
 public class NoteChunkRepository {
@@ -178,56 +174,6 @@ public class NoteChunkRepository {
             ORDER BY paradedb.score(id) DESC
             LIMIT ?
             """, new NoteChunkRowMapper(), query, limit);
-    }
-
-    /**
-     * One representative vector per note — the mean of its TEXT-source chunk embeddings
-     * (image-caption chunks are a different semantic domain and excluded). Backs the
-     * offline vector cache (frontend/src/pwa/db.js 'noteVectors' store): the client pulls
-     * these piggybacked on the existing review sync and brute-force cosine-similarities
-     * against them offline instead of re-embedding on the server.
-     *
-     * Notes with no embedded text chunks yet (still queued in findChunksNeedingEmbedding)
-     * are simply absent from the result — callers should treat a missing path as "not
-     * cached yet", not an error.
-     */
-    public List<NoteVector> findAveragedTextVectors(List<String> notePaths) {
-        if (notePaths == null || notePaths.isEmpty()) return List.of();
-        String placeholders = String.join(",", Collections.nCopies(notePaths.size(), "?"));
-        List<Object[]> rows = jdbc.query(
-            "SELECT note_path, embedding::text AS embedding FROM note_chunks " +
-            "WHERE source = 'text' AND embedding IS NOT NULL AND note_path IN (" + placeholders + ")",
-            (rs, i) -> new Object[]{ rs.getString("note_path"), parseVectorText(rs.getString("embedding")) },
-            notePaths.toArray());
-
-        Map<String, float[]> sums = new LinkedHashMap<>();
-        Map<String, Integer> counts = new LinkedHashMap<>();
-        for (Object[] row : rows) {
-            String path = (String) row[0];
-            float[] vec = (float[]) row[1];
-            float[] sum = sums.computeIfAbsent(path, k -> new float[vec.length]);
-            for (int i = 0; i < vec.length; i++) sum[i] += vec[i];
-            counts.merge(path, 1, Integer::sum);
-        }
-
-        List<NoteVector> out = new ArrayList<>();
-        for (Map.Entry<String, float[]> e : sums.entrySet()) {
-            float[] avg = e.getValue();
-            int n = counts.get(e.getKey());
-            for (int i = 0; i < avg.length; i++) avg[i] /= n;
-            out.add(new NoteVector(e.getKey(), avg));
-        }
-        return out;
-    }
-
-    /** Parses pgvector's text form "[0.1,0.2,...]" back into a float[]. */
-    private static float[] parseVectorText(String text) {
-        String inner = text.substring(1, text.length() - 1);
-        if (inner.isEmpty()) return new float[0];
-        String[] parts = inner.split(",");
-        float[] vec = new float[parts.length];
-        for (int i = 0; i < parts.length; i++) vec[i] = Float.parseFloat(parts[i]);
-        return vec;
     }
 
     /** Returns the highest chunk_index for a note within one source, or null if none exist. */

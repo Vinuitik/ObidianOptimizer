@@ -19,9 +19,8 @@ function isServerUnreachable(e) {
  * - debounceMs before each request (default 250ms; pass lower for snappier UIs like inline popups)
  * - AbortController cancels any in-flight request when query changes
  * - Returns [] immediately if query is null / shorter than minLength
- * - Offline (or server unreachable): falls back to KEYWORD search over the cached
- *   offline review set (not semantic — see utils/offlineSearch.js for why real
- *   offline semantic search isn't achievable here).
+ * - Offline (or server unreachable): falls back to a simple NAME (filename) substring
+ *   match over the cached vault-wide note list (see utils/offlineSearch.js).
  */
 export function useSearch(query, minLength = 2, debounceMs = 250) {
   const [results, setResults] = useState([]);
