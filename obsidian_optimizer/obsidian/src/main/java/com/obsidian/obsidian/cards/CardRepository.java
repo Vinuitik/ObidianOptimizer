@@ -147,15 +147,17 @@ public class CardRepository {
      * user's reason for the nightly feedback-aware regen. Returns false if the card
      * doesn't exist / is already flagged (nothing quarantined).
      */
-    public boolean flag(java.util.UUID cardId, String reason) {
+    /** Flags a card; returns its note_path (so the caller can trigger an immediate
+     * regen for that note) or null if the card doesn't exist or was already flagged. */
+    public String flag(java.util.UUID cardId, String reason) {
         String notePath = jdbc.query(
             "SELECT note_path FROM cards WHERE id = ? AND status <> 'FLAGGED'",
             rs -> rs.next() ? rs.getString(1) : null, cardId);
-        if (notePath == null) return false;
+        if (notePath == null) return null;
         jdbc.update("UPDATE cards SET status = 'FLAGGED' WHERE id = ?", cardId);
         jdbc.update("INSERT INTO card_flags(card_id, note_path, reason) VALUES (?, ?, ?)",
             cardId, notePath, reason);
-        return true;
+        return notePath;
     }
 
     /**
@@ -176,6 +178,25 @@ public class CardRepository {
               AND n.body_hash IS NOT NULL
             GROUP BY f.note_path, n.body_hash
             """);
+    }
+
+    /** Same shape as one row of {@link #findNotesWithPendingFlags()}, scoped to a single
+     * note — backs the immediate (per-flag) regen trigger, as opposed to the nightly sweep. */
+    public Map<String, Object> findPendingFlagsForNote(String notePath) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+            SELECT f.note_path,
+                   n.body_hash,
+                   COUNT(*)                                        AS flag_count,
+                   ARRAY_AGG(f.reason) FILTER (WHERE f.reason IS NOT NULL
+                                               AND f.reason <> '') AS reasons
+            FROM card_flags f
+            JOIN notes n ON n.path = f.note_path
+            WHERE f.serviced_at IS NULL
+              AND n.body_hash IS NOT NULL
+              AND f.note_path = ?
+            GROUP BY f.note_path, n.body_hash
+            """, notePath);
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     /** Mark a note's pending flags serviced once its replacements have been generated. */

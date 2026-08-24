@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.cards.AssignmentRepository;
 import com.obsidian.obsidian.cards.AssignmentService;
+import com.obsidian.obsidian.cards.CardRepository;
+import com.obsidian.obsidian.cards.FlaggedCardRegenService;
 import com.obsidian.obsidian.cards.ReviewService;
 import com.obsidian.obsidian.inbox.InboxController;
 import com.obsidian.obsidian.sync.DriveService;
@@ -30,8 +32,9 @@ import java.util.List;
  * is safely reprocessed.
  *
  * Runs on boot (whenever the laptop comes online) and on a short cron while up. P3 handles
- * {@code grade} events; {@code file}/{@code discard}/{@code assignment} arrive in P4/P5 — an
- * unsupported kind leaves the file in place (no data loss) until the server learns it.
+ * {@code grade} events; {@code file}/{@code discard}/{@code assignment} arrive in P4/P5;
+ * {@code flag} (2026-08-24) triggers an immediate feedback-aware regen, same as the online
+ * path. An unsupported kind leaves the file in place (no data loss) until the server learns it.
  */
 @Service
 public class MailboxConsumeService {
@@ -46,6 +49,8 @@ public class MailboxConsumeService {
     private final InboxController inbox;
     private final ConsumedEventRepository consumed;
     private final OfflineExportService offlineExport;
+    private final CardRepository cardRepo;
+    private final FlaggedCardRegenService flaggedCardRegen;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public MailboxConsumeService(DriveService drive,
@@ -55,7 +60,9 @@ public class MailboxConsumeService {
                                  AssignmentRepository assignmentRepo,
                                  InboxController inbox,
                                  ConsumedEventRepository consumed,
-                                 OfflineExportService offlineExport) {
+                                 OfflineExportService offlineExport,
+                                 CardRepository cardRepo,
+                                 FlaggedCardRegenService flaggedCardRegen) {
         this.drive = drive;
         this.encryption = encryption;
         this.reviewService = reviewService;
@@ -64,6 +71,8 @@ public class MailboxConsumeService {
         this.inbox = inbox;
         this.consumed = consumed;
         this.offlineExport = offlineExport;
+        this.cardRepo = cardRepo;
+        this.flaggedCardRegen = flaggedCardRegen;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -127,6 +136,7 @@ public class MailboxConsumeService {
                                               ev.path("targetFolder").asText(), ev.path("content").asText(null));
                     case "discard"     -> inbox.discardNote(ev.path("path").asText());
                     case "acknowledge" -> inbox.acknowledgeCapture(ev.path("captureId").asText());
+                    case "flag"        -> applyFlag(ev);
                     default -> {
                         allCommitted = false; // unknown kind → keep the file for a newer server
                         continue;
@@ -174,6 +184,24 @@ public class MailboxConsumeService {
                 }
             }
             assignmentService.complete(assignmentId);
+        }
+    }
+
+    /** Flag a card offline-queued via the Drive mailbox, then regen its note right away —
+     *  same immediate path CardController.flag() uses online. A regen failure (embedder
+     *  down) must not un-commit the flag itself; it just leaves the flag pending for the
+     *  nightly FlaggedCardRegenService.run() sweep to pick up. */
+    private void applyFlag(JsonNode ev) {
+        UUID cardId = UUID.fromString(ev.path("cardId").asText());
+        String reason = ev.path("reason").asText(null);
+        String notePath = cardRepo.flag(cardId, reason);
+        if (notePath != null) {
+            try {
+                flaggedCardRegen.regenerateNote(notePath);
+            } catch (Exception e) {
+                log.warn("[Mailbox] immediate regen failed for {}: {} (nightly sweep will retry)",
+                    notePath, e.getMessage());
+            }
         }
     }
 }

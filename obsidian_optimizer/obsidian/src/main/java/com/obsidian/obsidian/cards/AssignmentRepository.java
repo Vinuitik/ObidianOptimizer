@@ -175,7 +175,7 @@ public class AssignmentRepository {
 
     public Map<String, Object> findCard(UUID cardId) {
         List<Map<String, Object>> rows = jdbc.queryForList(
-            "SELECT id, note_path, type, payload, difficulty FROM cards WHERE id = ?", cardId);
+            "SELECT id, note_path, type, payload, difficulty, status FROM cards WHERE id = ?", cardId);
         return rows.isEmpty() ? null : rows.get(0);
     }
 }

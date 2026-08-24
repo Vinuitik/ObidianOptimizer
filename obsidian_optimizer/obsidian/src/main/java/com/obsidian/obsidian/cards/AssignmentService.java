@@ -175,6 +175,16 @@ public class AssignmentService {
         if (card == null) throw new IllegalArgumentException("unknown card: " + cardId);
         int difficulty = ((Number) card.get("difficulty")).intValue();
 
+        // Flagged mid-test (the flag button is available before AND after answering — see
+        // FlashcardSession.jsx): skip verification (no LLM judge spend on a card whose result
+        // won't count) and don't record an attempt at all. perNoteScores only sums attempts
+        // that exist, so no row = excluded from both the note's score and its difficulty
+        // denominator, same as if the card had never been drawn.
+        if ("FLAGGED".equals(card.get("status"))) {
+            return mapOfNullable("verdict", "FLAGGED", "pointsEarned", 0,
+                "maxPoints", difficulty, "feedback", null);
+        }
+
         String verdict;
         boolean judgeUsed = false;
         String feedback = null;
