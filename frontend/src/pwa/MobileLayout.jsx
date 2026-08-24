@@ -21,6 +21,7 @@ export default function MobileLayout() {
   const setShowLogin    = useStore(s => s.setShowLogin);
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const showLogin       = useStore(s => s.showLogin);
+  const showToast       = useStore(s => s.showToast);
   const online          = useOffline();
 
   // Same bootstrap the desktop App does — auth gate + revalidate on focus — but the
@@ -58,14 +59,20 @@ export default function MobileLayout() {
   useEffect(() => {
     const trySync = async () => {
       if (!navigator.onLine) return;
-      if (await hasCreds().catch(() => false)) await pushMailbox().catch(() => {});
-      await flushOutbox().catch(() => {});
+      let synced = 0;
+      if (await hasCreds().catch(() => false)) {
+        const { pushed } = await pushMailbox().catch(() => ({ pushed: 0 }));
+        synced += pushed;
+      }
+      const { sent } = await flushOutbox().catch(() => ({ sent: 0 }));
+      synced += sent;
+      if (synced > 0) showToast(`Back online — ${synced} synced`);
     };
     if (online) trySync();
     const onVis = () => { if (document.visibilityState === 'visible') trySync(); };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
-  }, [online]);
+  }, [online, showToast]);
 
   // Auto-sync (cron-like): keep the Drive-linked review set fresh without a manual tap.
   // Fires on launch (mount) and reconnect (online flips true), on tab-focus, and every
