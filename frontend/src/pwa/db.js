@@ -4,11 +4,12 @@
 // Stores:
 //   reviewNotes  keyPath 'path'     — { path, shortName, content, media:[urls], srDue }
 //   assignments  keyPath 'notePath' — { notePath, assignmentId, cards, variants }  (offline flashcards)
+//   noteVectors  keyPath 'path'     — { path, vector:number[768] }  (cached doc-embeddings — see FLOWS.md)
 //   outbox       autoIncrement      — { id, kind:'grade'|'capture'|'assignment', ...payload, eventId, ts }
 //   meta         keyPath 'key'      — { key, value }  (lastSync, driveCreds, doneDate, …)
 
 const DB_NAME = 'obsopt-offline';
-const DB_VERSION = 2;   // bumped for the 'assignments' store — keep public/sw.js openDB in sync
+const DB_VERSION = 3;   // bumped for the 'noteVectors' store — keep public/sw.js openDB in sync
 
 let dbPromise = null;
 
@@ -20,6 +21,7 @@ export function openDB() {
       const db = req.result;
       if (!db.objectStoreNames.contains('reviewNotes')) db.createObjectStore('reviewNotes', { keyPath: 'path' });
       if (!db.objectStoreNames.contains('assignments')) db.createObjectStore('assignments', { keyPath: 'notePath' });
+      if (!db.objectStoreNames.contains('noteVectors')) db.createObjectStore('noteVectors', { keyPath: 'path' });
       if (!db.objectStoreNames.contains('outbox'))      db.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
       if (!db.objectStoreNames.contains('meta'))        db.createObjectStore('meta', { keyPath: 'key' });
     };
@@ -66,6 +68,19 @@ export const getAssignmentByNote = (notePath) =>
 // (hasCards) for the hybrid-review split.
 export const getAllAssignments = () =>
   tx('assignments', 'readonly', (s) => reqValue(s.getAll(), {}));
+
+// ── noteVectors (cached embeddings — see FLOWS.md) ────────────────────────────
+// Upsert-only (no clear-all): a partial or failed vector fetch during a sync must
+// never wipe vectors cached from an earlier successful sync. Stale/missing entries
+// are accepted — cadence piggybacks on the review sync, no dedicated refresh.
+export const putNoteVectors = (list) =>
+  tx('noteVectors', 'readwrite', (s) => { list.forEach(v => s.put(v)); });
+
+export const getAllNoteVectors = () =>
+  tx('noteVectors', 'readonly', (s) => reqValue(s.getAll(), {}));
+
+export const getNoteVector = (path) =>
+  tx('noteVectors', 'readonly', (s) => reqValue(s.get(path), {}));
 
 // ── outbox ───────────────────────────────────────────────────────────────────
 export const addToOutbox = (entry) =>

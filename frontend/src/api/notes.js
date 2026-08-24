@@ -239,6 +239,22 @@ export async function searchNotes(query, { signal } = {}) {
   return res.json();
 }
 
+// NEW endpoint (offline embeddings support) — returns [{path, vector}] for whichever of
+// the given paths already have embedded text chunks; paths with nothing indexed yet are
+// simply absent. Document-side vectors only — NOT usable to embed a typed query (the
+// embedder's model is prompt-asymmetric; see NoteVectorController's doc comment and
+// frontend/src/pwa/FLOWS.md). Used by the offline sync piggyback (syncOffline.js /
+// drivePull.js), not by any online request path.
+export async function fetchNoteVectors(paths) {
+  if (!paths || paths.length === 0) return [];
+  const res = await req(`${BASE}/notes/vectors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+  return res.json();
+}
+
 // ── Reviews (FSRS + bandit) ──────────────────────────────────────────────────
 
 // Returns [{note_path, stability, difficulty, reps, last_review, due}, ...].
