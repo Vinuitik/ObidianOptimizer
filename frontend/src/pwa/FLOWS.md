@@ -198,6 +198,19 @@ the existing `GET /names` — no new endpoint), and match on filename substring 
    `SearchBar` and `MilkdownEditor`'s `WikiLinkSuggest`) catches a server-unreachable
    error and calls `offlineSearch.offlineKeywordSearch()`, which substring-matches the
    query against `cachedNoteNames` — filename only, not content, not semantic.
+3. **Offline Learn destination-folder picker (2026-08-24)**: `InboxReview.jsx` (the
+   component both desktop and mobile `/learn` render) already filed/discarded/acknowledged
+   offline via `pwa/offlineApi.js` — but its `loadVaultDir()` folder browser called the live
+   `GET /children` with no fallback, so picking a DESTINATION folder broke offline even
+   though the filing action itself didn't. Fixed the same way as (2): `loadVaultDir()`
+   catches a failed `fetchChildren` and derives the tree from `cachedNoteNames` instead
+   (`../utils/offlineFolders.js offlineChildrenOf()` — same absolute-path format `/children`
+   uses, so a folder picked offline files identically to one picked online). Needs one more
+   tiny anchor beyond the name list: the vault root path itself (`meta.cachedVaultRoot`,
+   cached opportunistically in `InboxReview.jsx`'s own mount effect, not a sync piggyback) —
+   without it there's no way to know when browsing has reached the top. A folder with zero
+   notes anywhere in its subtree is invisible offline (derived from note paths, not a real
+   directory listing) — accepted, same drift trade-off as (1)/(2).
 
 To change the piggyback scope: `syncOffline.js` / `drivePull.js`. To change match
 scoring: `offlineSearch.js`.
@@ -293,7 +306,7 @@ scoring: `offlineSearch.js`.
 | Download progress phase labels | `SyncPage.jsx` `STAGE_LABELS` / `stageText()` / `mediaSummary()`; emitted by `drivePull.pullReviewFromDrive`/`refreshAndPull` (`onStage`) + `warmMedia.warmReviewMedia` (`onProgress.phase`) |
 | What media is warmed (images/A-V/PDF/other) | `utils/noteMedia.js` `mediaEntriesForNote()` (shares `pdfPageUrl` with `SourceSplicePanel`) |
 | SW media routing (incl. `/pdf-page`) | `public/sw.js` `isMedia()` + `VERSION` bump |
-| Review auto-advance (random next note) | `pages/ReviewPage.jsx` `pickRandomNext()` / `handleClose(fromPath)` |
+| Review auto-advance (DFS pre-order next note) | `pages/reviewOrder.js` `pickNextInOrder()` / `pages/ReviewPage.jsx handleClose(fromPath)` |
 | Learn auto-advance (next in source group, stop at group end) | `components/organisms/InboxReview.jsx` `nextInGroup()` + `load({preferGroup})` (file/acknowledge/discard) |
 | PWA auto-sync cron (launch/focus/interval) | `MobileLayout.jsx` effect → `autoSync.maybeAutoSync()` |
 | Auto-sync freshness window | `autoSync.js` `FRESH_MS` (6h) |
@@ -308,6 +321,7 @@ scoring: `offlineSearch.js`.
 | Offline name cache (what/when it's fetched) | `syncOffline.js` (after `putReviewNotes`) / `drivePull.js refreshAndPull()` (`if (serverUp)` block) |
 | Offline name cache store | `db.js` `meta` key `cachedNoteNames` (`setMeta`/`getMeta`) |
 | Offline search/linking fallback | `../utils/useSearch.js` `isServerUnreachable()` → `../utils/offlineSearch.js offlineKeywordSearch()` |
+| Offline Learn destination-folder picker | `components/organisms/InboxReview.jsx loadVaultDir()` catch branch → `../utils/offlineFolders.js offlineChildrenOf()`, fed by the same `cachedNoteNames` + meta `cachedVaultRoot` |
 | Offline subset size / media policy | `syncOffline.js` `syncForOffline({ limit, includeMedia })` |
 | Share-target params (incl. file `accept`) | `manifest.webmanifest` + `vite-pwa.config.js` `share_target` |
 | Manifest icons (desktop-install gate) | `manifest.webmanifest` `icons` — needs PNG 192+512 for the Edge/Chrome desktop Install prompt; regen from `public/icons/*.svg` |

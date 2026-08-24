@@ -7,6 +7,8 @@ import {
 } from '../../pwa/offlineApi';
 import { fetchChildren, updateNote } from '../../api/notes';
 import { splitInboxNote, moveInboxNote, createInboxFolder } from '../../api/inbox';
+import { getMeta, setMeta } from '../../pwa/db';
+import { offlineChildrenOf } from '../../utils/offlineFolders';
 import { buildSourceColors, groupBySource, captureLabel, buildInboxTree, folderAllItems } from '../../utils/sourceColor';
 import { markLearnTaskDone } from '../../utils/dailyDuty';
 import useStore from '../../store/useStore';
@@ -126,22 +128,33 @@ export default function InboxReview({ onCount }) {
   useEffect(() => {
     if (!isAuthenticated) return;
     load();
-    fetchChildren(null).then(r => setVaultRoot(r.parentPath)).catch(() => {});
+    fetchChildren(null)
+      .then(r => { setVaultRoot(r.parentPath); setMeta('cachedVaultRoot', r.parentPath).catch(() => {}); })
+      .catch(() => { getMeta('cachedVaultRoot').then(setVaultRoot).catch(() => {}); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   // ── folder tree picker (reuses FolderPicker, browsing the vault) ──────────────
+  // Offline (or the server unreachable): fall back to deriving the tree from the note-path
+  // list already cached for offline search/linking (utils/offlineFolders.js) — same
+  // absolute-path shape /children uses, so a folder picked offline files identically to one
+  // picked online.
   const loadVaultDir = useCallback(async (path) => {
-    const r = await fetchChildren(path);
-    const cur = r.parentPath;
-    const parent = (!vaultRoot || cur === vaultRoot) ? null : dirName(cur);
-    return {
-      current: cur,
-      parent,
-      dirs: (r.folderPaths || [])
-        .filter(f => !/[/\\]_inbox$/.test(f))
-        .map(p => ({ path: p, name: baseName(p) })),
-    };
+    try {
+      const r = await fetchChildren(path);
+      const cur = r.parentPath;
+      const parent = (!vaultRoot || cur === vaultRoot) ? null : dirName(cur);
+      return {
+        current: cur,
+        parent,
+        dirs: (r.folderPaths || [])
+          .filter(f => !/[/\\]_inbox$/.test(f))
+          .map(p => ({ path: p, name: baseName(p) })),
+      };
+    } catch {
+      const names = (await getMeta('cachedNoteNames').catch(() => null)) || [];
+      return offlineChildrenOf(names, path, vaultRoot);
+    }
   }, [vaultRoot]);
 
   function openFolderPicker() {
