@@ -53,6 +53,7 @@ function AnimatedRoutes() {
 export default function App() {
   const checkAuth  = useStore(s => s.checkAuth);
   const showLogin  = useStore(s => s.showLogin);
+  const showToast  = useStore(s => s.showToast);
 
   // Re-validate on mount AND whenever the tab regains focus, so a backend restart
   // (session cookie invalidated) is detected proactively — not left showing stale
@@ -69,12 +70,15 @@ export default function App() {
   // backgrounded/frozen tab can miss the 'online' event entirely — see MobileLayout.jsx
   // for the mobile case this actually surfaced in), so nothing is stranded.
   useEffect(() => {
-    flushOutbox().catch(() => {});
-    const onVis = () => { if (document.visibilityState === 'visible' && navigator.onLine) flushOutbox().catch(() => {}); };
+    const flushAndNotify = () => flushOutbox().then(({ sent }) => {
+      if (sent > 0) showToast(`Back online — ${sent} synced`);
+    }).catch(() => {});
+    flushAndNotify();
+    const onVis = () => { if (document.visibilityState === 'visible' && navigator.onLine) flushAndNotify(); };
     document.addEventListener('visibilitychange', onVis);
-    const offConnectivity = onConnectivityChange(on => { if (on) flushOutbox().catch(() => {}); });
+    const offConnectivity = onConnectivityChange(on => { if (on) flushAndNotify(); });
     return () => { document.removeEventListener('visibilitychange', onVis); offConnectivity(); };
-  }, []);
+  }, [showToast]);
 
   return (
     <BrowserRouter>
