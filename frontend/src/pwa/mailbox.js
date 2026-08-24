@@ -13,7 +13,7 @@ export async function pushMailbox() {
 
   const all = await getOutbox();
   // Server consume handles these kinds (P3/P4/P5). Others stay for the server-direct path.
-  const KINDS = new Set(['grade', 'assignment', 'file', 'discard', 'acknowledge']);
+  const KINDS = new Set(['grade', 'assignment', 'file', 'discard', 'acknowledge', 'flag']);
   const sendable = all.filter(e => KINDS.has(e.kind));
   if (!sendable.length) return { pushed: 0 };
 

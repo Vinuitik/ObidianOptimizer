@@ -13,6 +13,7 @@ import {
   buildAssignment as netBuildAssignment,
   submitAttempt as netSubmitAttempt,
   completeAssignment as netCompleteAssignment,
+  flagCard as netFlagCard,
   ApiError,
 } from '../api/notes';
 import {
@@ -24,7 +25,7 @@ import {
 import { getAllReviewNotes, getReviewNote, getAssignmentByNote, getAllAssignments, getMeta, setMeta } from './db';
 import {
   enqueueGrade, enqueueCapture, enqueueCaptureText, enqueueAssignment,
-  enqueueFile, enqueueDiscard, enqueueAcknowledge, flush,
+  enqueueFile, enqueueDiscard, enqueueAcknowledge, enqueueFlag, flush,
 } from './outbox';
 import { isOnline } from './connectivity';
 
@@ -54,19 +55,35 @@ function isServerUnreachable(e) {
   return false;
 }
 
+// The ONE offline-resilience shape reused by every function below except the deferred-test
+// trio (buildAssignmentOffline/submitAttemptOffline/completeAssignmentOffline — those are
+// driveMode-gated in-memory session state, not a per-call live-vs-queue decision, so they
+// don't fit this): attempt `live()` only when not driveMode (driveMode never hits the
+// server directly for these — it defers to the Drive-pulled cache or the mailbox) and
+// actually online; on an unreachable server, or when skipped for the reasons above, fall
+// back to `fallback()`. A genuine error (a real 401/4xx `live()` chooses to throw) is NOT
+// swallowed — it propagates so the caller's own handling (e.g. a login prompt) still runs.
+// `live()` may itself decide to queue-and-return for a case it wants to handle specially
+// (captureUrl/captureText's 401 → queued with `reason:'auth'` instead of a login rethrow).
+async function withOfflineFallback(live, fallback) {
+  if (!driveMode && isOnline()) {
+    try { return await live(); }
+    catch (e) { if (!isServerUnreachable(e)) throw e; }
+  }
+  return fallback();
+}
+
 // Review list — network when online, downloaded IDB subset when offline. Every branch
 // yields { notes: [{ path, hasCards }], hasMore } so the store's allocator (reviewPlan.js)
 // can split flashcard vs read tracks identically on desktop and phone.
 export async function fetchReviewOffline(offset = 0, limit = 40) {
-  if (driveMode) return localReviewPage(offset, limit);      // phone: never hits the server
-  if (isOnline()) {
-    try {
+  return withOfflineFallback(
+    async () => {
       const res = await netFetchReview(offset, limit);
       return { notes: normalizeNotes(res?.notes), hasMore: Boolean(res?.hasMore) };
-    }
-    catch (e) { if (!isServerUnreachable(e)) throw e; }       // server down/blip → use cache
-  }
-  return localReviewPage(offset, limit);
+    },
+    () => localReviewPage(offset, limit),
+  );
 }
 
 // Accept both the new shape ([{path,hasCards}]) and the legacy one (string[]), so a
@@ -94,36 +111,22 @@ async function localReviewPage(offset, limit) {
 
 // Note text — network when online, downloaded copy when offline.
 export async function fetchNoteContentOffline(fullPath) {
-  if (driveMode) {
+  const fromCache = async () => {
     const rec = await getReviewNote(fullPath);
     if (rec?.content != null) return rec.content;
-    throw new ApiError(503); // not in the pulled set
-  }
-  if (isOnline()) {
-    try { return await netFetchNoteContent(fullPath); }
-    catch (e) { if (!isServerUnreachable(e)) throw e; }       // server down/blip → use cache
-  }
-  const rec = await getReviewNote(fullPath);
-  if (rec?.content != null) return rec.content;
-  throw new ApiError(503); // not downloaded for offline
+    throw new ApiError(503); // not downloaded for offline
+  };
+  return withOfflineFallback(() => netFetchNoteContent(fullPath), fromCache);
 }
 
-// Grade — POST when online; otherwise optimistic + queue for replay on reconnect.
+// Grade — POST when online; otherwise optimistic + queue for replay on reconnect. A real
+// 401 is NOT queued here — isServerUnreachable() only treats 5xx/530/TypeError as
+// unreachable, so a 401 propagates and the UI prompts login instead.
 export async function gradeNoteOffline(notePath, band) {
-  if (driveMode) {
-    // Never hit the server directly in Drive mode — queue for the mailbox / later replay.
-    await enqueueGrade(notePath, band);
-    return { notePath, band, queued: true, due: null };
-  }
-  if (isOnline()) {
-    try { return await netGradeNote(notePath, band); }
-    catch (e) {
-      if (e instanceof ApiError && e.status === 401) throw e; // let UI prompt login
-      // network failure → queue
-    }
-  }
-  await enqueueGrade(notePath, band);
-  return { notePath, band, queued: true, due: null };
+  return withOfflineFallback(
+    () => netGradeNote(notePath, band),
+    async () => { await enqueueGrade(notePath, band); return { notePath, band, queued: true, due: null }; },
+  );
 }
 
 // Capture a shared/pasted link → backend ingest. Queues when offline / on 401.
@@ -131,8 +134,8 @@ export async function gradeNoteOffline(notePath, band) {
 // { newTrackTitle, newTrackType? } creates one on the fly — resolved server-side
 // (CaptureController.resolveTrackId). Omitted ⇒ today's exact untagged behavior.
 export async function captureUrl(url, trackOpts = {}) {
-  if (isOnline()) {
-    try {
+  return withOfflineFallback(
+    async () => {
       const res = await fetch('/api/capture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -140,23 +143,23 @@ export async function captureUrl(url, trackOpts = {}) {
         body: JSON.stringify({ url, ...trackOpts }),
       });
       if (res.ok) return { queued: false };
+      // 401 gets its own queued-with-reason result (not a login rethrow) — capture is a
+      // fire-and-forget action the UI doesn't block on, so it just queues for replay
+      // after the user signs back in, same as any other unreachable case.
       if (res.status === 401) { await enqueueCapture(url, trackOpts); return { queued: true, reason: 'auth' }; }
       throw new ApiError(res.status);
-    } catch (e) {
-      if (e instanceof ApiError && !isServerUnreachable(e)) throw e;
-      // network failure or server down (5xx/530) → queue
-    }
-  }
-  await enqueueCapture(url, trackOpts);
-  return { queued: true };
+    },
+    async () => { await enqueueCapture(url, trackOpts); return { queued: true }; },
+  );
 }
 
-// Capture a typed raw note (brain dump) → text ingest → Learn inbox. Queues when offline /
-// on 401, replays server-direct on reconnect. Mirrors captureUrl; driveMode is irrelevant
-// (capture always goes server-direct — the ingest pipeline needs the server regardless).
+// Capture a typed raw note (brain dump) → text ingest → Learn inbox. Mirrors captureUrl;
+// driveMode is irrelevant here (capture always needs the server — there's no local queue
+// bypass), but withOfflineFallback's driveMode gate is harmless since driveMode is never
+// set true for a surface that calls this.
 export async function captureText(text, title, trackOpts = {}) {
-  if (isOnline()) {
-    try {
+  return withOfflineFallback(
+    async () => {
       const res = await fetch('/api/capture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -169,13 +172,9 @@ export async function captureText(text, title, trackOpts = {}) {
         return { queued: true, reason: 'auth' };
       }
       throw new ApiError(res.status);
-    } catch (e) {
-      if (e instanceof ApiError && !isServerUnreachable(e)) throw e;
-      // network failure or server down (5xx/530) → queue
-    }
-  }
-  await enqueueCaptureText(text, title, trackOpts);
-  return { queued: true };
+    },
+    async () => { await enqueueCaptureText(text, title, trackOpts); return { queued: true }; },
+  );
 }
 
 // ── Offline flashcard tests (deferred grading) ────────────────────────────────
@@ -222,42 +221,50 @@ async function dropFromInbox(pred) {
 }
 
 export async function fetchInboxOffline() {
-  if (driveMode) return pulledInbox();
-  if (isOnline()) {
-    try { return await netFetchInbox(); }
-    catch (e) { if (!isServerUnreachable(e)) throw e; }  // network blip → fall through
-  }
-  return pulledInbox();   // offline and not driveMode: still show whatever was last pulled
+  return withOfflineFallback(netFetchInbox, pulledInbox);
 }
 
 export async function fileInboxOffline(path, targetFolder, content) {
-  if (!driveMode && isOnline()) {
-    try { return await netFileInbox(path, targetFolder, content); }
-    catch (e) { if (!isServerUnreachable(e)) throw e; }
-  }
-  await enqueueFile(path, targetFolder, content);
-  await dropFromInbox(i => i.path !== path);
-  return { path, queued: true };
+  return withOfflineFallback(
+    () => netFileInbox(path, targetFolder, content),
+    async () => {
+      await enqueueFile(path, targetFolder, content);
+      await dropFromInbox(i => i.path !== path);
+      return { path, queued: true };
+    },
+  );
 }
 
 export async function discardInboxOffline(path) {
-  if (!driveMode && isOnline()) {
-    try { return await netDiscardInbox(path); }
-    catch (e) { if (!isServerUnreachable(e)) throw e; }
-  }
-  await enqueueDiscard(path);
-  await dropFromInbox(i => i.path !== path);
-  return { queued: true };
+  return withOfflineFallback(
+    () => netDiscardInbox(path),
+    async () => {
+      await enqueueDiscard(path);
+      await dropFromInbox(i => i.path !== path);
+      return { queued: true };
+    },
+  );
 }
 
 export async function acknowledgeOffline(captureId) {
-  if (!driveMode && isOnline()) {
-    try { return await netAcknowledge(captureId); }
-    catch (e) { if (!isServerUnreachable(e)) throw e; }
-  }
-  await enqueueAcknowledge(captureId);
-  await dropFromInbox(i => i.captureId !== captureId);
-  return { queued: true };
+  return withOfflineFallback(
+    () => netAcknowledge(captureId),
+    async () => {
+      await enqueueAcknowledge(captureId);
+      await dropFromInbox(i => i.captureId !== captureId);
+      return { queued: true };
+    },
+  );
+}
+
+// ── Offline flashcard flagging ─────────────────────────────────────────────────
+// Same shape as the inbox actions above. The regen a flag kicks off is best-effort
+// either way — see MailboxConsumeService.applyFlag / CardController.flag server-side.
+export async function flagCardOffline(cardId, reason) {
+  return withOfflineFallback(
+    () => netFlagCard(cardId, reason),
+    async () => { await enqueueFlag(cardId, reason); return { queued: true }; },
+  );
 }
 
 // Replay the outbox — call on reconnect (and after re-login).

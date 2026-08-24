@@ -4,8 +4,8 @@ import {
   buildAssignmentOffline as buildAssignment,
   submitAttemptOffline as submitAttempt,
   completeAssignmentOffline as completeAssignment,
+  flagCardOffline as flagCard,
 } from '../../pwa/offlineApi';
-import { flagCard } from '../../api/notes';
 import styles from './FlashcardSession.module.css';
 
 const SESSION_POINTS = 10; // point budget per mini-test (points = card difficulty 1-5)
@@ -103,6 +103,19 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
     setAnswers(prev => ({ ...prev, [cardId]: value }));
   }
 
+  // Flagging is available any time — before or after answering (quiz phase and result
+  // breakdown both use this). A flagged card is excluded from grading server-side
+  // (AssignmentService.submitAttempt) and kicks off an immediate feedback-aware
+  // replacement, not a nightly-only one.
+  async function flagThisCard(cardId, reason) {
+    try {
+      await flagCard(cardId, reason);
+      setFlagged(p => ({ ...p, [cardId]: true }));
+    } catch (e) {
+      showToast(`Flag failed: ${e.message ?? e}`);
+    }
+  }
+
   // Finish: send every buffered answer at once (each card's own submitAttempt,
   // same per-card verification the server has always done — nothing server-side
   // changed), then complete the assignment. Cards never touched are treated the
@@ -187,6 +200,13 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
               {' '}You can change this until you press Finish.
             </p>
           )}
+
+          {/* Flag a bad card any time — before or after answering. Excluded from
+              grading, and a replacement starts generating right away. */}
+          <FlagControl
+            flagged={Boolean(flagged[card.id])}
+            onFlag={(reason) => flagThisCard(card.id, reason)}
+          />
         </div>
 
         <div className={styles.nav}>
@@ -206,8 +226,12 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
   // ── Result phase ──────────────────────────────────────────────────────────
 
   const deferred = Boolean(completion?.deferred);   // offline: server grades on sync
-  const earned = cards.reduce((sum, c) => sum + (verdicts[c.id]?.pointsEarned ?? 0), 0);
-  const max    = cards.reduce((sum, c) => sum + c.difficulty, 0);
+  // Flagged cards are excluded from both numerator and denominator server-side
+  // (AssignmentService.submitAttempt never records an attempt for one) — match that here
+  // so the displayed total agrees with noteResult.band, which comes from the same query.
+  const scoredCards = cards.filter(c => verdicts[c.id]?.verdict !== 'FLAGGED');
+  const earned = scoredCards.reduce((sum, c) => sum + (verdicts[c.id]?.pointsEarned ?? 0), 0);
+  const max    = scoredCards.reduce((sum, c) => sum + c.difficulty, 0);
   const noteResult = completion?.notes?.find(n => n.notePath === notePath) ?? completion?.notes?.[0];
 
   return (
@@ -238,9 +262,11 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
       <div className={styles.breakdown}>
         {cards.map(c => {
           const v = verdicts[c.id];
+          const flaggedResult = v?.verdict === 'FLAGGED';
           // Deferred (offline): neutral mark, no correctness/answer reveal — the server
-          // hasn't graded yet. Online: the usual correct/partial/wrong breakdown.
-          const cls = deferred ? styles.resultPending
+          // hasn't graded yet. Flagged: also neutral — excluded from grading, not "wrong".
+          // Online otherwise: the usual correct/partial/wrong breakdown.
+          const cls = deferred || flaggedResult ? styles.resultPending
                     : v?.verdict === 'CORRECT' ? styles.resultCorrect
                     : v?.verdict === 'PARTIAL' ? styles.resultPending
                     : styles.resultWrong;
@@ -248,38 +274,35 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
             <div key={c.id} className={`${styles.resultCard} ${cls}`}
                  data-testid={`result-card-${c.id}`}>
               <span className={styles.resultMark}>
-                {deferred ? '◐'
+                {deferred ? '◐' : flaggedResult ? '🚩'
                   : v?.verdict === 'CORRECT' ? '✓' : v?.verdict === 'PARTIAL' ? '◐' : '✗'}
               </span>
               <div className={styles.resultCardBody}>
                 <p className={styles.resultQuestion}>{questionOf(c, variants)}</p>
-                <p className={styles.resultAnswer}>
-                  Your answer: {answerDisplayOf(c, answers[c.id])}
-                  {!deferred && <>{' '}· {v?.pointsEarned ?? 0}/{c.difficulty} pts</>}
-                </p>
-                {!deferred && v?.verdict !== 'CORRECT' && correctAnswerOf(c, variants) != null && (
+                {flaggedResult ? (
+                  <p className={styles.resultAnswer}>Flagged — excluded from this test's grading.</p>
+                ) : (
+                  <p className={styles.resultAnswer}>
+                    Your answer: {answerDisplayOf(c, answers[c.id])}
+                    {!deferred && <>{' '}· {v?.pointsEarned ?? 0}/{c.difficulty} pts</>}
+                  </p>
+                )}
+                {!deferred && !flaggedResult && v?.verdict !== 'CORRECT' && correctAnswerOf(c, variants) != null && (
                   <p className={styles.resultCorrectAnswer}>
                     Correct answer: {String(correctAnswerOf(c, variants))}
                   </p>
                 )}
-                {!deferred && c.payload.explanation && (
+                {!deferred && !flaggedResult && c.payload.explanation && (
                   <p className={styles.resultExplanation}>Why: {c.payload.explanation}</p>
                 )}
-                {!deferred && v?.feedback && (
+                {!deferred && !flaggedResult && v?.feedback && (
                   <p className={styles.resultFeedback}>{v.feedback}</p>
                 )}
-                {/* Flag a bad card: quarantines it now; the nightly regen replaces it
-                    1-for-1, using the reason to steer the agent away from the flaw. */}
+                {/* Flag a bad card: quarantines it now and starts a replacement generating
+                    right away, using the reason to steer the agent away from the flaw. */}
                 <FlagControl
                   flagged={Boolean(flagged[c.id])}
-                  onFlag={async (reason) => {
-                    try {
-                      await flagCard(c.id, reason);
-                      setFlagged(p => ({ ...p, [c.id]: true }));
-                    } catch (e) {
-                      showToast(`Flag failed: ${e.message ?? e}`);
-                    }
-                  }}
+                  onFlag={(reason) => flagThisCard(c.id, reason)}
                 />
               </div>
             </div>
@@ -308,7 +331,7 @@ function FlagControl({ flagged, onFlag }) {
 
   if (flagged) {
     return <p className={styles.flagDone} data-testid="flag-done">
-      🚩 Flagged — a replacement is generated tonight.
+      🚩 Flagged — excluded from grading, replacement generating now.
     </p>;
   }
   if (!open) {

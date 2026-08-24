@@ -39,6 +39,10 @@ export function enqueueAcknowledge(captureId) {
   return addToOutbox({ kind: 'acknowledge', captureId, eventId: newId() });
 }
 
+export function enqueueFlag(cardId, reason) {
+  return addToOutbox({ kind: 'flag', cardId, reason, eventId: newId() });
+}
+
 // Replay everything. Returns { sent, failed }. A 401 leaves items queued (the
 // caller should prompt login via the existing LoginModal, then flush again).
 export async function flush() {
