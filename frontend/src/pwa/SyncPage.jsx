@@ -8,7 +8,12 @@ import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
 import { refreshAndPull, pullReviewFromDrive } from './drivePull';
 import { pushMailbox } from './mailbox';
 import { notificationsSupported, notificationPermission, requestNotificationPermission } from './quitNotify';
+import { fetchFailedCaptures, retryCapture, dismissCapture } from '../api/capture';
 import styles from './MobilePages.module.css';
+
+// Baseline for "did the failed-capture count grow since last time we checked", persisted
+// across visits/reloads — a plain localStorage number is enough for a per-device counter.
+const FAILED_COUNT_KEY = 'obs.failedCaptureCount';
 
 // The PWA's Sync tab. "Download for offline" seeds the review subset (notes + text
 // + media) into IndexedDB / Cache Storage so review keeps working with no network;
@@ -48,6 +53,7 @@ export default function SyncPage() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const setShowLogin    = useStore(s => s.setShowLogin);
   const logout          = useStore(s => s.logout);
+  const showToast       = useStore(s => s.showToast);
   const online          = useOffline();
 
   const [lastSync, setLastSync] = useState(null);
@@ -57,11 +63,59 @@ export default function SyncPage() {
   const [linked, setLinked]     = useState(false);
   const [driveMsg, setDriveMsg] = useState(null);  // { text, tone }
   const [notifPerm, setNotifPerm] = useState(() => notificationPermission());
+  const [failed, setFailed]     = useState([]);     // failed captures
+  const [failedBusyId, setFailedBusyId] = useState(null);
 
   useEffect(() => {
     getMeta('lastSync').then(v => setLastSync(v || null)).catch(() => {});
     hasCreds().then(setLinked).catch(() => {});
   }, []);
+
+  // Failed captures don't self-report — pull the list, and toast if it grew since the
+  // last time this page checked (so a background failure isn't invisible unless the
+  // user happens to come look).
+  async function loadFailed() {
+    try {
+      const list = await fetchFailedCaptures();
+      setFailed(list);
+      const prevCount = Number(localStorage.getItem(FAILED_COUNT_KEY) ?? list.length);
+      if (list.length > prevCount) {
+        showToast(`${list.length} capture${list.length === 1 ? '' : 's'} failed — see below.`);
+      }
+      localStorage.setItem(FAILED_COUNT_KEY, String(list.length));
+    } catch { /* not signed in yet, or offline — silently skip */ }
+  }
+
+  useEffect(() => {
+    if (isAuthenticated) loadFailed();
+  }, [isAuthenticated]);
+
+  async function handleRetry(id) {
+    setFailedBusyId(id);
+    try {
+      await retryCapture(id);
+      showToast('Retry queued.');
+      setFailed(f => f.filter(c => c.id !== id));
+      localStorage.setItem(FAILED_COUNT_KEY, String(failed.length - 1));
+    } catch (e) {
+      showToast(`Retry failed: ${e.message ?? e}`);
+    } finally {
+      setFailedBusyId(null);
+    }
+  }
+
+  async function handleDismiss(id) {
+    setFailedBusyId(id);
+    try {
+      await dismissCapture(id);
+      setFailed(f => f.filter(c => c.id !== id));
+      localStorage.setItem(FAILED_COUNT_KEY, String(failed.length - 1));
+    } catch (e) {
+      showToast(`Dismiss failed: ${e.message ?? e}`);
+    } finally {
+      setFailedBusyId(null);
+    }
+  }
 
   async function enableNotifications() {
     setNotifPerm(await requestNotificationPermission());
@@ -204,6 +258,46 @@ export default function SyncPage() {
               Enable "are you a quitter?" nudges
             </button>
           )}
+        </>
+      )}
+
+      {/* ── Failed captures ───────────────────────────────────────────────── */}
+      {isAuthenticated && failed.length > 0 && (
+        <>
+          <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>
+            Failed captures ({failed.length})
+          </h2>
+          <p className={styles.hint}>
+            These keep auto-retrying every 6h on their own — retry now or give up on one below.
+          </p>
+          {failed.map(c => (
+            <div key={c.id} style={{
+              marginTop: 10, padding: '10px 12px',
+              border: '1px solid var(--color-border, #262a35)', borderRadius: 8,
+            }}>
+              <div style={{ fontWeight: 600, wordBreak: 'break-word' }}>
+                {c.title || c.sourceRef}
+              </div>
+              <p className={`${styles.hint} ${styles.err}`} style={{ margin: '4px 0' }}>
+                {c.lastError || 'Unknown error'}
+              </p>
+              <p className={styles.hint} style={{ margin: '0 0 8px' }}>
+                {c.sourceType} · {c.retryCount} attempt{c.retryCount === 1 ? '' : 's'}
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className={styles.captureBtn} onClick={() => handleRetry(c.id)}
+                        disabled={failedBusyId === c.id || !online}
+                        style={{ flex: 1, padding: '8px 14px' }}>
+                  Retry
+                </button>
+                <button className={styles.captureBtn} onClick={() => handleDismiss(c.id)}
+                        disabled={failedBusyId === c.id}
+                        style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--color-border, #262a35)', color: 'var(--color-muted, #8a90a0)' }}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
         </>
       )}
 
