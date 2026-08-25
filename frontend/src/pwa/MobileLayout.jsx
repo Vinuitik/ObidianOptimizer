@@ -6,7 +6,7 @@ import { flushOutbox, setDriveMode, OUTBOX_RETRY_MS } from './offlineApi';
 import { pushMailbox } from './mailbox';
 import { hasCreds } from './setup';
 import { maybeAutoSync } from './autoSync';
-import { armQuitNotify } from './quitNotify';
+import { armQuitNotify, showLocalNotification } from './quitNotify';
 import LoginModal from '../components/organisms/LoginModal';
 import RouteErrorBoundary from '../components/organisms/RouteErrorBoundary';
 import BottomNav from './BottomNav';
@@ -71,7 +71,16 @@ export default function MobileLayout() {
       }
       const { sent } = await flushOutbox().catch(() => ({ sent: 0 }));
       synced += sent;
-      if (synced > 0) showToast(`Back online — ${synced} synced`);
+      if (synced > 0) {
+        showToast(`Back online — ${synced} synced`);
+        // Positive confirmation the queued offline work actually landed (Drive mailbox
+        // and/or server-direct), not just that it was queued — same mechanism/permission
+        // gate as the quit-nag / failed-capture alerts (quitNotify.js).
+        showLocalNotification(
+          synced === 1 ? '1 offline change synced' : `${synced} offline changes synced`,
+          { body: 'Your offline grades/edits made it to the server.', tag: 'obsopt-outbox-sync' },
+        );
+      }
     };
     if (online) trySync();
     const onVis = () => { if (document.visibilityState === 'visible') trySync(); };

@@ -1,5 +1,5 @@
 # PWA / Mobile — FLOWS
-Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, SyncPage.jsx, CapturePage.jsx, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, reviewPlan.js, drivePull.js, registerSW.js, vite-pwa.config.js, installPrompt.js, ../../public/sw.js, ../../public/manifest.webmanifest, ../components/atoms/RefreshButton.jsx
+Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, SyncPage.jsx, CapturePage.jsx, quitNotify.js, ../api/capture.js, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, reviewPlan.js, drivePull.js, registerSW.js, vite-pwa.config.js, installPrompt.js, ../../public/sw.js, ../../public/manifest.webmanifest, ../components/atoms/RefreshButton.jsx, ../App.jsx
 > Unused (dropped from the narrow PWA, kept in-tree): MobileNotesPage.jsx, MobileSearchPage.jsx.
 
 > The installed PWA is a **narrow, offline-capable app** — three jobs: **Review**
@@ -40,8 +40,12 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
   foregrounded. That interval exists because the first two triggers only fire on a
   connectivity/focus TRANSITION — a queue built up because the SERVER (not the phone) was
   down never retries on its own if the user just keeps watching the app. Toasts
-  `Back online — N synced` when either flush actually sends something (App.jsx mirrors
-  this for the desktop full site, minus the mailbox push).
+  `Back online — N synced` **and** fires a local notification (`quitNotify.showLocalNotification`,
+  tag `obsopt-outbox-sync`) when either flush actually sends something ≥1 item — the positive
+  "it landed" signal, not just the retry request being accepted (App.jsx mirrors this for the
+  desktop full site, minus the mailbox push). Gated to non-empty flushes only: `sent`/`pushed`
+  counts come straight from `outbox.flush()` / `mailbox.pushMailbox()`'s own return values, so
+  an empty/no-op flush (nothing was queued) never fires.
 - **Auto sign-in prompt:** the installed PWA has no visible "Sign in" button, so
   `MobileLayout`'s bootstrap effect calls `checkAuth()` and, if it comes back
   unauthenticated **while online**, auto-opens `LoginModal` via `setShowLogin(true)`
@@ -122,6 +126,36 @@ embedder `/ingest` (standalone, `find_home`).
   SW `enqueueOutbox({kind:'captureFile', blob})` (file); all replayed server-direct by
   `outbox.flush()` on reconnect (ingestion needs the server anyway — no Drive mailbox kind).
 - To change share params: `manifest.webmanifest` + `vite-pwa.config.js` `share_target`.
+
+## Flow — local (OS) notifications, permission + all firing points
+`quitNotify.js`, `SyncPage.jsx`, `App.jsx`, `MobileLayout.jsx`.
+- **One primitive, one permission gate.** `quitNotify.showLocalNotification(title, options)` →
+  `reg.showNotification()` via the active SW; no-ops silently unless
+  `Notification.permission === 'granted'`. Every feature below reuses this SAME function/gate —
+  no separate opt-in, no Web Push (explicitly declined — no backend push server involved, so
+  none of this reaches someone who doesn't have the app open somewhere on that device).
+  Permission toggle lives in `SyncPage`'s "Notifications" section (`requestNotificationPermission()`,
+  must be called from a user gesture).
+- **Quit-nag** (original consumer): `armQuitNotify()` — backgrounding with today's duty
+  unfinished → tag `obsopt-quit-guard`.
+- **Failed-capture alert:** `SyncPage.loadFailed()` — failed-list count GROWING since last
+  check → tag `obsopt-capture-failed`.
+- **Retry queued → confirmed synced (two-stage, NOT the same event):** `SyncPage.handleRetry()`
+  fires "Retry queued" immediately (tag `obsopt-capture-retry`) — that only means the retry POST
+  was *accepted*, not that the async ingest (`CaptureIngestWorker`) actually worked. The real
+  confirmation comes later: `handleRetry` adds the id→title to `pendingRetryRef` (a `Map`, ref
+  not state — no need to re-render on it), and `SyncPage` now **polls** `loadFailed()` every
+  `OUTBOX_RETRY_MS` (reusing `offlineApi.js`'s constant) while signed in. Each poll checks
+  `pendingRetryRef` against the fresh failed-list: an id that's DROPPED OUT actually succeeded
+  → fires "Capture synced" (same tag `obsopt-capture-retry`, so it replaces the earlier "queued"
+  notification instead of stacking two for one retry). An id that's still present either failed
+  again (covered by the growth-check notification above) or is still processing — either way
+  it's removed from `pendingRetryRef` so it's only ever "pending" for one poll cycle.
+- **Outbox/mailbox flush landing:** see the narrow-app flow above and MobileLayout's `trySync()`
+  — tag `obsopt-outbox-sync`, one notification per successful flush BATCH (not per queued item),
+  only when the batch actually had ≥1 item (`sent`/`pushed` > 0).
+- To add a new local-notification trigger: reuse `showLocalNotification()`, pick a `tag` that's
+  either unique to the event or intentionally shared (to replace, not stack) with a related one.
 
 ## Flow — Drive-link + auto-sync (server-independent offline)
 `setup.js`, `drivePull.js`, `autoSync.js`, `mailbox.js`, `drive.js`, `crypto.js`.
@@ -321,6 +355,10 @@ scoring: `offlineSearch.js`.
 | Creds re-read / blank-folder heal | `setup.js` `refreshCreds()` (+ `drivePull.js` just-in-time call) |
 | `/pwa/setup` blank-folder guard | `PwaController.setup()` (409 while `folderId` blank) |
 | Outbox/mailbox retry cadence (server-down self-heal) | `offlineApi.js OUTBOX_RETRY_MS` (60s) — used by both `App.jsx` and `MobileLayout.jsx`'s flush effects |
+| Local-notification primitive + permission gate | `quitNotify.js showLocalNotification()` / `notificationPermission()`; toggle UI in `SyncPage.jsx` "Notifications" section |
+| Failed-capture list poll cadence | `SyncPage.jsx` `useEffect` → `setInterval(loadFailed, OUTBOX_RETRY_MS)` |
+| Retry-queued vs retry-confirmed-synced notifications | `SyncPage.jsx` `handleRetry()` (queued, `pendingRetryRef.set`) + `loadFailed()` (confirms via list diff) — both tag `obsopt-capture-retry` |
+| Outbox/mailbox flush success notification | `App.jsx` `flushAndNotify()` / `MobileLayout.jsx` `trySync()` — tag `obsopt-outbox-sync`, gated on `sent`/`pushed` > 0 |
 | Shared viewport hook | `src/utils/useMediaQuery.js` (`useIsMobile`, `MOBILE_QUERY`) |
 | Shell precache list | `public/sw.js` `SHELL_URLS` |
 | Media cache name | `public/sw.js` + `syncOffline.js` `MEDIA_CACHE = 'obsopt-media'` |

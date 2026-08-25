@@ -16,6 +16,7 @@ import Toast from './components/atoms/Toast';
 import useStore from './store/useStore';
 import { flushOutbox, OUTBOX_RETRY_MS } from './pwa/offlineApi';
 import { onConnectivityChange } from './pwa/connectivity';
+import { showLocalNotification } from './pwa/quitNotify';
 import styles from './App.module.css';
 
 const pageVariants = {
@@ -75,7 +76,16 @@ export default function App() {
   // if the user just kept watching the app the whole time. The interval closes that gap.
   useEffect(() => {
     const flushAndNotify = () => flushOutbox().then(({ sent }) => {
-      if (sent > 0) showToast(`Back online — ${sent} synced`);
+      if (sent > 0) {
+        showToast(`Back online — ${sent} synced`);
+        // Positive confirmation that queued offline work actually landed on the server —
+        // not just that it was queued. Same permission-gated local-notification mechanism
+        // as the quit-nag / failed-capture alerts (quitNotify.js); no-ops if not granted.
+        showLocalNotification(
+          sent === 1 ? '1 offline change synced' : `${sent} offline changes synced`,
+          { body: 'Your offline grades/captures made it to the server.', tag: 'obsopt-outbox-sync' },
+        );
+      }
     }).catch(() => {});
     flushAndNotify();
     const onVis = () => { if (document.visibilityState === 'visible' && navigator.onLine) flushAndNotify(); };

@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import useOffline from './useOffline';
 import { syncForOffline } from './syncOffline';
-import { flushOutbox } from './offlineApi';
+import { flushOutbox, OUTBOX_RETRY_MS } from './offlineApi';
 import { getMeta } from './db';
 import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
 import { refreshAndPull, pullReviewFromDrive } from './drivePull';
@@ -65,6 +65,11 @@ export default function SyncPage() {
   const [notifPerm, setNotifPerm] = useState(() => notificationPermission());
   const [failed, setFailed]     = useState([]);     // failed captures
   const [failedBusyId, setFailedBusyId] = useState(null);
+  // Capture ids whose retry POST was accepted but whose actual ingest outcome isn't known
+  // yet (the worker runs async — see CaptureIngestWorker). Map id → title, so the eventual
+  // confirmation notification can name it. Checked against the failed list on every
+  // loadFailed() poll below: gone from the list next time round = it actually landed.
+  const pendingRetryRef = useRef(new Map());
 
   useEffect(() => {
     getMeta('lastSync').then(v => setLastSync(v || null)).catch(() => {});
@@ -96,11 +101,43 @@ export default function SyncPage() {
         );
       }
       localStorage.setItem(FAILED_COUNT_KEY, String(list.length));
+
+      // Resolve any retries in flight: a pending id that's no longer in the failed list
+      // actually succeeded (this is the only place that's known — the retry POST just
+      // means "accepted", not "worked"). One still-present is either still processing or
+      // failed again; either way it's no longer "pending", so drop it from tracking too —
+      // a repeat failure is already covered by the growth check above.
+      const pending = pendingRetryRef.current;
+      if (pending.size > 0) {
+        const stillFailed = new Set(list.map(c => c.id));
+        const confirmed = [];
+        for (const [id, title] of pending) {
+          if (!stillFailed.has(id)) { confirmed.push(title); pending.delete(id); }
+          else pending.delete(id);
+        }
+        if (confirmed.length > 0) {
+          showLocalNotification(
+            confirmed.length === 1 ? 'Capture synced' : `${confirmed.length} captures synced`,
+            {
+              body: confirmed.length === 1
+                ? `${confirmed[0]} finished processing.`
+                : `${confirmed.join(', ')} finished processing.`,
+              tag: 'obsopt-capture-retry',   // replaces the earlier "Retry queued" notification
+            },
+          );
+        }
+      }
     } catch { /* not signed in yet, or offline — silently skip */ }
   }
 
   useEffect(() => {
-    if (isAuthenticated) loadFailed();
+    if (!isAuthenticated) return;
+    loadFailed();
+    // Poll so a retry's actual outcome (known only on the NEXT fetch) gets checked without
+    // requiring the user to keep the page open and manually refresh — same cadence/pattern
+    // as the outbox retry interval (offlineApi.js OUTBOX_RETRY_MS).
+    const id = setInterval(loadFailed, OUTBOX_RETRY_MS);
+    return () => clearInterval(id);
   }, [isAuthenticated]);
 
   async function handleRetry(id) {
@@ -109,9 +146,11 @@ export default function SyncPage() {
     try {
       await retryCapture(id);
       showToast('Retry queued.');
-      // "Finished" here means the retry request itself resolved, not the eventual
-      // ingest outcome — that's only known on the next loadFailed() (worker runs async,
-      // and there's no backend push to tell the page when it lands).
+      // "Queued" here means the retry request itself resolved, not the eventual ingest
+      // outcome — that's only known on the next loadFailed() poll (worker runs async, no
+      // backend push), where pendingRetryRef is checked and the REAL success notification
+      // fires. Track it here rather than declaring victory now.
+      pendingRetryRef.current.set(id, label);
       showLocalNotification('Retry queued', {
         body: `${label} is retrying now.`,
         tag: 'obsopt-capture-retry',
