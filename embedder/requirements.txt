@@ -32,7 +32,7 @@ nvidia-cublas-cu12
 
 # yt-dlp — captions (ingest fast-path) + offline media download. Salvaged in-process
 # from the former VideoManager sister app (download/downloader.py).
-yt-dlp>=2024.5.27
+yt-dlp>=2026.8.19
 
 # Ingest stages 2-5: PDF, web, keyframes
 # CLIP keyframe/diagram selection runs via ingest.clip_onnx (pre-exported ONNX,
@@ -44,7 +44,10 @@ trafilatura>=1.12.0
 scenedetect[opencv-headless]>=0.6.4
 
 # MCP server (JSON-RPC over streamable HTTP) + direct Postgres access for tools
-mcp>=1.8.0
+# Pinned below 2.x: mcp_server.py uses `from mcp.server.fastmcp import FastMCP`, which mcp 2.x
+# renamed to MCPServer (breaking import, crashes the embedder on startup). Bump this alongside
+# a deliberate migration of mcp_server.py to the 2.x API, not as a side effect of a dep refresh.
+mcp>=1.8.0,<2.0.0
 psycopg[binary]>=3.2.0
 
 # Tests

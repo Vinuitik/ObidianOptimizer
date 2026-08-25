@@ -323,6 +323,50 @@ public class CaptureController {
         return "Captured text";
     }
 
+    // ── Failed captures ───────────────────────────────────────────────────────────
+    // A capture that hard-failed (yt-dlp rejected the URL, embedder 4xx, ...) no longer
+    // vanishes silently — it's auto-retried on every restart + a 6h standing cadence
+    // (CaptureIngestWorker.retryFailed), forever, with no lifetime cap. It stays visible
+    // here with the real error and a lifetime attempt count until it either succeeds or
+    // the user dismisses it — it is never auto-discarded.
+
+    @GetMapping("capture/failed")
+    public ResponseEntity<List<Map<String, Object>>> listFailed() {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (CaptureRepository.Capture c : captureRepo.listFailed()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", c.id());
+            m.put("sourceType", c.sourceType());
+            m.put("sourceRef", c.sourceRef());
+            m.put("title", c.title());
+            m.put("lastError", c.lastError());
+            m.put("retryCount", c.retryCount());
+            m.put("createdAt", c.createdAt());
+            out.add(m);
+        }
+        return ResponseEntity.ok(out);
+    }
+
+    /** Retry a failed capture right now, instead of waiting for the next scheduled pass. */
+    @PostMapping("capture/{id}/retry")
+    public ResponseEntity<Map<String, Object>> retryFailed(@PathVariable String id) {
+        if (!captureRepo.requeueFailed(id)) {
+            return ResponseEntity.status(409).body(Map.of("error", "not a failed capture"));
+        }
+        ingestWorker.nudge();
+        log.info("[Capture] manual retry requested for {}", id);
+        return ResponseEntity.ok(Map.of("status", "queued"));
+    }
+
+    /** Give up on a failed capture — done trying, stop showing it. */
+    @PostMapping("capture/{id}/dismiss")
+    public ResponseEntity<Map<String, Object>> dismissFailed(@PathVariable String id) {
+        if (!captureRepo.dismissFailed(id)) {
+            return ResponseEntity.status(409).body(Map.of("error", "not a failed capture"));
+        }
+        return ResponseEntity.ok(Map.of("status", "discarded"));
+    }
+
     // ── Offline media download (yt-dlp, proxied to the embedder) ──────────────────
     // The embedder is loopback-only, so the browser extension can't hit it directly.
     // These thin proxies forward to the embedder's /download endpoints (the yt-dlp

@@ -1,0 +1,22 @@
+[Unit]
+Description=Rebuild the Obsidian Optimizer embedder image (picks up yt-dlp/dep updates)
+Documentation=file:///home/victor/Desktop/ObidianOptimizer/FLOWS.md
+After=obsidian-optimizer.service
+Requires=docker.service
+
+# A failed run (e.g. a transient apt/PyPI mirror hiccup, not a real problem) gets 10-minute
+# retries instead of waiting for tomorrow's scheduled run. Bounded to 6 attempts within 1h
+# (10/20/30/40/50/60 min) so a genuinely broken build doesn't retry forever — past that it
+# goes quiet until the timer's next normal daily fire, which is a fresh start attempt and
+# not subject to this same-failure rate limit.
+StartLimitIntervalSec=3600
+StartLimitBurst=6
+
+[Service]
+Type=oneshot
+User=victor
+Group=victor
+WorkingDirectory=/home/victor/Desktop/ObidianOptimizer
+ExecStart=/usr/bin/env bash /home/victor/Desktop/ObidianOptimizer/linux_scripts/refresh-embedder.sh
+Restart=on-failure
+RestartSec=10min

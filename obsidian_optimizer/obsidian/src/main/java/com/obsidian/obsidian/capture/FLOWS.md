@@ -82,9 +82,10 @@ text, title)`. Callers: `CaptureIngestWorker` (standalone, from the queue) and
 queued ──drain/submit──> processing ──embedder publishes notes to _inbox──> (Inbox shows it)
    │                     │  │                                                      │
    4xx→failed  5xx→queued   synthesis 503 (LLM cooling) → deferred      user files/acks each note
-   (retry)     (retry)      (+bundle_ref)     │                                    │
-                              retryDeferred: resume from bundle      all filed → 'filed' + source trashed
-                              (no re-extract) → processing
+   (auto-retry)(retry)      (+bundle_ref)     │                                    │
+   forever ↓                  retryDeferred: resume from bundle      all filed → 'filed' + source trashed
+   failed ──retryFailed──> queued              (no re-extract) → processing
+   (GET /api/capture/failed lists it; POST .../retry|dismiss)
 ```
 `queued` is NEW (this change): resources wait here until submitted. `processing`/`ready` are what
 the Learn Inbox lists (`InboxController`); `filed` is set when every child note is triaged (see
@@ -99,6 +100,21 @@ re-download/re-whisper). Restart-safe: the state is this DB row, the bundle a fi
 `/models` volume. Idempotency: resume is skipped if the capture already produced notes
 (`noteIndex.findNotesByCapture` non-empty → settle to `processing`), so a status race can't
 duplicate. `deferred` blocks the dedup guard (live) and is excluded from orphan cleanup.
+
+**`failed` is retried, forever, never auto-discarded.** Before this change a hard 4xx/site-reject
+(e.g. yt-dlp refusing an Instagram URL) just sat at `failed` until the orphan-cleanup sweep
+silently discarded it 30min later — no retry, no visibility, the actual failure reason wasn't
+even recorded. Now: `markFailed(id, error)` records `last_error`; `retryFailed()` (on every
+`onAppReady` restart + a 6h `@Scheduled` tick) requeues `failed` rows with NO lifetime cap — a
+permanently-broken link gets retried again on every future restart forever, because the failure
+might be transient at the SITE level (rate-limited, extractor briefly broken) independent of the
+request itself. What IS bounded: `sessionRetryAttempts` (in-memory, per-JVM-lifetime) caps
+automated retries of the SAME capture within one continuous uptime
+(`ingest.capture.session-max-retries`, default 5) so a long-running deploy doesn't hammer a dead
+link every 6h forever — the cap resets to zero on the next restart. A manual retry
+(`POST /api/capture/{id}/retry`) always bypasses the session cap. `cleanupOrphanSources` no
+longer sweeps `failed` rows at all — a failure only leaves `failed` by succeeding or by an
+explicit `POST /api/capture/{id}/dismiss`.
 
 ## Technology Notes
 
@@ -145,10 +161,12 @@ duplicate. `deferred` blocks the dedup guard (live) and is excluded from orphan 
 | Embedder URL / submit timeout | `embedder.url` / `ingest.submit.timeout-ms` env |
 | Master ingest on/off | `ingest.enabled` (shared with ResourceScanService) |
 | Capture lifecycle transitions | `queued`→`processing` here; `filed` in `inbox/InboxController` |
-| **Failure visibility** (job failed after submit) | `CaptureIngestWorker.pollFailures()` polls `IngestClient.listJobs()` → `CaptureRepository.markFailed()` (stranded `processing`→`failed`); DEFERRED → `markDeferred()` |
+| **Failure visibility** (job failed after submit) | `CaptureIngestWorker.pollFailures()` polls `IngestClient.listJobs()` → `CaptureRepository.markFailed(id, error)` (stranded `processing`→`failed`, records `last_error`); DEFERRED → `markDeferred()` |
+| **Failed-capture auto-retry** (unbounded, forever) | `CaptureIngestWorker.retryFailed()` (`onAppReady` + `ingest.capture.retry-failed-ms`, 6h) → `CaptureRepository.requeueFailed()`; per-session cap `ingest.capture.session-max-retries` (in-memory `sessionRetryAttempts`, resets on restart) |
+| **Failed-capture list / manual retry / dismiss** | `GET /api/capture/failed` · `POST /api/capture/{id}/retry` (bypasses session cap) · `POST /api/capture/{id}/dismiss` → `CaptureController` + `CaptureRepository.listFailed/requeueFailed/dismissFailed` |
 | **Synthesis durability retry** | `CaptureIngestWorker.retryDeferred()`/`drainDeferred()` → `IngestClient.resume(bundle_ref,…)`; cadence `ingest.capture.retry-deferred-ms` (3min) |
 | **Deferred state + bundle** | `CaptureRepository.markDeferred/findDeferred/claimDeferred`; `bundle_ref` column; status `deferred` |
-| **Orphan-source cleanup** ("no children → trash source") | `CaptureIngestWorker.cleanupOrphanSources()` (age + no-active-job + `countLiveReferencesToFile` guards) → `FileRepository.softDeleteFile`; env `ingest.cleanup.min-age-ms` |
+| **Orphan-source cleanup** ("no children → trash source"), `processing` only — `failed` is excluded, see failed-capture rows above | `CaptureIngestWorker.cleanupOrphanSources()` (age + no-active-job + `countLiveReferencesToFile` guards) → `FileRepository.softDeleteFile`; env `ingest.cleanup.min-age-ms` |
 | **Duplicate-capture guard** (409) | `CaptureController.capture()` → `CaptureRepository.existsLiveForSource()`; extension shows ⚠️ |
 | Per-note retention (last note deleted → trash media) | `inbox/InboxController.discard()` (`local:` + `trashLocalMedia`; LOCAL_MEDIA_RETENTION §4) |
 | **Playlist URL detection** | `CaptureController.isPlaylistUrl()` (`PLAYLIST_PATH`/`LIST_PARAM` regexes, video-host gated) |

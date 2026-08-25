@@ -1,5 +1,12 @@
 FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /app
+# mvnw picks wget over curl whenever both are on PATH — but Alpine's /usr/bin/wget is just a
+# busybox applet symlink with a real TLS-record-truncation bug over some network paths
+# ("connection closed prematurely" / "truncated TLS record"), reproduced reliably fetching the
+# maven-wrapper distribution zip. Install curl and drop the wget symlink (busybox itself is
+# untouched — every other applet still works) so mvnw's `command -v wget` fails and it falls
+# through to curl.
+RUN apk add --no-cache curl && rm -f /usr/bin/wget
 COPY .mvn .mvn
 COPY mvnw pom.xml ./
 RUN chmod +x mvnw && ./mvnw dependency:go-offline -q

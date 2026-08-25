@@ -32,7 +32,8 @@ public class CaptureRepository {
     public record Capture(String id, String sourceType, String sourceRef,
                           String sourcePath, String title, String status,
                           String bundleRef, long createdAt,
-                          String playlistId, Integer playlistPosition, Long trackId) {}
+                          String playlistId, Integer playlistPosition, Long trackId,
+                          int retryCount, String lastError) {}
 
     @PostConstruct
     public void initSchema() {
@@ -62,6 +63,13 @@ public class CaptureRepository {
         // repository with its own initSchema(), and Spring gives no ordering guarantee between
         // @PostConstruct methods in different beans.
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS track_id BIGINT");
+        // retry_count/last_error: a 'failed' capture (real ingest error, e.g. yt-dlp rejected
+        // the URL) used to just sit there until the cleanup sweep silently discarded it 30 min
+        // later — no retry, no visibility. These back an unbounded auto-retry (CaptureIngestWorker
+        // .retryFailed — every restart, forever) and let the failed-list endpoint show the actual
+        // error and lifetime attempt count instead of nothing.
+        jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0");
+        jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS last_error TEXT");
     }
 
     public void create(String id, String sourceType, String sourceRef,
@@ -112,10 +120,45 @@ public class CaptureRepository {
 
     /** Mark a capture failed ONLY if it's still processing — so a job that fails after a
      *  successful submit stops being a silent 'processing' strand, without clobbering a
-     *  capture the user already filed/acknowledged. Returns true if it flipped. */
-    public boolean markFailed(String id) {
+     *  capture the user already filed/acknowledged. Records the real error so the failed-list
+     *  endpoint (and the eventual retry) can show *why*, not just *that*. Returns true if it
+     *  flipped. */
+    public boolean markFailed(String id, String error) {
         return jdbc.update(
-            "UPDATE capture SET status = 'failed' WHERE id = ? AND status = 'processing'",
+            "UPDATE capture SET status = 'failed', last_error = ? WHERE id = ? AND status = 'processing'",
+            error, id) > 0;
+    }
+
+    /** Unbounded auto-retry: atomically claim a FAILED row for another attempt (→ queued,
+     *  retry_count+1) so a scheduled tick and a manual "retry now" can't double-claim it. No
+     *  cap — a failure only stops being retried by succeeding or by the user dismissing it
+     *  from the failed-list; retry_count is kept purely as telemetry ("tried N times"), never
+     *  as a silent give-up threshold. Returns true if THIS caller won it. */
+    public boolean requeueFailed(String id) {
+        return jdbc.update(
+            "UPDATE capture SET status = 'queued', retry_count = retry_count + 1 WHERE id = ? AND status = 'failed'",
+            id) > 0;
+    }
+
+    /** Oldest-first batch of FAILED captures — candidates for {@code requeueFailed}. */
+    public List<Capture> findFailedRetryable(int limit) {
+        return jdbc.query(
+            "SELECT * FROM capture WHERE status = 'failed' ORDER BY created_at ASC LIMIT ?",
+            CaptureRepository::map, limit);
+    }
+
+    /** Every live FAILED capture (retry-exhausted or not) for the frontend's failed-list —
+     *  newest first, same convention as {@link #listAll}. */
+    public List<Capture> listFailed() {
+        return jdbc.query(
+            "SELECT * FROM capture WHERE status = 'failed' ORDER BY created_at DESC",
+            CaptureRepository::map);
+    }
+
+    /** User dismissed a failed capture from the failed-list UI — done trying. */
+    public boolean dismissFailed(String id) {
+        return jdbc.update(
+            "UPDATE capture SET status = 'discarded' WHERE id = ? AND status = 'failed'",
             id) > 0;
     }
 
@@ -143,15 +186,17 @@ public class CaptureRepository {
             id) > 0;
     }
 
-    /** Captures still 'processing'/'failed' and older than a cutoff — candidates for the
-     *  orphan-source cleanup sweep (a source with no notes left → trash it). The age gate
-     *  keeps mid-ingest captures out. Excludes 'deferred' (mid-pipeline, not orphaned). */
+    /** Captures still 'processing' and older than a cutoff — candidates for the orphan-source
+     *  cleanup sweep (a source with no notes left → trash it). The age gate keeps mid-ingest
+     *  captures out. 'failed' is handled separately ({@link #findExhaustedFailed}) — it gets a
+     *  bounded auto-retry first instead of being swept the moment it's stale. */
     public List<Capture> findStaleActive(long olderThanEpochMillis) {
         return jdbc.query(
-            "SELECT * FROM capture WHERE status IN ('processing','failed') AND created_at < ? " +
+            "SELECT * FROM capture WHERE status = 'processing' AND created_at < ? " +
             "ORDER BY created_at ASC",
             CaptureRepository::map, olderThanEpochMillis);
     }
+
 
     /** Oldest-first batch of queued resources awaiting submission (FIFO fairness). */
     public List<Capture> findQueued(int limit) {
@@ -216,6 +261,7 @@ public class CaptureRepository {
             rs.getString("id"), rs.getString("source_type"), rs.getString("source_ref"),
             rs.getString("source_path"), rs.getString("title"), rs.getString("status"),
             rs.getString("bundle_ref"), rs.getLong("created_at"),
-            rs.getString("playlist_id"), playlistPosition, trackId);
+            rs.getString("playlist_id"), playlistPosition, trackId,
+            rs.getInt("retry_count"), rs.getString("last_error"));
     }
 }

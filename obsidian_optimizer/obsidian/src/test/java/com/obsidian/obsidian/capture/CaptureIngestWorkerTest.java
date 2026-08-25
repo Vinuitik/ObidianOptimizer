@@ -32,12 +32,12 @@ class CaptureIngestWorkerTest {
 
     private static CaptureRepository.Capture url(String id) {
         return new CaptureRepository.Capture(id, "video", "https://youtu.be/" + id, null,
-            id, "queued", null, 0L, null, null, null);
+            id, "queued", null, 0L, null, null, null, 0, null);
     }
 
     private static CaptureRepository.Capture deferred(String id, String bundleRef) {
         return new CaptureRepository.Capture(id, "video", "https://youtu.be/" + id, null,
-            id, "deferred", bundleRef, 0L, null, null, null);
+            id, "deferred", bundleRef, 0L, null, null, null, 0, null);
     }
 
     @BeforeEach
@@ -85,7 +85,7 @@ class CaptureIngestWorkerTest {
 
         worker.drain();
 
-        verify(repo).updateStatus("bad", "failed");
+        verify(repo).markFailed("bad", "rejected (422): unroutable");
     }
 
     @Test
@@ -118,7 +118,7 @@ class CaptureIngestWorkerTest {
         worker.pollFailures();
 
         verify(repo).markDeferred("cap-1", "/models/ingest_bundles/job1.json");
-        verify(repo, never()).markFailed(any());
+        verify(repo, never()).markFailed(any(), any());
     }
 
     @Test
@@ -128,7 +128,7 @@ class CaptureIngestWorkerTest {
 
         worker.pollFailures();
 
-        verify(repo).markFailed("cap-2");
+        verify(repo).markFailed("cap-2", "boom");
         verify(repo, never()).markDeferred(any(), any());
     }
 

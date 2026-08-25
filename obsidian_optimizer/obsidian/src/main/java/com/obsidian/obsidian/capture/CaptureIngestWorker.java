@@ -19,7 +19,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Continuously drains the durable capture queue into the ingest pipeline. The user
@@ -68,6 +70,19 @@ public class CaptureIngestWorker {
     @Value("${ingest.capture.batch-limit:25}")
     private int batchLimit;
 
+    // A hard-FAILED capture is retried automatically FOREVER — no lifetime cap, no auto-discard
+    // (see retryFailed/cleanupOrphanSources: 'failed' rows are never swept). Some failures are
+    // transient at the SITE level (rate-limited, extractor briefly broken) and self-heal on
+    // their own timeline, and every restart deserves a fresh shot at that. What IS bounded is
+    // automated hammering within one continuous uptime: sessionRetryAttempts caps how many
+    // times the periodic tick will re-try the SAME capture before leaving it alone for the
+    // rest of this session (still visible, still retried again on the next restart). A manual
+    // "retry now" from the failed-list UI always bypasses this cap — it's the user's call, not
+    // an automated loop.
+    @Value("${ingest.capture.session-max-retries:5}")
+    private int sessionMaxRetries;
+    private final Map<String, Integer> sessionRetryAttempts = new ConcurrentHashMap<>();
+
     // The embedder publishes synthesized notes BACK to this backend; during boot Tomcat
     // isn't bound yet, so hold submission until the app is ready (same reasoning as
     // ResourceScanService). The scheduled tick drains the backlog once ready.
@@ -86,7 +101,8 @@ public class CaptureIngestWorker {
     @EventListener(ApplicationReadyEvent.class)
     public void onAppReady() {
         appReady = true;
-        nudge();   // drain anything captured (or left over) before the first tick
+        retryFailed();   // every restart is a free retry — yt-dlp/site fixes land between them
+        nudge();         // drain anything captured (or left over) before the first tick
     }
 
     @PreDestroy
@@ -128,7 +144,7 @@ public class CaptureIngestWorker {
                     log.info("[CaptureIngestWorker] capture {} DEFERRED (providers cooling), "
                         + "will retry synthesis from bundle", j.captureId());
                 }
-            } else if ("FAILED".equals(j.status()) && captureRepo.markFailed(j.captureId())) {
+            } else if ("FAILED".equals(j.status()) && captureRepo.markFailed(j.captureId(), j.error())) {
                 log.warn("[CaptureIngestWorker] capture {} ingest FAILED: {}",
                     j.captureId(), j.error());
             }
@@ -172,6 +188,35 @@ public class CaptureIngestWorker {
         }
     }
 
+    /** Auto-retry for hard-FAILED captures (yt-dlp rejected a URL, embedder 4xx, ...). Runs on
+     *  every app restart ({@link #onAppReady}) AND on a slow standing cadence, since a
+     *  long-uptime deploy won't restart often enough on its own to catch a site fix. No
+     *  lifetime cap — a permanently-broken link stays visible and gets retried again on every
+     *  future restart, forever; {@link #sessionRetryAttempts} only throttles the AUTOMATED tick
+     *  within one continuous uptime so it doesn't hammer the same dead link every 6h forever in
+     *  a session that happens to run for weeks. Requeues (→ 'queued', retry_count+1, the
+     *  lifetime telemetry counter) so the row re-enters the normal {@link #drain()} path. */
+    @Scheduled(fixedDelayString = "${ingest.capture.retry-failed-ms:21600000}",   // 6h
+               initialDelayString = "${ingest.capture.initial-delay-ms:20000}")
+    public void retryFailed() {
+        if (!ingestEnabled) return;
+        List<CaptureRepository.Capture> batch = captureRepo.findFailedRetryable(batchLimit);
+        if (batch.isEmpty()) return;
+        int requeued = 0;
+        for (CaptureRepository.Capture c : batch) {
+            int attempts = sessionRetryAttempts.getOrDefault(c.id(), 0);
+            if (attempts >= sessionMaxRetries) continue;   // done for THIS session; next restart resets it
+            if (captureRepo.requeueFailed(c.id())) {
+                sessionRetryAttempts.put(c.id(), attempts + 1);
+                requeued++;
+            }
+        }
+        if (requeued > 0) {
+            log.info("[CaptureIngestWorker] requeued {} failed capture(s) for retry", requeued);
+            nudge();
+        }
+    }
+
     /** Orphan-source cleanup (the user's "once a source has no children we delete it" rule).
      *  A capture whose proposed notes were ALL deleted leaves its kept original (uploaded PDF,
      *  saved media) sitting in the vault. This sweep trashes it. Guards against nuking a source
@@ -187,20 +232,26 @@ public class CaptureIngestWorker {
             if (("QUEUED".equals(j.status()) || "RUNNING".equals(j.status())) && j.captureId() != null)
                 active.add(j.captureId());
         }
+        // 'failed' captures are deliberately NOT swept here — see retryFailed's class doc.
+        // They only leave 'failed' by succeeding or by an explicit user dismiss.
         long cutoff = System.currentTimeMillis() - cleanupMinAgeMs;
         for (CaptureRepository.Capture c : captureRepo.findStaleActive(cutoff)) {
-            if (active.contains(c.id())) continue;                          // still ingesting
-            if (!noteIndex.findNotesByCapture(c.id()).isEmpty()) continue;  // still has children
-            String file = localVaultFile(c);
-            // Don't trash a file a DUPLICATE capture (same upload twice) still shares — its
-            // sibling may still have notes pointing at it. Only the last reference trashes it.
-            boolean trash = file != null && captureRepo.countLiveReferencesToFile(file, c.id()) == 0;
-            if (trash) trashVaultFile(file);
-            captureRepo.updateStatus(c.id(), "discarded");
-            log.info("[cleanup] capture {} has no notes → discarded{}",
-                c.id(), trash ? " + trashed source " + file
-                              : (file != null ? " (source " + file + " kept — shared)" : ""));
+            sweepOrphan(c, active);
         }
+    }
+
+    private void sweepOrphan(CaptureRepository.Capture c, Set<String> active) {
+        if (active.contains(c.id())) return;                          // still ingesting
+        if (!noteIndex.findNotesByCapture(c.id()).isEmpty()) return;  // still has children
+        String file = localVaultFile(c);
+        // Don't trash a file a DUPLICATE capture (same upload twice) still shares — its
+        // sibling may still have notes pointing at it. Only the last reference trashes it.
+        boolean trash = file != null && captureRepo.countLiveReferencesToFile(file, c.id()) == 0;
+        if (trash) trashVaultFile(file);
+        captureRepo.updateStatus(c.id(), "discarded");
+        log.info("[cleanup] capture {} has no notes → discarded{}",
+            c.id(), trash ? " + trashed source " + file
+                          : (file != null ? " (source " + file + " kept — shared)" : ""));
     }
 
     /** The capture's kept original as a vault-local file, or null (external URL / nothing). */
@@ -236,9 +287,10 @@ public class CaptureIngestWorker {
                 if (res.ok()) {
                     submitted++;
                 } else if (res.status() >= 400 && res.status() < 500) {
-                    // the embedder rejected the request itself (bad ref/route) — retrying
-                    // won't help, so fail it rather than loop forever.
-                    captureRepo.updateStatus(c.id(), "failed");
+                    // the embedder rejected the request itself (bad ref/route) — immediate
+                    // retrying won't help, but the bounded auto-retry (retryFailed) still gets
+                    // a shot later in case it was a transient site-side rejection.
+                    captureRepo.markFailed(c.id(), "rejected (" + res.status() + "): " + res.body());
                     log.warn("[CaptureIngestWorker] {} rejected ({}) — marked failed",
                         c.id(), res.status());
                 } else {

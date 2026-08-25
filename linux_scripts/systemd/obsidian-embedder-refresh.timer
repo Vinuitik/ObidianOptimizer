@@ -1,0 +1,15 @@
+[Unit]
+Description=Run obsidian-embedder-refresh on boot and daily
+
+[Timer]
+# Fires a few minutes after boot (lets docker/the stack settle first).
+OnBootSec=5min
+# ...and again every 24h of uptime after that.
+OnUnitActiveSec=24h
+# If the laptop was off when a run was due, catch up on the next boot instead of
+# silently skipping it (systemd persists last-run time to disk for this).
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
