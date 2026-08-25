@@ -23,6 +23,16 @@ export async function requestNotificationPermission() {
   return Notification.requestPermission();
 }
 
+// Low-level "fire an OS notification via the service worker" primitive — the same
+// mechanism the quit-nag uses below, shared with any other feature that wants a local
+// (no Web Push, no server involvement) notification gated on the SAME permission toggle
+// (see the "Notifications" section in SyncPage.jsx). No-op if unsupported or not granted.
+export async function showLocalNotification(title, options = {}) {
+  if (!notificationsSupported() || Notification.permission !== 'granted') return;
+  const reg = await navigator.serviceWorker.ready;
+  reg.showNotification(title, options);
+}
+
 // Call once from the mobile shell (MobileLayout). No-op while signed out, permission
 // not granted, or unsupported (iOS PWA notifications need 16.4+ AND home-screen install
 // — there's no fallback, this silently does nothing on older iOS).
@@ -42,8 +52,7 @@ export function armQuitNotify(isAuthenticated) {
     if (!unfinished || !canNag()) return;
     markNagged();
     const q = randomQuote();
-    const reg = await navigator.serviceWorker.ready;
-    reg.showNotification('Are you a quitter?', {
+    showLocalNotification('Are you a quitter?', {
       body: `${q.text} — ${q.author}`,
       tag: 'obsopt-quit-guard',   // replaces any previous nag instead of stacking
     });

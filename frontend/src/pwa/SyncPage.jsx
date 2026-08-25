@@ -7,7 +7,7 @@ import { getMeta } from './db';
 import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
 import { refreshAndPull, pullReviewFromDrive } from './drivePull';
 import { pushMailbox } from './mailbox';
-import { notificationsSupported, notificationPermission, requestNotificationPermission } from './quitNotify';
+import { notificationsSupported, notificationPermission, requestNotificationPermission, showLocalNotification } from './quitNotify';
 import { fetchFailedCaptures, retryCapture, dismissCapture } from '../api/capture';
 import styles from './MobilePages.module.css';
 
@@ -81,6 +81,19 @@ export default function SyncPage() {
       const prevCount = Number(localStorage.getItem(FAILED_COUNT_KEY) ?? list.length);
       if (list.length > prevCount) {
         showToast(`${list.length} capture${list.length === 1 ? '' : 's'} failed — see below.`);
+        // Same local-notification mechanism as the quit-nag (quitNotify.js), gated on the
+        // same permission toggle — silently no-ops if not granted. Fires here because this
+        // is the only place the page learns about a failure: there's no backend push (Web
+        // Push was explicitly declined), so this only reaches someone who has the app open.
+        showLocalNotification(
+          list.length === 1 ? 'A capture failed' : `${list.length} captures failed`,
+          {
+            body: list.length === 1
+              ? 'Open Sync to retry or dismiss it.'
+              : `${list.length} captures need attention — open Sync to retry or dismiss.`,
+            tag: 'obsopt-capture-failed',   // replaces any previous one instead of stacking
+          },
+        );
       }
       localStorage.setItem(FAILED_COUNT_KEY, String(list.length));
     } catch { /* not signed in yet, or offline — silently skip */ }
@@ -91,14 +104,26 @@ export default function SyncPage() {
   }, [isAuthenticated]);
 
   async function handleRetry(id) {
+    const label = failed.find(c => c.id === id)?.title || 'Capture';
     setFailedBusyId(id);
     try {
       await retryCapture(id);
       showToast('Retry queued.');
+      // "Finished" here means the retry request itself resolved, not the eventual
+      // ingest outcome — that's only known on the next loadFailed() (worker runs async,
+      // and there's no backend push to tell the page when it lands).
+      showLocalNotification('Retry queued', {
+        body: `${label} is retrying now.`,
+        tag: 'obsopt-capture-retry',
+      });
       setFailed(f => f.filter(c => c.id !== id));
       localStorage.setItem(FAILED_COUNT_KEY, String(failed.length - 1));
     } catch (e) {
       showToast(`Retry failed: ${e.message ?? e}`);
+      showLocalNotification('Retry failed', {
+        body: `Could not retry ${label}: ${e.message ?? e}`,
+        tag: 'obsopt-capture-retry',
+      });
     } finally {
       setFailedBusyId(null);
     }
