@@ -286,4 +286,26 @@ class TrackRepositoryIT {
 
         assertThat(repo.listProgressRows()).isEmpty();
     }
+
+    // ── Subscriptions schema (Step 1) ───────────────────────────────────────
+
+    @Test
+    void subscriptionColumns_defaultNull_andGroupIdDefaultsNull() {
+        Track t = repo.create("Rust Book", "book", "manual");
+        TrackItem item = repo.addItem(t.id(), "Ch1", null);
+
+        assertThat(t.sourceUrl()).isNull();
+        assertThat(t.sourceType()).isNull();
+        assertThat(t.lastCheckedAt()).isNull();
+        assertThat(item.groupId()).isNull();
+    }
+
+    @Test
+    void initSchema_isIdempotent() {
+        repo.initSchema();
+        repo.initSchema();
+
+        Track t = repo.create("Rust Book", "book", "manual");
+        assertThat(repo.get(t.id())).isEqualTo(t);
+    }
 }

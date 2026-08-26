@@ -53,9 +53,10 @@ class InternalAgentControllerTest {
 
     @Test
     void trackItems_validToken_returnsItems() throws Exception {
-        Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now());
-        TrackItem item1 = new TrackItem(1L, 1L, 0, "Ch1", "vault/Ch1.md", "pending", null);
-        TrackItem item2 = new TrackItem(2L, 1L, 1, "Ch2", "vault/Ch2.md", "done", Instant.now());
+        Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(),
+            null, null, null);
+        TrackItem item1 = new TrackItem(1L, 1L, 0, "Ch1", "vault/Ch1.md", "pending", null, null);
+        TrackItem item2 = new TrackItem(2L, 1L, 1, "Ch2", "vault/Ch2.md", "done", Instant.now(), null);
         when(trackRepo.get(1L)).thenReturn(track);
         when(trackRepo.listItems(1L)).thenReturn(List.of(item1, item2));
 

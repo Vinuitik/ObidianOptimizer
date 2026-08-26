@@ -65,7 +65,8 @@ class TrackControllerTest {
 
     @Test
     void generateMinicourse_success_returnsJobBody() throws Exception {
-        Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now());
+        Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(),
+            null, null, null);
         when(trackRepo.get(1L)).thenReturn(track);
         when(trackAgentClient.submitMinicourse(1L))
             .thenReturn(new TrackAgentClient.Result(true, 200, "{\"id\":\"job1\",\"status\":\"pending\"}"));
@@ -77,7 +78,8 @@ class TrackControllerTest {
 
     @Test
     void generateMinicourse_clientFailure_propagatesStatusAndBody() throws Exception {
-        Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now());
+        Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(),
+            null, null, null);
         when(trackRepo.get(1L)).thenReturn(track);
         when(trackAgentClient.submitMinicourse(1L))
             .thenReturn(new TrackAgentClient.Result(false, 503, "{\"error\":\"embedder unreachable\"}"));
@@ -154,14 +156,16 @@ class TrackControllerTest {
 
     @Test
     void commitImport_createsTracksAndItems_completesDoneItem() throws Exception {
-        Track trackA = new Track(10L, "Track A", "book", "active", "excel_import", null, null, true, Instant.now());
-        Track trackB = new Track(20L, "Track B", "custom", "active", "excel_import", null, null, true, Instant.now());
+        Track trackA = new Track(10L, "Track A", "book", "active", "excel_import", null, null, true, Instant.now(),
+            null, null, null);
+        Track trackB = new Track(20L, "Track B", "custom", "active", "excel_import", null, null, true, Instant.now(),
+            null, null, null);
         when(trackRepo.create("Track A", "book", "excel_import")).thenReturn(trackA);
         when(trackRepo.create("Track B", "custom", "excel_import")).thenReturn(trackB);
 
-        TrackItem item1 = new TrackItem(100L, 10L, 0, "Item 1", null, "pending", null);
-        TrackItem item2 = new TrackItem(101L, 10L, 1, "Item 2", null, "pending", null);
-        TrackItem item3 = new TrackItem(102L, 20L, 0, "Item 3", null, "pending", null);
+        TrackItem item1 = new TrackItem(100L, 10L, 0, "Item 1", null, "pending", null, null);
+        TrackItem item2 = new TrackItem(101L, 10L, 1, "Item 2", null, "pending", null, null);
+        TrackItem item3 = new TrackItem(102L, 20L, 0, "Item 3", null, "pending", null, null);
         when(trackRepo.addItem(10L, "Item 1", null)).thenReturn(item1);
         when(trackRepo.addItem(10L, "Item 2", null)).thenReturn(item2);
         when(trackRepo.addItem(20L, "Item 3", null)).thenReturn(item3);
@@ -198,10 +202,11 @@ class TrackControllerTest {
 
     @Test
     void commitImport_outOfRangeTrackIndex_skippedNotFiveHundred() throws Exception {
-        Track trackA = new Track(10L, "Track A", "book", "active", "excel_import", null, null, true, Instant.now());
+        Track trackA = new Track(10L, "Track A", "book", "active", "excel_import", null, null, true, Instant.now(),
+            null, null, null);
         when(trackRepo.create("Track A", "book", "excel_import")).thenReturn(trackA);
 
-        TrackItem validItem = new TrackItem(100L, 10L, 0, "Valid Item", null, "pending", null);
+        TrackItem validItem = new TrackItem(100L, 10L, 0, "Valid Item", null, "pending", null, null);
         when(trackRepo.addItem(10L, "Valid Item", null)).thenReturn(validItem);
 
         String body = """

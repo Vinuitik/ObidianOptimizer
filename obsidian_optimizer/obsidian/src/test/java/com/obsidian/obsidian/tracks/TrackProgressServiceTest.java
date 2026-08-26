@@ -29,7 +29,8 @@ class TrackProgressServiceTest {
     private Track track(long id, String title, LocalDate createdDate, LocalDate deadline,
                         boolean includeInProgress) {
         Instant createdAt = createdDate.atStartOfDay(ZoneId.systemDefault()).toInstant();
-        return new Track(id, title, "book", "active", "manual", deadline, null, includeInProgress, createdAt);
+        return new Track(id, title, "book", "active", "manual", deadline, null, includeInProgress, createdAt,
+            null, null, null);
     }
 
     @Test

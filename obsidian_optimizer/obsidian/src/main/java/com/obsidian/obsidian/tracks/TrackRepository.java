@@ -30,10 +30,14 @@ public class TrackRepository {
 
     public record Track(long id, String title, String type, String status, String source,
                         LocalDate deadline, String priority, boolean includeInProgress,
-                        Instant createdAt) {}
+                        Instant createdAt, String sourceUrl, String sourceType, Instant lastCheckedAt) {}
 
     public record TrackItem(long id, long trackId, int position, String title, String notePath,
-                            String status, Instant completedAt) {}
+                            String status, Instant completedAt, Long groupId) {}
+
+    /** Shape only — used by a later step's {@code getOrCreateGroup()} to bucket subscription
+     *  items (e.g. a YouTube upload's chapters) under one source entry. */
+    public record TrackItemGroup(long id, long trackId, String title, String sourceUrl, Instant createdAt) {}
 
     /** One row of the Progress tab's source data (Phase 1d) — completion counts joined
      *  onto the track, before the service layer adds the deadline-aware onTrack signal. */
@@ -80,6 +84,25 @@ public class TrackRepository {
               capacity  NUMERIC NOT NULL
             )
             """);
+        jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS source_url TEXT");
+        jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS source_type TEXT"); // 'youtube_channel' | 'feed'
+        jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ");
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS track_item_groups (
+              id          BIGSERIAL PRIMARY KEY,
+              track_id    BIGINT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+              capture_id  TEXT,
+              title       TEXT NOT NULL,
+              source_url  TEXT,
+              created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+              UNIQUE (track_id, capture_id)
+            )
+            """);
+        jdbc.execute("""
+            ALTER TABLE track_items ADD COLUMN IF NOT EXISTS group_id BIGINT
+              REFERENCES track_item_groups(id) ON DELETE SET NULL
+            """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_track_items_group ON track_items(group_id)");
         seedDefaultCapacity();
     }
 
@@ -312,11 +335,14 @@ public class TrackRepository {
 
     private static Track mapTrack(ResultSet rs, int rowNum) throws SQLException {
         java.sql.Date deadline = rs.getDate("deadline");
+        Timestamp lastCheckedAt = rs.getTimestamp("last_checked_at");
         return new Track(
             rs.getLong("id"), rs.getString("title"), rs.getString("type"), rs.getString("status"),
             rs.getString("source"), deadline == null ? null : deadline.toLocalDate(),
             rs.getString("priority"), rs.getBoolean("include_in_progress"),
-            rs.getTimestamp("created_at").toInstant());
+            rs.getTimestamp("created_at").toInstant(),
+            rs.getString("source_url"), rs.getString("source_type"),
+            lastCheckedAt == null ? null : lastCheckedAt.toInstant());
     }
 
     private static TrackItem mapItem(ResultSet rs, int rowNum) throws SQLException {
@@ -324,6 +350,7 @@ public class TrackRepository {
         return new TrackItem(
             rs.getLong("id"), rs.getLong("track_id"), rs.getInt("position"), rs.getString("title"),
             rs.getString("note_path"), rs.getString("status"),
-            completedAt == null ? null : completedAt.toInstant());
+            completedAt == null ? null : completedAt.toInstant(),
+            (Long) rs.getObject("group_id"));
     }
 }

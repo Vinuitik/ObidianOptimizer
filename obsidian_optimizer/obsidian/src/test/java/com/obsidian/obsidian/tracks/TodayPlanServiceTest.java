@@ -40,11 +40,12 @@ class TodayPlanServiceTest {
     }
 
     private Track deadlineTrack(long id, String title, LocalDate deadline, String priority) {
-        return new Track(id, title, "book", "active", "manual", deadline, priority, true, Instant.now());
+        return new Track(id, title, "book", "active", "manual", deadline, priority, true, Instant.now(),
+            null, null, null);
     }
 
     private Track manualTrack(long id, String title) {
-        return new Track(id, title, "book", "active", "manual", null, null, true, Instant.now());
+        return new Track(id, title, "book", "active", "manual", null, null, true, Instant.now(), null, null, null);
     }
 
     /** Stubs nextPendingItems(trackId, n) to hand back n synthetic items, so item COUNT is
@@ -54,7 +55,7 @@ class TodayPlanServiceTest {
             int n = inv.getArgument(1);
             List<TrackItem> items = new java.util.ArrayList<>();
             for (int i = 0; i < n; i++) {
-                items.add(new TrackItem(trackId * 1000 + i, trackId, i, "item" + i, null, "pending", null));
+                items.add(new TrackItem(trackId * 1000 + i, trackId, i, "item" + i, null, "pending", null, null));
             }
             return items;
         });
