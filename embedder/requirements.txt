@@ -34,6 +34,9 @@ nvidia-cublas-cu12
 # from the former VideoManager sister app (download/downloader.py).
 yt-dlp>=2026.8.19
 
+# Subscriptions discovery — RSS/Atom feed parsing (subscriptions/discover.py)
+feedparser>=6.0.0
+
 # Ingest stages 2-5: PDF, web, keyframes
 # CLIP keyframe/diagram selection runs via ingest.clip_onnx (pre-exported ONNX,
 # pure onnxruntime) — open_clip_torch is intentionally gone.

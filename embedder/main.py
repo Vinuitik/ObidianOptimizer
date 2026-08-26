@@ -125,6 +125,11 @@ class SubsRequest(BaseModel):
     lang: str = "en"
 
 
+class SubscriptionDiscoverRequest(BaseModel):
+    source_url: str
+    source_type: str                # youtube_channel | feed
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -599,6 +604,20 @@ def playlist_expand(req: DownloadRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return {"entries": entries}
+
+
+@app.post("/subscriptions/discover")
+def subscriptions_discover(req: SubscriptionDiscoverRequest):
+    """List candidate items (videos/posts) currently at a channel/feed source —
+    Step 5 of the Subscriptions feature. Stateless: no DB, no dedup against what's
+    already ingested (a later Java step does that). See subscriptions/discover.py."""
+    from subscriptions import discover
+
+    try:
+        candidates, resolved = discover.discover(req.source_url, req.source_type)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"candidates": candidates, "resolvedFeedUrl": resolved}
 
 
 @app.post("/subs")

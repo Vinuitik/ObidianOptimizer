@@ -64,18 +64,25 @@ def download_sync(url: str, progress_hook: Callable | None = None,
         return ydl.prepare_filename(info)
 
 
-def list_playlist_entries(url: str) -> list[dict]:
+def list_playlist_entries(url: str, limit: int | None = None) -> list[dict]:
     """List a playlist's videos WITHOUT downloading (extract_flat) — lets the Java
     capture endpoint expand a playlist URL into individual queued captures, each
     downloaded/ingested one at a time by the existing capture pipeline. Raises
     ValueError if the URL has no entries (i.e. it's a single video, not a playlist).
-    Returns [{"url": ..., "title": ...}, ...] in playlist order."""
+    Returns [{"url": ..., "title": ...}, ...] in playlist order.
+
+    `limit` (optional) caps how many entries yt-dlp extracts via `playlistend` —
+    used by subscriptions.discover for channel polling, where only the most
+    recent N uploads matter. Omitted by existing callers (e.g. /playlist/expand),
+    which keep extracting the full playlist unchanged."""
     opts = {
         "extract_flat": "in_playlist",
         "skip_download": True,
         "quiet": True,
         "no_warnings": True,
     }
+    if limit is not None:
+        opts["playlistend"] = limit
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
     entries = [e for e in (info or {}).get("entries", []) if e]
