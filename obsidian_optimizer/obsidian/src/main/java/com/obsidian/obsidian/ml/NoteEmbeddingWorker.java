@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -89,6 +90,30 @@ public class NoteEmbeddingWorker {
             // (embedder down / all failing) — the next tick will retry either way.
             if (pending.size() < batchSize || ok == 0) return;
         }
+    }
+
+    /**
+     * One-off backfill: walk every note and add its title chunk (source='title')
+     * if missing. Safe to call repeatedly — {@link EmbeddingService#indexNote}
+     * content-hash-gates every chunk (title included), so notes that already have
+     * an up-to-date title chunk cost one hash compare and no embed call. Runs on
+     * the same lane as the scheduled drain, so it never overlaps a normal embed
+     * pass; returns false (no-op) if one is already in flight.
+     */
+    public boolean backfillTitleChunks() {
+        return lane.trigger(() -> {
+            List<String> paths = noteIndexRepo.getAllPaths();
+            log.info("[NoteEmbeddingWorker] title backfill: scanning {} note(s)", paths.size());
+            int ok = 0;
+            for (String path : paths) {
+                try {
+                    if (embeddingService.indexNote(path)) ok++;
+                } catch (Exception e) {
+                    log.warn("[NoteEmbeddingWorker] title backfill failed for {}: {}", path, e.getMessage());
+                }
+            }
+            log.info("[NoteEmbeddingWorker] title backfill done: {}/{} note(s) ok", ok, paths.size());
+        });
     }
 
     /** Daily: drop chunks belonging to deleted/renamed notes (text AND image). */

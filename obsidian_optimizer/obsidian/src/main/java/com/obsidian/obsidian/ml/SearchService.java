@@ -15,6 +15,10 @@ public class SearchService {
 
     private static final Logger log = LoggerFactory.getLogger(SearchService.class);
     private static final int RRF_K = 60;
+    // A note's own title chunk (source='title') means the query IS (close to) the
+    // note's name — that should win over every other note that merely mentions it
+    // in a [[wikilink]]. Multiplies that chunk's RRF contribution in each channel.
+    private static final double TITLE_BOOST = 3.0;
 
     private final NoteChunkRepository chunkRepo;
     private final EmbeddingService embeddingService;
@@ -44,14 +48,18 @@ public class SearchService {
         for (int i = 0; i < vectorMatches.size(); i++) {
             NoteChunk match = vectorMatches.get(i);
             String key = match.getNotePath() + "::" + match.getChunkIndex();
-            rrfScores.merge(key, 1.0 / (RRF_K + i + 1), Double::sum);
+            double score = 1.0 / (RRF_K + i + 1);
+            if ("title".equals(match.getSource())) score *= TITLE_BOOST;
+            rrfScores.merge(key, score, Double::sum);
             chunkMap.putIfAbsent(key, match);
         }
 
         for (int i = 0; i < textMatches.size(); i++) {
             NoteChunk match = textMatches.get(i);
             String key = match.getNotePath() + "::" + match.getChunkIndex();
-            rrfScores.merge(key, 1.0 / (RRF_K + i + 1), Double::sum);
+            double score = 1.0 / (RRF_K + i + 1);
+            if ("title".equals(match.getSource())) score *= TITLE_BOOST;
+            rrfScores.merge(key, score, Double::sum);
             chunkMap.putIfAbsent(key, match);
         }
 

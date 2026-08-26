@@ -62,6 +62,8 @@ public class EmbeddingService {
             return false;
         }
 
+        boolean titleOk = indexTitleChunk(path);
+
         List<NoteChunk> chunks = preprocessor.chunkNote(path, content);
 
         // Pass 1: collect only the chunks whose text changed since last embed —
@@ -106,7 +108,32 @@ public class EmbeddingService {
         chunkRepo.deleteStaleChunks(path, "text", chunks.size() - 1);
         log.debug("[EmbeddingService] indexed {} text chunk(s) for {} ({} changed)",
             chunks.size(), path, changed.size());
-        return allOk;
+        return allOk && titleOk;
+    }
+
+    /**
+     * Indexes a note's filename as its own chunk (source='title', index 0) so a
+     * search for a note's exact name matches the note itself, not just every other
+     * note whose body happens to mention it via [[wikilink]]. Content-hash gated
+     * like the body chunks, so a no-op rename-free reindex costs one hash compare.
+     */
+    private boolean indexTitleChunk(String path) {
+        String fileName = Paths.get(path).getFileName().toString();
+        String title = fileName.endsWith(".md") ? fileName.substring(0, fileName.length() - 3) : fileName;
+
+        String newHash = ContentHashing.sha256(title);
+        String storedHash = chunkRepo.getContentHash(path, "title", 0);
+        if (newHash.equals(storedHash)) {
+            return true;
+        }
+
+        float[] vector = embed(title);
+        if (vector == null) {
+            log.warn("[EmbeddingService] title embed failed for {} — will retry", path);
+            return false;
+        }
+        chunkRepo.upsertChunk(path, 0, "title", title, vector, newHash);
+        return true;
     }
 
     /**

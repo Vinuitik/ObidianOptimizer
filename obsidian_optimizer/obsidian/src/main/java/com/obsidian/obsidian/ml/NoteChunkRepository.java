@@ -151,7 +151,7 @@ public class NoteChunkRepository {
     /** Vector similarity search using pgvector cosine distance. */
     public List<NoteChunk> findByVectorSimilarity(float[] queryVec, int limit) {
         return jdbc.query("""
-            SELECT note_path, chunk_index, text
+            SELECT note_path, chunk_index, source, text
             FROM note_chunks
             WHERE embedding IS NOT NULL
             ORDER BY embedding <=> ?::vector
@@ -168,7 +168,7 @@ public class NoteChunkRepository {
     public List<NoteChunk> findByTextSearch(String query, int limit) {
         if (query == null || query.isBlank()) return List.of();
         return jdbc.query("""
-            SELECT note_path, chunk_index, text
+            SELECT note_path, chunk_index, source, text
             FROM note_chunks
             WHERE id @@@ paradedb.match('text', ?)
             ORDER BY paradedb.score(id) DESC
@@ -201,6 +201,7 @@ public class NoteChunkRepository {
             return new NoteChunk(
                 rs.getString("note_path"),
                 rs.getInt("chunk_index"),
+                rs.getString("source"),
                 rs.getString("text"),
                 List.of()
             );
