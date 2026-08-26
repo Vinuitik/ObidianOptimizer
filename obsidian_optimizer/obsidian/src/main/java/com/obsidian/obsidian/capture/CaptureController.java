@@ -295,7 +295,7 @@ public class CaptureController {
 
     /** Coarse source_type for display/grouping (the embedder router does the real
      *  routing). youtube/vimeo → video, .pdf → pdf, a/v ext → video, else web. */
-    private static String classifyUrl(String url) {
+    public static String classifyUrl(String url) {
         String host = "";
         try { host = URI.create(url).getHost(); } catch (Exception ignored) {}
         if (host != null && VIDEO_HOST.matcher(host).find()) return "video";

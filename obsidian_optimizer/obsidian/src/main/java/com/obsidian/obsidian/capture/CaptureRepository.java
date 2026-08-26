@@ -225,6 +225,18 @@ public class CaptureRepository {
         return n != null && n > 0;
     }
 
+    /** Permanent dedup — has ANY capture row EVER existed for this exact source (any status,
+     *  not just in-flight)? Unlike {@link #existsLiveForSource} (guards concurrent duplicates
+     *  only), this is for a later step's subscription poller: stops it from re-ingesting a
+     *  source item that was already fully processed (or even failed/discarded) in a past poll
+     *  cycle. */
+    public boolean existsForSource(String sourceRef) {
+        if (sourceRef == null || sourceRef.isBlank()) return false;
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM capture WHERE source_ref = ?", Integer.class, sourceRef);
+        return n != null && n > 0;
+    }
+
     /** How many OTHER live (non-discarded) captures still reference this vault file as their
      *  source/original. Guards the cleanup sweep against trashing a file shared by a duplicate
      *  capture (same upload twice → same filename) whose sibling still has notes. */
