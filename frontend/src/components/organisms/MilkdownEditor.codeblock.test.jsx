@@ -53,12 +53,11 @@ vi.mock('../../utils/obsidianImagePlugin', () => ({
   fileTypeFor: vi.fn(() => 'image'),
   removePendingBlob: vi.fn(),
 }));
-vi.mock('../molecules/FrontmatterTable', () => ({ default: () => null }));
 vi.mock('./EditorErrorBoundary', () => ({ default: ({ children }) => <>{children}</> }));
 vi.mock('../organisms/MilkdownEditor.module.css', () => ({ default: {} }));
 
-vi.mock('../../store/useStore', () => ({
-  default: vi.fn((selector) => selector({
+vi.mock('../../store/useStore', () => {
+  const state = {
     currentNotePath: '/vault/Test.md',
     pendingFrontmatter: {},
     pendingRaw: '```python\nprint("Hello")\n```\n',
@@ -70,8 +69,11 @@ vi.mock('../../store/useStore', () => ({
     pendingFiles: {},
     addPendingFile: vi.fn(),
     showToast: vi.fn(),
-  })),
-}));
+  };
+  const useStore = vi.fn((selector) => selector(state));
+  useStore.getState = () => state;
+  return { default: useStore };
+});
 
 describe('MilkdownEditor code block', () => {
   beforeEach(() => {

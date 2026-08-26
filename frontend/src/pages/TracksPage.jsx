@@ -556,75 +556,83 @@ function TrackDetail({ track, onDeleted }) {
         <button className={styles.dangerBtn} onClick={handleDelete}>Delete track</button>
       </div>
 
-      <div className={styles.fieldRow}>
-        <label className={styles.fieldLabel}>Type</label>
-        <select
-          className={styles.select}
-          value={type}
-          onChange={e => { setType(e.target.value); saveField({ type: e.target.value }); }}
-        >
-          {TRACK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-
-        <label className={styles.fieldLabel}>Status</label>
-        <select
-          className={styles.select}
-          value={track.status}
-          onChange={e => saveField({ status: e.target.value })}
-        >
-          {['active', 'paused', 'done', 'archived'].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-
-      {track.type === 'subscription' && (
+      <div className={styles.card}>
         <div className={styles.fieldRow}>
-          <span className={styles.fieldLabel}>
-            Last checked: {track.lastCheckedAt ? new Date(track.lastCheckedAt).toLocaleString() : 'never'}
-          </span>
-          <button className={styles.secondaryBtn} onClick={handlePoll} disabled={polling}>
-            {polling ? 'Polling…' : 'Poll now'}
-          </button>
-        </div>
-      )}
+          <label className={styles.fieldLabel}>Type</label>
+          <select
+            className={styles.select}
+            value={type}
+            onChange={e => { setType(e.target.value); saveField({ type: e.target.value }); }}
+          >
+            {TRACK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
 
-      <div className={styles.fieldRow}>
-        <label className={styles.fieldLabel}>Deadline</label>
-        <input
-          type="date"
-          className={styles.dateInput}
-          value={deadline}
-          onChange={e => setDeadline(e.target.value)}
-          onBlur={() => {
-            if (deadline) saveField({ deadline });
-            else if (track.deadline) saveField({ clearDeadline: true });
-          }}
-        />
-        {deadline && (
-          <>
-            <label className={styles.fieldLabel}>Priority</label>
-            <select
-              className={styles.select}
-              value={priority || 'should'}
-              onChange={e => { setPriority(e.target.value); saveField({ priority: e.target.value }); }}
-            >
-              {['must', 'should', 'could'].map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </>
+          <label className={styles.fieldLabel}>Status</label>
+          <select
+            className={styles.select}
+            value={track.status}
+            onChange={e => saveField({ status: e.target.value })}
+          >
+            {['active', 'paused', 'done', 'archived'].map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        {track.type === 'subscription' && (
+          <div className={styles.fieldRow}>
+            <span className={styles.fieldLabel}>
+              Last checked: {track.lastCheckedAt ? new Date(track.lastCheckedAt).toLocaleString() : 'never'}
+            </span>
+            <button className={styles.secondaryBtn} onClick={handlePoll} disabled={polling}>
+              {polling ? 'Polling…' : 'Poll now'}
+            </button>
+          </div>
         )}
+
+        <div className={styles.fieldRow}>
+          <label className={styles.fieldLabel}>Deadline</label>
+          <input
+            type="date"
+            className={styles.dateInput}
+            value={deadline}
+            onChange={e => setDeadline(e.target.value)}
+            onBlur={() => {
+              if (deadline) saveField({ deadline });
+              else if (track.deadline) saveField({ clearDeadline: true });
+            }}
+          />
+          {deadline && (
+            <>
+              <label className={styles.fieldLabel}>Priority</label>
+              <select
+                className={styles.select}
+                value={priority || 'should'}
+                onChange={e => { setPriority(e.target.value); saveField({ priority: e.target.value }); }}
+              >
+                {['must', 'should', 'could'].map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </>
+          )}
+        </div>
+
+        <label className={styles.checkRow} style={{ marginBottom: 0 }}>
+          <input
+            type="checkbox"
+            checked={includeInProgress}
+            onChange={e => { setIncludeInProgress(e.target.checked); saveField({ includeInProgress: e.target.checked }); }}
+          />
+          Include in Progress tab
+        </label>
       </div>
 
-      <label className={styles.checkRow}>
-        <input
-          type="checkbox"
-          checked={includeInProgress}
-          onChange={e => { setIncludeInProgress(e.target.checked); saveField({ includeInProgress: e.target.checked }); }}
-        />
-        Include in Progress tab
-      </label>
-
-      <TrackItemsEditor trackId={track.id} />
-      <TrackScheduleEditor trackId={track.id} />
-      <MinicoursePanel trackId={track.id} />
+      <div className={styles.card}>
+        <TrackItemsEditor trackId={track.id} />
+      </div>
+      <div className={styles.card}>
+        <TrackScheduleEditor trackId={track.id} />
+      </div>
+      <div className={styles.card}>
+        <MinicoursePanel trackId={track.id} />
+      </div>
     </div>
   );
 }

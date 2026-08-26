@@ -27,7 +27,6 @@ vi.mock('../../utils/livePreviewPlugin', () => ({ livePreviewPlugin: {} }));
 vi.mock('../../utils/mathPlugin',        () => ({ mathPlugin: {} }));
 vi.mock('../../utils/frontmatter',       () => ({ splitFrontmatter: () => ({ frontmatter: {}, body: '' }) }));
 vi.mock('../../utils/markdownCleanup',   () => ({ cleanMilkdownOutput: s => s }));
-vi.mock('../molecules/FrontmatterTable', () => ({ default: () => null }));
 vi.mock('./EditorErrorBoundary',         () => ({ default: ({ children }) => <>{children}</> }));
 vi.mock('../../utils/obsidianImagePlugin', () => ({
   obsidianImagePlugin: {},

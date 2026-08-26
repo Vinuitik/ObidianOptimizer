@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
 import { commonmark } from '@milkdown/preset-commonmark';
@@ -28,7 +28,6 @@ import { hashtagPlugin } from '../../utils/hashtagPlugin';
 import { livePreviewPlugin } from '../../utils/livePreviewPlugin';
 import { cleanMilkdownOutput } from '../../utils/markdownCleanup';
 import { mathPlugin } from '../../utils/mathPlugin';
-import FrontmatterTable from '../molecules/FrontmatterTable';
 import EditorErrorBoundary from './EditorErrorBoundary';
 import styles from './MilkdownEditor.module.css';
 
@@ -334,8 +333,6 @@ export function MilkdownEditorInner({ body, isMutable, onBodyChange, onFilePaste
 
 export default function MilkdownEditor() {
   const currentNotePath    = useStore(s => s.currentNotePath);
-  const pendingFrontmatter = useStore(s => s.pendingFrontmatter);
-  const pendingRaw         = useStore(s => s.pendingRaw);
   const isMutable          = useStore(s => s.isMutable);
   const editorResetKey     = useStore(s => s.editorResetKey);
   const updatePending      = useStore(s => s.updatePending);
@@ -357,6 +354,17 @@ export default function MilkdownEditor() {
   const handleUnsupported = useCallback((count) => {
     showToast(`${count} file${count > 1 ? 's' : ''} skipped — accepted types: images, video, audio, PDF.`);
   }, [showToast]);
+
+  // Initial editor content — read once per note (not subscribed to pendingRaw, so typing
+  // never re-renders this component). useEditor's factory is deps=[] and freezes body at
+  // mount, so re-deriving it on every keystroke was pure wasted work on the whole document —
+  // the actual cause of the typing lag on large notes: MilkdownEditor doesn't need to know
+  // about pendingRaw at all after this point; syncNote()/cancelEdit() read it straight from
+  // the store when they need it.
+  const body = useMemo(
+    () => splitFrontmatter(useStore.getState().pendingRaw).body,
+    [currentNotePath, editorResetKey],
+  );
 
   const handleClick = useCallback((e) => {
     if (isMutable) return;
@@ -390,11 +398,8 @@ export default function MilkdownEditor() {
     );
   }
 
-  const { body } = splitFrontmatter(pendingRaw);
-
   return (
     <div className={styles.wrapper} onClick={handleClick}>
-      <FrontmatterTable frontmatter={pendingFrontmatter} />
       <div className={styles.milkdownWrapper}>
         <EditorErrorBoundary>
           <MilkdownProvider key={`${currentNotePath}-${editorResetKey}`}>

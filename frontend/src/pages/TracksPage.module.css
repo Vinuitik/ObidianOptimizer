@@ -457,6 +457,17 @@
 
 .detailBody {
   padding: var(--sp-5);
+  max-width: 720px;
+}
+
+.card > .sectionTitle:first-child { margin-top: 0; }
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-4);
 }
 
 .detailHeader {
@@ -505,7 +516,7 @@
 
 /* ── Items editor ────────────────────────────────────────────────────────── */
 
-.itemsEditor { margin-top: var(--sp-4); }
+.itemsEditor { }
 
 .newItemForm {
   display: flex;
@@ -607,6 +618,10 @@
   flex-direction: column;
   gap: var(--sp-2);
   margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 }
 
 .resourceResultList {
@@ -644,7 +659,7 @@
 
 /* ── Schedule editor ─────────────────────────────────────────────────────── */
 
-.scheduleEditor { margin-top: var(--sp-5); }
+.scheduleEditor { }
 
 .weekRow {
   display: flex;
@@ -688,7 +703,7 @@
 
 /* ── Mini-course (Phase 2) ───────────────────────────────────────────────── */
 
-.minicoursePanel { margin-top: var(--sp-5); }
+.minicoursePanel { }
 
 .minicourseStatus {
   display: flex;

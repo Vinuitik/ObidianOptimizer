@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { MilkdownProvider } from '@milkdown/react';
 import useStore from '../../store/useStore';
 import { splitFrontmatter } from '../../utils/frontmatter';
-import FrontmatterTable from './FrontmatterTable';
 import EditorErrorBoundary from '../organisms/EditorErrorBoundary';
 import { MilkdownEditorInner } from '../organisms/MilkdownEditor';
 import ImageLightbox from './ImageLightbox';
@@ -21,7 +20,7 @@ export default function NoteRenderer({ content, resetKey = 0 }) {
   const openTab   = useStore(s => s.openTab);
   const [zoom, setZoom] = useState(null); // { src, alt } while an image is open fullscreen
 
-  const { frontmatter, body } = splitFrontmatter(content || '');
+  const { body } = splitFrontmatter(content || '');
   // Trailing blank lines at the very END of a note render as dead empty space in the read
   // view — invisible before, but obvious now that the review grade bar sits right below.
   // Trim trailing whitespace/newlines, end only. Display-only: the stored note is untouched.
@@ -60,7 +59,6 @@ export default function NoteRenderer({ content, resetKey = 0 }) {
 
   return (
     <div className={styles.wrapper} onClick={handleClick}>
-      <FrontmatterTable frontmatter={frontmatter} />
       <div className={styles.milkdownWrapper}>
         <EditorErrorBoundary>
           <MilkdownProvider key={resetKey}>
