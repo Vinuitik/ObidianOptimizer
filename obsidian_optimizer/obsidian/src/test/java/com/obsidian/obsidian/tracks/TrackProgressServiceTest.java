@@ -113,4 +113,32 @@ class TrackProgressServiceTest {
         // capacitySpan<=0 -> expectedDone falls back to itemsTotal (10); 3 < 10 -> behind
         assertThat(progress.get(0).onTrack()).isFalse();
     }
+
+    /** Grouping (Subscriptions Step 4) is inert to progress. TrackProgressRow carries only
+     *  the itemsDone/itemsTotal counts already aggregated by the repo's GROUP BY t.id —
+     *  it has no groupId field at all, so a "some items grouped" and "same items ungrouped"
+     *  fixture are represented by the identical row here; this proves the service's
+     *  itemsDone/itemsTotal/onTrack computation has no way to vary with grouping. */
+    @Test
+    void itemGrouping_doesNotAffectProgressCounts() {
+        service = new TrackProgressService(trackRepo);
+        LocalDate created = LocalDate.of(2026, 8, 1);
+        LocalDate today = LocalDate.of(2026, 8, 17);
+        LocalDate deadline = LocalDate.of(2026, 9, 1);
+        Track t = track(1, "Grouped", created, deadline, true);
+        // Represents a track with 2 of 5 items sharing a group_id and 3 ungrouped —
+        // itemsDone/itemsTotal are what the repo's GROUP BY t.id would produce either way.
+        TrackProgressRow groupedRow = new TrackProgressRow(t, 2, 5);
+        TrackProgressRow ungroupedRow = new TrackProgressRow(t, 2, 5);
+        when(trackRepo.capacityBetween(created, deadline)).thenReturn(100.0);
+        when(trackRepo.capacityBetween(created, today)).thenReturn(40.0);
+
+        when(trackRepo.listProgressRows()).thenReturn(List.of(groupedRow));
+        TrackProgress groupedResult = service.progress(today).get(0);
+
+        when(trackRepo.listProgressRows()).thenReturn(List.of(ungroupedRow));
+        TrackProgress ungroupedResult = service.progress(today).get(0);
+
+        assertThat(groupedResult).isEqualTo(ungroupedResult);
+    }
 }

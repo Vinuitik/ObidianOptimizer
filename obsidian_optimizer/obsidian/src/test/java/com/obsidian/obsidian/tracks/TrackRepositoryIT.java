@@ -333,6 +333,24 @@ class TrackRepositoryIT {
     }
 
     @Test
+    void reorderItem_ignoresGroupId_positionMathUnaffected() {
+        Track t = repo.create("Rust Book", "book", "manual");
+        TrackItemGroup group = repo.getOrCreateGroup(t.id(), "cap-3", "Video Title", null);
+        TrackItem i1 = repo.addItem(t.id(), "A", null, group.id()); // pos 0, grouped
+        TrackItem i2 = repo.addItem(t.id(), "B", null, null);       // pos 1, ungrouped
+        TrackItem i3 = repo.addItem(t.id(), "C", null, group.id()); // pos 2, grouped
+
+        repo.reorderItem(i1.id(), 2); // move grouped item A past ungrouped B — same shape as
+                                       // reorderItem_movingForward_shiftsSiblingsBack above
+
+        List<TrackItem> items = repo.listItems(t.id());
+        assertThat(items).extracting(TrackItem::title).containsExactly("B", "C", "A");
+        assertThat(repo.getItem(i1.id()).groupId()).isEqualTo(group.id()); // survives reorder
+        assertThat(repo.getItem(i2.id()).groupId()).isNull();
+        assertThat(repo.getItem(i3.id()).groupId()).isEqualTo(group.id());
+    }
+
+    @Test
     void initSchema_isIdempotent() {
         repo.initSchema();
         repo.initSchema();

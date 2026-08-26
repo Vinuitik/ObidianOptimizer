@@ -245,4 +245,43 @@ class TodayPlanServiceTest {
         // Persistence itself (survives restart) is SettingsRepository's existing, already-
         // tested app_settings behavior — nothing new to re-verify at IT level here.
     }
+
+    // ── 9. Item grouping (Subscriptions Step 4) is inert to Today allocation ────
+
+    /** Grouping is pure display/provenance clustering — TodayItem has no groupId field, so
+     *  this proves item.groupId() can never leak into or influence what Today allocates:
+     *  two fixtures that differ ONLY in groupId produce byte-identical plans. */
+    @Test
+    void itemGrouping_doesNotAffectTodayAllocation() {
+        LocalDate mon = LocalDate.of(2026, 8, 17); // Monday, weekday=0
+        List<TrackItem> grouped = List.of(
+            new TrackItem(101, 1, 0, "item0", null, "pending", null, 900L),
+            new TrackItem(102, 1, 1, "item1", null, "pending", null, 900L),
+            new TrackItem(103, 1, 2, "item2", null, "pending", null, null),
+            new TrackItem(104, 1, 3, "item3", null, "pending", null, null),
+            new TrackItem(105, 1, 4, "item4", null, "pending", null, null));
+        List<TrackItem> ungrouped = grouped.stream()
+            .map(i -> new TrackItem(i.id(), i.trackId(), i.position(), i.title(), i.notePath(),
+                i.status(), i.completedAt(), null))
+            .toList();
+
+        TodayPlan groupedPlan = todayWithFixedItems(mon, grouped);
+        TodayPlan ungroupedPlan = todayWithFixedItems(mon, ungrouped);
+
+        assertThat(groupedPlan).isEqualTo(ungroupedPlan);
+        assertThat(groupedPlan.items()).hasSize(5);
+    }
+
+    private TodayPlan todayWithFixedItems(LocalDate date, List<TrackItem> items) {
+        TrackRepository repo = mock(TrackRepository.class);
+        SettingsRepository settings = mock(SettingsRepository.class);
+        when(settings.getOrDefault(TodayPlanService.MODE_KEY, TodayPlanService.MODE_NORMAL))
+            .thenReturn(TodayPlanService.MODE_NORMAL);
+        Track t = manualTrack(1, "Grouped Track");
+        when(repo.listActive()).thenReturn(List.of(t));
+        when(repo.getCapacity(anyInt())).thenReturn(10.0);
+        when(repo.getScheduleBudget(1, 0)).thenReturn(items.size());
+        when(repo.nextPendingItems(eq(1L), anyInt())).thenReturn(items);
+        return new TodayPlanService(repo, settings).today(date);
+    }
 }
