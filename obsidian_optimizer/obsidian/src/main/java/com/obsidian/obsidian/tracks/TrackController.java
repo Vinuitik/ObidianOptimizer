@@ -20,13 +20,16 @@ public class TrackController {
     private final TodayPlanService todayPlan;
     private final TrackReviewHandoff reviewHandoff;
     private final TrackProgressService progressService;
+    private final TrackAgentClient trackAgentClient;
 
     TrackController(TrackRepository trackRepo, TodayPlanService todayPlan,
-                    TrackReviewHandoff reviewHandoff, TrackProgressService progressService) {
+                    TrackReviewHandoff reviewHandoff, TrackProgressService progressService,
+                    TrackAgentClient trackAgentClient) {
         this.trackRepo = trackRepo;
         this.todayPlan = todayPlan;
         this.reviewHandoff = reviewHandoff;
         this.progressService = progressService;
+        this.trackAgentClient = trackAgentClient;
     }
 
     // ── Tracks ───────────────────────────────────────────────────────────────
@@ -178,6 +181,32 @@ public class TrackController {
         return ResponseEntity.ok(Map.of("mode", req.mode()));
     }
 
+    // ── Mini-course generation (Phase 2) ────────────────────────────────────────
+
+    @PostMapping("{id}/minicourse")
+    public ResponseEntity<String> generateMinicourse(@PathVariable long id) {
+        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        return toResponse(trackAgentClient.submitMinicourse(id));
+    }
+
+    @GetMapping("minicourse/{jobId}")
+    public ResponseEntity<String> pollMinicourse(@PathVariable String jobId) {
+        return toResponse(trackAgentClient.pollMinicourse(jobId));
+    }
+
+    @PostMapping("minicourse/{jobId}/approve")
+    public ResponseEntity<String> approveMinicourse(@PathVariable String jobId,
+                                                    @RequestBody(required = false) ApproveMinicourseRequest req) {
+        List<Integer> approvedIndexes = req == null ? null : req.approvedIndexes();
+        return toResponse(trackAgentClient.approveMinicourse(jobId, approvedIndexes));
+    }
+
+    private static ResponseEntity<String> toResponse(TrackAgentClient.Result res) {
+        return ResponseEntity.status(res.status() == 0 ? 502 : res.status())
+            .header("Content-Type", "application/json")
+            .body(res.body());
+    }
+
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
     record CreateTrackRequest(String title, String type) {}
@@ -187,4 +216,5 @@ public class TrackController {
     record UpdateItemRequest(String title, Integer position) {}
     record CompleteItemRequest(Boolean addToReview) {}
     record ModeRequest(String mode) {}
+    record ApproveMinicourseRequest(List<Integer> approvedIndexes) {}
 }
