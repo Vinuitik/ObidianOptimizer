@@ -176,6 +176,16 @@ public class NoteChunkRepository {
             """, new NoteChunkRowMapper(), query, limit);
     }
 
+    /** Count of distinct notes that have at least one chunk of the given source —
+     *  a DB-truth progress signal for one-off backfills (survives app restarts,
+     *  unlike an in-memory job flag). */
+    public int countDistinctNotesForSource(String source) {
+        Integer n = jdbc.queryForObject(
+            "SELECT COUNT(DISTINCT note_path) FROM note_chunks WHERE source = ?",
+            Integer.class, source);
+        return n == null ? 0 : n;
+    }
+
     /** Returns the highest chunk_index for a note within one source, or null if none exist. */
     public Integer queryMaxChunkIndex(String notePath, String source) {
         List<Integer> rows = jdbc.queryForList(

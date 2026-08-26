@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.request.async.DeferredResult;
+import com.obsidian.obsidian.notes.NoteIndexRepository;
 
 import java.util.List;
 import java.util.Map;
@@ -21,10 +22,15 @@ public class SearchController {
 
     private final SearchService searchService;
     private final NoteEmbeddingWorker embeddingWorker;
+    private final NoteChunkRepository chunkRepo;
+    private final NoteIndexRepository noteIndexRepo;
 
-    public SearchController(SearchService searchService, NoteEmbeddingWorker embeddingWorker) {
+    public SearchController(SearchService searchService, NoteEmbeddingWorker embeddingWorker,
+                            NoteChunkRepository chunkRepo, NoteIndexRepository noteIndexRepo) {
         this.searchService = searchService;
         this.embeddingWorker = embeddingWorker;
+        this.chunkRepo = chunkRepo;
+        this.noteIndexRepo = noteIndexRepo;
     }
 
     @GetMapping("/search")
@@ -65,5 +71,22 @@ public class SearchController {
     public Map<String, Object> reindexTitles() {
         boolean started = embeddingWorker.backfillTitleChunks();
         return Map.of("started", started);
+    }
+
+    /**
+     * Progress signal for the backfill above, read straight from the DB rather
+     * than in-memory job state — so it still tells the truth if the app restarted
+     * mid-run (the lane's "running" flag wouldn't survive that; the row count does).
+     */
+    @GetMapping("/search/reindex-titles/status")
+    public Map<String, Object> reindexTitlesStatus() {
+        int titledNotes = chunkRepo.countDistinctNotesForSource("title");
+        int totalNotes = noteIndexRepo.getAllPaths().size();
+        return Map.of(
+            "titledNotes", titledNotes,
+            "totalNotes", totalNotes,
+            "complete", titledNotes >= totalNotes,
+            "laneRunning", embeddingWorker.isBackfillRunning()
+        );
     }
 }

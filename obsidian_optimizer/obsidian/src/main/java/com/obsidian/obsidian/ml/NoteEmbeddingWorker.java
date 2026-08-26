@@ -116,6 +116,14 @@ public class NoteEmbeddingWorker {
         });
     }
 
+    /** Best-effort: true while a drain (scheduled or backfill) is on the lane.
+     *  Lost on restart like everything else in-memory — combine with a DB-truth
+     *  count (see {@link NoteChunkRepository#countDistinctNotesForSource}) for a
+     *  signal that actually survives a redeploy. */
+    public boolean isBackfillRunning() {
+        return lane.isRunning();
+    }
+
     /** Daily: drop chunks belonging to deleted/renamed notes (text AND image). */
     @Scheduled(fixedDelay = 86_400_000, initialDelay = 7_200_000)
     public void purgeOrphanChunks() {
