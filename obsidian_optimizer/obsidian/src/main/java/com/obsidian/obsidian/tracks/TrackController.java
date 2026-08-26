@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -207,6 +208,35 @@ public class TrackController {
             .body(res.body());
     }
 
+    // ── Excel import (Phase 3) ──────────────────────────────────────────────────
+
+    @PostMapping("import")
+    public ResponseEntity<String> importCsv(@RequestBody ImportCsvRequest req) {
+        return toResponse(trackAgentClient.importCsv(req.csvText()));
+    }
+
+    /** Writes the (possibly user-edited) preview through the normal CRUD path — no
+     *  embedder call here, the embedder only produced the preview mapping. */
+    @PostMapping("import/commit")
+    public ResponseEntity<?> commitImport(@RequestBody ImportCommitRequest req) {
+        Map<Integer, Long> trackIdByIndex = new LinkedHashMap<>();
+        for (int i = 0; i < req.tracks().size(); i++) {
+            ImportedTrack t = req.tracks().get(i);
+            String type = t.type() == null || t.type().isBlank() ? "custom" : t.type();
+            Track created = trackRepo.create(t.title(), type, "excel_import");
+            trackIdByIndex.put(i, created.id());
+        }
+        for (ImportedItem item : req.items()) {
+            Long trackId = trackIdByIndex.get(item.trackIndex());
+            if (trackId == null) continue;
+            TrackItem created = trackRepo.addItem(trackId, item.title(), null);
+            if ("done".equals(item.status())) {
+                trackRepo.completeItem(created.id());
+            }
+        }
+        return ResponseEntity.ok(Map.of("tracksCreated", trackIdByIndex.size(), "itemsCreated", req.items().size()));
+    }
+
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
     record CreateTrackRequest(String title, String type) {}
@@ -217,4 +247,8 @@ public class TrackController {
     record CompleteItemRequest(Boolean addToReview) {}
     record ModeRequest(String mode) {}
     record ApproveMinicourseRequest(List<Integer> approvedIndexes) {}
+    record ImportCsvRequest(String csvText) {}
+    record ImportedTrack(String title, String type) {}
+    record ImportedItem(int trackIndex, String title, String status) {}
+    record ImportCommitRequest(List<ImportedTrack> tracks, List<ImportedItem> items) {}
 }

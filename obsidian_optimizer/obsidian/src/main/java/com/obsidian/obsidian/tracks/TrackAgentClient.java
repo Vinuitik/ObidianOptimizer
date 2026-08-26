@@ -64,6 +64,10 @@ public class TrackAgentClient {
         return post("/tracks/minicourse/" + jobId + "/approve", payload);
     }
 
+    public Result importCsv(String csvText) {
+        return post("/tracks/import", Map.of("csv_text", csvText));
+    }
+
     // ── transport (small + reusable so later methods — importCsv, discover — just add
     //    a get()/post() call, not their own HttpClient plumbing) ────────────────────
 
