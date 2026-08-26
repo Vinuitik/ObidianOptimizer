@@ -105,7 +105,9 @@ public class InternalAgentController {
         try {
             CaptureRepository.Capture cap = captureRepo.get(captureId);
             if (cap != null && cap.trackId() != null) {
-                trackRepo.addItem(cap.trackId(), noteTitle, notePath);
+                String groupTitle = (cap.title() != null && !cap.title().isBlank()) ? cap.title() : cap.sourceRef();
+                long groupId = trackRepo.getOrCreateGroup(cap.trackId(), captureId, groupTitle, cap.sourceRef()).id();
+                trackRepo.addItem(cap.trackId(), noteTitle, notePath, groupId);
             }
         } catch (Exception e) {
             log.warn("[internal.createNote] track link failed for capture {}: {}", captureId, e.toString());
@@ -139,7 +141,15 @@ public class InternalAgentController {
         if (req.title() == null || req.title().isBlank()) {
             return ResponseEntity.badRequest().body("title is required");
         }
-        return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath()));
+        if (req.captureId() == null || req.captureId().isBlank()) {
+            return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath()));
+        }
+        CaptureRepository.Capture cap = captureRepo.get(req.captureId());
+        String groupTitle = (cap != null && cap.title() != null && !cap.title().isBlank())
+            ? cap.title() : req.title().trim();
+        String sourceUrl = cap != null ? cap.sourceRef() : null;
+        long groupId = trackRepo.getOrCreateGroup(id, req.captureId(), groupTitle, sourceUrl).id();
+        return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath(), groupId));
     }
 
     /** Mini-course generation (step 1): the embedder reads a track's title + existing
@@ -250,5 +260,5 @@ public class InternalAgentController {
     record StoreMediaRequest(String filename, String dataB64) {}
     record CreateCaptureRequest(String captureId, String sourceRef, String content) {}
     record CreateTrackRequest(String title, String type) {}
-    record AddTrackItemRequest(String title, String notePath) {}
+    record AddTrackItemRequest(String title, String notePath, String captureId) {}
 }

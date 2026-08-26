@@ -167,14 +167,31 @@ public class TrackRepository {
     // ── Items ────────────────────────────────────────────────────────────────
 
     public TrackItem addItem(long trackId, String title, String notePath) {
+        return addItem(trackId, title, notePath, null);
+    }
+
+    public TrackItem addItem(long trackId, String title, String notePath, Long groupId) {
         Integer maxPos = jdbc.queryForObject(
             "SELECT COALESCE(MAX(position), -1) FROM track_items WHERE track_id = ?", Integer.class, trackId);
         int position = (maxPos == null ? -1 : maxPos) + 1;
         long id = jdbc.queryForObject("""
-            INSERT INTO track_items(track_id, position, title, note_path)
-            VALUES (?, ?, ?, ?) RETURNING id
-            """, Long.class, trackId, position, title, notePath);
+            INSERT INTO track_items(track_id, position, title, note_path, group_id)
+            VALUES (?, ?, ?, ?, ?) RETURNING id
+            """, Long.class, trackId, position, title, notePath, groupId);
         return getItem(id);
+    }
+
+    /** Bucket every note produced from the same capture under one group row — same
+     *  capture-queue key whether the note came from the extension, PWA, or a subscription
+     *  poller. ON CONFLICT DO NOTHING + re-select makes concurrent calls for the same
+     *  (trackId, captureId) converge on the same group instead of racing two inserts. */
+    public TrackItemGroup getOrCreateGroup(long trackId, String captureId, String title, String sourceUrl) {
+        jdbc.update("""
+            INSERT INTO track_item_groups(track_id, capture_id, title, source_url) VALUES (?, ?, ?, ?)
+            ON CONFLICT (track_id, capture_id) DO NOTHING
+            """, trackId, captureId, title, sourceUrl);
+        return jdbc.queryForObject("SELECT * FROM track_item_groups WHERE track_id = ? AND capture_id = ?",
+            TrackRepository::mapGroup, trackId, captureId);
     }
 
     public TrackItem getItem(long id) {
@@ -352,5 +369,11 @@ public class TrackRepository {
             rs.getString("note_path"), rs.getString("status"),
             completedAt == null ? null : completedAt.toInstant(),
             (Long) rs.getObject("group_id"));
+    }
+
+    private static TrackItemGroup mapGroup(ResultSet rs, int rowNum) throws SQLException {
+        return new TrackItemGroup(
+            rs.getLong("id"), rs.getLong("track_id"), rs.getString("title"),
+            rs.getString("source_url"), rs.getTimestamp("created_at").toInstant());
     }
 }

@@ -2,6 +2,7 @@ package com.obsidian.obsidian.tracks;
 
 import com.obsidian.obsidian.tracks.TrackRepository.Track;
 import com.obsidian.obsidian.tracks.TrackRepository.TrackItem;
+import com.obsidian.obsidian.tracks.TrackRepository.TrackItemGroup;
 import com.obsidian.obsidian.tracks.TrackRepository.TrackProgressRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -298,6 +299,37 @@ class TrackRepositoryIT {
         assertThat(t.sourceType()).isNull();
         assertThat(t.lastCheckedAt()).isNull();
         assertThat(item.groupId()).isNull();
+    }
+
+    @Test
+    void getOrCreateGroup_calledTwiceForSameCapture_returnsSameGroup() {
+        Track t = repo.create("Rust Book", "book", "manual");
+
+        TrackItemGroup first = repo.getOrCreateGroup(t.id(), "cap-1", "Video Title", "https://example.com/v1");
+        TrackItemGroup second = repo.getOrCreateGroup(t.id(), "cap-1", "Video Title", "https://example.com/v1");
+
+        assertThat(second.id()).isEqualTo(first.id());
+        assertThat(second.title()).isEqualTo("Video Title");
+        assertThat(second.sourceUrl()).isEqualTo("https://example.com/v1");
+    }
+
+    @Test
+    void addItem_fourArg_withGroupId_readsBackGroupId() {
+        Track t = repo.create("Rust Book", "book", "manual");
+        TrackItemGroup group = repo.getOrCreateGroup(t.id(), "cap-2", "Video Title", null);
+
+        TrackItem item = repo.addItem(t.id(), "Chapter 1", "vault/Ch1.md", group.id());
+
+        assertThat(repo.getItem(item.id()).groupId()).isEqualTo(group.id());
+    }
+
+    @Test
+    void addItem_threeArg_stillDelegatesToNullGroup() {
+        Track t = repo.create("Rust Book", "book", "manual");
+
+        TrackItem item = repo.addItem(t.id(), "Chapter 1", "vault/Ch1.md");
+
+        assertThat(repo.getItem(item.id()).groupId()).isNull();
     }
 
     @Test
