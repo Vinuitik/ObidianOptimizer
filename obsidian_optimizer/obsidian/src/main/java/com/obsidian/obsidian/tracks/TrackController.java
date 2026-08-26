@@ -22,15 +22,17 @@ public class TrackController {
     private final TrackReviewHandoff reviewHandoff;
     private final TrackProgressService progressService;
     private final TrackAgentClient trackAgentClient;
+    private final SubscriptionPollWorker subscriptionPollWorker;
 
     TrackController(TrackRepository trackRepo, TodayPlanService todayPlan,
                     TrackReviewHandoff reviewHandoff, TrackProgressService progressService,
-                    TrackAgentClient trackAgentClient) {
+                    TrackAgentClient trackAgentClient, SubscriptionPollWorker subscriptionPollWorker) {
         this.trackRepo = trackRepo;
         this.todayPlan = todayPlan;
         this.reviewHandoff = reviewHandoff;
         this.progressService = progressService;
         this.trackAgentClient = trackAgentClient;
+        this.subscriptionPollWorker = subscriptionPollWorker;
     }
 
     // ── Tracks ───────────────────────────────────────────────────────────────
@@ -46,7 +48,8 @@ public class TrackController {
             return ResponseEntity.badRequest().body("title is required");
         }
         String type = req.type() == null || req.type().isBlank() ? "custom" : req.type();
-        return ResponseEntity.ok(trackRepo.create(req.title().trim(), type, "manual"));
+        return ResponseEntity.ok(trackRepo.create(req.title().trim(), type, "manual",
+            req.sourceUrl(), req.sourceType()));
     }
 
     @PatchMapping("{id}")
@@ -68,6 +71,15 @@ public class TrackController {
     public ResponseEntity<?> delete(@PathVariable long id) {
         trackRepo.delete(id);
         return ResponseEntity.ok().build();
+    }
+
+    /** Manual "check now" for a subscription track — bypasses the poll worker's interval
+     *  gate and polls immediately. */
+    @PostMapping("{id}/poll-now")
+    public ResponseEntity<?> pollNow(@PathVariable long id) {
+        return subscriptionPollWorker.pollNow(id)
+            ? ResponseEntity.ok().build()
+            : ResponseEntity.badRequest().body("not a subscription track");
     }
 
     // ── Items ────────────────────────────────────────────────────────────────
@@ -239,7 +251,7 @@ public class TrackController {
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
-    record CreateTrackRequest(String title, String type) {}
+    record CreateTrackRequest(String title, String type, String sourceUrl, String sourceType) {}
     record UpdateTrackRequest(String title, String type, String status, String deadline,
                               String priority, Boolean includeInProgress, Boolean clearDeadline) {}
     record AddItemRequest(String title, String notePath) {}

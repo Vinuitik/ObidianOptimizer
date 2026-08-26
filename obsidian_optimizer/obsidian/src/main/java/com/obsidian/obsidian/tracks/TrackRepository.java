@@ -121,10 +121,21 @@ public class TrackRepository {
     // ── Tracks ───────────────────────────────────────────────────────────────
 
     public Track create(String title, String type, String source) {
-        long id = jdbc.queryForObject(
-            "INSERT INTO tracks(title, type, source) VALUES (?, ?, ?) RETURNING id",
-            Long.class, title, type, source == null ? "manual" : source);
+        return create(title, type, source, null, null);
+    }
+
+    public Track create(String title, String type, String source, String sourceUrl, String sourceType) {
+        long id = jdbc.queryForObject("""
+            INSERT INTO tracks(title, type, source, source_url, source_type) VALUES (?, ?, ?, ?, ?)
+            RETURNING id
+            """, Long.class, title, type, source == null ? "manual" : source, sourceUrl, sourceType);
         return get(id);
+    }
+
+    /** Poll cursor for a subscription track — {@link SubscriptionPollWorker} calls this after
+     *  a discovery pass so the next tick's due-check has a fresh baseline. */
+    public void markChecked(long id, Instant when) {
+        jdbc.update("UPDATE tracks SET last_checked_at = ? WHERE id = ?", Timestamp.from(when), id);
     }
 
     public Track get(long id) {

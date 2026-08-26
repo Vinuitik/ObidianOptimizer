@@ -2,6 +2,7 @@ package com.obsidian.obsidian.tracks;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +68,40 @@ public class TrackAgentClient {
 
     public Result importCsv(String csvText) {
         return post("/tracks/import", Map.of("csv_text", csvText));
+    }
+
+    /** One item the embedder found for a subscription source (new YouTube upload, new feed
+     *  entry) — not yet ingested. */
+    public record Candidate(String itemUrl, String title, String publishedAt) {}
+
+    /** Outcome of a discovery poll. {@code ok} = HTTP 200 AND the body parsed; on either
+     *  failure {@code candidates} is empty so the poll worker just skips the tick and
+     *  retries next time (same "leave state untouched, retry later" shape as IngestClient's
+     *  submit Result). */
+    public record DiscoverResult(boolean ok, List<Candidate> candidates, String resolvedFeedUrl) {}
+
+    /** Ask the embedder for new items since this source was last checked. Parsing lives here
+     *  (not in the worker) — same split as IngestClient.listJobs(): the client owns turning
+     *  the embedder's JSON into typed data, callers just consume it. */
+    public DiscoverResult discover(String sourceUrl, String sourceType) {
+        Result res = post("/subscriptions/discover", Map.of("source_url", sourceUrl, "source_type", sourceType));
+        if (!res.ok()) return new DiscoverResult(false, List.of(), null);
+        try {
+            JsonNode root = objectMapper.readTree(res.body());
+            List<Candidate> candidates = new ArrayList<>();
+            for (JsonNode c : root.path("candidates")) {
+                candidates.add(new Candidate(txt(c, "item_url"), txt(c, "title"), txt(c, "published_at")));
+            }
+            return new DiscoverResult(true, candidates, txt(root, "resolvedFeedUrl"));
+        } catch (Exception e) {
+            log.warn("[TrackAgentClient] discover response unparseable: {}", e.toString());
+            return new DiscoverResult(false, List.of(), null);
+        }
+    }
+
+    private static String txt(JsonNode n, String field) {
+        JsonNode v = n.path(field);
+        return (v.isMissingNode() || v.isNull()) ? null : v.asText();
     }
 
     // ── transport (small + reusable so later methods — importCsv, discover — just add

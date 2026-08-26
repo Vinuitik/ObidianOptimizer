@@ -43,13 +43,14 @@ class TrackControllerTest {
     @Mock TrackReviewHandoff reviewHandoff;
     @Mock TrackProgressService progressService;
     @Mock TrackAgentClient trackAgentClient;
+    @Mock SubscriptionPollWorker subscriptionPollWorker;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         TrackController controller = new TrackController(
-            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient);
+            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, subscriptionPollWorker);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -230,5 +231,23 @@ class TrackControllerTest {
 
         verify(trackRepo).addItem(10L, "Valid Item", null);
         verify(trackRepo, never()).addItem(eq(10L), eq("Orphan Item"), isNull());
+    }
+
+    // ── Subscription poll-now (Step 6) ──────────────────────────────────────────
+
+    @Test
+    void pollNow_subscriptionTrack_returnsOk() throws Exception {
+        when(subscriptionPollWorker.pollNow(1L)).thenReturn(true);
+
+        mvc.perform(post("/tracks/1/poll-now"))
+            .andExpect(status().isOk());
+    }
+
+    @Test
+    void pollNow_nonSubscriptionTrack_returnsBadRequest() throws Exception {
+        when(subscriptionPollWorker.pollNow(1L)).thenReturn(false);
+
+        mvc.perform(post("/tracks/1/poll-now"))
+            .andExpect(status().isBadRequest());
     }
 }

@@ -18,11 +18,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
@@ -348,6 +350,27 @@ class TrackRepositoryIT {
         assertThat(repo.getItem(i1.id()).groupId()).isEqualTo(group.id()); // survives reorder
         assertThat(repo.getItem(i2.id()).groupId()).isNull();
         assertThat(repo.getItem(i3.id()).groupId()).isEqualTo(group.id());
+    }
+
+    @Test
+    void create_fiveArg_setsSourceUrlAndType() {
+        Track t = repo.create("Channel", "subscription", "manual",
+            "https://youtube.com/@ch", "youtube_channel");
+
+        assertThat(t.sourceUrl()).isEqualTo("https://youtube.com/@ch");
+        assertThat(t.sourceType()).isEqualTo("youtube_channel");
+        assertThat(repo.get(t.id())).isEqualTo(t);
+    }
+
+    @Test
+    void markChecked_setsLastCheckedAt() {
+        Track t = repo.create("Channel", "subscription", "manual",
+            "https://youtube.com/@ch", "youtube_channel");
+        Instant when = Instant.now();
+
+        repo.markChecked(t.id(), when);
+
+        assertThat(repo.get(t.id()).lastCheckedAt()).isCloseTo(when, within(1, java.time.temporal.ChronoUnit.SECONDS));
     }
 
     @Test
