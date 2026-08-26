@@ -104,6 +104,14 @@ class SplitNoteRequest(BaseModel):
     note_path: str                  # vault-relative .md path
 
 
+class MinicourseSubmitRequest(BaseModel):
+    track_id: str
+
+
+class MinicourseApproveRequest(BaseModel):
+    approved_indexes: list[int] | None = None
+
+
 class DownloadRequest(BaseModel):
     url: str                        # video / playlist URL for offline download
 
@@ -467,6 +475,46 @@ def split_note(req: SplitNoteRequest):
         return splitter.split(req.note_path, content)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.post("/tracks/minicourse")
+def minicourse_submit(req: MinicourseSubmitRequest):
+    """Kick off mini-course generation (tracks/FLOWS.md) for a Learning Track: fetch its
+    title + attached items from Java's internal API, then hand off to the async
+    outline job (tracks/minicourse_jobs.submit_outline). Poll GET /tracks/minicourse/{id}."""
+    import httpx
+
+    from ingest import publish
+    from tracks import minicourse_jobs
+
+    try:
+        track = publish.get_track_items(req.track_id)
+    except (publish.PublishError, httpx.HTTPError) as e:
+        raise HTTPException(status_code=502, detail=f"track fetch failed: {e}")
+    if track is None:
+        raise HTTPException(status_code=404, detail=f"unknown track: {req.track_id}")
+
+    return minicourse_jobs.submit_outline(req.track_id, track["title"], track["items"])
+
+
+@app.get("/tracks/minicourse/{job_id}")
+def minicourse_status(job_id: str):
+    from tracks import minicourse_jobs
+
+    job = minicourse_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown job id")
+    return job
+
+
+@app.post("/tracks/minicourse/{job_id}/approve")
+def minicourse_approve(job_id: str, req: MinicourseApproveRequest):
+    from tracks import minicourse_jobs
+
+    job = minicourse_jobs.approve(job_id, req.approved_indexes)
+    if job is None:
+        raise HTTPException(status_code=404, detail="unknown job id")
+    return job
 
 
 @app.get("/ingest/{job_id}")

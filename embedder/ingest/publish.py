@@ -269,6 +269,22 @@ def add_track_item(track_id: str, title: str, note_path: str) -> None:
         raise PublishError(f"add_track_item {res.status_code}: {res.text[:300]}")
 
 
+def get_track_items(track_id: str) -> dict | None:
+    """Fetch a Learning Track's title + attached items (GET /api/internal/tracks/{id}/items,
+    step 1 of the mini-course feature) — the embedder never carries a session cookie, so
+    tracks/minicourse_jobs.submit_outline's inputs come through this internal-token-gated
+    mirror instead. Returns None on a 404 (unknown track) so callers can distinguish
+    "doesn't exist" from a transport/5xx failure (raised as PublishError, same as every
+    other function here)."""
+    res = httpx.get(f"{BACKEND_URL}/api/internal/tracks/{track_id}/items",
+                    headers=_headers(), timeout=30)
+    if res.status_code == 404:
+        return None
+    if res.status_code != 200:
+        raise PublishError(f"get_track_items {res.status_code}: {res.text[:300]}")
+    return res.json()
+
+
 def create_capture(capture_id: str, source_ref: str, content: str) -> str:
     """Stash a pre-rewrite snapshot of an in-place note as its Capture source —
     a note can hold multiple embeds, so the note itself (not any one embed) is

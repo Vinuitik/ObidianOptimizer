@@ -156,3 +156,77 @@ def test_embed_large_batch(client):
     resp = client.post("/embed", json={"texts": texts})
     assert resp.status_code == 200
     assert len(resp.json()["embeddings"]) == 32
+
+
+# ---------------------------------------------------------------------------
+# /tracks/minicourse — Java-fetch (publish.get_track_items) + minicourse_jobs mocked
+# ---------------------------------------------------------------------------
+
+def test_minicourse_submit_fetches_track_and_submits_outline(client, monkeypatch):
+    from ingest import publish
+    from tracks import minicourse_jobs
+
+    fetched = {}
+    def fake_get_track_items(track_id):
+        fetched["id"] = track_id
+        return {"title": "My Track", "items": [{"title": "A", "notePath": "a.md",
+                                                 "status": "DONE"}]}
+    monkeypatch.setattr(publish, "get_track_items", fake_get_track_items)
+    calls = []
+    monkeypatch.setattr(minicourse_jobs, "submit_outline",
+                        lambda tid, title, items: calls.append((tid, title, items)) or
+                        {"id": "job-1", "status": "QUEUED"})
+
+    resp = client.post("/tracks/minicourse", json={"track_id": "track-1"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"id": "job-1", "status": "QUEUED"}
+    assert fetched["id"] == "track-1"
+    assert calls == [("track-1", "My Track",
+                      [{"title": "A", "notePath": "a.md", "status": "DONE"}])]
+
+
+def test_minicourse_submit_404_when_track_missing(client, monkeypatch):
+    from ingest import publish
+    from tracks import minicourse_jobs
+
+    monkeypatch.setattr(publish, "get_track_items", lambda track_id: None)
+    called = []
+    monkeypatch.setattr(minicourse_jobs, "submit_outline",
+                        lambda *a: called.append(a) or {})
+
+    resp = client.post("/tracks/minicourse", json={"track_id": "no-such-track"})
+
+    assert resp.status_code == 404
+    assert called == []
+
+
+def test_minicourse_status_404_unknown_job(client):
+    resp = client.get("/tracks/minicourse/no-such-job")
+    assert resp.status_code == 404
+
+
+def test_minicourse_approve_404_unknown_job(client, monkeypatch):
+    from tracks import minicourse_jobs
+
+    monkeypatch.setattr(minicourse_jobs, "approve", lambda job_id, idx: None)
+
+    resp = client.post("/tracks/minicourse/no-such-job/approve", json={})
+
+    assert resp.status_code == 404
+
+
+def test_minicourse_approve_happy_path_returns_job(client, monkeypatch):
+    from tracks import minicourse_jobs
+
+    calls = []
+    monkeypatch.setattr(minicourse_jobs, "approve",
+                        lambda job_id, idx: calls.append((job_id, idx)) or
+                        {"id": job_id, "status": "RUNNING", "stage": "lessons"})
+
+    resp = client.post("/tracks/minicourse/job-1/approve",
+                       json={"approved_indexes": [0, 2]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"id": "job-1", "status": "RUNNING", "stage": "lessons"}
+    assert calls == [("job-1", [0, 2])]

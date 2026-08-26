@@ -15,7 +15,8 @@ note_chunks table the Java backend maintains — and read note files from
 the read-only /vault mount) live in mcp_tools/, grouped by concern:
   mcp_tools/search.py — search_notes, get_note_content
   mcp_tools/vault.py  — find_home_for_note, get_vault_tree, list_folder
-  mcp_tools/write.py  — ingest_resource, split_note, create_note
+  mcp_tools/write.py  — ingest_resource, split_note, create_note, create_track,
+                         generate_minicourse, check_minicourse, approve_minicourse
 Importing them below (see bottom of file) registers each function as an
 MCP tool (@mcp.tool() runs at import time) and re-exports it here too, so
 `from mcp_server import X` / `mcp_server.X` keep working exactly as before
@@ -228,4 +229,5 @@ class ApiKeyMiddleware:
 # ---------------------------------------------------------------------------
 from mcp_tools.search import search_notes, get_note_content
 from mcp_tools.vault import find_home_for_note, get_vault_tree, list_folder
-from mcp_tools.write import ingest_resource, split_note, create_note
+from mcp_tools.write import (ingest_resource, split_note, create_note,
+                             generate_minicourse, check_minicourse, approve_minicourse)

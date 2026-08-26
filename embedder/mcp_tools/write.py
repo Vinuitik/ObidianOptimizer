@@ -76,6 +76,49 @@ def create_track(title: str, type: str = "") -> dict:
 
 
 @mcp.tool()
+def generate_minicourse(track_id: str) -> dict:
+    """Generate a mini-course syllabus from a Learning Track's attached resources
+    (async — poll the returned job_id via check_minicourse). Nothing is written to
+    the vault until approve_minicourse confirms which lessons to keep."""
+    from ingest import publish
+    from tracks import minicourse_jobs
+
+    track = publish.get_track_items(track_id)
+    if track is None:
+        raise ValueError(f"unknown track: {track_id}")
+    return minicourse_jobs.submit_outline(track_id, track["title"], track["items"])
+
+
+@mcp.tool()
+def check_minicourse(job_id: str) -> dict:
+    """Poll a mini-course job's status (QUEUED/RUNNING/AWAITING_APPROVAL/DONE/FAILED).
+    When AWAITING_APPROVAL, the returned 'plan' has the syllabus to review."""
+    from tracks import minicourse_jobs
+
+    job = minicourse_jobs.get(job_id)
+    if job is None:
+        raise ValueError(f"unknown job id: {job_id}")
+    return job
+
+
+@mcp.tool()
+def approve_minicourse(job_id: str, approved_indexes: str = "") -> dict:
+    """Approve some/all lessons from a generated syllabus (comma-separated 0-based
+    indexes into plan['lessons'], empty = approve all). Expands the approved lessons
+    into markdown bodies — writing them to the vault as track items is a LATER step,
+    not done by this tool yet."""
+    from tracks import minicourse_jobs
+
+    indexes = None
+    if approved_indexes.strip():
+        indexes = [int(x.strip()) for x in approved_indexes.split(",") if x.strip()]
+    job = minicourse_jobs.approve(job_id, indexes)
+    if job is None:
+        raise ValueError(f"unknown job id: {job_id}")
+    return job
+
+
+@mcp.tool()
 def split_note(note_path: str) -> dict:
     """Split an oversized note (>6000 chars) into focused concept notes and
     rewrite the original as a hub of [[links]]. Synchronous — a few LLM calls."""

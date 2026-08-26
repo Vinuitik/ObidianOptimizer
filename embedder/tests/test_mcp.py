@@ -152,7 +152,8 @@ def test_tools_list_exposes_the_tools(client):
     tools = {t["name"] for t in resp.json()["result"]["tools"]}
     assert tools == {"search_notes", "get_note_content", "find_home_for_note",
                      "ingest_resource", "create_note", "split_note", "get_vault_tree",
-                     "list_folder", "create_track"}
+                     "list_folder", "create_track", "generate_minicourse",
+                     "check_minicourse", "approve_minicourse"}
 
 
 def test_tools_call_search_notes_returns_rrf_results(client):
@@ -347,3 +348,89 @@ def test_create_note_grouped_folder_still_gets_suggested_folder(monkeypatch):
     res = mcp_server.create_note("a short thought", folder="Some Group")
     assert res["status"] == "DONE"
     assert "SUGGESTED=Study" in written["content"]
+
+
+# ── mini-course MCP tools — call the same minicourse_jobs seam as the HTTP routes ──
+
+def test_generate_minicourse_fetches_track_and_submits_outline(monkeypatch):
+    from ingest import publish
+    from tracks import minicourse_jobs
+
+    monkeypatch.setattr(publish, "get_track_items",
+                        lambda track_id: {"title": "My Track",
+                                          "items": [{"title": "A", "notePath": "a.md",
+                                                     "status": "DONE"}]})
+    calls = []
+    monkeypatch.setattr(minicourse_jobs, "submit_outline",
+                        lambda tid, title, items: calls.append((tid, title, items)) or
+                        {"id": "job-1", "status": "QUEUED"})
+
+    res = mcp_server.generate_minicourse("track-1")
+
+    assert res == {"id": "job-1", "status": "QUEUED"}
+    assert calls == [("track-1", "My Track",
+                      [{"title": "A", "notePath": "a.md", "status": "DONE"}])]
+
+
+def test_generate_minicourse_unknown_track_raises(monkeypatch):
+    from ingest import publish
+
+    monkeypatch.setattr(publish, "get_track_items", lambda track_id: None)
+
+    with pytest.raises(ValueError):
+        mcp_server.generate_minicourse("no-such-track")
+
+
+def test_check_minicourse_unknown_job_raises(monkeypatch):
+    from tracks import minicourse_jobs
+
+    monkeypatch.setattr(minicourse_jobs, "get", lambda job_id: None)
+
+    with pytest.raises(ValueError):
+        mcp_server.check_minicourse("no-such-job")
+
+
+def test_check_minicourse_returns_job(monkeypatch):
+    from tracks import minicourse_jobs
+
+    monkeypatch.setattr(minicourse_jobs, "get",
+                        lambda job_id: {"id": job_id, "status": "AWAITING_APPROVAL",
+                                       "plan": {"course_title": "X", "lessons": []}})
+
+    res = mcp_server.check_minicourse("job-1")
+    assert res["status"] == "AWAITING_APPROVAL"
+
+
+def test_approve_minicourse_parses_comma_separated_indexes(monkeypatch):
+    from tracks import minicourse_jobs
+
+    calls = []
+    monkeypatch.setattr(minicourse_jobs, "approve",
+                        lambda job_id, idx: calls.append((job_id, idx)) or
+                        {"id": job_id, "status": "RUNNING"})
+
+    res = mcp_server.approve_minicourse("job-1", approved_indexes="0, 2")
+
+    assert res == {"id": "job-1", "status": "RUNNING"}
+    assert calls == [("job-1", [0, 2])]
+
+
+def test_approve_minicourse_empty_string_approves_all(monkeypatch):
+    from tracks import minicourse_jobs
+
+    calls = []
+    monkeypatch.setattr(minicourse_jobs, "approve",
+                        lambda job_id, idx: calls.append((job_id, idx)) or {"id": job_id})
+
+    mcp_server.approve_minicourse("job-1")
+
+    assert calls == [("job-1", None)]
+
+
+def test_approve_minicourse_unknown_job_raises(monkeypatch):
+    from tracks import minicourse_jobs
+
+    monkeypatch.setattr(minicourse_jobs, "approve", lambda job_id, idx: None)
+
+    with pytest.raises(ValueError):
+        mcp_server.approve_minicourse("no-such-job")
