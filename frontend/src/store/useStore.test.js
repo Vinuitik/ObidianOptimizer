@@ -663,7 +663,7 @@ describe('tracks: create / update / delete', () => {
 
     await getState().createTrack('New Track', 'book');
 
-    expect(tracksApi.createTrack).toHaveBeenCalledWith('New Track', 'book');
+    expect(tracksApi.createTrack).toHaveBeenCalledWith('New Track', 'book', {});
     expect(getState().tracks).toEqual([{ id: 2, title: 'New Track' }, { id: 1, title: 'Old' }]);
   });
 

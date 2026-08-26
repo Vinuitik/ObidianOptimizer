@@ -387,8 +387,8 @@ const useStore = create((set, get) => ({
     }
   },
 
-  createTrack: async (title, type) => {
-    const track = await apiCreateTrack(title, type);
+  createTrack: async (title, type, extra = {}) => {
+    const track = await apiCreateTrack(title, type, extra);
     set(s => ({ tracks: [track, ...s.tracks] }));
     return track;
   },

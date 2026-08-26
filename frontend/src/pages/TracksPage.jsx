@@ -1,11 +1,32 @@
 import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import Ring from '../components/atoms/Ring';
-import { generateMinicourse, fetchMinicourseJob, approveMinicourse, importCsv, commitImport } from '../api/tracks';
+import { generateMinicourse, fetchMinicourseJob, approveMinicourse, importCsv, commitImport, pollTrackNow } from '../api/tracks';
 import styles from './TracksPage.module.css';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const TRACK_TYPES = ['book', 'course', 'article', 'custom'];
+const TRACK_TYPES = ['book', 'course', 'article', 'custom', 'subscription'];
+const SOURCE_TYPES = ['youtube_channel', 'feed'];
+
+// Pure rendering transform — items stay a flat array from the API/store. Items sharing a
+// groupId came from one source-ingestion event (e.g. a long video split into several notes);
+// singleton groups (groupId set but no siblings) render flat like ungrouped items.
+function groupForDisplay(items) {
+  const byGroup = {};
+  items.forEach(i => { if (i.groupId) (byGroup[i.groupId] ??= []).push(i); });
+  const rendered = new Set();
+  const rows = [];
+  for (const item of items) {
+    if (item.groupId && byGroup[item.groupId].length > 1) {
+      if (rendered.has(item.groupId)) continue;
+      rendered.add(item.groupId);
+      rows.push({ type: 'group', groupId: item.groupId, members: byGroup[item.groupId] });
+    } else {
+      rows.push({ type: 'item', item });
+    }
+  }
+  return rows;
+}
 
 export default function TracksPage() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
@@ -146,18 +167,34 @@ function ManageTab() {
   const [selectedId, setSelectedId] = useState(null);
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('book');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceType, setSourceType] = useState('feed');
+  const [sourceTypeTouched, setSourceTypeTouched] = useState(false);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
 
   useEffect(() => { fetchTracks(); }, [fetchTracks]);
+
+  function handleSourceUrlChange(value) {
+    setSourceUrl(value);
+    if (!sourceTypeTouched) {
+      setSourceType(/youtube\.com|youtu\.be/.test(value) ? 'youtube_channel' : 'feed');
+    }
+  }
 
   async function handleCreate(e) {
     e.preventDefault();
     if (!newTitle.trim()) return;
     setCreating(true);
     try {
-      const track = await createTrack(newTitle.trim(), newType);
+      const extra = newType === 'subscription' && sourceUrl.trim()
+        ? { sourceUrl: sourceUrl.trim(), sourceType }
+        : {};
+      const track = await createTrack(newTitle.trim(), newType, extra);
       setNewTitle('');
+      setSourceUrl('');
+      setSourceType('feed');
+      setSourceTypeTouched(false);
       setSelectedId(track.id);
     } catch (e) {
       showToast(`Couldn't create track: ${e.message ?? e}`);
@@ -182,6 +219,23 @@ function ManageTab() {
           <select className={styles.select} value={newType} onChange={e => setNewType(e.target.value)}>
             {TRACK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
+          {newType === 'subscription' && (
+            <>
+              <input
+                className={styles.textInput}
+                placeholder="Feed or channel URL…"
+                value={sourceUrl}
+                onChange={e => handleSourceUrlChange(e.target.value)}
+              />
+              <select
+                className={styles.select}
+                value={sourceType}
+                onChange={e => { setSourceType(e.target.value); setSourceTypeTouched(true); }}
+              >
+                {SOURCE_TYPES.map(st => <option key={st} value={st}>{st}</option>)}
+              </select>
+            </>
+          )}
           <button className={styles.primaryBtn} type="submit" disabled={creating || !newTitle.trim()}>
             + New track
           </button>
@@ -440,6 +494,7 @@ function CapacityPanel() {
 function TrackDetail({ track, onDeleted }) {
   const updateTrack   = useStore(s => s.updateTrack);
   const deleteTrack   = useStore(s => s.deleteTrack);
+  const fetchTracks   = useStore(s => s.fetchTracks);
   const showToast     = useStore(s => s.showToast);
 
   const [title, setTitle] = useState(track.title);
@@ -447,6 +502,7 @@ function TrackDetail({ track, onDeleted }) {
   const [deadline, setDeadline] = useState(track.deadline ?? '');
   const [priority, setPriority] = useState(track.priority ?? '');
   const [includeInProgress, setIncludeInProgress] = useState(track.includeInProgress);
+  const [polling, setPolling] = useState(false);
 
   // Reset local form state whenever a different track is selected.
   useEffect(() => {
@@ -472,6 +528,18 @@ function TrackDetail({ track, onDeleted }) {
       onDeleted();
     } catch (e) {
       showToast(`Couldn't delete: ${e.message ?? e}`);
+    }
+  }
+
+  async function handlePoll() {
+    setPolling(true);
+    try {
+      await pollTrackNow(track.id);
+      await fetchTracks();
+    } catch (e) {
+      showToast(`Couldn't poll: ${e.message ?? e}`);
+    } finally {
+      setPolling(false);
     }
   }
 
@@ -506,6 +574,17 @@ function TrackDetail({ track, onDeleted }) {
           {['active', 'paused', 'done', 'archived'].map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
+
+      {track.type === 'subscription' && (
+        <div className={styles.fieldRow}>
+          <span className={styles.fieldLabel}>
+            Last checked: {track.lastCheckedAt ? new Date(track.lastCheckedAt).toLocaleString() : 'never'}
+          </span>
+          <button className={styles.secondaryBtn} onClick={handlePoll} disabled={polling}>
+            {polling ? 'Polling…' : 'Poll now'}
+          </button>
+        </div>
+      )}
 
       <div className={styles.fieldRow}>
         <label className={styles.fieldLabel}>Deadline</label>
@@ -708,6 +787,26 @@ function TrackItemsEditor({ trackId }) {
     }
   }
 
+  function renderItemRow(item) {
+    return (
+      <li
+        key={item.id}
+        className={styles.itemRow}
+        draggable
+        onDragStart={() => setDragId(item.id)}
+        onDragOver={e => e.preventDefault()}
+        onDrop={() => handleDrop(item)}
+      >
+        <span className={styles.dragHandle}>⠿</span>
+        <span className={`${styles.itemTitle} ${item.status === 'done' ? styles.itemDone : ''}`}>
+          {item.title}
+        </span>
+        {item.notePath && <span className={styles.itemNote} title={item.notePath}>📄</span>}
+        <button className={styles.removeBtn} onClick={() => deleteTrackItem(trackId, item.id)}>×</button>
+      </li>
+    );
+  }
+
   return (
     <div className={styles.itemsEditor}>
       <h3 className={styles.sectionTitle}>Items</h3>
@@ -721,23 +820,16 @@ function TrackItemsEditor({ trackId }) {
         <button className={styles.primaryBtn} type="submit" disabled={!newItemTitle.trim()}>Add</button>
       </form>
       <ul className={styles.itemList}>
-        {items.map(item => (
-          <li
-            key={item.id}
-            className={styles.itemRow}
-            draggable
-            onDragStart={() => setDragId(item.id)}
-            onDragOver={e => e.preventDefault()}
-            onDrop={() => handleDrop(item)}
-          >
-            <span className={styles.dragHandle}>⠿</span>
-            <span className={`${styles.itemTitle} ${item.status === 'done' ? styles.itemDone : ''}`}>
-              {item.title}
-            </span>
-            {item.notePath && <span className={styles.itemNote} title={item.notePath}>📄</span>}
-            <button className={styles.removeBtn} onClick={() => deleteTrackItem(trackId, item.id)}>×</button>
+        {groupForDisplay(items).map(row => row.type === 'group' ? (
+          <li key={`group-${row.groupId}`} className={styles.itemGroup}>
+            <details>
+              <summary className={styles.itemGroupSummary}>{row.members.length} items from one source</summary>
+              <ul className={styles.itemList}>
+                {row.members.map(renderItemRow)}
+              </ul>
+            </details>
           </li>
-        ))}
+        ) : renderItemRow(row.item))}
         {items.length === 0 && <p className={styles.emptyMsg}>No items yet.</p>}
       </ul>
     </div>

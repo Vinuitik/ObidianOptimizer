@@ -17,14 +17,20 @@ export async function fetchTracks() {
   return res.json();
 }
 
-// Returns the created Track.
-export async function createTrack(title, type) {
+// Returns the created Track. extra: optional { sourceUrl, sourceType } for subscription tracks.
+export async function createTrack(title, type, extra = {}) {
   const res = await req(`${BASE}/tracks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, type }),
+    body: JSON.stringify({ title, type, ...extra }),
   });
   return res.json();
+}
+
+// 400 if the track isn't a subscription track. No response body to parse — caller
+// re-fetches tracks afterward to pick up the new lastCheckedAt.
+export async function pollTrackNow(id) {
+  await req(`${BASE}/tracks/${id}/poll-now`, { method: 'POST' });
 }
 
 // patch: any of { title, type, status, deadline (YYYY-MM-DD), priority, includeInProgress, clearDeadline }.
