@@ -257,14 +257,18 @@ def create_track(title: str, type: str) -> dict:
     return res.json()
 
 
-def add_track_item(track_id: str, title: str, note_path: str) -> None:
+def add_track_item(track_id: str, title: str, note_path: str, capture_id: str | None = None) -> None:
     """Append a synthesized note as a track_items row. Called from the async ingest job
     path (jobs.py) once a note the MCP caller tagged with track_id actually lands — the
     tool call itself already returned before synthesis finishes, so this can't happen at
     call time. Best-effort by design: callers swallow failures (a track-tagging hiccup
-    must never sink note delivery, same rule as one-bad-note-in-a-batch elsewhere here)."""
+    must never sink note delivery, same rule as one-bad-note-in-a-batch elsewhere here).
+
+    capture_id (optional): groups sibling notes from the same job under one
+    track_item_groups row (trackId, captureId) on the Java side."""
     res = httpx.post(f"{BACKEND_URL}/api/internal/tracks/{track_id}/items", headers=_headers(),
-                     json={"title": title, "notePath": note_path}, timeout=30)
+                     json={"title": title, "notePath": note_path, "captureId": capture_id},
+                     timeout=30)
     if res.status_code != 200:
         raise PublishError(f"add_track_item {res.status_code}: {res.text[:300]}")
 

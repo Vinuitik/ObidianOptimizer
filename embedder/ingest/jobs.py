@@ -584,7 +584,7 @@ def _link_track_item(job: dict, title: str, path: str) -> None:
         return
     from ingest import publish
     try:
-        publish.add_track_item(track_id, title, path)
+        publish.add_track_item(track_id, title, path, capture_id=job.get("capture_id"))
     except Exception as e:
         log.warning("track item link failed (track_id=%s, note=%r): %s", track_id, title, e)
 

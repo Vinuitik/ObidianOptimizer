@@ -322,6 +322,38 @@ def test_private_fields_not_exposed(stub_extract):
     assert not any(k.startswith("_") for k in ingest_jobs.get(job["id"]))
 
 
+# ── _link_track_item (item-grouping step 3b: threads job's capture_id through) ──
+
+def test_link_track_item_passes_job_capture_id(monkeypatch):
+    from ingest import publish as ingest_publish
+    calls = []
+    monkeypatch.setattr(ingest_publish, "add_track_item",
+                        lambda *a, **k: calls.append((a, k)))
+    job = {"track_id": "trk1", "capture_id": "cap1"}
+    ingest_jobs._link_track_item(job, "Note Title", "path/to/note.md")
+    assert calls == [(("trk1", "Note Title", "path/to/note.md"), {"capture_id": "cap1"})]
+
+
+def test_link_track_item_missing_capture_id_key_defaults_none(monkeypatch):
+    from ingest import publish as ingest_publish
+    calls = []
+    monkeypatch.setattr(ingest_publish, "add_track_item",
+                        lambda *a, **k: calls.append((a, k)))
+    job = {"track_id": "trk1"}
+    ingest_jobs._link_track_item(job, "Note Title", "path/to/note.md")
+    assert calls[0][1] == {"capture_id": None}
+
+
+def test_link_track_item_no_track_id_skips_call(monkeypatch):
+    from ingest import publish as ingest_publish
+    calls = []
+    monkeypatch.setattr(ingest_publish, "add_track_item",
+                        lambda *a, **k: calls.append((a, k)))
+    job = {"capture_id": "cap1"}
+    ingest_jobs._link_track_item(job, "Note Title", "path/to/note.md")
+    assert calls == []
+
+
 # ── API endpoints ────────────────────────────────────────────────────────
 
 @pytest.fixture
