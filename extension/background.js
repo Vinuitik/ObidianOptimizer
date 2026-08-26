@@ -135,6 +135,15 @@ async function capture(url, trackOpts = {}) {
   return { ok: true };
 }
 
+// A subscription track: the backend poller periodically checks sourceUrl for new
+// content and files it under this track.
+async function subscribeTrack({ title, sourceUrl, sourceType }) {
+  const res = await json('/tracks', 'POST', { title, type: 'subscription', sourceUrl, sourceType });
+  if (res.status === 401) return { ok: false, status: 401 };
+  if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
+  return { ok: true };
+}
+
 // Keep a watchable/readable copy in _workspace (media-file URL).
 async function workspaceSave(url) {
   const res = await json('/workspace/save', 'POST', { url });
@@ -344,6 +353,7 @@ const HANDLERS = {
   capturePage,
   uploadFile,
   listTracks: () => listTracks(),
+  subscribeTrack,
   getConfig: () => getConfig(),
   setConfig: (patch) => setConfig(patch).then(() => { connectAgentWs(); return { ok: true }; }),
 };

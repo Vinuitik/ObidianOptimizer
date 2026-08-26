@@ -98,6 +98,52 @@ async function capturePage() {
   handleResult(res);
 }
 
+// ── Subscribe to this page ───────────────────────────────────────────────────
+const YOUTUBE_HOST_RE = /(?:^|\.)(youtube\.com|youtu\.be)$/i;
+
+$('subscribe-page').addEventListener('click', async () => {
+  $('subscribe-form').hidden = !$('subscribe-form').hidden;
+  if ($('subscribe-form').hidden) return;
+  try {
+    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url) {
+      $('sub-url').value = tab.url;
+      let host = '';
+      try { host = new URL(tab.url).host; } catch { /* leave default select value */ }
+      if (host) $('sub-type').value = YOUTUBE_HOST_RE.test(host) ? 'youtube_channel' : 'feed';
+    }
+    if (tab?.title && !$('sub-title').value) $('sub-title').value = tab.title;
+  } catch { /* no tab access — leave fields blank */ }
+});
+
+$('sub-cancel').addEventListener('click', () => {
+  $('subscribe-form').hidden = true;
+  setStatus($('sub-status'), '', 'info');
+});
+
+$('sub-confirm').addEventListener('click', async () => {
+  const title = $('sub-title').value.trim();
+  const sourceUrl = $('sub-url').value.trim();
+  const sourceType = $('sub-type').value;
+  if (!title || !sourceUrl) return setStatus($('sub-status'), 'Enter a title and URL.', 'err');
+
+  $('sub-confirm').disabled = true;
+  setStatus($('sub-status'), 'Subscribing…', 'info');
+  const res = await send('subscribeTrack', { title, sourceUrl, sourceType });
+  $('sub-confirm').disabled = false;
+  if (res?.ok) {
+    setStatus($('sub-status'), 'Subscribed ✓', 'ok');
+    $('sub-title').value = '';
+    $('sub-url').value = '';
+    $('subscribe-form').hidden = true;
+    loadTracks();   // the new subscription track now exists — refresh the picker
+  } else if (res?.status === 401) {
+    setStatus($('sub-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
+  } else {
+    setStatus($('sub-status'), `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
+  }
+});
+
 // ── Send (text / URL) ─────────────────────────────────────────────────────────
 $('cap-send').addEventListener('click', () => submit());
 
