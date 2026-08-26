@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { captureUrl, captureText } from './offlineApi';
-import { fetchTracks } from '../api/tracks';
+import { fetchTracks, createTrack } from '../api/tracks';
+import { ApiError } from '../api/notes';
 import { getMeta, setMeta } from './db';
+import useOffline from './useOffline';
 import styles from './MobilePages.module.css';
 
 // Capture tab — two ways in, both landing in the Learn inbox via the ingest pipeline:
@@ -24,12 +26,21 @@ export default function CapturePage() {
   const [params] = useSearchParams();
   const shared = params.get('shared');
 
-  const [mode, setMode] = useState('link'); // 'link' | 'note'
+  const online = useOffline();
+
+  const [mode, setMode] = useState('link'); // 'link' | 'note' | 'subscribe'
   const [url, setUrl] = useState('');
   const [noteText, setNoteText] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
   const [status, setStatus] = useState(null); // { text, tone }
   const [busy, setBusy] = useState(false);
+
+  // Subscribe (tracks/FLOWS.md subscription discovery) — deliberate, infrequent action,
+  // unlike Link/Note which go through the offline outbox. No queueing here by design.
+  const [subTitle, setSubTitle] = useState('');
+  const [subUrl, setSubUrl] = useState('');
+  const [subType, setSubType] = useState('feed');
+  const [subTypeTouched, setSubTypeTouched] = useState(false);
 
   // Track picker (tracks/FLOWS.md Phase 1b) — this manual capture form is already a
   // deliberate multi-field form (not fire-and-forget like the share-target), so it gets
@@ -113,6 +124,40 @@ export default function CapturePage() {
     }
   }
 
+  function handleSubUrlChange(value) {
+    setSubUrl(value);
+    if (!subTypeTouched) {
+      setSubType(/youtube\.com|youtu\.be/.test(value) ? 'youtube_channel' : 'feed');
+    }
+  }
+
+  async function submitSubscribe(e) {
+    e.preventDefault();
+    const title = subTitle.trim();
+    const link = subUrl.trim();
+    if (!title || !link) return;
+    if (!online) {
+      setStatus({ text: "You're offline — try again once connected.", tone: 'warn' });
+      return;
+    }
+    setBusy(true);
+    try {
+      await createTrack(title, 'subscription', { sourceUrl: link, sourceType: subType });
+      setStatus({ text: 'Subscribed.', tone: 'ok' });
+      setSubTitle('');
+      setSubUrl('');
+      setSubType('feed');
+      setSubTypeTouched(false);
+    } catch (e) {
+      const clean4xx = e instanceof ApiError && e.status >= 400 && e.status < 500;
+      setStatus(clean4xx
+        ? { text: `Failed: ${e.message}`, tone: 'err' }
+        : { text: "You're offline — try again once connected.", tone: 'warn' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className={styles.page}>
       <h1 className={styles.pageTitle}>Capture</h1>
@@ -134,9 +179,14 @@ export default function CapturePage() {
           className={`${styles.modeBtn} ${mode === 'note' ? styles.modeBtnActive : ''}`}
           onClick={() => { setMode('note'); setStatus(null); }}
         >Note</button>
+        <button
+          type="button" role="tab" aria-selected={mode === 'subscribe'}
+          className={`${styles.modeBtn} ${mode === 'subscribe' ? styles.modeBtnActive : ''}`}
+          onClick={() => { setMode('subscribe'); setStatus(null); }}
+        >Subscribe</button>
       </div>
 
-      {isAuthenticated && (
+      {isAuthenticated && mode !== 'subscribe' && (
         <div className={styles.captureFormCol}>
           <select
             className={styles.captureInput}
@@ -174,7 +224,7 @@ export default function CapturePage() {
             {busy ? 'Sending…' : 'Capture'}
           </button>
         </form>
-      ) : (
+      ) : mode === 'note' ? (
         <form onSubmit={submitNote} className={styles.captureFormCol}>
           <input
             className={styles.captureInput}
@@ -193,20 +243,55 @@ export default function CapturePage() {
             {busy ? 'Sending…' : 'Send to inbox'}
           </button>
         </form>
+      ) : (
+        <form onSubmit={submitSubscribe} className={styles.captureFormCol}>
+          <input
+            className={styles.captureInput}
+            type="text"
+            placeholder="Track title"
+            value={subTitle}
+            onChange={e => setSubTitle(e.target.value)}
+          />
+          <input
+            className={styles.captureInput}
+            type="url"
+            inputMode="url"
+            placeholder="Channel or feed URL"
+            value={subUrl}
+            onChange={e => handleSubUrlChange(e.target.value)}
+          />
+          <select
+            className={styles.captureInput}
+            value={subType}
+            onChange={e => { setSubType(e.target.value); setSubTypeTouched(true); }}
+            aria-label="Source type"
+          >
+            <option value="youtube_channel">YouTube channel</option>
+            <option value="feed">RSS/Atom feed</option>
+          </select>
+          <button
+            className={styles.captureBtn} type="submit"
+            disabled={busy || !subTitle.trim() || !subUrl.trim()}
+          >
+            {busy ? 'Subscribing…' : 'Subscribe'}
+          </button>
+        </form>
       )}
 
       {status && (
         <p className={`${styles.hint} ${styles[status.tone] || ''}`}>{status.text}</p>
       )}
 
-      {!isAuthenticated && (
+      {!isAuthenticated && mode !== 'subscribe' && (
         <p className={styles.hint}>You're signed out — captures will queue until you sign in.</p>
       )}
 
       <p className={styles.hint}>
         {mode === 'link'
           ? 'Tip: once installed, share any link — or a PDF/video/audio file — from another app and pick “Obsidian Optimizer”.'
-          : 'Rough notes you’d never revisit? Dump them here — the inbox guarantees you triage each one at least once.'}
+          : mode === 'note'
+          ? 'Rough notes you’d never revisit? Dump them here — the inbox guarantees you triage each one at least once.'
+          : 'Browsing a YouTube channel or blog? Subscribe here and new items will show up in the track automatically.'}
       </p>
     </div>
   );
