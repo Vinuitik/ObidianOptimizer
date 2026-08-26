@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import Ring from '../components/atoms/Ring';
+import { generateMinicourse, fetchMinicourseJob, approveMinicourse } from '../api/tracks';
 import styles from './TracksPage.module.css';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -373,6 +374,132 @@ function TrackDetail({ track, onDeleted }) {
 
       <TrackItemsEditor trackId={track.id} />
       <TrackScheduleEditor trackId={track.id} />
+      <MinicoursePanel trackId={track.id} />
+    </div>
+  );
+}
+
+// ── Mini-course (Phase 2) ────────────────────────────────────────────────────
+
+function MinicoursePanel({ trackId }) {
+  const items = useStore(s => s.trackItems[trackId]) ?? [];
+  const fetchTrackItems = useStore(s => s.fetchTrackItems);
+  const showToast = useStore(s => s.showToast);
+  const [job, setJob] = useState(null);
+  const [checked, setChecked] = useState({}); // lesson index -> bool
+  const [busy, setBusy] = useState(false);
+
+  const hasNotes = items.some(i => i.notePath);
+
+  // Different track selected — drop any job state from the previous one.
+  useEffect(() => { setJob(null); }, [trackId]);
+
+  const polling = job != null && (job.status === 'QUEUED' || job.status === 'RUNNING');
+  useEffect(() => {
+    if (!polling) return undefined;
+    const id = setInterval(async () => {
+      try {
+        const updated = await fetchMinicourseJob(job.id);
+        setJob(updated);
+        if (updated.status === 'DONE') fetchTrackItems(trackId);
+      } catch (e) {
+        showToast(`Couldn't check mini-course status: ${e.message ?? e}`);
+      }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [polling, job?.id, trackId, fetchTrackItems, showToast]);
+
+  useEffect(() => {
+    if (job?.status === 'AWAITING_APPROVAL' && job.plan) {
+      setChecked(Object.fromEntries(job.plan.lessons.map((_, i) => [i, true])));
+    }
+  }, [job?.status, job?.plan]);
+
+  async function start() {
+    setBusy(true);
+    try {
+      setJob(await generateMinicourse(trackId));
+    } catch (e) {
+      showToast(`Couldn't start mini-course: ${e.message ?? e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approve() {
+    const approvedIndexes = Object.entries(checked).filter(([, v]) => v).map(([i]) => Number(i));
+    setBusy(true);
+    try {
+      setJob(await approveMinicourse(job.id, approvedIndexes));
+    } catch (e) {
+      showToast(`Couldn't approve mini-course: ${e.message ?? e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={styles.minicoursePanel}>
+      <h3 className={styles.sectionTitle}>Mini-course</h3>
+
+      {(!job || job.status === 'FAILED') && (
+        <button
+          className={styles.primaryBtn}
+          onClick={start}
+          disabled={busy || !hasNotes}
+          title={hasNotes ? undefined : 'Add at least one item with a linked note first'}
+        >
+          Generate mini-course
+        </button>
+      )}
+
+      {job && (job.status === 'QUEUED' || job.status === 'RUNNING') && (
+        <div className={styles.minicourseStatus}>
+          <span className={styles.spinnerSm} />
+          <span>{job.stage === 'lessons' ? 'Writing lessons…' : 'Generating syllabus…'}</span>
+        </div>
+      )}
+
+      {job?.status === 'AWAITING_APPROVAL' && job.plan && (
+        <div className={styles.minicoursePlan}>
+          <p className={styles.minicoursePlanTitle}>{job.plan.course_title}</p>
+          <ul className={styles.minicourseLessonList}>
+            {job.plan.lessons.map((lesson, i) => (
+              <li key={i} className={styles.minicourseLessonRow}>
+                <label className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(checked[i])}
+                    onChange={e => setChecked(c => ({ ...c, [i]: e.target.checked }))}
+                  />
+                  <span className={styles.minicourseLessonText}>
+                    <span className={styles.minicourseLessonTitle}>{lesson.title}</span>
+                    <span className={styles.minicourseLessonObjective}>{lesson.objective}</span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <button className={styles.primaryBtn} onClick={approve} disabled={busy}>
+            Approve &amp; write notes
+          </button>
+        </div>
+      )}
+
+      {job?.status === 'DONE' && (
+        <div className={styles.minicourseDone}>
+          <p className={styles.minicourseDoneText}>{job.results?.length ?? 0} lesson note(s) written.</p>
+          {job.lesson_failures?.length > 0 && (
+            <p className={styles.minicourseFailures}>
+              Failed: {job.lesson_failures.map(f => f.title).join(', ')}
+            </p>
+          )}
+        </div>
+      )}
+
+      {job?.status === 'FAILED' && (
+        <p className={styles.minicourseError}>{job.error}</p>
+      )}
     </div>
   );
 }

@@ -145,3 +145,28 @@ export async function fetchTrackProgress() {
   const res = await req(`${BASE}/tracks/progress`);
   return res.json();
 }
+
+// ── Mini-course (Phase 2) ────────────────────────────────────────────────────
+
+// Returns the created job dict — { id, status, stage, track_id, course_title, error,
+// created_at, plan, results, lesson_failures }.
+export async function generateMinicourse(trackId) {
+  const res = await req(`${BASE}/tracks/${trackId}/minicourse`, { method: 'POST' });
+  return res.json();
+}
+
+// Returns the job dict — poll this while status is QUEUED/RUNNING.
+export async function fetchMinicourseJob(jobId) {
+  const res = await req(`${BASE}/tracks/minicourse/${jobId}`);
+  return res.json();
+}
+
+// approvedIndexes: number[] of plan.lessons indexes to keep, or null to approve all.
+export async function approveMinicourse(jobId, approvedIndexes) {
+  const res = await req(`${BASE}/tracks/minicourse/${jobId}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approvedIndexes }),
+  });
+  return res.json();
+}
