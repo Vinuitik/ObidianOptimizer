@@ -112,6 +112,10 @@ class MinicourseApproveRequest(BaseModel):
     approved_indexes: list[int] | None = None
 
 
+class ImportCsvRequest(BaseModel):
+    csv_text: str
+
+
 class DownloadRequest(BaseModel):
     url: str                        # video / playlist URL for offline download
 
@@ -495,6 +499,19 @@ def minicourse_submit(req: MinicourseSubmitRequest):
         raise HTTPException(status_code=404, detail=f"unknown track: {req.track_id}")
 
     return minicourse_jobs.submit_outline(req.track_id, track["title"], track["items"])
+
+
+@app.post("/tracks/import")
+def tracks_import(req: ImportCsvRequest):
+    """Map an arbitrary spreadsheet export into {tracks, items} in one LLM call
+    (tracks/import_agent.map_csv_to_tracks). Synchronous — no job registry, unlike
+    /tracks/minicourse, since this is a single LLM-call-class of work."""
+    from tracks import import_agent
+
+    try:
+        return import_agent.map_csv_to_tracks(req.csv_text)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/tracks/minicourse/{job_id}")

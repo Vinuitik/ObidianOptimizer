@@ -230,3 +230,48 @@ def test_minicourse_approve_happy_path_returns_job(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json() == {"id": "job-1", "status": "RUNNING", "stage": "lessons"}
     assert calls == [("job-1", [0, 2])]
+
+
+# ---------------------------------------------------------------------------
+# /tracks/import — synchronous, import_agent.map_csv_to_tracks mocked
+# ---------------------------------------------------------------------------
+
+def test_tracks_import_happy_path_returns_mapping(client, monkeypatch):
+    from tracks import import_agent
+
+    result = {"tracks": [{"title": "Book A", "type": "book"}],
+              "items": [{"trackIndex": 0, "title": "Ch 1", "status": "pending"}]}
+    monkeypatch.setattr(import_agent, "map_csv_to_tracks", lambda csv_text: result)
+
+    resp = client.post("/tracks/import", json={"csv_text": "Book,Chapter\nBook A,Ch 1"})
+
+    assert resp.status_code == 200
+    assert resp.json() == result
+
+
+def test_tracks_import_422_on_value_error(client, monkeypatch):
+    from tracks import import_agent
+
+    def raise_empty(csv_text):
+        raise ValueError("csv_text is empty")
+    monkeypatch.setattr(import_agent, "map_csv_to_tracks", raise_empty)
+
+    resp = client.post("/tracks/import", json={"csv_text": ""})
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "csv_text is empty"
+
+
+def test_tracks_import_passes_raw_csv_text_unmodified(client, monkeypatch):
+    from tracks import import_agent
+
+    received = {}
+    def fake_map(csv_text):
+        received["csv_text"] = csv_text
+        return {"tracks": [], "items": []}
+    monkeypatch.setattr(import_agent, "map_csv_to_tracks", fake_map)
+
+    resp = client.post("/tracks/import", json={"csv_text": "Book,Chapter\nA,1"})
+
+    assert resp.status_code == 200
+    assert received["csv_text"] == "Book,Chapter\nA,1"
