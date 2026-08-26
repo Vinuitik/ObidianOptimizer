@@ -5,6 +5,7 @@ import com.obsidian.obsidian.media.MediaController;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.tracks.TrackRepository;
+import com.obsidian.obsidian.tracks.TrackRepository.Track;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -141,16 +142,18 @@ public class InternalAgentController {
         return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath()));
     }
 
-    /** Mini-course generation (step 1): the embedder reads a track's existing items —
-     *  title, notePath, status — to build a bundle from every resource already attached
-     *  to a track. Mirrors the session-authed GET /tracks/{id}/items (TrackController)
-     *  behind the same internal-token gate as every other embedder-facing endpoint. */
+    /** Mini-course generation (step 1): the embedder reads a track's title + existing
+     *  items (title, notePath, status) to build a bundle from every resource already
+     *  attached to a track — this is the ONLY way the embedder learns the track's title
+     *  (it never carries a session cookie, so it can't call the session-authed track-get
+     *  endpoint). Same internal-token gate as every other embedder-facing endpoint. */
     @GetMapping("/tracks/{id}/items")
     public ResponseEntity<?> trackItems(@RequestHeader(value = "X-Internal-Token", required = false) String token,
                                         @PathVariable long id) {
         if (badToken(token)) return unauthorized();
-        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
-        return ResponseEntity.ok(trackRepo.listItems(id));
+        Track track = trackRepo.get(id);
+        if (track == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(Map.of("title", track.title(), "items", trackRepo.listItems(id)));
     }
 
     /** Overwrite an existing note (used by the note splitter's hub rewrite). */

@@ -61,9 +61,10 @@ class InternalAgentControllerTest {
 
         mvc.perform(get("/api/internal/tracks/1/items").header("X-Internal-Token", TOKEN))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].title").value("Ch1"))
-            .andExpect(jsonPath("$[1].title").value("Ch2"))
-            .andExpect(jsonPath("$[1].status").value("done"));
+            .andExpect(jsonPath("$.title").value("Rust Book"))
+            .andExpect(jsonPath("$.items[0].title").value("Ch1"))
+            .andExpect(jsonPath("$.items[1].title").value("Ch2"))
+            .andExpect(jsonPath("$.items[1].status").value("done"));
     }
 
     @Test
