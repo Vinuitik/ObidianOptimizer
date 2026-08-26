@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import Ring from '../components/atoms/Ring';
-import { generateMinicourse, fetchMinicourseJob, approveMinicourse } from '../api/tracks';
+import { generateMinicourse, fetchMinicourseJob, approveMinicourse, importCsv, commitImport } from '../api/tracks';
 import styles from './TracksPage.module.css';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -147,6 +147,7 @@ function ManageTab() {
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('book');
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => { fetchTracks(); }, [fetchTracks]);
 
@@ -186,6 +187,13 @@ function ManageTab() {
           </button>
         </form>
 
+        <button
+          className={`${styles.secondaryBtn} ${styles.importTriggerBtn}`}
+          onClick={() => { setImporting(true); setSelectedId(null); }}
+        >
+          Import from spreadsheet…
+        </button>
+
         <div className={styles.trackItems}>
           {tracks.length === 0 && <p className={styles.emptyMsg}>No tracks yet.</p>}
           {tracks.map(t => (
@@ -204,13 +212,175 @@ function ManageTab() {
       <div className={styles.divider} />
 
       <div className={styles.trackDetail}>
-        {selected ? (
+        {importing ? (
+          <ImportPanel onClose={() => setImporting(false)} />
+        ) : selected ? (
           <TrackDetail track={selected} onDeleted={() => setSelectedId(null)} />
         ) : (
           <div className={styles.emptySession}>
             <p className={styles.emptySessionText}>Select a track to edit its items and schedule, or create a new one.</p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── Import from spreadsheet (Phase 3) ───────────────────────────────────────
+
+function ImportPanel({ onClose }) {
+  const fetchTracks = useStore(s => s.fetchTracks);
+  const showToast   = useStore(s => s.showToast);
+
+  const [text, setText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [previewTracks, setPreviewTracks] = useState(null); // [{ title, type }]
+  const [previewItems, setPreviewItems]   = useState(null); // [{ _key, trackIndex, title, status }]
+  const [committing, setCommitting] = useState(false);
+  const [result, setResult] = useState(null); // { tracksCreated, itemsCreated }
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setText(await file.text());
+  }
+
+  async function handlePreview() {
+    if (!text.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await importCsv(text);
+      setPreviewTracks(res.tracks.map(t => ({ ...t })));
+      setPreviewItems(res.items.map((it, i) => ({ ...it, _key: i })));
+    } catch (e) {
+      setError(e.message ?? String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function editTrack(i, patch) {
+    setPreviewTracks(ts => ts.map((t, idx) => idx === i ? { ...t, ...patch } : t));
+  }
+
+  function deleteTrack(i) {
+    setPreviewTracks(ts => ts.filter((_, idx) => idx !== i));
+    setPreviewItems(its => its
+      .filter(it => it.trackIndex !== i)
+      .map(it => it.trackIndex > i ? { ...it, trackIndex: it.trackIndex - 1 } : it));
+  }
+
+  function editItem(key, patch) {
+    setPreviewItems(its => its.map(it => it._key === key ? { ...it, ...patch } : it));
+  }
+
+  function deleteItem(key) {
+    setPreviewItems(its => its.filter(it => it._key !== key));
+  }
+
+  async function handleCommit() {
+    setCommitting(true);
+    try {
+      const items = previewItems.map(({ _key, ...rest }) => rest);
+      const res = await commitImport({ tracks: previewTracks, items });
+      setResult(res);
+      setPreviewTracks(null);
+      setPreviewItems(null);
+      fetchTracks();
+    } catch (e) {
+      showToast(`Couldn't import: ${e.message ?? e}`);
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  if (result) {
+    return (
+      <div className={styles.importPanel}>
+        <p className={styles.importSummary}>
+          Imported {result.tracksCreated} track(s) and {result.itemsCreated} item(s).
+        </p>
+        <button className={styles.primaryBtn} onClick={onClose}>Done</button>
+      </div>
+    );
+  }
+
+  if (previewTracks) {
+    return (
+      <div className={styles.importPanel}>
+        <h3 className={styles.sectionTitle}>Review import</h3>
+        {previewTracks.map((t, i) => (
+          <div key={i} className={styles.importTrackGroup}>
+            <div className={styles.importTrackHeader}>
+              <input
+                className={styles.textInput}
+                value={t.title}
+                onChange={e => editTrack(i, { title: e.target.value })}
+              />
+              <select
+                className={styles.select}
+                value={t.type}
+                onChange={e => editTrack(i, { type: e.target.value })}
+              >
+                {TRACK_TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
+              </select>
+              <button className={styles.dangerBtn} onClick={() => deleteTrack(i)}>Delete track</button>
+            </div>
+            <ul className={styles.itemList}>
+              {previewItems.filter(it => it.trackIndex === i).map(it => (
+                <li key={it._key} className={styles.itemRow}>
+                  <input
+                    className={styles.textInput}
+                    value={it.title}
+                    onChange={e => editItem(it._key, { title: e.target.value })}
+                  />
+                  <span className={styles.importItemStatus}>{it.status}</span>
+                  <button className={styles.removeBtn} onClick={() => deleteItem(it._key)}>×</button>
+                </li>
+              ))}
+              {previewItems.filter(it => it.trackIndex === i).length === 0 && (
+                <p className={styles.emptyMsg}>No items in this track.</p>
+              )}
+            </ul>
+          </div>
+        ))}
+        {previewTracks.length === 0 && <p className={styles.emptyMsg}>No tracks left to import.</p>}
+        <div className={styles.importActions}>
+          <button
+            className={styles.primaryBtn}
+            onClick={handleCommit}
+            disabled={committing || previewTracks.length === 0}
+          >
+            Commit import
+          </button>
+          <button className={styles.secondaryBtn} onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.importPanel}>
+      <h3 className={styles.sectionTitle}>Import from spreadsheet</h3>
+      <p className={styles.emptySessionText}>
+        Paste CSV text or select a .csv file. An LLM parses it into tracks and items for you to review before anything is created.
+      </p>
+      <textarea
+        className={styles.importTextarea}
+        placeholder="Paste CSV here…"
+        value={text}
+        onChange={e => setText(e.target.value)}
+        rows={10}
+      />
+      <input type="file" accept=".csv,text/csv" onChange={handleFile} />
+      {error && <p className={styles.minicourseError}>{error}</p>}
+      <div className={styles.importActions}>
+        <button className={styles.primaryBtn} onClick={handlePreview} disabled={loading || !text.trim()}>
+          {loading ? 'Parsing…' : 'Preview'}
+        </button>
+        <button className={styles.secondaryBtn} onClick={onClose}>Cancel</button>
       </div>
     </div>
   );

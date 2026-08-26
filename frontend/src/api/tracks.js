@@ -170,3 +170,36 @@ export async function approveMinicourse(jobId, approvedIndexes) {
   });
   return res.json();
 }
+
+// ── Import (Phase 3) ─────────────────────────────────────────────────────────
+
+// Returns { tracks: [{ title, type }], items: [{ trackIndex, title, status }] }.
+// On 422 (LLM couldn't parse the CSV), throws an Error whose message is the backend's
+// detail string — req()'s ApiError only carries the status, not the body, so that path
+// alone would surface as an unhelpful "HTTP 422".
+export async function importCsv(csvText) {
+  const res = await fetch(`${BASE}/tracks/import`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csvText }),
+  });
+  if (!res.ok) {
+    let detail;
+    try { detail = (await res.json()).detail; } catch { /* not JSON */ }
+    throw new Error(detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// tracks: [{ title, type }], items: [{ trackIndex, title, status }] — the (possibly edited)
+// preview state. Returns { tracksCreated, itemsCreated }.
+export async function commitImport({ tracks, items }) {
+  const res = await req(`${BASE}/tracks/import/commit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tracks, items }),
+  });
+  return res.json();
+}

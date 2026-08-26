@@ -711,6 +711,67 @@
   color: var(--color-danger);
 }
 
+/* ── Import from spreadsheet (Phase 3) ───────────────────────────────────── */
+
+.importTriggerBtn {
+  margin: 0 var(--sp-4) var(--sp-3);
+}
+
+.importPanel {
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.importTextarea {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm2);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: var(--sp-3);
+  resize: vertical;
+  outline: none;
+}
+
+.importTextarea:focus { border-color: var(--color-accent-border); }
+
+.importActions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.importSummary {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.importTrackGroup {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.importTrackHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.importTrackHeader .textInput { flex: 1; }
+
+.importItemStatus {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 
 @media (max-width: 768px) {
