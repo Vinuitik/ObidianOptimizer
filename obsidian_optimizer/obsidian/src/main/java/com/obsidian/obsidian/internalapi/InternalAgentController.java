@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -138,6 +139,18 @@ public class InternalAgentController {
             return ResponseEntity.badRequest().body("title is required");
         }
         return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath()));
+    }
+
+    /** Mini-course generation (step 1): the embedder reads a track's existing items —
+     *  title, notePath, status — to build a bundle from every resource already attached
+     *  to a track. Mirrors the session-authed GET /tracks/{id}/items (TrackController)
+     *  behind the same internal-token gate as every other embedder-facing endpoint. */
+    @GetMapping("/tracks/{id}/items")
+    public ResponseEntity<?> trackItems(@RequestHeader(value = "X-Internal-Token", required = false) String token,
+                                        @PathVariable long id) {
+        if (badToken(token)) return unauthorized();
+        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(trackRepo.listItems(id));
     }
 
     /** Overwrite an existing note (used by the note splitter's hub rewrite). */
