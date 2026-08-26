@@ -600,6 +600,48 @@
   background: var(--color-card);
 }
 
+.resourceCapture { margin-bottom: var(--sp-3); }
+
+.resourceForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.resourceResultList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.resourceResultRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+}
+
+.resourceResultIcon { flex-shrink: 0; width: 14px; text-align: center; }
+
+.resourceResultUrl {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceResultMsg {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
 /* ── Schedule editor ─────────────────────────────────────────────────────── */
 
 .scheduleEditor { margin-top: var(--sp-5); }

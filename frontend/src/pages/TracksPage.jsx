@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import Ring from '../components/atoms/Ring';
 import { generateMinicourse, fetchMinicourseJob, approveMinicourse, importCsv, commitImport, pollTrackNow } from '../api/tracks';
+import { captureResource } from '../api/capture';
 import styles from './TracksPage.module.css';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -762,6 +763,10 @@ function TrackItemsEditor({ trackId }) {
   const showToast        = useStore(s => s.showToast);
   const [newItemTitle, setNewItemTitle] = useState('');
   const [dragId, setDragId] = useState(null);
+  const [showResourceForm, setShowResourceForm] = useState(false);
+  const [resourceText, setResourceText] = useState('');
+  const [resourceResults, setResourceResults] = useState([]); // [{url, status, message}]
+  const [resourceBusy, setResourceBusy] = useState(false);
 
   useEffect(() => { fetchTrackItems(trackId); }, [trackId, fetchTrackItems]);
 
@@ -773,6 +778,31 @@ function TrackItemsEditor({ trackId }) {
       setNewItemTitle('');
     } catch (e) {
       showToast(`Couldn't add item: ${e.message ?? e}`);
+    }
+  }
+
+  // Batch-add via the real ingest pipeline (extraction → synthesis → note), distinct
+  // from handleAdd's bare-title checklist row above. Sequential — a handful of URLs at
+  // a time, no need for a parallel queue. Ingestion is async: this only enqueues each
+  // capture and refreshes the item list once, it doesn't wait for notes to land.
+  async function handleCaptureResources(e) {
+    e.preventDefault();
+    const urls = [...new Set(resourceText.split('\n').map(u => u.trim()).filter(Boolean))];
+    if (urls.length === 0) return;
+    setResourceBusy(true);
+    setResourceResults(urls.map(url => ({ url, status: 'pending' })));
+    let anySucceeded = false;
+    for (const url of urls) {
+      const res = await captureResource(url, trackId);
+      if (res.ok && !res.duplicate) anySucceeded = true;
+      setResourceResults(rs => rs.map(r => r.url === url
+        ? { url, status: res.ok ? (res.duplicate ? 'duplicate' : 'ok') : 'error', message: res.error }
+        : r));
+    }
+    setResourceBusy(false);
+    if (anySucceeded) {
+      setResourceText('');
+      fetchTrackItems(trackId);
     }
   }
 
@@ -819,6 +849,45 @@ function TrackItemsEditor({ trackId }) {
         />
         <button className={styles.primaryBtn} type="submit" disabled={!newItemTitle.trim()}>Add</button>
       </form>
+
+      <div className={styles.resourceCapture}>
+        <button
+          type="button"
+          className={styles.secondaryBtn}
+          onClick={() => setShowResourceForm(s => !s)}
+        >
+          {showResourceForm ? '− Add resources' : '+ Add resources'}
+        </button>
+        {showResourceForm && (
+          <form className={styles.resourceForm} onSubmit={handleCaptureResources}>
+            <textarea
+              className={styles.importTextarea}
+              placeholder="Paste one or more URLs, one per line…"
+              value={resourceText}
+              onChange={e => setResourceText(e.target.value)}
+              rows={4}
+            />
+            <button className={styles.primaryBtn} type="submit" disabled={resourceBusy || !resourceText.trim()}>
+              {resourceBusy ? 'Capturing…' : 'Capture'}
+            </button>
+            {resourceResults.length > 0 && (
+              <ul className={styles.resourceResultList}>
+                {resourceResults.map(r => (
+                  <li key={r.url} className={styles.resourceResultRow}>
+                    <span className={styles.resourceResultIcon}>
+                      {r.status === 'pending' ? '…' : r.status === 'ok' ? '✓' : r.status === 'duplicate' ? '⚠' : '✗'}
+                    </span>
+                    <span className={styles.resourceResultUrl} title={r.url}>{r.url}</span>
+                    {r.status === 'duplicate' && <span className={styles.resourceResultMsg}>already captured</span>}
+                    {r.status === 'error' && <span className={styles.resourceResultMsg}>{r.message}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </form>
+        )}
+      </div>
+
       <ul className={styles.itemList}>
         {groupForDisplay(items).map(row => row.type === 'group' ? (
           <li key={`group-${row.groupId}`} className={styles.itemGroup}>
