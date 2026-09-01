@@ -17,6 +17,7 @@ ENCRYPTION (2026-07-02 cleanup).
 | [FLASHCARDS_ARCH](FLASHCARDS_ARCH.md) | ◐ partial | generation shipped; FSRS/bandit/assignments half open |
 | [FSRS_REWORK_PLAN](FSRS_REWORK_PLAN.md) | ⏸ awaiting permit | decisions locked, nothing implemented |
 | [PIPELINE_HARDENING_PLAN](PIPELINE_HARDENING_PLAN.md) | ◐ phases 1–2a done | gates + per-note batching landed; rest open |
+| [QUEUE_UNIFICATION_PLAN](QUEUE_UNIFICATION_PLAN.md) | ✗ planned | 15 hand-rolled pollers → one `WorkQueue`/`JobRegistry` abstraction; RabbitMQ pilot for capture/image/sync queues |
 | [ML_ARCH](ML_ARCH.md) | ✅ largely implemented | MCP server, pgvector search, image pipeline (live doc: ml/FLOWS.md) |
 | [EXTENSION_ARCH](EXTENSION_ARCH.md) | ✗ packaging only | trimmed 2026-07-02; the React plan is dead, vanilla extension shipped |
 | [ONBOARDING_ARCH](ONBOARDING_ARCH.md) | ✗ planned | in-app glow tour |
