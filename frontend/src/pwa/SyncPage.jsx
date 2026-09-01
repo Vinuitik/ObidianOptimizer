@@ -54,6 +54,9 @@ export default function SyncPage() {
   const setShowLogin    = useStore(s => s.setShowLogin);
   const logout          = useStore(s => s.logout);
   const showToast       = useStore(s => s.showToast);
+  const settings        = useStore(s => s.settings);
+  const loadSettings    = useStore(s => s.loadSettings);
+  const applySettings   = useStore(s => s.applySettings);
   const online          = useOffline();
 
   const [lastSync, setLastSync] = useState(null);
@@ -75,6 +78,24 @@ export default function SyncPage() {
     getMeta('lastSync').then(v => setLastSync(v || null)).catch(() => {});
     hasCreds().then(setLinked).catch(() => {});
   }, []);
+
+  // The desktop-only Settings page used to be the only place this lived — pull it in here
+  // too so the toggle (and its current value) is reachable without a laptop.
+  useEffect(() => {
+    if (isAuthenticated) loadSettings();
+  }, [isAuthenticated, loadSettings]);
+
+  const [backupBusy, setBackupBusy] = useState(false);
+  async function toggleAutoBackup(e) {
+    setBackupBusy(true);
+    try {
+      await applySettings({ syncEnabled: e.target.value === 'true' });
+    } catch (err) {
+      showToast(`Couldn't save: ${err.message ?? err}`);
+    } finally {
+      setBackupBusy(false);
+    }
+  }
 
   // Failed captures don't self-report — pull the list, and toast if it grew since the
   // last time this page checked (so a background failure isn't invisible unless the
@@ -391,6 +412,31 @@ export default function SyncPage() {
       )}
 
       {driveMsg && <p className={`${styles.hint} ${styles[driveMsg.tone] || ''}`}>{driveMsg.text}</p>}
+
+      {/* ── Automatic backup (server-side upload cron — different from the device-local
+          "Drive link" above, which lets this phone read Drive directly) ──────────── */}
+      {isAuthenticated && (
+        <>
+          <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>Automatic backup</h2>
+          <p className={styles.hint}>
+            Uploads your vault to Drive on a schedule (every 6h), independent of the
+            device link above. Runs on the server, so it works even with this phone closed.
+          </p>
+          <select
+            value={String(settings.syncEnabled ?? true)}
+            disabled={backupBusy}
+            onChange={toggleAutoBackup}
+            style={{
+              marginTop: 8, width: '100%', padding: '12px 16px', borderRadius: 8,
+              border: '1px solid var(--color-border, #262a35)',
+              background: 'var(--color-bg, #12141a)', color: 'inherit', fontSize: 15,
+            }}
+          >
+            <option value="false">Off</option>
+            <option value="true">On — scheduled background uploads</option>
+          </select>
+        </>
+      )}
     </div>
   );
 }

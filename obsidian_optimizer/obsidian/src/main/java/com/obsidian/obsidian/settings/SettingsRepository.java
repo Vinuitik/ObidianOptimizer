@@ -79,7 +79,7 @@ public class SettingsRepository {
         // Google Drive sync (SyncController / DriveService / VaultEncryptionService).
         // Env-backed keys use seedIfBlank, NOT insertDefault: on live installs the rows
         // already exist (possibly as ''), and adding a var to .env later must still land.
-        insertDefault("syncEnabled", "false");
+        insertDefault("syncEnabled", "true");
         insertDefault("sync.refresh_token", "");
         insertDefault("sync.account_email", "");
         seedIfBlank("syncClientId", defaultOAuthClientId);
