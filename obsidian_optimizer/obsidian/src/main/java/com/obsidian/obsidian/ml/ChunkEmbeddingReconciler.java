@@ -1,5 +1,7 @@
 package com.obsidian.obsidian.ml;
 
+import com.obsidian.obsidian.common.PollingQueueWorker;
+import com.obsidian.obsidian.common.WorkQueue;
 import com.obsidian.obsidian.common.WorkerLane;
 import com.obsidian.obsidian.ml.NoteChunkRepository.PendingChunk;
 import jakarta.annotation.PreDestroy;
@@ -39,9 +41,56 @@ public class ChunkEmbeddingReconciler {
     private final EmbeddingService embeddingService;
     private final WorkerLane lane = new WorkerLane("embed-reconcile");
 
+    private final PollingQueueWorker<PendingChunk> pollingWorker;
+
     public ChunkEmbeddingReconciler(NoteChunkRepository chunkRepo, EmbeddingService embeddingService) {
         this.chunkRepo = chunkRepo;
         this.embeddingService = embeddingService;
+
+        WorkQueue<PendingChunk> queue = new WorkQueue<>() {
+            @Override
+            public List<PendingChunk> claimBatch(int limit) {
+                return chunkRepo.findChunksNeedingEmbedding(limit);
+            }
+
+            // The vector is only known once the processor computes it, so the
+            // actual setChunkEmbedding write lives there — these are no-ops today,
+            // kept for a later phase's RetryPolicy.
+            @Override public void markDone(PendingChunk item) {}
+            @Override public void markFailed(PendingChunk item, Exception error) {}
+            @Override public void markDeferred(PendingChunk item) {}
+        };
+
+        PollingQueueWorker.ItemProcessor<PendingChunk> processor = c -> {
+            try {
+                float[] embedding = embeddingService.embed(c.text());
+                if (embedding != null
+                    && chunkRepo.setChunkEmbedding(c.notePath(), c.source(), c.chunkIndex(), embedding)) {
+                    return true;
+                }
+                // embedding null → embedder unreachable; leave NULL, retry next cycle
+                return false;
+            } catch (Exception e) {
+                log.warn("[ChunkEmbeddingReconciler] failed {}#{} ({}): {}",
+                    c.notePath(), c.chunkIndex(), c.source(), e.getMessage());
+                return false;
+            }
+        };
+
+        PollingQueueWorker.BatchListener<PendingChunk> listener = new PollingQueueWorker.BatchListener<>() {
+            @Override
+            public void onBatchClaimed(List<PendingChunk> batch) {
+                log.info("[ChunkEmbeddingReconciler] embedding {} pending chunk(s)", batch.size());
+            }
+
+            @Override
+            public void onBatchFinished(List<PendingChunk> batch, int okCount) {
+                log.debug("[ChunkEmbeddingReconciler] embedded {}/{} chunk(s)", okCount, batch.size());
+            }
+        };
+
+        this.pollingWorker = new PollingQueueWorker<>(queue, processor,
+            () -> batchSize, () -> enabled, true, lane, listener);
     }
 
     @PreDestroy
@@ -50,37 +99,13 @@ public class ChunkEmbeddingReconciler {
     @Scheduled(fixedDelayString = "${embedding.reconcile.delay-ms:15000}",
                initialDelayString = "${embedding.reconcile.initial-delay-ms:45000}")
     public void reconcilePendingChunks() {
-        if (!enabled) return;
-        lane.trigger(this::drain);
+        pollingWorker.tick();
     }
 
     /** Runs on the embed-reconcile lane. Drains NULL-vector chunks in batches,
      *  continuing while a batch comes back full AND progress is made; stops on a
      *  partial batch (drained) or zero progress (embedder down → next tick retries). */
     void drain() {
-        while (enabled) {
-            List<PendingChunk> pending = chunkRepo.findChunksNeedingEmbedding(batchSize);
-            if (pending.isEmpty()) return;
-
-            log.info("[ChunkEmbeddingReconciler] embedding {} pending chunk(s)", pending.size());
-
-            int ok = 0;
-            for (PendingChunk c : pending) {
-                try {
-                    float[] embedding = embeddingService.embed(c.text());
-                    if (embedding != null
-                        && chunkRepo.setChunkEmbedding(c.notePath(), c.source(), c.chunkIndex(), embedding)) {
-                        ok++;
-                    }
-                    // embedding null → embedder unreachable; leave NULL, retry next cycle
-                } catch (Exception e) {
-                    log.warn("[ChunkEmbeddingReconciler] failed {}#{} ({}): {}",
-                        c.notePath(), c.chunkIndex(), c.source(), e.getMessage());
-                }
-            }
-            log.debug("[ChunkEmbeddingReconciler] embedded {}/{} chunk(s)", ok, pending.size());
-
-            if (pending.size() < batchSize || ok == 0) return;
-        }
+        pollingWorker.drain();
     }
 }

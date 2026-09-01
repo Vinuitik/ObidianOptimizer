@@ -1,6 +1,8 @@
 package com.obsidian.obsidian.ml;
 
 import com.obsidian.obsidian.common.IngestClient;
+import com.obsidian.obsidian.common.PollingQueueWorker;
+import com.obsidian.obsidian.common.WorkQueue;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import org.slf4j.Logger;
@@ -77,11 +79,51 @@ public class ResourceScanService {
         appReady = true;
     }
 
+    private final PollingQueueWorker<String> pollingWorker;
+
     public ResourceScanService(SettingsRepository settingsRepo, NoteIndexRepository noteIndexRepo,
                                IngestClient ingestClient) {
         this.settingsRepo = settingsRepo;
         this.noteIndexRepo = noteIndexRepo;
         this.ingestClient = ingestClient;
+
+        WorkQueue<String> queue = new WorkQueue<>() {
+            @Override
+            public List<String> claimBatch(int limit) {
+                return noteIndexRepo.findIngestPending(limit);
+            }
+
+            // scan() unconditionally persists the ingest_pending gate itself, for
+            // both the found-embeds and no-embeds-left cases — there is no separate
+            // done/failed/deferred state to record here.
+            @Override public void markDone(String item) {}
+            @Override public void markFailed(String item, Exception error) {}
+            @Override public void markDeferred(String item) {}
+        };
+
+        PollingQueueWorker.ItemProcessor<String> processor = absPath -> {
+            try {
+                scan(absPath, Files.readString(Paths.get(absPath)));
+                return true;
+            } catch (Exception e) {
+                log.debug("[ResourceScanService] ingest retry read failed for {}: {}", absPath, e.getMessage());
+                return false;
+            }
+        };
+
+        PollingQueueWorker.BatchListener<String> listener = new PollingQueueWorker.BatchListener<>() {
+            @Override
+            public void onBatchClaimed(List<String> batch) {
+                log.info("[ResourceScanService] re-firing ingest for {} pending note(s)", batch.size());
+            }
+        };
+
+        // No WorkerLane: this tick already runs its actual re-ingest side effect
+        // off-thread via scan() → trigger()'s own single-thread executor, and
+        // single-pass (not continuousDrain) — a capped random batch per 5-minute
+        // tick is the intended pacing, not a drain-to-empty.
+        this.pollingWorker = new PollingQueueWorker<>(queue, processor,
+            () -> retryBatchLimit, () -> ingestEnabled, false, null, listener);
     }
 
     /**
@@ -121,17 +163,7 @@ public class ResourceScanService {
     @Scheduled(fixedDelayString = "${ingest.retry.delay-ms:300000}",
                initialDelayString = "${ingest.retry.initial-delay-ms:180000}")
     public void retryPendingIngests() {
-        if (!ingestEnabled) return;
-        List<String> pending = noteIndexRepo.findIngestPending(retryBatchLimit);
-        if (pending.isEmpty()) return;
-        log.info("[ResourceScanService] re-firing ingest for {} pending note(s)", pending.size());
-        for (String absPath : pending) {
-            try {
-                scan(absPath, Files.readString(Paths.get(absPath)));
-            } catch (Exception e) {
-                log.debug("[ResourceScanService] ingest retry read failed for {}: {}", absPath, e.getMessage());
-            }
-        }
+        pollingWorker.tick();
     }
 
     /** Resource embeds in {@code content} that do not yet carry their ingest
