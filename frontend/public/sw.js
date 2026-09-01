@@ -267,7 +267,10 @@ async function handleShareTarget(request) {
     throw new Error('capture failed: ' + res.status);
   } catch (e) {
     await enqueueOutbox({ kind: 'capture', url: shared });
-    return Response.redirect('/capture?shared=queued', 303);
+    // Same device-offline vs. server-unreachable-while-online distinction as offlineApi.js —
+    // don't tell someone "offline" when their connection is fine and it's the origin/tunnel
+    // that's down.
+    return Response.redirect(`/capture?shared=${self.navigator.onLine ? 'unreachable' : 'offline'}`, 303);
   }
 }
 
@@ -289,7 +292,7 @@ async function handleShareFile(file, title) {
     throw new Error('capture/file failed: ' + res.status);
   } catch (e) {
     await enqueueOutbox({ kind: 'captureFile', blob: file, filename: file.name });
-    return Response.redirect('/capture?shared=queued', 303);
+    return Response.redirect(`/capture?shared=${self.navigator.onLine ? 'unreachable' : 'offline'}`, 303);
   }
 }
 

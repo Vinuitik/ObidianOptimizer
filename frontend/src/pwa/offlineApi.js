@@ -157,7 +157,11 @@ export async function captureUrl(url, trackOpts = {}) {
       if (res.status === 401) { await enqueueCapture(url, trackOpts); return { queued: true, reason: 'auth' }; }
       throw new ApiError(res.status);
     },
-    async () => { await enqueueCapture(url, trackOpts); return { queued: true }; },
+    // isOnline() at this point distinguishes WHY it queued: the device had no connection
+    // at all, vs. the device is online but the server/tunnel answered broken (5xx/530) or
+    // didn't answer (TypeError). Those are different facts and were getting flattened into
+    // one misleading "Offline" message — see captureText for the same fix.
+    async () => { await enqueueCapture(url, trackOpts); return { queued: true, reason: isOnline() ? 'unreachable' : 'offline' }; },
   );
 }
 
@@ -181,7 +185,10 @@ export async function captureText(text, title, trackOpts = {}) {
       }
       throw new ApiError(res.status);
     },
-    async () => { await enqueueCaptureText(text, title, trackOpts); return { queued: true }; },
+    async () => {
+      await enqueueCaptureText(text, title, trackOpts);
+      return { queued: true, reason: isOnline() ? 'unreachable' : 'offline' };
+    },
   );
 }
 

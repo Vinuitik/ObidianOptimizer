@@ -42,7 +42,7 @@ describe('captureText', () => {
 
     const res = await captureText('later', null);
 
-    expect(res).toEqual({ queued: true });
+    expect(res).toEqual({ queued: true, reason: 'offline' });
     expect(global.fetch).not.toHaveBeenCalled();
     expect(enqueueCaptureText).toHaveBeenCalledWith('later', null, {});
   });
@@ -63,7 +63,7 @@ describe('captureText', () => {
 
     const res = await captureText('flaky', null);
 
-    expect(res).toEqual({ queued: true });
+    expect(res).toEqual({ queued: true, reason: 'unreachable' });
     expect(enqueueCaptureText).toHaveBeenCalledWith('flaky', null, {});
   });
 });

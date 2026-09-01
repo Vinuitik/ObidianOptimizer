@@ -14,11 +14,16 @@ import styles from './MobilePages.module.css';
 //            ingested into the inbox so you're guaranteed to come back to it once.
 // Sharing a PDF/video/audio FILE is handled by the share-sheet (sw.js → /api/capture/file);
 // there's no manual file picker here by design (the app stays narrow).
+// Precise about WHAT happened and WHERE the thing is right now — "sent to the server"
+// (accepted, synthesis pipeline picks it up next) is as far as any of these states can
+// honestly claim; a note being fully processed, or later backed up to Drive, are separate
+// server-side events this page has no live signal for yet.
 const SHARED_MSG = {
-  ok:     { text: 'Saved — the ingest pipeline is turning it into a note.', tone: 'ok' },
-  queued: { text: 'Offline — queued. It will be sent when you reconnect.',   tone: 'warn' },
-  auth:   { text: 'Sign in, then it will be sent (queued for now).',         tone: 'warn' },
-  err:    { text: "Couldn't read what was shared.",                          tone: 'err' },
+  ok:          { text: 'Sent to server — now processing into a note.',                  tone: 'ok' },
+  offline:     { text: "You're offline — queued locally on this device. Will send once you're back online.", tone: 'warn' },
+  unreachable: { text: "Server unreachable — queued locally on this device. Will retry automatically.",      tone: 'warn' },
+  auth:        { text: 'Sign in, then it will be sent (queued locally for now).',        tone: 'warn' },
+  err:         { text: "Couldn't read what was shared.",                                 tone: 'err' },
 };
 
 export default function CapturePage() {
@@ -86,9 +91,8 @@ export default function CapturePage() {
   }
 
   function resultMsg(res) {
-    return res.queued
-      ? { text: 'Offline — queued. Will send on reconnect.', tone: 'warn' }
-      : { text: 'Saved — ingesting into a note.', tone: 'ok' };
+    if (!res.queued) return SHARED_MSG.ok;
+    return SHARED_MSG[res.reason] || SHARED_MSG.unreachable;
   }
 
   async function submitLink(e) {
