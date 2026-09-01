@@ -91,6 +91,19 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
                   src={`${src}#page=${region.pages[0] || 1}`} />;
   }
   if (kind === 'web') {
+    // Instagram/TikTok reels are best-effort yt-dlp downloads (login walls/rate limits — see
+    // embedder/ingest/router.py). No local copy landed → the platform itself blocks third-party
+    // iframing (X-Frame-Options/CSP), so the embed renders blank. Link out instead of a dead frame.
+    if (isEmbedBlockedHost(region.ref)) {
+      return (
+        <div className={styles.blocked}>
+          <p>Couldn&rsquo;t fetch this source for offline viewing.</p>
+          <a className={styles.blockedBtn} href={hrefFor(region.ref)} target="_blank" rel="noreferrer">
+            Open original ↗
+          </a>
+        </div>
+      );
+    }
     return <iframe className={styles.frame} src={region.ref} title="source page" />;
   }
   // text / unknown → default RSVP (fast read); 'read' renders the note so the user can
@@ -218,6 +231,10 @@ function mediaUrl(ref) {
   return `/api/images/${encodeURIComponent(ref || '')}`;
 }
 function hrefFor(ref) { return /^https?:\/\//.test(ref) ? ref : mediaUrl(ref); }
+
+// Platforms whose pages refuse third-party iframing (X-Frame-Options/CSP) — same list as
+// router.py's VIDEO_HOST_RE, since these are exactly the yt-dlp best-effort hosts.
+function isEmbedBlockedHost(ref) { return /instagram\.com|tiktok\.com/i.test(ref || ''); }
 
 function fmt(s) {
   const m = Math.floor(s / 60), sec = String(s % 60).padStart(2, '0');

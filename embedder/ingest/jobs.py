@@ -256,6 +256,13 @@ def _run(job: dict):
         _ensure_local_copy(job, bundle, resolved)
     except Exception as e:
         log.warning("local media copy skipped for %s: %s", job.get("ref"), e)
+        import failures
+        failures.record_failure(
+            source="ingest", stage="video_download",
+            input_payload={"ref": job.get("ref"), "note_path": job.get("note_path"),
+                            "capture_id": job.get("capture_id")},
+            error=e, bundle_ref=job.get("bundle_path"),
+        )
 
     # Re-save now that keyframes + local media are attached, so the on-disk bundle is the
     # complete PRE-SYNTHESIS state. A DEFERRED job resumes from THIS (skipping the expensive
