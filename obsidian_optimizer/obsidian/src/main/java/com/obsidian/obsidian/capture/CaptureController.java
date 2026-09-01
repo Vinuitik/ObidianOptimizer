@@ -113,10 +113,49 @@ public class CaptureController {
         if ((url == null || url.isBlank()) && !hasText) {
             return ResponseEntity.badRequest().body(Map.of("error", "url or text required"));
         }
+        if (!hasText && isPlaylistUrl(url.trim())) {
+            return capturePlaylist(url.trim());
+        }
+        try {
+            String captureId = enqueueCapture(url, text, body.title(),
+                body.trackId(), body.newTrackTitle(), body.newTrackType());
+            return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
+        } catch (DuplicateCaptureException e) {
+            log.info("[Capture] duplicate ignored: {}", e.getMessage());
+            return ResponseEntity.status(409).body(Map.of(
+                "error", "already captured", "duplicate", true,
+                "message", "Already in your inbox — not capturing it again."));
+        } catch (Exception e) {
+            log.warn("[Capture] enqueue failed: {}", e.toString());
+            return ResponseEntity.status(500).body(Map.of("error", "could not queue resource"));
+        }
+    }
+
+    /** Core enqueue, shared by the direct POST above and the Drive-mailbox drain
+     *  (MailboxConsumeService) — a capture queued while the device was online but the
+     *  SERVER was unreachable can now go to the Drive mailbox instead of trusting local
+     *  IndexedDB alone, and drains through this exact same path once the server is back
+     *  (same as grade/assignment/file/discard/flag events already do). Playlist expansion
+     *  (isPlaylistUrl) stays direct-POST-only — a playlist link reaching this method is
+     *  captured as one plain resource, not expanded per-video; that's a deliberate scope
+     *  cut (playlists are normally shared while online, hitting the direct endpoint) rather
+     *  than an oversight. Throws DuplicateCaptureException for an already-live URL (no row
+     *  created); any other exception marks the just-created row "failed" before rethrowing,
+     *  so a mailbox-drain failure doesn't leave a capture silently stuck "processing"
+     *  forever. */
+    public String enqueueCapture(String url, String text, String title, Long trackId,
+                                 String newTrackTitle, String newTrackType) throws Exception {
+        boolean hasText = text != null && !text.isBlank();
+        if ((url == null || url.isBlank()) && !hasText) {
+            throw new IllegalArgumentException("url or text required");
+        }
+        if (!hasText && captureRepo.existsLiveForSource(url.trim())) {
+            throw new DuplicateCaptureException(url.trim());
+        }
 
         String captureId = UUID.randomUUID().toString().substring(0, 12);
         try {
-            Long trackId = resolveTrackId(body.trackId(), body.newTrackTitle(), body.newTrackType());
+            Long resolvedTrackId = resolveTrackId(trackId, newTrackTitle, newTrackType);
             // Persist the resource into the durable ingest queue, then nudge the worker.
             // Enqueue-and-drain (not fire-and-forget HTTP) means a resource captured while
             // the embedder is down survives a restart and is submitted once it returns —
@@ -125,34 +164,29 @@ public class CaptureController {
             if (hasText) {
                 // Keep the original text as a resource so Learn can show it beside the
                 // proposed notes; the worker reads it back for the embedder's text route.
-                String title = (body.title() != null && !body.title().isBlank())
-                    ? body.title() : firstLine(text);
-                String sourcePath = storeTextResource(captureId, title, text);
-                captureRepo.enqueue(captureId, "text", title, sourcePath, title);
+                String t = (title != null && !title.isBlank()) ? title : firstLine(text);
+                String sourcePath = storeTextResource(captureId, t, text);
+                captureRepo.enqueue(captureId, "text", t, sourcePath, t);
             } else {
                 String ref = url.trim();
-                if (isPlaylistUrl(ref)) {
-                    return capturePlaylist(ref);
-                }
-                // Misclick / re-share guard: if this exact link/file is already in the pipeline,
-                // reject LOUDLY instead of making a duplicate set of notes.
-                if (captureRepo.existsLiveForSource(ref)) {
-                    log.info("[Capture] duplicate ignored: {}", ref);
-                    return ResponseEntity.status(409).body(Map.of(
-                        "error", "already captured", "duplicate", true,
-                        "message", "Already in your inbox — not capturing it again."));
-                }
                 captureRepo.enqueue(captureId, classifyUrl(ref), ref, null, ref);
             }
-            if (trackId != null) captureRepo.setTrackId(captureId, trackId);
+            if (resolvedTrackId != null) captureRepo.setTrackId(captureId, resolvedTrackId);
             ingestWorker.nudge();
             log.info("[Capture] enqueued {} ({})", captureId, hasText ? "text" : url);
-            return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
+            return captureId;
         } catch (Exception e) {
             captureRepo.updateStatus(captureId, "failed");
-            log.warn("[Capture] enqueue failed for {}: {}", captureId, e.toString());
-            return ResponseEntity.status(500).body(Map.of("error", "could not queue resource"));
+            throw e;
         }
+    }
+
+    /** An exact URL already live in the pipeline — a misclick/re-share guard, not a real
+     *  failure. The direct endpoint turns this into a 409; the mailbox drain treats it as
+     *  already-applied (see MailboxConsumeService.applyCapture) rather than retrying it
+     *  forever on every 15-min pass. */
+    public static class DuplicateCaptureException extends RuntimeException {
+        public DuplicateCaptureException(String ref) { super(ref); }
     }
 
     /** A dedicated playlist LISTING page for a video host (host-checked, not any URL that

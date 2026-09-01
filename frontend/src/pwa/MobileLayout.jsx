@@ -47,9 +47,11 @@ export default function MobileLayout() {
   // IndexedDB (not the server). Unlinked → falls back to the server path (still works online).
   useEffect(() => { hasCreds().then(setDriveMode).catch(() => {}); }, []);
 
-  // Reconnect → sync the outbox. Drive-linked: grades go to the Drive mailbox (works with
-  // the laptop off); anything left (e.g. captures) still tries the server. Unlinked: just
-  // the server-direct flush. All no-ops when the outbox is empty.
+  // Reconnect → sync the outbox. Drive-linked: pushMailbox() drains most kinds (including
+  // capture/captureText) to Drive first — durable even if the SERVER is what's unreachable,
+  // not just the phone's own connection; flushOutbox() then handles anything left (401s,
+  // captureFile, or an unlinked device). Unlinked: just the server-direct flush. All no-ops
+  // when the outbox is empty.
   //
   // Also retried on visibilitychange, not just the `online` flip: Android/Chrome freezes
   // a backgrounded tab's JS, so a phone that reconnects while locked/backgrounded never

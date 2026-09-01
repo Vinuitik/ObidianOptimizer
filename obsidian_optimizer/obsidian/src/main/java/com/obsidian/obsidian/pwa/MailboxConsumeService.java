@@ -7,6 +7,7 @@ import com.obsidian.obsidian.cards.AssignmentService;
 import com.obsidian.obsidian.cards.CardRepository;
 import com.obsidian.obsidian.cards.FlaggedCardRegenService;
 import com.obsidian.obsidian.cards.ReviewService;
+import com.obsidian.obsidian.capture.CaptureController;
 import com.obsidian.obsidian.inbox.InboxController;
 import com.obsidian.obsidian.sync.DriveService;
 import com.obsidian.obsidian.sync.DriveService.MailboxFile;
@@ -51,6 +52,7 @@ public class MailboxConsumeService {
     private final OfflineExportService offlineExport;
     private final CardRepository cardRepo;
     private final FlaggedCardRegenService flaggedCardRegen;
+    private final CaptureController captureController;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public MailboxConsumeService(DriveService drive,
@@ -62,7 +64,8 @@ public class MailboxConsumeService {
                                  ConsumedEventRepository consumed,
                                  OfflineExportService offlineExport,
                                  CardRepository cardRepo,
-                                 FlaggedCardRegenService flaggedCardRegen) {
+                                 FlaggedCardRegenService flaggedCardRegen,
+                                 CaptureController captureController) {
         this.drive = drive;
         this.encryption = encryption;
         this.reviewService = reviewService;
@@ -73,6 +76,7 @@ public class MailboxConsumeService {
         this.offlineExport = offlineExport;
         this.cardRepo = cardRepo;
         this.flaggedCardRegen = flaggedCardRegen;
+        this.captureController = captureController;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -137,6 +141,7 @@ public class MailboxConsumeService {
                     case "discard"     -> inbox.discardNote(ev.path("path").asText());
                     case "acknowledge" -> inbox.acknowledgeCapture(ev.path("captureId").asText());
                     case "flag"        -> applyFlag(ev);
+                    case "capture", "captureText" -> applyCapture(ev);
                     default -> {
                         allCommitted = false; // unknown kind → keep the file for a newer server
                         continue;
@@ -191,6 +196,29 @@ public class MailboxConsumeService {
      *  same immediate path CardController.flag() uses online. A regen failure (embedder
      *  down) must not un-commit the flag itself; it just leaves the flag pending for the
      *  nightly FlaggedCardRegenService.run() sweep to pick up. */
+    /** A capture pushed to Drive because the phone was online but the SERVER was
+     *  unreachable (the more durable plan-B over trusting local IndexedDB alone) — drains
+     *  through the exact same enqueue path as a direct POST /api/capture
+     *  (CaptureController.enqueueCapture). A URL already live in the pipeline is NOT a
+     *  transient failure — without this catch it would retry forever every 15 min since
+     *  it'll always be "already captured"; here it's just already-applied, so it's dropped
+     *  the same way a truly-committed event is. */
+    private void applyCapture(JsonNode ev) throws Exception {
+        JsonNode trackOpts = ev.path("trackOpts");
+        Long trackId = trackOpts.hasNonNull("trackId") ? trackOpts.get("trackId").asLong() : null;
+        String newTrackTitle = trackOpts.hasNonNull("newTrackTitle") ? trackOpts.get("newTrackTitle").asText() : null;
+        String newTrackType  = trackOpts.hasNonNull("newTrackType")  ? trackOpts.get("newTrackType").asText()  : null;
+        boolean isText = "captureText".equals(ev.path("kind").asText(""));
+        String url   = isText ? null : ev.path("url").asText(null);
+        String text  = isText ? ev.path("text").asText(null) : null;
+        String title = ev.hasNonNull("title") ? ev.path("title").asText() : null;
+        try {
+            captureController.enqueueCapture(url, text, title, trackId, newTrackTitle, newTrackType);
+        } catch (CaptureController.DuplicateCaptureException e) {
+            log.info("[Mailbox] capture already in pipeline, treating as consumed: {}", e.getMessage());
+        }
+    }
+
     private void applyFlag(JsonNode ev) {
         UUID cardId = UUID.fromString(ev.path("cardId").asText());
         String reason = ev.path("reason").asText(null);

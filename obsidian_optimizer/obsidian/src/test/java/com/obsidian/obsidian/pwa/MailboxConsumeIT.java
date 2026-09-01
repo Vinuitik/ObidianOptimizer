@@ -224,14 +224,16 @@ class MailboxConsumeIT {
 
     @Test
     void unknownKind_leavesFileForNewerServer() throws Exception {
+        // "capture"/"captureText" are handled kinds now (MailboxConsumeService.applyCapture)
+        // — this fixture needs a kind that's genuinely unsupported, not one of those.
         stageMailbox(envelope(
-            "{\"kind\":\"capture\",\"eventId\":\"e-cap\",\"url\":\"https://example.com\"}"));
+            "{\"kind\":\"someFutureKind\",\"eventId\":\"e-future\",\"url\":\"https://example.com\"}"));
 
         int applied = consume.consumeAll();
 
         assertThat(applied).isZero();
         verify(drive, never()).deleteFile(anyString());
-        assertThat(ledger.alreadyConsumed("e-cap")).isFalse();
+        assertThat(ledger.alreadyConsumed("e-future")).isFalse();
     }
 
     @Test
@@ -278,5 +280,60 @@ class MailboxConsumeIT {
         assertThat(staged).doesNotExist();
         assertThat(captureRepo.get("cap-mb").status()).isEqualTo("filed");
         verify(drive).deleteFile("f1");
+    }
+
+    // ── capture/captureText: the Drive-mailbox plan-B for online-but-server-down ─────
+
+    @Test
+    void captureEvent_enqueuesCapture_fileDeleted_workerNudged() throws Exception {
+        String url = "https://example.com/mailbox-capture";
+        String captureEvent = """
+            {"kind":"capture","eventId":"e-cap","url":"%s","trackOpts":{}}
+            """.formatted(url).trim();
+        stageMailbox(envelope(captureEvent));
+
+        int applied = consume.consumeAll();
+
+        assertThat(applied).isEqualTo(1);
+        assertThat(captureRepo.existsLiveForSource(url)).isTrue();
+        verify(drive).deleteFile("f1");
+        assertThat(ledger.alreadyConsumed("e-cap")).isTrue();
+        verify(captureIngestWorker, times(1)).nudge();
+    }
+
+    @Test
+    void captureTextEvent_enqueuesTextCapture_fileDeleted() throws Exception {
+        String captureEvent = """
+            {"kind":"captureText","eventId":"e-cap-text","text":"a rough idea from the phone","title":"Rough idea","trackOpts":{}}
+            """.trim();
+        stageMailbox(envelope(captureEvent));
+
+        int applied = consume.consumeAll();
+
+        assertThat(applied).isEqualTo(1);
+        verify(drive).deleteFile("f1");
+        assertThat(ledger.alreadyConsumed("e-cap-text")).isTrue();
+    }
+
+    // A URL already live in the pipeline (e.g. also sent server-direct in the same window)
+    // must not loop forever every 15-min pass just because it's "already captured" —
+    // applyCapture() swallows DuplicateCaptureException and treats the event as consumed.
+    @Test
+    void duplicateCaptureEvent_treatedAsConsumed_notRetriedForever() throws Exception {
+        String url = "https://example.com/already-captured";
+        captureRepo.enqueue("existing-id", "web_dom", url, null, "Existing");
+        String captureEvent = """
+            {"kind":"capture","eventId":"e-cap-dup","url":"%s","trackOpts":{}}
+            """.formatted(url).trim();
+        stageMailbox(envelope(captureEvent));
+
+        int applied = consume.consumeAll();
+
+        // applyCapture() swallows the duplicate internally rather than throwing, so the
+        // switch completes normally — it's counted as committed (applied), the file is
+        // deleted, and the eventId is marked so it isn't retried forever.
+        assertThat(applied).isEqualTo(1);
+        verify(drive).deleteFile("f1");
+        assertThat(ledger.alreadyConsumed("e-cap-dup")).isTrue();
     }
 }
