@@ -1,10 +1,29 @@
 // Grade + capture outbox. Writes made while offline (or while the session is
 // expired) are queued here and replayed on reconnect / re-login.
-import { addToOutbox, getOutbox, deleteFromOutbox } from './db';
+import { addToOutbox, getOutbox, deleteFromOutbox, getMeta } from './db';
 import { gradeNote } from '../api/notes';
+import { showLocalNotification } from './quitNotify';
 
 // eventId makes mailbox replay idempotent — the server dedupes on it (consumed_events).
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+
+// "Sent to server" confirmations are their own on/off switch (SyncPage.jsx Notifications
+// section), separate from the OS Notification permission gate showLocalNotification already
+// checks — that permission is one all-or-nothing grant shared with the quit-nag, and someone
+// may want one but not the other. Defaults on: granting OS permission at all is a reasonable
+// signal they want to hear about a capture actually going out, which is the specific gap
+// that caused a note to look silently lost (FLOWS.md — 530 mislabeled "offline").
+const NOTIFY_PREF_KEY = 'notifyCaptureSent';
+async function captureSentNotifyEnabled() {
+  return (await getMeta(NOTIFY_PREF_KEY)) !== false;
+}
+
+const CAPTURE_KINDS = new Set(['capture', 'captureText', 'captureFile']);
+function captureLabel(item) {
+  if (item.kind === 'capture') return item.url;
+  if (item.kind === 'captureText') return item.title || (item.text || '').slice(0, 60) || 'Note';
+  return item.filename || 'Shared file';
+}
 
 export function enqueueGrade(notePath, band) {
   return addToOutbox({ kind: 'grade', notePath, band, eventId: newId() });
@@ -48,6 +67,7 @@ export function enqueueFlag(cardId, reason) {
 export async function flush() {
   const items = await getOutbox();
   let sent = 0, failed = 0;
+  const notifyOn = await captureSentNotifyEnabled();
   for (const item of items) {
     try {
       if (item.kind === 'grade') {
@@ -80,6 +100,12 @@ export async function flush() {
       }
       await deleteFromOutbox(item.id);
       sent++;
+      if (notifyOn && CAPTURE_KINDS.has(item.kind)) {
+        showLocalNotification('Capture sent', {
+          body: `${captureLabel(item)} left the queue — now on the server, processing into a note.`,
+          tag: `obsopt-capture-sent-${item.id}`,
+        });
+      }
     } catch (e) {
       failed++; // leave it queued for the next flush
     }

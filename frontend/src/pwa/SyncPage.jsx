@@ -3,7 +3,7 @@ import useStore from '../store/useStore';
 import useOffline from './useOffline';
 import { syncForOffline } from './syncOffline';
 import { flushOutbox, OUTBOX_RETRY_MS } from './offlineApi';
-import { getMeta } from './db';
+import { getMeta, setMeta } from './db';
 import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
 import { refreshAndPull, pullReviewFromDrive } from './drivePull';
 import { pushMailbox } from './mailbox';
@@ -66,6 +66,9 @@ export default function SyncPage() {
   const [linked, setLinked]     = useState(false);
   const [driveMsg, setDriveMsg] = useState(null);  // { text, tone }
   const [notifPerm, setNotifPerm] = useState(() => notificationPermission());
+  // "Capture sent" confirmations, mutable independent of the quit-nag — same OS permission
+  // gates both, but this is its own opt-out (outbox.js checks the same stored key).
+  const [notifyCaptureSent, setNotifyCaptureSent] = useState(true);
   const [failed, setFailed]     = useState([]);     // failed captures
   const [failedBusyId, setFailedBusyId] = useState(null);
   // Capture ids whose retry POST was accepted but whose actual ingest outcome isn't known
@@ -77,7 +80,13 @@ export default function SyncPage() {
   useEffect(() => {
     getMeta('lastSync').then(v => setLastSync(v || null)).catch(() => {});
     hasCreds().then(setLinked).catch(() => {});
+    getMeta('notifyCaptureSent').then(v => setNotifyCaptureSent(v !== false)).catch(() => {});
   }, []);
+
+  async function toggleCaptureSentNotify(on) {
+    setNotifyCaptureSent(on); // optimistic — this is a local preference, not a server call
+    await setMeta('notifyCaptureSent', on).catch(() => {});
+  }
 
   // The desktop-only Settings page used to be the only place this lived — pull it in here
   // too so the toggle (and its current value) is reachable without a laptop.
@@ -332,7 +341,22 @@ export default function SyncPage() {
             fallback otherwise.
           </p>
           {notifPerm === 'granted' ? (
-            <p className={styles.hint}>✓ Enabled</p>
+            <>
+              <p className={styles.hint}>✓ Enabled</p>
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 12, marginTop: 10,
+              }}>
+                <label htmlFor="notify-capture-sent" className={styles.hint} style={{ margin: 0 }}>
+                  Notify when a queued capture sends
+                </label>
+                <input
+                  id="notify-capture-sent" type="checkbox"
+                  checked={notifyCaptureSent}
+                  onChange={e => toggleCaptureSentNotify(e.target.checked)}
+                />
+              </div>
+            </>
           ) : notifPerm === 'denied' ? (
             <p className={`${styles.hint} ${styles.warn}`}>
               Blocked — re-enable in your browser/OS notification settings for this app.
