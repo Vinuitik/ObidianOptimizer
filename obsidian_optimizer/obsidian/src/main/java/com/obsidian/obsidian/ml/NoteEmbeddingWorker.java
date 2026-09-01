@@ -1,5 +1,7 @@
 package com.obsidian.obsidian.ml;
 
+import com.obsidian.obsidian.common.PollingQueueWorker;
+import com.obsidian.obsidian.common.WorkQueue;
 import com.obsidian.obsidian.common.WorkerLane;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import jakarta.annotation.PreDestroy;
@@ -9,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -41,12 +44,65 @@ public class NoteEmbeddingWorker {
     // embedder call can't starve the image / card / chrono workers (and vice versa).
     private final WorkerLane lane = new WorkerLane("embed");
 
+    private record EmbedCandidate(String path, String hash) {}
+
+    private final PollingQueueWorker<EmbedCandidate> pollingWorker;
+
     public NoteEmbeddingWorker(NoteIndexRepository noteIndexRepo,
                                EmbeddingService embeddingService,
                                NoteChunkRepository chunkRepo) {
         this.noteIndexRepo    = noteIndexRepo;
         this.embeddingService = embeddingService;
         this.chunkRepo        = chunkRepo;
+
+        WorkQueue<EmbedCandidate> queue = new WorkQueue<>() {
+            @Override
+            public List<EmbedCandidate> claimBatch(int limit) {
+                Map<String, String> pending = noteIndexRepo.findNotesNeedingEmbedding(limit);
+                List<EmbedCandidate> out = new ArrayList<>(pending.size());
+                for (Map.Entry<String, String> e : pending.entrySet()) {
+                    out.add(new EmbedCandidate(e.getKey(), e.getValue()));
+                }
+                return out;
+            }
+
+            // Persistence happens inside the processor below (markEmbedded must run
+            // only after a successful indexNote, in the same try/catch) — these are
+            // no-ops today, kept for a later phase's RetryPolicy.
+            @Override public void markDone(EmbedCandidate item) {}
+            @Override public void markFailed(EmbedCandidate item, Exception error) {}
+            @Override public void markDeferred(EmbedCandidate item) {}
+        };
+
+        PollingQueueWorker.ItemProcessor<EmbedCandidate> processor = candidate -> {
+            try {
+                if (embeddingService.indexNote(candidate.path())) {
+                    noteIndexRepo.markEmbedded(candidate.path(), candidate.hash());
+                    return true;
+                }
+                // false → embedder unreachable / partial failure: stays in the
+                // diff and is retried next cycle
+                return false;
+            } catch (Exception e) {
+                log.warn("[NoteEmbeddingWorker] failed {}: {}", candidate.path(), e.getMessage());
+                return false;
+            }
+        };
+
+        PollingQueueWorker.BatchListener<EmbedCandidate> listener = new PollingQueueWorker.BatchListener<>() {
+            @Override
+            public void onBatchClaimed(List<EmbedCandidate> batch) {
+                log.info("[NoteEmbeddingWorker] embedding {} note(s)", batch.size());
+            }
+
+            @Override
+            public void onBatchFinished(List<EmbedCandidate> batch, int okCount) {
+                log.debug("[NoteEmbeddingWorker] embedded {}/{} note(s)", okCount, batch.size());
+            }
+        };
+
+        this.pollingWorker = new PollingQueueWorker<>(queue, processor,
+            () -> batchSize, () -> enabled, true, lane, listener);
     }
 
     @PreDestroy
@@ -56,8 +112,7 @@ public class NoteEmbeddingWorker {
     @Scheduled(fixedDelayString = "${embedding.scan.delay-ms:60000}",
                initialDelayString = "${embedding.scan.initial-delay-ms:30000}")
     public void embedPendingNotes() {
-        if (!enabled) return;
-        lane.trigger(this::drain);
+        pollingWorker.tick();
     }
 
     /** Runs on the lane thread. Drains the backlog in batches, continuing while a
@@ -65,31 +120,7 @@ public class NoteEmbeddingWorker {
      *  backlog clears in minutes without waiting a tick per batch, but a persistent
      *  failure (embedder down → zero progress) stops and waits for the next tick. */
     void drain() {
-        while (enabled) {
-            Map<String, String> pending = noteIndexRepo.findNotesNeedingEmbedding(batchSize);
-            if (pending.isEmpty()) return;
-
-            log.info("[NoteEmbeddingWorker] embedding {} note(s)", pending.size());
-
-            int ok = 0;
-            for (Map.Entry<String, String> entry : pending.entrySet()) {
-                try {
-                    if (embeddingService.indexNote(entry.getKey())) {
-                        noteIndexRepo.markEmbedded(entry.getKey(), entry.getValue());
-                        ok++;
-                    }
-                    // false → embedder unreachable / partial failure: stays in the
-                    // diff and is retried next cycle
-                } catch (Exception e) {
-                    log.warn("[NoteEmbeddingWorker] failed {}: {}", entry.getKey(), e.getMessage());
-                }
-            }
-            log.debug("[NoteEmbeddingWorker] embedded {}/{} note(s)", ok, pending.size());
-
-            // Stop when the backlog is drained (partial batch) or nothing progressed
-            // (embedder down / all failing) — the next tick will retry either way.
-            if (pending.size() < batchSize || ok == 0) return;
-        }
+        pollingWorker.drain();
     }
 
     /**
