@@ -13,38 +13,35 @@ Same in-memory, restart-loses-status tradeoff ingest/jobs.py accepts — no pers
 This module does not write notes to the vault or call Java; the HTTP wiring is a later step.
 """
 import logging
-import threading
 import time
-import uuid
 
 from ingest import bundle as bundle_util
 from ingest.synthesize import SynthesisError
+from job_registry import JobRegistry, PerCallThread, public_view
 from tracks import minicourse
 
 log = logging.getLogger("embedder.tracks.minicourse_jobs")
 
-_jobs: dict[str, dict] = {}
-_lock = threading.Lock()
+_registry = JobRegistry(PerCallThread())
 
 
 def submit_outline(track_id: str, track_title: str, items: list[dict]) -> dict:
-    job_id = uuid.uuid4().hex[:12]
+    job_id = _registry.new_id()
     job = {
         "id": job_id, "status": "QUEUED", "stage": None,
         "track_id": track_id, "course_title": None, "error": None,
         "created_at": time.time(),
         "plan": None, "results": None, "lesson_failures": None,
     }
-    with _lock:
-        _jobs[job_id] = job
-    threading.Thread(target=_run_outline, args=(job, track_id, track_title, items),
-                     daemon=True, name=f"minicourse-outline-{job_id}").start()
+    _registry.create(job_id, job)
+    _registry.dispatch(_run_outline, job, track_id, track_title, items,
+                       name=f"minicourse-outline-{job_id}")
     return public_view(job)
 
 
 def approve(job_id: str, approved_indexes: list[int] | None) -> dict | None:
-    with _lock:
-        job = _jobs.get(job_id)
+    with _registry.lock:
+        job = _registry.jobs.get(job_id)
         if job is None:
             return None
         if job["status"] != "AWAITING_APPROVAL":
@@ -61,25 +58,16 @@ def approve(job_id: str, approved_indexes: list[int] | None) -> dict | None:
         job["status"] = "RUNNING"
         job["stage"] = "lessons"
 
-    threading.Thread(target=_run_lessons, args=(job, selected),
-                     daemon=True, name=f"minicourse-lessons-{job_id}").start()
+    _registry.dispatch(_run_lessons, job, selected, name=f"minicourse-lessons-{job_id}")
     return public_view(job)
 
 
 def get(job_id: str) -> dict | None:
-    with _lock:
-        job = _jobs.get(job_id)
-        return public_view(job) if job else None
+    return _registry.get(job_id)
 
 
 def list_jobs() -> list[dict]:
-    with _lock:
-        return [public_view(j) for j in
-                sorted(_jobs.values(), key=lambda j: j["created_at"], reverse=True)]
-
-
-def public_view(job: dict) -> dict:
-    return {k: v for k, v in job.items() if not k.startswith("_")}
+    return _registry.list_jobs()
 
 
 def _run_outline(job: dict, track_id: str, track_title: str, items: list[dict]) -> None:

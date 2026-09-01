@@ -9,46 +9,34 @@ Container restart drops in-flight jobs (in-memory, like ingest/jobs.py). Accepte
 downloads are idempotent and re-triggerable. Status: queued|downloading|done|error.
 """
 import logging
-import threading
 import time
-import uuid
 
 from download import downloader
+from job_registry import JobRegistry, PerCallThread, public_view
 
 log = logging.getLogger("embedder.download.jobs")
 
-_jobs: dict[str, dict] = {}
-_lock = threading.Lock()
+_registry = JobRegistry(PerCallThread())
 
 
 def submit(url: str) -> dict:
-    job_id = uuid.uuid4().hex[:12]
+    job_id = _registry.new_id()
     job = {
         "id": job_id, "url": url, "status": "queued",
         "progress": 0.0, "speed": "", "eta": "", "filename": "",
         "error": None, "created_at": time.time(),
     }
-    with _lock:
-        _jobs[job_id] = job
-    threading.Thread(target=_run, args=(job,), daemon=True,
-                     name=f"download-{job_id}").start()
+    _registry.create(job_id, job)
+    _registry.dispatch(_run, job, name=f"download-{job_id}")
     return public_view(job)
 
 
 def get(job_id: str) -> dict | None:
-    with _lock:
-        job = _jobs.get(job_id)
-        return public_view(job) if job else None
+    return _registry.get(job_id)
 
 
 def list_jobs() -> list[dict]:
-    with _lock:
-        return [public_view(j) for j in
-                sorted(_jobs.values(), key=lambda j: j["created_at"], reverse=True)]
-
-
-def public_view(job: dict) -> dict:
-    return {k: v for k, v in job.items() if not k.startswith("_")}
+    return _registry.list_jobs()
 
 
 def _run(job: dict):
