@@ -157,6 +157,13 @@ def _worker_loop():
                 except Exception:
                     pass
             _maybe_escalate(job)   # AGENT_ESCALATION: hand recoverable failures to the agent
+            import failures
+            failures.record_failure(
+                source="ingest", stage=job.get("stage") or "unknown",
+                input_payload={"ref": job.get("ref"), "note_path": job.get("note_path"),
+                                "capture_id": job.get("capture_id")},
+                error=e, bundle_ref=job.get("bundle_path"),
+            )
         finally:
             # Once the burst drains, release the bursty ingest models so VRAM/RAM
             # returns to the rest of the stack. Deferred until the queue is empty
@@ -348,6 +355,13 @@ def _synthesize(job: dict, bundle: dict) -> None:
                                       title=job.get("title"))
             log.warning("ingest job %s DEFERRED — all LLM providers cooling; "
                         "will retry from bundle: %s", job["id"], e)
+            import failures
+            failures.record_failure(
+                source="ingest", stage="synthesize",
+                input_payload={"ref": job.get("ref"), "note_path": job.get("note_path"),
+                                "capture_id": job.get("capture_id")},
+                error=e, bundle_ref=job.get("bundle_path"),
+            )
             return
         raise
     job["status"] = "DONE"
