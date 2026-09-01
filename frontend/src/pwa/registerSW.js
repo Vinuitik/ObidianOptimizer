@@ -34,11 +34,23 @@ export async function registerServiceWorker() {
     checkForUpdate();
     setInterval(checkForUpdate, 15 * 60 * 1000);
 
+    // Cold start: a worker already sitting in `waiting` here means it finished
+    // downloading during a PREVIOUS visit and nobody applied it — there's no in-progress
+    // typing/capture to interrupt (the page just loaded), so apply it now instead of
+    // making the user notice the button. Guarded the same way notifyIfWaiting() is: only
+    // when a controller already exists, i.e. this is a real update, not the very first
+    // install (which self-activates with no waiting worker to hand off).
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      applyUpdate();
+    }
+
     // sw.js no longer self-activates (no skipWaiting() on install) — a new SW installs and
     // WAITS, so the tab keeps running on the old cache/old fetch logic until the user
-    // explicitly clicks Update. This just watches for that waiting worker and notifies;
-    // notifyIfWaiting() does the actual "does this represent a real update" check.
-    if (registration.waiting) notifyIfWaiting(registration);
+    // explicitly clicks Update (or the cold-start case above already handled it). This
+    // watches for a waiting worker discovered WHILE THE TAB IS OPEN and only notifies —
+    // never auto-applies mid-session, since that would yank the UI out from under
+    // someone typing a note or mid-capture. notifyIfWaiting() does the actual
+    // "does this represent a real update" check.
     registration.addEventListener('updatefound', () => {
       const installing = registration.installing;
       if (!installing) return;
