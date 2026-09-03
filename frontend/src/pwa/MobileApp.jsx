@@ -4,11 +4,13 @@ import CapturePage from './CapturePage';
 import SyncPage from './SyncPage';
 import ReviewPage from '../pages/ReviewPage';
 import LearnPage from '../pages/LearnPage';
+import TracksPage from '../pages/TracksPage';
 
-// The installed PWA — deliberately NARROW (not the whole website). Three jobs:
+// The installed PWA — deliberately NARROW (not the whole website). Jobs:
 //   • Review   — do flashcards (offline once the offline seam lands), grades sync back.
 //   • Learn    — triage the ingest inbox (online; offline learn lane is the next step).
 //   • Capture  — Android share-sheet target → ingest pipeline (+ manual paste).
+//   • Tracks   — curricula + subscriptions; same component the desktop renders.
 //   • Sync     — download the review subset for offline; replay the outbox.
 // Everything else (full note editor, folder tree, search, dashboard, settings) lives
 // on the full site, reached by opening the link in a browser. See ResponsiveApp.
@@ -26,6 +28,7 @@ export default function PwaApp() {
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/learn" element={<LearnPage />} />
           <Route path="/capture" element={<CapturePage />} />
+          <Route path="/tracks" element={<TracksPage />} />
           <Route path="/settings" element={<SyncPage />} />
           <Route path="*" element={<Navigate to="/review" replace />} />
         </Route>

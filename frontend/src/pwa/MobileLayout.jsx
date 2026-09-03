@@ -10,6 +10,7 @@ import { armQuitNotify, showLocalNotification } from './quitNotify';
 import LoginModal from '../components/organisms/LoginModal';
 import RouteErrorBoundary from '../components/organisms/RouteErrorBoundary';
 import BottomNav from './BottomNav';
+import TopBar from './TopBar';
 import styles from './MobileLayout.module.css';
 
 // The installed-PWA shell: an offline banner, the routed page, and the bottom nav.
@@ -109,6 +110,7 @@ export default function MobileLayout() {
 
   return (
     <div className={styles.shell}>
+      <TopBar />
       {!online && (
         <div className={styles.offlineBar}>Offline — showing your downloaded set</div>
       )}

@@ -31,25 +31,6 @@
   color: var(--color-accent, #7c5cff);
 }
 
-/* The auth control is a <button>, not a NavLink — strip the native button chrome so it
-   sits flush with the tabs. */
-.authTab {
-  background: none;
-  border: none;
-  font-family: inherit;
-  cursor: pointer;
-}
-
 .label {
   line-height: 1;
-}
-
-/* Non-route utility slot, deliberately NOT flex:1 like the tabs — it shouldn't
-   compete with the app's four real destinations for width. */
-.refreshSlot {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 10px;
 }
