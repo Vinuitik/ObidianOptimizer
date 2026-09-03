@@ -109,6 +109,22 @@ public class NoteIndexRepository {
         return out;
     }
 
+    /** Single-note version of {@link #findNotesNeedingEmbedding}'s predicate — used
+     *  by the outbox producer at the registerImages chokepoint to decide whether the
+     *  note just written is worth an "embed" message, without a table scan. */
+    public boolean needsEmbedding(String path) {
+        Boolean needs = jdbc.queryForObject("""
+            SELECT EXISTS (
+                SELECT 1 FROM notes
+                WHERE path = ?
+                  AND content_hash IS NOT NULL
+                  AND content_hash IS DISTINCT FROM embedded_hash
+                  AND ingest_pending = false
+            )
+            """, Boolean.class, path);
+        return Boolean.TRUE.equals(needs);
+    }
+
     /** Records that {@code indexedHash} is fully embedded. Guarded so a note
      *  edited mid-indexing stays in the work list (hash no longer matches). */
     public void markEmbedded(String path, String indexedHash) {

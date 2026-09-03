@@ -18,6 +18,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # Transactional-outbox broker for Group A (see architecture_plans/QUEUE_UNIFICATION_PLAN.md
+  # Phase 3). No host ports on purpose: reachable only from `backend` by service name over
+  # the internal compose network — avoids colliding with an unrelated RabbitMQ container
+  # already running on this host for a different project.
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   embedder:
     build: ./embedder
     restart: unless-stopped
@@ -119,9 +134,21 @@ services:
       # LIGHT — web/API/search/MCP only, zero background processing — for testing.
       - EMBEDDING_ENABLED=${EMBEDDING_ENABLED:-true}
       # Spring relaxed-binds these to embedding.batch-limit / embedding.scan.delay-ms.
-      # Raise for a fast backlog drain (local ONNX, no API cost); defaults are 8 / 60000.
+      # Raise for a fast backlog drain (local ONNX, no API cost); defaults are 8 / 3600000.
+      # The scan is now the SAFETY NET, not the primary trigger — the outbox+RabbitMQ path
+      # (ImageScanService's chokepoint) delivers new work within seconds instead of waiting
+      # for this tick (see QUEUE_UNIFICATION_PLAN.md Phase 3).
       - EMBEDDING_BATCH_LIMIT=${EMBEDDING_BATCH_LIMIT:-8}
-      - EMBEDDING_SCAN_DELAY_MS=${EMBEDDING_SCAN_DELAY_MS:-60000}
+      - EMBEDDING_SCAN_DELAY_MS=${EMBEDDING_SCAN_DELAY_MS:-3600000}
+      # RabbitMQ — internal service name, no host port published (see the rabbitmq service
+      # above). guest/guest default is fine: nothing outside the compose network can reach it.
+      - RABBITMQ_HOST=${RABBITMQ_HOST:-rabbitmq}
+      - RABBITMQ_PORT=${RABBITMQ_PORT:-5672}
+      - RABBITMQ_USERNAME=${RABBITMQ_USERNAME:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+      # Off by default in application.properties (so test contexts without a broker
+      # don't fail startup) — the real app has a broker, so turn consumption on here.
+      - RABBITMQ_LISTENERS_AUTO_START=${RABBITMQ_LISTENERS_AUTO_START:-true}
       - IMAGES_ENABLED=${IMAGES_ENABLED:-true}
       - CHRONO_ENABLED=${CHRONO_ENABLED:-true}
       - INGEST_ENABLED=${INGEST_ENABLED:-true}
@@ -164,6 +191,8 @@ services:
       postgres:
         condition: service_healthy
       embedder:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   frontend:
@@ -212,3 +241,4 @@ services:
 volumes:
   postgres_data:
   embedder_models:
+  rabbitmq_data:

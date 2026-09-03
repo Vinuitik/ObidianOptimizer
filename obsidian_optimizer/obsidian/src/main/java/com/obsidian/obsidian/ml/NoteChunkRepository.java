@@ -141,6 +141,17 @@ public class NoteChunkRepository {
             "DELETE FROM note_chunks WHERE NOT EXISTS (SELECT 1 FROM notes WHERE notes.path = note_chunks.note_path)");
     }
 
+    /** Text of a chunk still awaiting a vector, or null if the chunk is gone or already
+     *  embedded — the outbox consumer's idempotency check (a re-delivered or
+     *  superseded message is then a safe no-op instead of re-embedding). */
+    public String getChunkText(String notePath, String source, int chunkIndex) {
+        List<String> rows = jdbc.queryForList("""
+            SELECT text FROM note_chunks
+            WHERE note_path = ? AND source = ? AND chunk_index = ? AND embedding IS NULL
+            """, String.class, notePath, source, chunkIndex);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     public String getContentHash(String notePath, String source, int chunkIndex) {
         List<String> rows = jdbc.queryForList(
             "SELECT content_hash FROM note_chunks WHERE note_path = ? AND source = ? AND chunk_index = ?",

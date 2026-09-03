@@ -3,6 +3,8 @@ package com.obsidian.obsidian.ml;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.common.ContentHashing;
+import com.obsidian.obsidian.common.OutboxRepository;
+import com.obsidian.obsidian.common.RabbitQueueConfig;
 import com.obsidian.obsidian.common.WorkerLane;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -11,6 +13,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -55,6 +59,11 @@ public class ImageProcessingWorker {
     private final PendingImageJobRepository jobRepo;
     private final EmbeddingService embeddingService;
     private final NoteChunkRepository chunkRepo;
+    private final OutboxRepository outboxRepo;
+    // Programmatic, not @Transactional: handleResult (below) is only ever called via
+    // self-invocation (processJobBatch -> handleResult on `this`), which bypasses
+    // Spring's AOP proxy entirely — an annotation here would silently never apply.
+    private final TransactionTemplate txTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
     // HTTP_1_1: uvicorn embedder can't do the JDK client's default h2c upgrade,
     // which drops POST bodies (422). See ResourceScanService for the full detail.
@@ -68,10 +77,14 @@ public class ImageProcessingWorker {
 
     public ImageProcessingWorker(PendingImageJobRepository jobRepo,
                                  EmbeddingService embeddingService,
-                                 NoteChunkRepository chunkRepo) {
+                                 NoteChunkRepository chunkRepo,
+                                 OutboxRepository outboxRepo,
+                                 PlatformTransactionManager txManager) {
         this.jobRepo          = jobRepo;
         this.embeddingService = embeddingService;
         this.chunkRepo        = chunkRepo;
+        this.outboxRepo       = outboxRepo;
+        this.txTemplate       = new TransactionTemplate(txManager);
     }
 
     @PostConstruct
@@ -223,7 +236,7 @@ public class ImageProcessingWorker {
             if (embedding != null) {
                 chunkRepo.upsertChunk(job.getNotePath(), chunkIndex, "image", chunk, embedding, hash);
             } else {
-                chunkRepo.upsertChunkTextOnly(job.getNotePath(), chunkIndex, "image", chunk, hash);
+                persistPendingChunkAndEnqueueEmbed(job.getNotePath(), chunkIndex, chunk, hash);
             }
         }
 
@@ -233,6 +246,21 @@ public class ImageProcessingWorker {
         jobRepo.markDone(job.getId());
         log.debug("[ImageProcessingWorker] captioned {} via {} -> {} chunk(s)",
             job.getImagePath(), provider, textChunks.size());
+    }
+
+    /**
+     * Persists a caption chunk with no vector yet, and enqueues the outbox "embed-chunk"
+     * fast path, atomically — a crash between the two would otherwise either publish a
+     * message for a chunk that never landed, or silently lose the fast-path signal for
+     * one that did. ChunkEmbeddingReconciler's poll (now a much-slower safety net, see
+     * {@code embedding.reconcile.delay-ms}) still finds anything this misses.
+     */
+    private void persistPendingChunkAndEnqueueEmbed(String notePath, int chunkIndex, String text, String hash) {
+        txTemplate.executeWithoutResult(status -> {
+            chunkRepo.upsertChunkTextOnly(notePath, chunkIndex, "image", text, hash);
+            outboxRepo.enqueue(RabbitQueueConfig.EMBED_CHUNK_QUEUE, Map.of(
+                "notePath", notePath, "source", "image", "chunkIndex", chunkIndex));
+        });
     }
 
     private boolean checkWrapperHealth() {
