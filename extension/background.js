@@ -15,9 +15,8 @@
 //   POST /notes   {folder, name}      create note → { path }   (writes sr-due + #review)
 //   PUT  /notes   {path, content}     write note body
 //   POST /capture {url}               → embedder /ingest (extract → synthesize → inbox)
-//   POST /workspace/save   {url}      download a media/pdf URL into _workspace/
 //   POST /workspace/upload (multipart) store a dropped local file in _workspace/
-//   POST /download {url}              yt-dlp offline grab → _workspace/ (watchable)
+//   POST /pipeline-failures            report a client-side capture dead-end (see below)
 import { getConfig, setConfig, getCreds, api } from './config.js';
 
 // ── HTTP helper ────────────────────────────────────────────────────────────────
@@ -28,11 +27,68 @@ import { getConfig, setConfig, getCreds, api } from './config.js';
 async function obsidian(path, opts = {}) {
   const { obsidianApi } = await getConfig();
   const doFetch = () => fetch(`${obsidianApi}${path}`, { credentials: 'include', ...opts });
-  let res = await doFetch();
+  let res;
+  try { res = await doFetch(); }
+  catch { return Response.error(); }   // truly unreachable (offline/DNS/refused) — no HTTP
+  // response at all. Response.error() is the spec's own "network error" sentinel (status 0,
+  // type 'error', empty body) — every existing caller's res.ok/res.status/res.text() check
+  // still works on it, instead of this throwing and leaving the popup awaiting forever
+  // (sendMessage has no timeout; an unhandled rejection here never calls sendResponse).
   if (res.status === 401 && path !== '/login') {
-    if (await reloginFromStored(obsidianApi)) res = await doFetch();
+    if (await reloginFromStored(obsidianApi)) {
+      try { res = await doFetch(); }
+      catch { return Response.error(); }
+    }
   }
   return res;
+}
+
+// ── Failure classification + reporting (pipeline_failures ledger) ────────────────
+// A non-ok response is either "the tunnel/server is down" (Response.error() above, or a
+// Cloudflare/nginx HTML error page instead of JSON) or "the backend actually looked at
+// this and said no" (a real JSON error body). Only the second is worth reporting to the
+// shared ledger — reporting a tunnel-down failure would just be another call to the same
+// unreachable backend. This also derives the SHORT message the popup shows — never the
+// raw body (a Cloudflare 1033 page is several KB of HTML; see extension/FLOWS.md).
+async function classifyFailure(res) {
+  if (res.type === 'error' || res.status === 0) {
+    return { networkDown: true, message: 'Server unreachable — check your connection and try again.' };
+  }
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('application/json')) {
+    return { networkDown: true, message: `Server unreachable (${res.status}) — try again shortly.` };
+  }
+  let body = null;
+  try { body = await res.json(); } catch { /* not actually JSON despite the header */ }
+  const message = (body && (body.error || body.message)) || `Backend error (${res.status})`;
+  return { networkDown: false, message: String(message).slice(0, 300) };
+}
+
+// Cap on any payload text sent to the ledger — enough to debug/replay, not a blank
+// check for pasting arbitrarily large notes into a debugging table.
+const REPORT_TEXT_CAP = 4000;
+
+// Best-effort POST to the shared pipeline_failures ledger (QUEUE_UNIFICATION_PLAN.md) —
+// review page at /failures. Awaited (not fire-and-forget): an MV3 service worker can be
+// killed right after its message handler returns, which would silently drop an
+// un-awaited fetch mid-flight — the opposite of what this exists to prevent.
+async function reportFailure(stage, inputPayload, errorMessage) {
+  try {
+    await obsidian('/pipeline-failures', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'extension', stage, input: inputPayload, error: errorMessage }),
+    });
+  } catch { /* a failed report must never mask the original failure */ }
+}
+
+// Shared handling for every capture call's non-ok branch: classify, report if it's a
+// real (non-network-down) rejection, and return the friendly message instead of the raw
+// body. inputPayload is what gets stored in the ledger for debugging/replay.
+async function handleFailure(res, stage, inputPayload) {
+  const { networkDown, message } = await classifyFailure(res);
+  if (!networkDown) await reportFailure(stage, inputPayload, message);
+  return { ok: false, status: res.status, error: message };
 }
 
 async function reloginFromStored(obsidianApi) {
@@ -118,7 +174,10 @@ async function captureText(text, title, trackOpts = {}) {
     : sanitizeName(text.split('\n').find(l => l.trim()) || '');
   const res = await json('/capture', 'POST', { text, title: t, ...trackOpts });
   if (res.status === 401) return { ok: false, status: 401 };
-  if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
+  if (!res.ok) {
+    return handleFailure(res, 'capture_text',
+      { title: t, text: text.slice(0, REPORT_TEXT_CAP) });
+  }
   return { ok: true, kind: 'text', detail: `Synthesizing notes from “${t}”` };
 }
 
@@ -131,7 +190,7 @@ async function capture(url, trackOpts = {}) {
     try { msg = (await res.json()).message || msg; } catch { /* keep default */ }
     return { ok: false, duplicate: true, status: 409, detail: msg };
   }
-  if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
+  if (!res.ok) return handleFailure(res, 'capture_url', { url });
   return { ok: true };
 }
 
@@ -140,24 +199,7 @@ async function capture(url, trackOpts = {}) {
 async function subscribeTrack({ title, sourceUrl, sourceType }) {
   const res = await json('/tracks', 'POST', { title, type: 'subscription', sourceUrl, sourceType });
   if (res.status === 401) return { ok: false, status: 401 };
-  if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
-  return { ok: true };
-}
-
-// Keep a watchable/readable copy in _workspace (media-file URL).
-async function workspaceSave(url) {
-  const res = await json('/workspace/save', 'POST', { url });
-  if (res.status === 401) return { ok: false, status: 401 };
-  if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
-  return { ok: true };
-}
-
-// Keep a watchable copy via yt-dlp (video-platform URL). Fire-and-forget: we don't
-// poll the job — the file appears in Learn when it's done.
-async function startDownload(url) {
-  const res = await json('/download', 'POST', { url });
-  if (res.status === 401) return { ok: false, status: 401 };
-  if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
+  if (!res.ok) return handleFailure(res, 'subscribe_track', { title, sourceUrl, sourceType });
   return { ok: true };
 }
 
@@ -174,11 +216,19 @@ async function captureDriveFile(url) {
   const dl = `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`;
   let res;
   try { res = await fetch(dl, { credentials: 'include' }); }
-  catch (e) { return { ok: false, error: `drive fetch failed: ${e}` }; }
+  catch (e) {
+    // Never touched OUR backend — a client-side dead-end with no fallback left, still
+    // worth reporting so it shows up on the Pipeline Failures page (extension/FLOWS.md).
+    const msg = `Drive fetch failed: ${e}`;
+    await reportFailure('drive_file_fetch', { url, driveFileId: id }, msg);
+    return { ok: false, error: msg };
+  }
   const ct = (res.headers.get('content-type') || '').toLowerCase();
   // HTML back = virus-scan interstitial or an access wall — we didn't get the file.
   if (!res.ok || ct.includes('text/html')) {
-    return { ok: false, error: `drive returned ${res.status} (${ct || 'no type'}) — file may be restricted` };
+    const msg = `Drive returned ${res.status} (${ct || 'no type'}) — file may be restricted`;
+    await reportFailure('drive_file_fetch', { url, driveFileId: id }, msg);
+    return { ok: false, error: msg };
   }
   const cd = res.headers.get('content-disposition') || '';
   const fnm = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
@@ -188,7 +238,7 @@ async function captureDriveFile(url) {
   form.append('file', blob, name);
   const up = await obsidian('/workspace/upload', { method: 'POST', body: form });
   if (up.status === 401) return { ok: false, status: 401 };
-  if (!up.ok) return { ok: false, status: up.status, error: await up.text() };
+  if (!up.ok) return handleFailure(up, 'drive_file_upload', { url, driveFileId: id, name });
   const { path } = await up.json();
   const cap = await capture(path);   // ingest the stored file → extract_pdf/av on the local bytes
   return cap.ok ? { ok: true, kind: 'media', detail: `Pulled "${name}" from Drive + generating notes` } : cap;
@@ -337,10 +387,12 @@ async function uploadFile({ name, type, dataB64 }) {
     form.append('file', new Blob([bytes], { type: type || 'application/octet-stream' }), name);
     const res = await obsidian('/workspace/upload', { method: 'POST', body: form });
     if (res.status === 401) return { ok: false, status: 401 };
-    if (!res.ok) return { ok: false, status: res.status, error: await res.text() };
+    if (!res.ok) return handleFailure(res, 'upload_file', { name, type });
     const { path } = await res.json();
-    // Ingest the stored file for notes (vault-relative path is a valid ingest ref).
-    await capture(path).catch(() => {});
+    // Ingest the stored file for notes (vault-relative path is a valid ingest ref). Not
+    // swallowed anymore — capture() can't throw (obsidian() never throws) and reports its
+    // own real failures, so a `.catch(() => {})` here would only have hidden that report.
+    await capture(path);
     return { ok: true, kind: 'file', detail: `Uploaded “${name}” + generating notes` };
   } catch (e) { return { ok: false, error: String(e) }; }
 }

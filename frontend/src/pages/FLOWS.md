@@ -1,6 +1,6 @@
 # Pages Flows
 
-Files: MainPage.jsx, LearnPage.jsx, ReviewPage.jsx, DashboardPage.jsx, SettingsPage.jsx, GetAppPage.jsx
+Files: MainPage.jsx, LearnPage.jsx, ReviewPage.jsx, DashboardPage.jsx, SettingsPage.jsx, GetAppPage.jsx, PipelineFailuresPage.jsx
 
 ---
 
@@ -37,6 +37,31 @@ To add a new setting:
 2. `SettingsRepository.java` typed getter + default
 3. `SettingsController.SettingsResponse` + `UpdateSettingsRequest` records
 4. `SettingsController.updateSettings()` handler
+
+---
+
+## PipelineFailuresPage — `/failures` (top-level nav)
+
+Read-only debugging ledger over the shared `pipeline_failures` table
+(`architecture_plans/QUEUE_UNIFICATION_PLAN.md`) — every backend pipeline dead-letter
+(capture retry-ladder exhausted, ingest stage failures, the browser extension's own
+client-side dead-ends) lands here instead of vanishing silently. No generic retry button —
+payload shapes differ per source/stage, so replay is source-specific (e.g. capture's own
+`/capture/{id}/retry` on the `SyncPage` failed-list, a *different*, narrower view scoped to
+just the `capture` table's retryable rows).
+
+Mount → `fetchPipelineFailures({onlyOpen})` (`api/pipelineFailures.js`) → `GET
+/pipeline-failures`. Row click expands the full `input_payload` JSON
+(`JSON.parse`/pretty-print client-side — the column is JSONB text over the wire). "Mark
+resolved" → `POST /pipeline-failures/{id}/resolve`, removes it from the (default) open view.
+Filters: open-only toggle, source dropdown (populated from whatever's actually loaded, not
+a hardcoded list).
+
+To change what's captured here: the WRITE side lives per-pipeline, not on this page —
+`common/PipelineFailureRepository.record()` (Java) / `embedder/failures.py
+record_failure()` (Python) / the extension's `background.js reportFailure()` (client-side
+dead-ends only, see `extension/FLOWS.md`). To change: `PipelineFailuresPage.jsx`
+(`summarize()` for the collapsed-row heuristic), `api/pipelineFailures.js`.
 
 ### Google Drive Sync panel
 

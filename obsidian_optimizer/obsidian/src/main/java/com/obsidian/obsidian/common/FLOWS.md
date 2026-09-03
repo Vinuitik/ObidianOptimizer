@@ -135,9 +135,31 @@ transparently reopened if found closed.
 `capture`'s transport moved to the same outbox→RabbitMQ→`@RabbitListener` shape as Group A,
 PLUS a retry ladder (backoff rungs = plain RabbitMQ queues with `x-message-ttl` +
 `x-dead-letter-exchange` pointing back at `capture` — no Java timer involved) and a
-`capture.deadletter` terminal queue. `PipelineFailureRepository` (new) is the Java-side
+`capture.deadletter` terminal queue. `PipelineFailureRepository` is the Java-side
 writer for the same `pipeline_failures` table `embedder/failures.py` owns — see
 `capture/FLOWS.md`'s "Retry ladder" section for the full mechanism and rung durations.
+`CaptureController.enqueueCapture()`'s own catch block (a failure BEFORE the row ever
+reaches the ladder — row creation or outbox publish itself throwing) also calls
+`pipelineFailureRepo.record("capture", "enqueue", ...)` for the same reason — otherwise
+that failure mode is invisible to the ledger even though `CaptureRepository.markFailed`
+still shows it in `/capture/failed`.
+
+## Pipeline Failures — read/resolve + client-originated reports
+
+`PipelineFailureRepository` (write-only originally, Phase 4) grew read/resolve methods
+(`list(onlyOpen, source, stage, limit)`, `resolve(id)`) once a UI needed them —
+`PipelineFailureController` is the new thin REST surface: `GET /pipeline-failures`
+(list, filtered), `POST /pipeline-failures/{id}/resolve` (mark looked-at, no generic
+retry — replay is source-specific), and `POST /pipeline-failures` (**new write path**,
+`{source, stage, input, error}`) for a failure that dead-ends CLIENT-side before any
+durable row exists to retry — today's one caller is the browser extension
+(`extension/FLOWS.md` "Failure reporting"), e.g. its initial `/capture` POST itself
+gets rejected, or a client-only step (Drive-file fetch) has no fallback left. Anything
+that gets past capture-row-creation is already covered by the owning pipeline's own
+dead-letter write — this endpoint is only for the gap before that point.
+Session-authenticated like every other endpoint (`SecurityConfig` `anyRequest().
+authenticated()` — no new security rule needed). Frontend: `pages/FLOWS.md`
+"PipelineFailuresPage".
 - **pgvector dimension is fixed at 768** (`note_chunks.embedding vector(768)`) —
   any embed call that returns a differently-sized vector fails the SQL write, not
   silently truncates. Caught this exact mismatch in `OutboxEmbedFlowIT` during
@@ -157,4 +179,6 @@ writer for the same `pipeline_failures` table `embedder/failures.py` owns — se
 | RabbitMQ-backed WorkQueue (manual ack) | `RabbitBackedQueue.java` |
 | Retry ladder rung TTLs (Phase 4, `capture` pilot) | `RabbitQueueConfig.java` (`capture.retry.rung{1,2,3}-ttl-ms`, default 1h/6h/24h) |
 | Shared pipeline failure ledger (Java-side writer) | `PipelineFailureRepository.java` (table `pipeline_failures`, same schema `embedder/failures.py` owns) |
+| Pipeline failure ledger — read/resolve/client-report REST surface | `PipelineFailureController.java` (`GET /pipeline-failures`, `POST /pipeline-failures/{id}/resolve`, `POST /pipeline-failures`) |
+| Capture's own immediate-failure (pre-ladder) ledger write | `CaptureController.enqueueCapture()` catch block |
 | Broker itself (image, volume, healthcheck) | root `docker-compose.yml` `rabbitmq` service |

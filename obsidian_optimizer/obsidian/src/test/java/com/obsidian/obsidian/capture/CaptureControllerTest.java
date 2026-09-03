@@ -45,6 +45,7 @@ class CaptureControllerTest {
     @Mock SettingsRepository settingsRepo;
     @Mock TrackRepository trackRepo;
     @Mock OutboxRepository outboxRepo;
+    @Mock com.obsidian.obsidian.common.PipelineFailureRepository pipelineFailureRepo;
     @Mock PlatformTransactionManager txManager;
 
     @TempDir Path vault;
@@ -55,7 +56,7 @@ class CaptureControllerTest {
     @BeforeEach
     void setUp() {
         controller = new CaptureController(repository, captureRepo, ingestWorker, settingsRepo,
-            trackRepo, outboxRepo, txManager);
+            trackRepo, outboxRepo, pipelineFailureRepo, txManager);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

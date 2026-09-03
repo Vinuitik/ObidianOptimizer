@@ -124,6 +124,61 @@ capture call chain (`capture`/`captureText`/`routeText`/`capturePage`/`escalate`
 `{duplicate:true}`; `routeText`/`capturePage` propagate it; `popup.handleResult` shows it LOUD
 (⚠️). Re-sharing a link/file already in the inbox is rejected, not re-ingested.
 
+## Flow — failure classification + reporting (never fail silently or ugly)
+Origin: a Cloudflare Tunnel error (backend unreachable) used to show as several KB of raw
+HTML dumped straight into the popup's status line (`res.text()` → `handleResult`'s `Failed:
+${res.error}`) — technically not silent, but unreadable, and a genuine client-side dead-end
+(a bad scrape, a rejected capture) really WAS silent: shown once in the popup, then gone
+forever with no way to come back and debug it later.
+
+Two-part fix, both in `background.js`:
+1. **`obsidian()` never throws.** A `fetch()` that throws outright (offline/DNS/connection
+   refused — no HTTP response at all) used to propagate as an unhandled rejection through
+   the `onMessage` handler, which has no `.catch` — `sendResponse` never fires and the
+   popup's `await send(...)` hangs forever. Now it catches and returns `Response.error()`
+   (the Fetch spec's own network-error sentinel: `status 0`, `type 'error'`, empty body) —
+   every existing `res.ok`/`res.status`/`res.text()` call site keeps working unchanged.
+2. **`classifyFailure(res)`** sorts every non-ok response into exactly two buckets:
+   - **network-down** — `res.type==='error'` (from #1) OR a non-JSON body (a Cloudflare/
+     nginx HTML error page, not a real API response) → just show a short friendly message
+     (`Server unreachable...`), never the raw body.
+   - **real rejection** — a JSON error body the backend actually produced → show its
+     `error`/`message` field (capped 300 chars), AND best-effort report it.
+   `handleFailure(res, stage, inputPayload)` wraps this for every capture call's `!res.ok`
+   branch: classify → report if real → return `{ok:false, status, error:<friendly message>}`.
+   `popup.js` needed NO changes — it already just displays `res.error`, which is now always
+   short and friendly instead of a raw HTML dump.
+
+**Reporting** (`reportFailure(stage, inputPayload, errorMessage)`) is a best-effort `POST
+/pipeline-failures` (`{source:'extension', stage, input, error}`) into the shared ledger
+(`common/PipelineFailureRepository`, `architecture_plans/QUEUE_UNIFICATION_PLAN.md`) —
+reviewable at the frontend's `/failures` page (`pages/FLOWS.md`
+"PipelineFailuresPage"). Awaited, not fire-and-forget: an MV3 service worker can be killed
+right after its message handler returns, which would silently drop an un-awaited fetch
+mid-flight. **Scope — only failures that never reach a created capture row**: once
+`/capture` returns 200 and a row exists, ANY downstream failure is already covered by
+`CaptureIngestWorker`'s own retry-ladder dead-letter write (`capture/FLOWS.md`) — reporting
+it again here would just duplicate that row. So this only fires for: the initial `/capture`/
+`/workspace/upload`/`/tracks` POST itself getting rejected (`captureText`, `capture`,
+`uploadFile`, `subscribeTrack`), and `captureDriveFile()`'s Drive-side fetch (never touches
+our backend at all — reported directly via `reportFailure()`, no `handleFailure()` to
+classify against since there's no backend `Response` to classify). Network-down failures are
+deliberately NOT reported — the report endpoint is on the same unreachable backend, there's
+nowhere to send it. No client-side persistence/retry queue (considered, dropped — see
+git history/PR discussion): the backend's existing retry-ladder infrastructure already
+covers everything past capture-creation, and there's no way to durably retry a request that
+never left the browser in a genuine offline moment anyway.
+*To change:* `classifyFailure()` (message wording, JSON-vs-HTML detection),
+`handleFailure()`/`reportFailure()` (what gets reported), `REPORT_TEXT_CAP` (text payload
+size cap, 4000 chars — enough to debug/replay a failed text capture, not unbounded).
+
+**Removed as dead code** (this session): `workspaceSave()`/`startDownload()` — leftover
+from before commit `ec20c7a` (Jul 4) moved media/video download ownership to the backend
+ingest pipeline itself (`/capture` alone now triggers the download server-side); the call
+sites were removed then but the function bodies weren't, so they'd been unreachable for
+two months. The top-of-file "Backend contracts used" comment was stale for the same reason
+(`/workspace/save`, `/download` no longer called from here).
+
 ## Flow — auth + config (⚙ Settings)
 `config.js` holds the one editable endpoint (`obsidianApi`, default
 `https://obsidianoptimizer.uk/api`) in `chrome.storage.local`. Sign-in →
@@ -172,6 +227,9 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | Agent WS client / browser tools | `background.connectAgentWs()` + `AGENT_TOOLS` (`agentGetDom/agentGetNetwork/agentBrowserFetch`); token = ⚙ Settings `#cfg-agent-token` → `config.agentWsToken` |
 | Agent activity feed (popup) | `background.recordAgentEvent` → `chrome.storage.agentLog`; popup `renderAgentFeed()` / `#agent-panel` |
 | Duplicate-capture warning | `background.capture()` 409 → `{duplicate}`; `popup.handleResult` (⚠️) |
+| Friendly error / network-vs-real-failure split | `background.js classifyFailure()` |
+| Failure reporting to the shared ledger | `background.js reportFailure()` / `handleFailure()`; review UI at frontend `/failures` (`pages/FLOWS.md`) |
+| Text-payload size cap sent to the ledger | `background.js REPORT_TEXT_CAP` |
 | Track picker | `popup.html` `#cap-track`/`#cap-track-title`; `popup.js` `trackSelection()`/`loadTracks()`; `background.js` `listTracks()` + `trackOpts` params |
 | API base override | popup ⚙ Settings → `chrome.storage.local` |
 | Smart page capture / scrape | `background.capturePage()` + `extractPageText()` (`#cap-page` button) |

@@ -3,6 +3,7 @@ package com.obsidian.obsidian.capture;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.common.OutboxRepository;
+import com.obsidian.obsidian.common.PipelineFailureRepository;
 import com.obsidian.obsidian.common.RabbitQueueConfig;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
@@ -74,6 +75,7 @@ public class CaptureController {
     private final SettingsRepository settingsRepo;
     private final TrackRepository trackRepo;
     private final OutboxRepository outboxRepo;
+    private final PipelineFailureRepository pipelineFailureRepo;
     private final TransactionTemplate txTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -90,6 +92,7 @@ public class CaptureController {
     public CaptureController(FileRepository repository, CaptureRepository captureRepo,
                              CaptureIngestWorker ingestWorker, SettingsRepository settingsRepo,
                              TrackRepository trackRepo, OutboxRepository outboxRepo,
+                             PipelineFailureRepository pipelineFailureRepo,
                              PlatformTransactionManager txManager) {
         this.repository = repository;
         this.captureRepo = captureRepo;
@@ -97,6 +100,7 @@ public class CaptureController {
         this.settingsRepo = settingsRepo;
         this.trackRepo = trackRepo;
         this.outboxRepo = outboxRepo;
+        this.pipelineFailureRepo = pipelineFailureRepo;
         this.txTemplate = new TransactionTemplate(txManager);
     }
 
@@ -186,6 +190,16 @@ public class CaptureController {
             return captureId;
         } catch (Exception e) {
             captureRepo.updateStatus(captureId, "failed");
+            // This is BEFORE the row ever reaches the retry ladder (dies during row
+            // creation / outbox publish itself), so CaptureIngestWorker's own dead-letter
+            // write never runs for it — record it here too, or it's invisible to the
+            // Pipeline Failures page even though /capture/failed still shows it.
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("captureId", captureId);
+            payload.put("sourceRef", hasText ? "" : (url == null ? "" : url));
+            payload.put("hasText", hasText);
+            pipelineFailureRepo.record("capture", "enqueue", payload,
+                e.getClass().getSimpleName(), String.valueOf(e.getMessage()), null);
             throw e;
         }
     }

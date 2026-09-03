@@ -7,6 +7,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -65,5 +70,44 @@ public class PipelineFailureRepository {
             log.warn("[PipelineFailureRepository] failed to record failure (source={} stage={}): {}",
                 source, stage, e.toString());
         }
+    }
+
+    public record Failure(long id, String occurredAt, String source, String stage,
+                          String inputPayload, String errorType, String errorMessage,
+                          String bundleRef, String resolvedAt) {}
+
+    /** Newest-first, for the "Pipeline Failures" review page. {@code onlyOpen} filters to
+     *  unresolved rows (the page's default view); source/stage narrow it further. */
+    public List<Failure> list(boolean onlyOpen, String source, String stage, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT * FROM pipeline_failures WHERE 1=1");
+        List<Object> params = new ArrayList<>();
+        if (onlyOpen) sql.append(" AND resolved_at IS NULL");
+        if (source != null && !source.isBlank()) { sql.append(" AND source = ?"); params.add(source); }
+        if (stage != null && !stage.isBlank()) { sql.append(" AND stage = ?"); params.add(stage); }
+        sql.append(" ORDER BY occurred_at DESC LIMIT ?");
+        params.add(limit);
+        return jdbc.query(sql.toString(), PipelineFailureRepository::map, params.toArray());
+    }
+
+    /** User (or a fix landing) is done with this one — stop showing it in the open view.
+     *  Rows are never auto-discarded, only explicitly resolved. */
+    public boolean resolve(long id) {
+        return jdbc.update(
+            "UPDATE pipeline_failures SET resolved_at = now() WHERE id = ? AND resolved_at IS NULL",
+            id) > 0;
+    }
+
+    private static Failure map(ResultSet rs, int rowNum) throws SQLException {
+        Timestamp resolvedAt = rs.getTimestamp("resolved_at");
+        return new Failure(
+            rs.getLong("id"),
+            rs.getTimestamp("occurred_at").toInstant().toString(),
+            rs.getString("source"),
+            rs.getString("stage"),
+            rs.getString("input_payload"),
+            rs.getString("error_type"),
+            rs.getString("error_message"),
+            rs.getString("bundle_ref"),
+            resolvedAt == null ? null : resolvedAt.toInstant().toString());
     }
 }

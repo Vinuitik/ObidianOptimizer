@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/review',   label: 'Review', flashcardsOnly: true },
   { to: '/tracks',   label: 'Tracks', tracksOnly: true },
   { to: '/dashboard', label: 'Dashboard' },
+  { to: '/failures', label: 'Failures' },
   { to: '/get-app',  label: 'Get App' },
   { to: '/settings', label: 'Settings' },
 ];

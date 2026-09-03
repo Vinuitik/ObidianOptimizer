@@ -8,6 +8,7 @@ import TracksPage from './pages/TracksPage';
 import LearnPage from './pages/LearnPage';
 import DashboardPage from './pages/DashboardPage';
 import GetAppPage from './pages/GetAppPage';
+import PipelineFailuresPage from './pages/PipelineFailuresPage';
 import NavBar from './components/organisms/NavBar';
 import LoginModal from './components/organisms/LoginModal';
 import SyncBanner from './components/organisms/SyncBanner';
@@ -45,6 +46,7 @@ function AnimatedRoutes() {
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/tracks" element={<TracksPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/failures" element={<PipelineFailuresPage />} />
           <Route path="/get-app" element={<GetAppPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
