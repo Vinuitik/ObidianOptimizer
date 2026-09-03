@@ -1,5 +1,7 @@
 package com.obsidian.obsidian.ml;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.common.PollingQueueWorker;
 import com.obsidian.obsidian.common.WorkQueue;
 import com.obsidian.obsidian.common.WorkerLane;
@@ -7,6 +9,7 @@ import com.obsidian.obsidian.ml.NoteChunkRepository.PendingChunk;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -42,6 +45,7 @@ public class ChunkEmbeddingReconciler {
     private final WorkerLane lane = new WorkerLane("embed-reconcile");
 
     private final PollingQueueWorker<PendingChunk> pollingWorker;
+    private final ObjectMapper mapper = new ObjectMapper();
 
     public ChunkEmbeddingReconciler(NoteChunkRepository chunkRepo, EmbeddingService embeddingService) {
         this.chunkRepo = chunkRepo;
@@ -61,21 +65,8 @@ public class ChunkEmbeddingReconciler {
             @Override public void markDeferred(PendingChunk item) {}
         };
 
-        PollingQueueWorker.ItemProcessor<PendingChunk> processor = c -> {
-            try {
-                float[] embedding = embeddingService.embed(c.text());
-                if (embedding != null
-                    && chunkRepo.setChunkEmbedding(c.notePath(), c.source(), c.chunkIndex(), embedding)) {
-                    return true;
-                }
-                // embedding null → embedder unreachable; leave NULL, retry next cycle
-                return false;
-            } catch (Exception e) {
-                log.warn("[ChunkEmbeddingReconciler] failed {}#{} ({}): {}",
-                    c.notePath(), c.chunkIndex(), c.source(), e.getMessage());
-                return false;
-            }
-        };
+        PollingQueueWorker.ItemProcessor<PendingChunk> processor =
+            c -> embedChunk(c.notePath(), c.source(), c.chunkIndex(), c.text());
 
         PollingQueueWorker.BatchListener<PendingChunk> listener = new PollingQueueWorker.BatchListener<>() {
             @Override
@@ -96,7 +87,10 @@ public class ChunkEmbeddingReconciler {
     @PreDestroy
     void stopLane() { lane.shutdown(); }
 
-    @Scheduled(fixedDelayString = "${embedding.reconcile.delay-ms:15000}",
+    /** Now the SAFETY NET (default 1h, was 15s) — the outbox+RabbitMQ path from
+     *  ImageProcessingWorker's chokepoint is the primary trigger. See
+     *  QUEUE_UNIFICATION_PLAN.md Phase 3. */
+    @Scheduled(fixedDelayString = "${embedding.reconcile.delay-ms:3600000}",
                initialDelayString = "${embedding.reconcile.initial-delay-ms:45000}")
     public void reconcilePendingChunks() {
         pollingWorker.tick();
@@ -107,5 +101,48 @@ public class ChunkEmbeddingReconciler {
      *  partial batch (drained) or zero progress (embedder down → next tick retries). */
     void drain() {
         pollingWorker.drain();
+    }
+
+    /**
+     * Fast path: consumes the "embed-chunk" outbox queue. The message only carries
+     * the chunk's identity (note_path/source/chunk_index); {@link NoteChunkRepository
+     * #getChunkText} fetches its current text AND doubles as the idempotency check —
+     * it returns null (safe no-op) if the chunk is gone or was already embedded
+     * (e.g. this message was redelivered after a crash post-ack, or the polling
+     * safety net already caught it).
+     */
+    @RabbitListener(queues = com.obsidian.obsidian.common.RabbitQueueConfig.EMBED_CHUNK_QUEUE)
+    public void onEmbedChunkMessage(String payloadJson) {
+        String notePath, source;
+        int chunkIndex;
+        try {
+            JsonNode node = mapper.readTree(payloadJson);
+            notePath = node.path("notePath").asText(null);
+            source = node.path("source").asText(null);
+            chunkIndex = node.path("chunkIndex").asInt(-1);
+        } catch (Exception e) {
+            log.warn("[ChunkEmbeddingReconciler] malformed embed-chunk message, dropping: {}", e.getMessage());
+            return;
+        }
+        if (notePath == null || source == null || chunkIndex < 0) return;
+        String text = chunkRepo.getChunkText(notePath, source, chunkIndex);
+        if (text == null) return; // gone or already embedded
+        embedChunk(notePath, source, chunkIndex, text);
+    }
+
+    /** Shared by the polling fallback and the RabbitMQ fast path. */
+    boolean embedChunk(String notePath, String source, int chunkIndex, String text) {
+        try {
+            float[] embedding = embeddingService.embed(text);
+            if (embedding != null && chunkRepo.setChunkEmbedding(notePath, source, chunkIndex, embedding)) {
+                return true;
+            }
+            // embedding null → embedder unreachable; leave NULL, retry next cycle
+            return false;
+        } catch (Exception e) {
+            log.warn("[ChunkEmbeddingReconciler] failed {}#{} ({}): {}",
+                notePath, chunkIndex, source, e.getMessage());
+            return false;
+        }
     }
 }

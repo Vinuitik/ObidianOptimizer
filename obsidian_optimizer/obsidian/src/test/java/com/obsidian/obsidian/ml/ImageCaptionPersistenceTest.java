@@ -1,7 +1,9 @@
 package com.obsidian.obsidian.ml;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.obsidian.obsidian.common.OutboxRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -24,7 +26,9 @@ class ImageCaptionPersistenceTest {
 
     private ImageProcessingWorker worker(PendingImageJobRepository jobRepo,
                                          EmbeddingService emb, NoteChunkRepository chunkRepo) {
-        var w = new ImageProcessingWorker(jobRepo, emb, chunkRepo);
+        var outboxRepo = mock(OutboxRepository.class);
+        var txManager = mock(PlatformTransactionManager.class);
+        var w = new ImageProcessingWorker(jobRepo, emb, chunkRepo, outboxRepo, txManager);
         when(chunkRepo.queryMaxChunkIndex(anyString(), eq("image"))).thenReturn(null); // start at 0
         return w;
     }

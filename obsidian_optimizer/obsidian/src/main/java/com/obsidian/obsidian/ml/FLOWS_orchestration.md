@@ -26,9 +26,9 @@ guard, so a tick mid-drain is a no-op, never stacks). To change the pattern:
 
 | Worker · method | Tick | Finds work by | Lane | Drain style |
 |---|---|---|---|---|
-| `NoteEmbeddingWorker.embedPendingNotes` | 60s | `content_hash` diff (`findNotesNeedingEmbedding`) | `embed` | **continuous** — loops while a batch is full AND progress is made (fast backlog drain); stops on partial batch or zero progress |
+| `NoteEmbeddingWorker.embedPendingNotes` | 1h (was 60s — now a SAFETY NET, see below) | `content_hash` diff (`findNotesNeedingEmbedding`) | `embed` | **continuous** — loops while a batch is full AND progress is made (fast backlog drain); stops on partial batch or zero progress |
 | `ImageProcessingWorker.processPendingImages` | 30s | `pending_image_jobs` table | `image` | **CAPTION stage** — one batch/tick (30s pacing avoids hammering cooled vision providers); inner `pool` parallelises across notes. Writes chunk text with a **NULL vector** and marks DONE = "captioned" — never re-captions, never loses a caption to an embed hiccup |
-| `ChunkEmbeddingReconciler.reconcilePendingChunks` | 15s | `note_chunks WHERE embedding IS NULL` (the **embed queue**) | `embed-reconcile` | continuous drain; embeds any NULL-vector chunk (image OR text), sets the vector only on success (fail → stays NULL → retried next tick) |
+| `ChunkEmbeddingReconciler.reconcilePendingChunks` | 1h (was 15s — now a SAFETY NET, see below) | `note_chunks WHERE embedding IS NULL` (the **embed queue**) | `embed-reconcile` | continuous drain; embeds any NULL-vector chunk (image OR text), sets the vector only on success (fail → stays NULL → retried next tick) |
 | `CardJobWorker.scanAndGenerate` | 30min | `body_hash` diff | `cards` | one batch/tick (credit-capped) |
 | `ChronoService.scheduledRun` | 2am cron | scans all md | `chrono` | full nightly pass (`runAllJobs`) |
 | `SyncWorker.scheduledUpload` | 6h cron | sync queue | `sync` | Drive upload |
@@ -47,6 +47,15 @@ self-healing reconciliation — this brought the one fire-once stage in line wit
 
 `NoteEmbeddingWorker.purgeOrphanChunks` (daily) + `ImageProcessingWorker.requeueSkipped`
 (daily) stay as direct light `@Scheduled` janitors — no lane needed.
+
+### Fast path: outbox + RabbitMQ (QUEUE_UNIFICATION_PLAN.md Phase 3)
+`NoteEmbeddingWorker` and `ChunkEmbeddingReconciler`'s ticks above are now the SAFETY
+NET, not the trigger. The chokepoints that actually change `content_hash` / write a
+NULL-vector chunk (`ImageScanService.registerImages`, `ImageProcessingWorker
+.handleResult`) also write a transactional-outbox row that gets published to RabbitMQ
+the instant the write commits — a `@RabbitListener` on the same worker class embeds it
+within seconds, reusing the exact same per-item logic the poll fallback uses
+(`embedOne` / `embedChunk`). Full mechanism: `common/FLOWS.md`.
 
 ### Why this fixes the old bug
 Before: no custom `TaskScheduler` → Spring's **single** scheduler thread ran every
@@ -134,7 +143,9 @@ Image captions + card text don't touch the GPU — they route through the host-w
 |---|---|
 | The lane mechanism (guard, thread) | `common/WorkerLane.java` |
 | Scheduler thread-pool size | `config/SchedulingConfig.java` → `setPoolSize` |
-| Embed cadence / batch | `.env` `EMBEDDING_SCAN_DELAY_MS` / `EMBEDDING_BATCH_LIMIT` |
+| Embed safety-net cadence / batch | `.env` `EMBEDDING_SCAN_DELAY_MS` (default 1h) / `EMBEDDING_BATCH_LIMIT` |
+| Embed-chunk safety-net cadence | property `embedding.reconcile.delay-ms` (default 1h) |
+| Outbox+RabbitMQ fast path | `common/FLOWS.md` |
 | Image pacing / parallelism | `ImageProcessingWorker` `fixedDelay` · `.env` `IMAGE_WORKER_PARALLELISM` |
 | Enable/disable a stage | `.env` `EMBEDDING_ENABLED` / `IMAGES_ENABLED` / `CARDS_ENABLED` / `INGEST_ENABLED` / `CHRONO_ENABLED` |
 | GPU arbitration policy | `embedder/gpu_slot.py` |

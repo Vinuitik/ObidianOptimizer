@@ -1,5 +1,7 @@
 package com.obsidian.obsidian.ml;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.common.PollingQueueWorker;
 import com.obsidian.obsidian.common.WorkQueue;
 import com.obsidian.obsidian.common.WorkerLane;
@@ -7,6 +9,7 @@ import com.obsidian.obsidian.notes.NoteIndexRepository;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -47,6 +50,7 @@ public class NoteEmbeddingWorker {
     private record EmbedCandidate(String path, String hash) {}
 
     private final PollingQueueWorker<EmbedCandidate> pollingWorker;
+    private final ObjectMapper mapper = new ObjectMapper();
 
     public NoteEmbeddingWorker(NoteIndexRepository noteIndexRepo,
                                EmbeddingService embeddingService,
@@ -74,20 +78,8 @@ public class NoteEmbeddingWorker {
             @Override public void markDeferred(EmbedCandidate item) {}
         };
 
-        PollingQueueWorker.ItemProcessor<EmbedCandidate> processor = candidate -> {
-            try {
-                if (embeddingService.indexNote(candidate.path())) {
-                    noteIndexRepo.markEmbedded(candidate.path(), candidate.hash());
-                    return true;
-                }
-                // false → embedder unreachable / partial failure: stays in the
-                // diff and is retried next cycle
-                return false;
-            } catch (Exception e) {
-                log.warn("[NoteEmbeddingWorker] failed {}: {}", candidate.path(), e.getMessage());
-                return false;
-            }
-        };
+        PollingQueueWorker.ItemProcessor<EmbedCandidate> processor =
+            candidate -> embedOne(candidate.path(), candidate.hash());
 
         PollingQueueWorker.BatchListener<EmbedCandidate> listener = new PollingQueueWorker.BatchListener<>() {
             @Override
@@ -108,11 +100,57 @@ public class NoteEmbeddingWorker {
     @PreDestroy
     void stopLane() { lane.shutdown(); }
 
-    /** Tick: hand the drain to the lane and return immediately. */
-    @Scheduled(fixedDelayString = "${embedding.scan.delay-ms:60000}",
+    /** Tick: hand the drain to the lane and return immediately. Now the SAFETY NET
+     *  (default 1h, was 60s) — the outbox+RabbitMQ path from ImageScanService's
+     *  chokepoint is the primary trigger, delivering within seconds instead of
+     *  waiting for this tick. See QUEUE_UNIFICATION_PLAN.md Phase 3. */
+    @Scheduled(fixedDelayString = "${embedding.scan.delay-ms:3600000}",
                initialDelayString = "${embedding.scan.initial-delay-ms:30000}")
     public void embedPendingNotes() {
         pollingWorker.tick();
+    }
+
+    /**
+     * Fast path: consumes the "embed" outbox queue, one note per message. Reuses the
+     * exact same per-note logic as the polling fallback ({@link #embedOne}) — the only
+     * difference is where the content_hash comes from (a poll batch snapshots it at
+     * claim time; here the message carries no hash, so the CURRENT hash is read fresh,
+     * which doubles as the idempotency check: if the note changed again since this
+     * message was published, embedOne's markEmbedded WHERE-guard against the stale
+     * hash it captured will still be correct because we read fresh, not stale).
+     */
+    @RabbitListener(queues = com.obsidian.obsidian.common.RabbitQueueConfig.EMBED_QUEUE)
+    public void onEmbedMessage(String payloadJson) {
+        String path;
+        try {
+            JsonNode node = mapper.readTree(payloadJson);
+            path = node.path("notePath").asText(null);
+        } catch (Exception e) {
+            log.warn("[NoteEmbeddingWorker] malformed embed message, dropping: {}", e.getMessage());
+            return;
+        }
+        if (path == null) return;
+        String hash = noteIndexRepo.getContentHash(path);
+        if (hash == null) return; // note deleted or never hashed — nothing to do
+        embedOne(path, hash);
+    }
+
+    /** Shared by the polling fallback and the RabbitMQ fast path: embed one note and
+     *  record success against the given hash (must be the hash currently in
+     *  {@code notes.content_hash} for markEmbedded's guard to actually take). */
+    boolean embedOne(String path, String hash) {
+        try {
+            if (embeddingService.indexNote(path)) {
+                noteIndexRepo.markEmbedded(path, hash);
+                return true;
+            }
+            // false → embedder unreachable / partial failure: stays in the
+            // diff and is retried next cycle
+            return false;
+        } catch (Exception e) {
+            log.warn("[NoteEmbeddingWorker] failed {}: {}", path, e.getMessage());
+            return false;
+        }
     }
 
     /** Runs on the lane thread. Drains the backlog in batches, continuing while a
