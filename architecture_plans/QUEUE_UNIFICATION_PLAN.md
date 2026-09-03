@@ -254,19 +254,34 @@ Group B. See Phase 3.
   classes, 0 failures/0 errors, independently re-run and confirmed via `surefire-reports/`
   before merge — not just taken on the implementing agent's word).
 
-### Phase 4 — pilot: `capture` / `CaptureIngestWorker` → RabbitMQ — not started
-- Swap `capture`'s `WorkQueue` to `RabbitBackedQueue`. Table keeps its exact schema — it's the
-  outbox/status record now, not the poll target.
-- DLX+TTL retry ladder (e.g. 1h → 6h → 24h) replaces `retryFailed`/`retryDeferred`'s two
-  hand-rolled pollers — delivers "retries over days" as broker config, not new Java code.
-- **Retry ladder order (per the "don't go silent" ask):** normal retries on the ladder → still
-  failing after N attempts → hand off to `ingest/escalation.py` (flip
-  `AGENT_ESCALATION_ENABLED` on) → escalation also gives up → THEN dead-letter: write to
-  `pipeline_failures` + let it flow into the EXISTING failed-capture local notification
-  (`SyncPage.loadFailed()`) — no new notification system needed.
+### Phase 4 — pilot: `capture` / `CaptureIngestWorker` → RabbitMQ — ✅ DONE
+- Transport: outbox+`@RabbitListener` (Group A's Phase 3 shape, not `RabbitBackedQueue` — a
+  push listener fit better than the poll-shaped `claimBatch` contract once a DLX+TTL ladder
+  was in the picture). `capture` table keeps its exact schema, unchanged — it's the
+  outbox/status record, not the poll target. `CaptureIngestWorker`'s own poll (`tick()`,
+  15s→5min) is now the safety net, same as Group A's.
+- DLX+TTL retry ladder (3 rungs: 1h → 6h → 24h, `RabbitQueueConfig` — each a plain queue with
+  `x-message-ttl` + `x-dead-letter-exchange` pointing back at `capture`) replaces
+  `retryFailed`'s hand-rolled 6h/session-capped poller. `retryDeferred`/`drainDeferred`
+  (bundle-resume synthesis retry) deliberately left untouched — functionally a different
+  operation (`IngestClient.resume`, not resubmit) on a much slower natural cadence
+  (LLM-provider cooldowns), not worth folding into the same ladder.
+- **Deviation from this doc's original ladder order:** no `ingest/escalation.py` hand-off
+  before dead-lettering. The Phase 4 implementation brief (separate from this doc) specified
+  the dead-letter handler as exactly two actions (`markFailed` + `pipeline_failures` write)
+  with no escalation step, and `escalation.py` is Python/Group E — a separate flag-gated
+  subsystem outside this phase's Java-only scope. Flagged, not silently dropped; wiring it in
+  is a small later addition (publish to escalation before the final dead-letter hop) if wanted.
+- **One deliberate touch to the otherwise-untouched orphan-cleanup sweep:** a capture riding
+  the 6h/24h rung stays `processing` well past `cleanupMinAgeMs` (30min) with no notes and no
+  active embedder job — indistinguishable from an abandoned row to the old predicate. Fixed
+  with an in-memory `ridingLadder` set in `CaptureIngestWorker`, checked in `sweepOrphan()`.
+  See `capture/FLOWS.md`'s Retry Ladder section for the full reasoning.
 - **Acceptance:** `/api/capture/failed` + manual retry/dismiss behave identically from the
-  UI's perspective; a forced yt-dlp failure (the reel case) rides the ladder, escalates, and
-  only then surfaces as a notified, debuggable `pipeline_failures` row.
+  UI's perspective (verified: `CaptureControllerTest` unchanged assertions on those
+  endpoints); a forced 5xx rides the ladder and surfaces as a notified, debuggable
+  `pipeline_failures` row (proven end-to-end against a real broker in `CaptureRabbitFlowIT`,
+  with rung TTLs shrunk via property override so the full ladder runs in seconds).
 
 ### Phase 5 — `pending_image_jobs` → `RabbitBackedQueue` — not started
 - Same shape as Phase 4; existing thread-pool concurrency (4) maps to consumer prefetch count.
@@ -279,7 +294,7 @@ Group B. See Phase 3.
 
 ## Execution order
 
-`0 (done) → 1 → 2 → 3 → 4 → (validate ~2 weeks) → 5 → (validate) → 6`
+`0 (done) → 1 (done) → 2 (done) → 3 (done) → 4 (done) → (validate ~2 weeks) → 5 → (validate) → 6`
 
 Each phase is its own branch/commit per the git-discipline rule.
 

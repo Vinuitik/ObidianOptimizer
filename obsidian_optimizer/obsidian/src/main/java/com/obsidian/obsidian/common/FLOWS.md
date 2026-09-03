@@ -123,7 +123,18 @@ transparently reopened if found closed.
 - **`RabbitBackedQueue` is unused in production today.** It exists to prove
   `PollingQueueWorker` genuinely doesn't care which `WorkQueue` implementation it
   drives — see `RabbitBackedQueueIT` for its ack/nack contract proven against a real
-  broker (Testcontainers). A later phase wires it in for a Group B queue.
+  broker (Testcontainers). Group B's Phase 4 pilot (`capture`, below) did NOT end up
+  using it — a push `@RabbitListener` (Group A's Phase 3 shape) fit better than the
+  poll-shaped `claimBatch` contract once a DLX+TTL retry ladder was in the picture.
+
+## Phase 4: Group B pilot (`capture`) — DLX+TTL retry ladder, see capture/FLOWS.md
+
+`capture`'s transport moved to the same outbox→RabbitMQ→`@RabbitListener` shape as Group A,
+PLUS a retry ladder (backoff rungs = plain RabbitMQ queues with `x-message-ttl` +
+`x-dead-letter-exchange` pointing back at `capture` — no Java timer involved) and a
+`capture.deadletter` terminal queue. `PipelineFailureRepository` (new) is the Java-side
+writer for the same `pipeline_failures` table `embedder/failures.py` owns — see
+`capture/FLOWS.md`'s "Retry ladder" section for the full mechanism and rung durations.
 - **pgvector dimension is fixed at 768** (`note_chunks.embedding vector(768)`) —
   any embed call that returns a differently-sized vector fails the SQL write, not
   silently truncates. Caught this exact mismatch in `OutboxEmbedFlowIT` during
@@ -139,6 +150,8 @@ transparently reopened if found closed.
 | Immediate-publish vs. sweep cadence | `OutboxRelay.java` · `.env`/property `outbox.relay.delay-ms` (default 5000) |
 | RabbitMQ connection (host/port/creds) | `application.properties` `spring.rabbitmq.*` · `.env` `RABBITMQ_HOST/PORT/USERNAME/PASSWORD` |
 | Listener auto-startup (broker required to boot) | `.env` `RABBITMQ_LISTENERS_AUTO_START` (compose default `true`; app default `false`) |
-| Declared queue names | `RabbitQueueConfig.java` (`EMBED_QUEUE`, `EMBED_CHUNK_QUEUE`) |
+| Declared queue names | `RabbitQueueConfig.java` (`EMBED_QUEUE`, `EMBED_CHUNK_QUEUE`, `CAPTURE_QUEUE`, `CAPTURE_RUNG_QUEUES`, `CAPTURE_DEADLETTER_QUEUE`) |
 | RabbitMQ-backed WorkQueue (manual ack) | `RabbitBackedQueue.java` |
+| Retry ladder rung TTLs (Phase 4, `capture` pilot) | `RabbitQueueConfig.java` (`capture.retry.rung{1,2,3}-ttl-ms`, default 1h/6h/24h) |
+| Shared pipeline failure ledger (Java-side writer) | `PipelineFailureRepository.java` (table `pipeline_failures`, same schema `embedder/failures.py` owns) |
 | Broker itself (image, volume, healthcheck) | root `docker-compose.yml` `rabbitmq` service |

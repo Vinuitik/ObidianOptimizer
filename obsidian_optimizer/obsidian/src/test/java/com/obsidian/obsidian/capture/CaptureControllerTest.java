@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.capture;
 
+import com.obsidian.obsidian.common.OutboxRepository;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.tracks.TrackRepository;
@@ -15,6 +16,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +44,8 @@ class CaptureControllerTest {
     @Mock CaptureIngestWorker ingestWorker;
     @Mock SettingsRepository settingsRepo;
     @Mock TrackRepository trackRepo;
+    @Mock OutboxRepository outboxRepo;
+    @Mock PlatformTransactionManager txManager;
 
     @TempDir Path vault;
     private MockMvc mvc;
@@ -50,7 +54,8 @@ class CaptureControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new CaptureController(repository, captureRepo, ingestWorker, settingsRepo, trackRepo);
+        controller = new CaptureController(repository, captureRepo, ingestWorker, settingsRepo,
+            trackRepo, outboxRepo, txManager);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

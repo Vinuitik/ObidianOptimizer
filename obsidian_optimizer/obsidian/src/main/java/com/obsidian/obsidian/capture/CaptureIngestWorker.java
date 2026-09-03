@@ -1,6 +1,10 @@
 package com.obsidian.obsidian.capture;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.common.IngestClient;
+import com.obsidian.obsidian.common.PipelineFailureRepository;
+import com.obsidian.obsidian.common.RabbitQueueConfig;
 import com.obsidian.obsidian.common.WorkerLane;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
@@ -8,12 +12,16 @@ import com.obsidian.obsidian.settings.SettingsRepository;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -53,7 +61,20 @@ public class CaptureIngestWorker {
     private final SettingsRepository settingsRepo;
     private final NoteIndexRepository noteIndex;
     private final FileRepository fileRepo;
+    private final RabbitTemplate rabbitTemplate;
+    private final PipelineFailureRepository pipelineFailureRepo;
     private final WorkerLane lane = new WorkerLane("capture-ingest");
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    // Captures currently riding the retry ladder (claimed, submitted at least once,
+    // waiting in a capture.wait.* rung) — in-memory, lost on restart like
+    // sessionRetryAttempts used to be. Purpose: cleanupOrphanSources() must not treat a
+    // capture that's legitimately backing off for up to 24h as an abandoned 'processing'
+    // row and trash its source (see FLOWS.md — this is the one deliberate touch to that
+    // otherwise-untouched sweep). A restart during a rung wait re-exposes the row to the
+    // sweep for at most one cleanup cycle — an accepted, rare edge case, same tradeoff
+    // class as the old session-retry cap.
+    private final Set<String> ridingLadder = ConcurrentHashMap.newKeySet();
 
     // Orphan-source cleanup: a capture with no notes left, older than this, and not actively
     // ingesting → its kept source file is trashed (the user's "no children → delete the
@@ -70,19 +91,6 @@ public class CaptureIngestWorker {
     @Value("${ingest.capture.batch-limit:25}")
     private int batchLimit;
 
-    // A hard-FAILED capture is retried automatically FOREVER — no lifetime cap, no auto-discard
-    // (see retryFailed/cleanupOrphanSources: 'failed' rows are never swept). Some failures are
-    // transient at the SITE level (rate-limited, extractor briefly broken) and self-heal on
-    // their own timeline, and every restart deserves a fresh shot at that. What IS bounded is
-    // automated hammering within one continuous uptime: sessionRetryAttempts caps how many
-    // times the periodic tick will re-try the SAME capture before leaving it alone for the
-    // rest of this session (still visible, still retried again on the next restart). A manual
-    // "retry now" from the failed-list UI always bypasses this cap — it's the user's call, not
-    // an automated loop.
-    @Value("${ingest.capture.session-max-retries:5}")
-    private int sessionMaxRetries;
-    private final Map<String, Integer> sessionRetryAttempts = new ConcurrentHashMap<>();
-
     // The embedder publishes synthesized notes BACK to this backend; during boot Tomcat
     // isn't bound yet, so hold submission until the app is ready (same reasoning as
     // ResourceScanService). The scheduled tick drains the backlog once ready.
@@ -90,19 +98,21 @@ public class CaptureIngestWorker {
 
     public CaptureIngestWorker(CaptureRepository captureRepo, IngestClient ingestClient,
                                SettingsRepository settingsRepo, NoteIndexRepository noteIndex,
-                               FileRepository fileRepo) {
+                               FileRepository fileRepo, RabbitTemplate rabbitTemplate,
+                               PipelineFailureRepository pipelineFailureRepo) {
         this.captureRepo = captureRepo;
         this.ingestClient = ingestClient;
         this.settingsRepo = settingsRepo;
         this.noteIndex = noteIndex;
         this.fileRepo = fileRepo;
+        this.rabbitTemplate = rabbitTemplate;
+        this.pipelineFailureRepo = pipelineFailureRepo;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void onAppReady() {
         appReady = true;
-        retryFailed();   // every restart is a free retry — yt-dlp/site fixes land between them
-        nudge();         // drain anything captured (or left over) before the first tick
+        nudge();   // drain anything captured (or left over) before the first tick
     }
 
     @PreDestroy
@@ -110,9 +120,12 @@ public class CaptureIngestWorker {
         lane.shutdown();
     }
 
-    /** Scheduled heartbeat — guarantees the queue drains even with no nudges (restart
-     *  backlog, released retries, resources enqueued by other paths). */
-    @Scheduled(fixedDelayString = "${ingest.capture.delay-ms:15000}",
+    /** Scheduled heartbeat — now the SAFETY NET (default 5min, was 15s): the outbox+
+     *  RabbitMQ fast path from CaptureController's enqueue chokepoint delivers within
+     *  seconds instead of waiting for this tick (QUEUE_UNIFICATION_PLAN.md Phase 4). This
+     *  still exists to catch whatever that path missed — a crash between the DB commit
+     *  and the outbox publish, or a genuinely lost message. */
+    @Scheduled(fixedDelayString = "${ingest.capture.delay-ms:300000}",
                initialDelayString = "${ingest.capture.initial-delay-ms:20000}")
     public void tick() {
         if (!ingestEnabled) return;
@@ -188,35 +201,6 @@ public class CaptureIngestWorker {
         }
     }
 
-    /** Auto-retry for hard-FAILED captures (yt-dlp rejected a URL, embedder 4xx, ...). Runs on
-     *  every app restart ({@link #onAppReady}) AND on a slow standing cadence, since a
-     *  long-uptime deploy won't restart often enough on its own to catch a site fix. No
-     *  lifetime cap — a permanently-broken link stays visible and gets retried again on every
-     *  future restart, forever; {@link #sessionRetryAttempts} only throttles the AUTOMATED tick
-     *  within one continuous uptime so it doesn't hammer the same dead link every 6h forever in
-     *  a session that happens to run for weeks. Requeues (→ 'queued', retry_count+1, the
-     *  lifetime telemetry counter) so the row re-enters the normal {@link #drain()} path. */
-    @Scheduled(fixedDelayString = "${ingest.capture.retry-failed-ms:21600000}",   // 6h
-               initialDelayString = "${ingest.capture.initial-delay-ms:20000}")
-    public void retryFailed() {
-        if (!ingestEnabled) return;
-        List<CaptureRepository.Capture> batch = captureRepo.findFailedRetryable(batchLimit);
-        if (batch.isEmpty()) return;
-        int requeued = 0;
-        for (CaptureRepository.Capture c : batch) {
-            int attempts = sessionRetryAttempts.getOrDefault(c.id(), 0);
-            if (attempts >= sessionMaxRetries) continue;   // done for THIS session; next restart resets it
-            if (captureRepo.requeueFailed(c.id())) {
-                sessionRetryAttempts.put(c.id(), attempts + 1);
-                requeued++;
-            }
-        }
-        if (requeued > 0) {
-            log.info("[CaptureIngestWorker] requeued {} failed capture(s) for retry", requeued);
-            nudge();
-        }
-    }
-
     /** Orphan-source cleanup (the user's "once a source has no children we delete it" rule).
      *  A capture whose proposed notes were ALL deleted leaves its kept original (uploaded PDF,
      *  saved media) sitting in the vault. This sweep trashes it. Guards against nuking a source
@@ -232,8 +216,8 @@ public class CaptureIngestWorker {
             if (("QUEUED".equals(j.status()) || "RUNNING".equals(j.status())) && j.captureId() != null)
                 active.add(j.captureId());
         }
-        // 'failed' captures are deliberately NOT swept here — see retryFailed's class doc.
-        // They only leave 'failed' by succeeding or by an explicit user dismiss.
+        // 'failed' captures are deliberately NOT swept here — they only leave 'failed' by
+        // succeeding (a manual retry re-entering the flow) or an explicit user dismiss.
         long cutoff = System.currentTimeMillis() - cleanupMinAgeMs;
         for (CaptureRepository.Capture c : captureRepo.findStaleActive(cutoff)) {
             sweepOrphan(c, active);
@@ -242,6 +226,7 @@ public class CaptureIngestWorker {
 
     private void sweepOrphan(CaptureRepository.Capture c, Set<String> active) {
         if (active.contains(c.id())) return;                          // still ingesting
+        if (ridingLadder.contains(c.id())) return;                    // backing off, not abandoned
         if (!noteIndex.findNotesByCapture(c.id()).isEmpty()) return;  // still has children
         String file = localVaultFile(c);
         // Don't trash a file a DUPLICATE capture (same upload twice) still shares — its
@@ -271,41 +256,155 @@ public class CaptureIngestWorker {
         }
     }
 
-    /** Runs on the capture lane. Claim-and-submit each queued resource; a transient
-     *  submit failure releases the row back to {@code queued} for the next tick, so a
-     *  down embedder never loses a resource. */
+    /** Runs on the capture lane — the SAFETY NET's per-tick batch. Claim-and-submit each
+     *  still-'queued' row (never claimed by the instant Rabbit path, or that path's
+     *  message was lost) exactly as attempt 0 — same as a fresh capture. */
     void drain() {
         if (!appReady) return;
         List<CaptureRepository.Capture> batch = captureRepo.findQueued(batchLimit);
         if (batch.isEmpty()) return;
-
-        int submitted = 0;
         for (CaptureRepository.Capture c : batch) {
-            if (!captureRepo.claim(c.id())) continue;   // a concurrent drain won it
-            try {
-                IngestClient.Result res = submit(c);
-                if (res.ok()) {
-                    submitted++;
-                } else if (res.status() >= 400 && res.status() < 500) {
-                    // the embedder rejected the request itself (bad ref/route) — immediate
-                    // retrying won't help, but the bounded auto-retry (retryFailed) still gets
-                    // a shot later in case it was a transient site-side rejection.
-                    captureRepo.markFailed(c.id(), "rejected (" + res.status() + "): " + res.body());
-                    log.warn("[CaptureIngestWorker] {} rejected ({}) — marked failed",
-                        c.id(), res.status());
-                } else {
-                    // transport / 5xx — embedder down or busy; release for the next tick.
-                    captureRepo.updateStatus(c.id(), "queued");
-                }
-            } catch (Exception e) {   // reconstruction/read error → don't strand as processing
-                captureRepo.updateStatus(c.id(), "queued");
-                log.warn("[CaptureIngestWorker] {} submit errored, requeued: {}", c.id(), e.toString());
-            }
+            if (!captureRepo.claim(c.id())) continue;   // a concurrent drain/listener won it
+            processCapture(c, 0);
         }
-        if (submitted > 0) {
-            log.info("[CaptureIngestWorker] submitted {} of {} queued resource(s)",
-                submitted, batch.size());
+    }
+
+    /** The instant path: one message per capture, published by CaptureController's outbox
+     *  chokepoint (attempt 0, header absent) or by the broker re-delivering a ladder rung
+     *  after its TTL expires (attempt = the rung number, via {@code x-attempt-count}). */
+    @RabbitListener(queues = RabbitQueueConfig.CAPTURE_QUEUE)
+    public void onCaptureMessage(Message message) {
+        String captureId = readCaptureId(message.getBody());
+        if (captureId == null) return;
+        int attempt = readAttempt(message);
+        if (attempt == 0) {
+            if (!captureRepo.claim(captureId)) return;   // lost the race, or not 'queued'
         }
+        CaptureRepository.Capture c = captureRepo.get(captureId);
+        // attempt 0 just claimed it, so this is really a null-safety guard there; for a
+        // ladder redelivery (attempt>0) it's the real idempotency check — a manual dismiss,
+        // a resolved dedup race, etc. may have moved the row off 'processing' already.
+        if (c == null || !"processing".equals(c.status())) return;
+        processCapture(c, attempt);
+    }
+
+    /** Shared by the poll-based safety net ({@link #drain()}) and the instant
+     *  {@link #onCaptureMessage} listener: submit the already-claimed row, and route the
+     *  outcome exactly like the old inline drain() body did: {@code ok} leaves it
+     *  'processing' for the embedder to own; a 4xx dead-letters immediately (retrying
+     *  won't help); a 5xx/transport failure advances to the next retry-ladder rung, or
+     *  dead-letters once the ladder (3 rungs) is exhausted. */
+    void processCapture(CaptureRepository.Capture c, int attempt) {
+        IngestClient.Result res;
+        try {
+            res = submit(c);
+        } catch (Exception e) {   // reconstruction/read error — treat like a transport failure
+            log.warn("[CaptureIngestWorker] {} submit errored: {}", c.id(), e.toString());
+            res = new IngestClient.Result(false, 0, null, e.toString());
+        }
+
+        if (res.ok()) {
+            ridingLadder.remove(c.id());
+            log.info("[CaptureIngestWorker] submitted {}", c.id());
+            return;
+        }
+        if (res.status() >= 400 && res.status() < 500) {
+            // the embedder rejected the request itself (bad ref/route) — immediate
+            // retrying won't help; straight to dead-letter, skip the ladder entirely.
+            deadLetter(c.id(), "rejected (" + res.status() + "): " + res.body());
+            return;
+        }
+        // transport / 5xx — embedder down or busy; ride the retry ladder.
+        int nextAttempt = attempt + 1;
+        if (nextAttempt > RabbitQueueConfig.CAPTURE_RUNG_QUEUES.length) {
+            deadLetter(c.id(), "retry ladder exhausted: " + res.body());
+        } else {
+            publishToRung(c.id(), nextAttempt);
+        }
+    }
+
+    /** Publish onto the next backoff rung (1-indexed: rung 1 = capture.wait.1h, ...) with
+     *  the attempt count carried forward as a message header — the broker's DLX+TTL moves
+     *  it back onto {@code capture} once the rung's TTL expires (see RabbitQueueConfig). */
+    private void publishToRung(String captureId, int rung) {
+        ridingLadder.add(captureId);
+        String queueName = RabbitQueueConfig.CAPTURE_RUNG_QUEUES[rung - 1];
+        try {
+            String payload = mapper.writeValueAsString(Map.of("id", captureId));
+            rabbitTemplate.convertAndSend(queueName, payload,
+                m -> { m.getMessageProperties().setHeader("x-attempt-count", rung); return m; });
+            log.info("[CaptureIngestWorker] {} riding retry ladder → {} (attempt {})",
+                captureId, queueName, rung);
+        } catch (Exception e) {
+            // Broker unreachable — don't strand the row silently; dead-letter it now rather
+            // than lose the retry entirely (a manual retry always still works afterward).
+            log.warn("[CaptureIngestWorker] could not publish {} to {}: {}", captureId, queueName, e.toString());
+            deadLetter(captureId, "could not schedule retry: " + e.getMessage());
+        }
+    }
+
+    /** Terminal handling for THIS submission attempt: publish to capture.deadletter so its
+     *  listener ({@link #onCaptureDeadLetter}) performs the two dead-letter actions durably
+     *  (survives a crash between "decided to give up" and actually recording it). Does NOT
+     *  poison the capture forever — {@code markFailed} only stops the AUTOMATIC ladder; a
+     *  manual {@code POST /api/capture/{id}/retry} re-enters the normal flow from rung 1. */
+    private void deadLetter(String captureId, String error) {
+        ridingLadder.remove(captureId);
+        try {
+            String payload = mapper.writeValueAsString(Map.of("id", captureId, "error", error));
+            rabbitTemplate.convertAndSend(RabbitQueueConfig.CAPTURE_DEADLETTER_QUEUE, payload);
+        } catch (Exception e) {
+            // Broker unreachable even for the deadletter hop — fall back to handling it
+            // inline so the failure is never silently lost (Phase 0's whole point).
+            log.warn("[CaptureIngestWorker] could not publish dead-letter for {}: {}", captureId, e.toString());
+            recordDeadLetter(captureId, error);
+        }
+    }
+
+    /** Consumes {@code capture.deadletter}: the two actions the plan specifies, nothing
+     *  else. (a) {@code markFailed} — the SAME method the pre-Rabbit code path already
+     *  used, so {@code GET /api/capture/failed} and manual retry/dismiss are unchanged.
+     *  (b) a {@code pipeline_failures} row, so debugging a capture dead-letter looks
+     *  identical to debugging any other pipeline's failure. */
+    @RabbitListener(queues = RabbitQueueConfig.CAPTURE_DEADLETTER_QUEUE)
+    public void onCaptureDeadLetter(Message message) {
+        String captureId;
+        String error;
+        try {
+            JsonNode node = mapper.readTree(message.getBody());
+            captureId = node.path("id").asText(null);
+            error = node.path("error").asText(null);
+        } catch (Exception e) {
+            log.warn("[CaptureIngestWorker] malformed dead-letter message, dropping: {}", e.getMessage());
+            return;
+        }
+        if (captureId == null) return;
+        recordDeadLetter(captureId, error);
+    }
+
+    private void recordDeadLetter(String captureId, String error) {
+        ridingLadder.remove(captureId);
+        CaptureRepository.Capture c = captureRepo.get(captureId);
+        captureRepo.markFailed(captureId, error);
+        log.warn("[CaptureIngestWorker] {} dead-lettered: {}", captureId, error);
+        pipelineFailureRepo.record("capture", "ingest_submit",
+            Map.of("captureId", captureId,
+                   "sourceRef", c != null && c.sourceRef() != null ? c.sourceRef() : "",
+                   "sourceType", c != null && c.sourceType() != null ? c.sourceType() : ""),
+            null, error, null);
+    }
+
+    private String readCaptureId(byte[] body) {
+        try {
+            return mapper.readTree(new String(body, StandardCharsets.UTF_8)).path("id").asText(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static int readAttempt(Message message) {
+        Object h = message.getMessageProperties().getHeaders().get("x-attempt-count");
+        return h instanceof Number ? ((Number) h).intValue() : 0;
     }
 
     /** Rebuild the embedder payload from the persisted capture row. Text captures kept

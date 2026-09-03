@@ -1,13 +1,17 @@
 # Capture — resource intake → durable ingest queue → notes
 
-Files: CaptureController.java, CaptureRepository.java, CaptureIngestWorker.java, ../common/IngestClient.java, ../internalapi/InternalAgentController.java (track fan-out), ../tracks/TrackRepository.java
+Files: CaptureController.java, CaptureRepository.java, CaptureIngestWorker.java, ../common/IngestClient.java, ../common/RabbitQueueConfig.java, ../common/OutboxRepository.java, ../common/PipelineFailureRepository.java, ../internalapi/InternalAgentController.java (track fan-out), ../tracks/TrackRepository.java
 
 The user "sends resources from time to time" (shared links, pasted text, PWA share-target).
-Each becomes a durable `capture` row and is drained into the embedder ingest pipeline by a
-continuous background worker. Nothing is lost if the embedder is down or the app restarts —
-the embedder's own job queue is in-memory; this table is authored, backed-up state.
+Each becomes a durable `capture` row; the `capture` table is the status/UI source of truth
+(unchanged schema). Since QUEUE_UNIFICATION_PLAN.md Phase 4, SUBMISSION transport is
+RabbitMQ (outbox chokepoint → `capture` queue → `@RabbitListener`), not a fast poll — see
+"Retry ladder" below. `CaptureIngestWorker`'s own poll (`tick()`, now 5min) is the SAFETY
+NET, same shape Phase 3 gave Group A. Nothing is lost if the embedder or the broker is down
+or the app restarts — the embedder's own job queue is in-memory; this table + the outbox +
+RabbitMQ's own durability are what survive a restart.
 
-## Intake → queue → drain → notes
+## Intake → outbox → RabbitMQ → submit → notes
 
 ```
 POST /api/capture {url|text, title?, trackId?|newTrackTitle?+newTrackType?}
@@ -15,9 +19,13 @@ POST /api/capture {url|text, title?, trackId?|newTrackTitle?+newTrackType?}
   resolveTrackId(): newTrackTitle set → trackRepo.create() first; else the given trackId;
     neither → null (untagged — today's exact behavior). See tracks/FLOWS.md Phase 1b.
   text → storeTextResource() writes resources/files/{id}.md  (kept for Learn side-by-side)
-  captureRepo.enqueue(id, type, ref, sourcePath, title)      → row status = 'queued'
+  enqueueAndPublish(id, type, ref, sourcePath, title)   TransactionTemplate, ONE transaction:
+    captureRepo.enqueue(...)                              → row status = 'queued'
+    outboxRepo.enqueue(CAPTURE_QUEUE, {id})                → outbox row, published on commit
   trackId resolved → captureRepo.setTrackId(id, trackId)     → capture.track_id set
-  ingestWorker.nudge()                                        → drain now (no tick wait)
+  ingestWorker.nudge()                             → ALSO trigger the poll safety net now
+    (deliberately redundant with the outbox publish above — claim() is atomic so whichever
+    path (Rabbit listener or this poll) reaches the row first wins; the other is a no-op)
   → 200 {status:"queued", captureId}
 
 POST /api/capture/file (multipart)                           CaptureController.captureFile()
@@ -39,18 +47,25 @@ POST /api/capture {url: playlist page}                       CaptureController.c
     caller gets an immediate response instead of waiting for the whole playlist
   → 200 {status:"queued", playlistId, count, skipped}         (skipped = already in pipeline)
 
-CaptureIngestWorker (continuous)                             capture/CaptureIngestWorker.java
-  @Scheduled tick (15s) ─┐
-  nudge() (on capture)  ─┼─→ WorkerLane("capture-ingest").trigger(drain)   (1 drain at a time)
-  onAppReady() ─────────┘
-  drain():
-    captureRepo.findQueued(batchLimit)          FIFO, oldest first
-    per row: captureRepo.claim(id)              atomic 'queued'→'processing' (no double-submit)
-             IngestClient.submit*(…)            text → submitText (reads the .md back)
-                                                url  → submitStandalone
-             ok        → stays 'processing'     (embedder now owns it)
-             4xx       → 'failed'               (bad ref/route — retry won't help)
-             5xx/down  → 'queued'               (released; next tick retries → survives outage)
+CaptureIngestWorker — TWO paths into the same processCapture() body:
+
+  INSTANT (primary): @RabbitListener(CAPTURE_QUEUE) onCaptureMessage(message)
+    attempt = message header x-attempt-count (absent → 0, i.e. fresh from the outbox)
+    attempt==0 → captureRepo.claim(id)          atomic 'queued'→'processing'
+    captureRepo.get(id), guard status=='processing' (idempotency: stale/duplicate redelivery)
+    → processCapture(c, attempt)
+
+  SAFETY NET (fallback): @Scheduled tick (5min, was 15s) / nudge()
+    WorkerLane("capture-ingest").trigger(drain)         (1 drain at a time)
+    drain(): captureRepo.findQueued(batchLimit)         FIFO, oldest first — only rows never
+             claimed by the instant path, or whose outbox publish was lost
+      per row: captureRepo.claim(id) → processCapture(c, 0)
+
+  processCapture(Capture c, int attempt):               shared by BOTH paths above
+    IngestClient.submit*(…)            text → submitText (reads the .md back); url → submitStandalone
+    ok        → stays 'processing'     (embedder now owns it; pollFailures reconciles the outcome)
+    4xx       → deadLetter(id, err)    straight to capture.deadletter — NO ladder (retry won't help)
+    5xx/down  → next rung, or deadLetter(id, err) if the ladder (3 rungs) is exhausted
 
 Per-note track fan-out (Phase 1b, capture.track_id set)          jobs.py + InternalAgentController
   embedder synthesis, per note produced:
@@ -79,18 +94,24 @@ text, title)`. Callers: `CaptureIngestWorker` (standalone, from the queue) and
 ## Lifecycle (capture.status)
 
 ```
-queued ──drain/submit──> processing ──embedder publishes notes to _inbox──> (Inbox shows it)
+queued ──claim/submit──> processing ──embedder publishes notes to _inbox──> (Inbox shows it)
    │                     │  │                                                      │
-   4xx→failed  5xx→queued   synthesis 503 (LLM cooling) → deferred      user files/acks each note
-   (auto-retry)(retry)      (+bundle_ref)     │                                    │
-   forever ↓                  retryDeferred: resume from bundle      all filed → 'filed' + source trashed
-   failed ──retryFailed──> queued              (no re-extract) → processing
-   (GET /api/capture/failed lists it; POST .../retry|dismiss)
+   │          4xx │  5xx/down │ synthesis 503 (LLM cooling) → deferred   user files/acks each note
+   │        (dead- │ (retry   │  (+bundle_ref)     │                                │
+   │         letter│  ladder) │      retryDeferred: resume from bundle  all filed → 'filed' + trashed
+   │        skip   ▼          │       (no re-extract) → processing
+   │        ladder) capture.deadletter (after 3 rungs exhausted, or an
+   │                 immediate 4xx) → markFailed + pipeline_failures row
+   │                          │
+   └───── manual POST .../retry ──────────────────────┘  (re-enters at rung 1, bypasses everything)
+   failed (GET /api/capture/failed lists it; POST .../retry|dismiss)
 ```
-`queued` is NEW (this change): resources wait here until submitted. `processing`/`ready` are what
-the Learn Inbox lists (`InboxController`); `filed` is set when every child note is triaged (see
-`inbox/FLOWS.md`). In-place note snapshots (`InternalAgentController.createCapture`) skip the queue
-— their ingest already ran — and are inserted straight at `processing`.
+`queued` waits here until claimed (by the instant Rabbit listener or the poll safety net).
+`processing`/`ready` are what the Learn Inbox lists (`InboxController`); `filed` is set when
+every child note is triaged (see `inbox/FLOWS.md`). In-place note snapshots
+(`InternalAgentController.createCapture`) skip the queue — their ingest already ran — and are
+inserted straight at `processing`. **A row riding the retry ladder stays `processing`**
+(never flips back to `queued`) — see Retry Ladder below for why.
 
 **`deferred` = synthesis waiting on LLM providers.** When the embedder DEFERS a job (all
 providers cooling), `pollFailures` parks the capture `deferred` with the `bundle_ref` instead of
@@ -101,33 +122,99 @@ re-download/re-whisper). Restart-safe: the state is this DB row, the bundle a fi
 (`noteIndex.findNotesByCapture` non-empty → settle to `processing`), so a status race can't
 duplicate. `deferred` blocks the dedup guard (live) and is excluded from orphan cleanup.
 
-**`failed` is retried, forever, never auto-discarded.** Before this change a hard 4xx/site-reject
-(e.g. yt-dlp refusing an Instagram URL) just sat at `failed` until the orphan-cleanup sweep
-silently discarded it 30min later — no retry, no visibility, the actual failure reason wasn't
-even recorded. Now: `markFailed(id, error)` records `last_error`; `retryFailed()` (on every
-`onAppReady` restart + a 6h `@Scheduled` tick) requeues `failed` rows with NO lifetime cap — a
-permanently-broken link gets retried again on every future restart forever, because the failure
-might be transient at the SITE level (rate-limited, extractor briefly broken) independent of the
-request itself. What IS bounded: `sessionRetryAttempts` (in-memory, per-JVM-lifetime) caps
-automated retries of the SAME capture within one continuous uptime
-(`ingest.capture.session-max-retries`, default 5) so a long-running deploy doesn't hammer a dead
-link every 6h forever — the cap resets to zero on the next restart. A manual retry
-(`POST /api/capture/{id}/retry`) always bypasses the session cap. `cleanupOrphanSources` no
-longer sweeps `failed` rows at all — a failure only leaves `failed` by succeeding or by an
-explicit `POST /api/capture/{id}/dismiss`.
+## Retry ladder (Phase 4 — replaces the old hand-rolled `retryFailed`/`retryDeferred` pollers)
+
+A submit failure is NOT immediately `failed` any more. `processCapture()` classifies the
+`IngestClient.Result`:
+
+- **4xx (embedder rejected the request itself — bad ref/route)**: retrying won't help.
+  Straight to `capture.deadletter`, skipping the ladder entirely.
+- **5xx/transport (embedder down or busy)**: rides the ladder — a small, fixed, NOT
+  per-message-configurable sequence of RabbitMQ queues, each a pure backoff timer:
+
+  ```
+  capture (attempt N fails, 5xx) ──publish──> capture.wait.1h  (x-attempt-count=1)
+                                                    │ TTL expires (x-message-ttl)
+                                                    ▼ DLX (dead-letter-exchange="", routing-key="capture")
+                                               capture (redelivered, attempt=1)
+                                                    │ fails again
+                                                    ▼
+                                               capture.wait.6h  (x-attempt-count=2)
+                                                    │ … same TTL→DLX→redeliver …
+                                                    ▼
+                                               capture.wait.24h (x-attempt-count=3)
+                                                    │ fails again → ladder exhausted (attempt 4 > 3 rungs)
+                                                    ▼
+                                               capture.deadletter
+  ```
+  Rungs: 1h → 6h → 24h (`capture.retry.rung{1,2,3}-ttl-ms`, `RabbitQueueConfig`). No consumer
+  ever attaches to a wait queue — a message just sits until its TTL expires, then the broker
+  itself moves it back onto `capture` via the default exchange. This IS the entire backoff
+  mechanism; no Java timer/scheduler is involved. `x-attempt-count` is a message header,
+  carried forward by RabbitMQ's DLX (headers survive dead-lettering), read by
+  `CaptureIngestWorker.onCaptureMessage` to decide `processCapture`'s next move.
+
+**`capture.deadletter`** — the graveyard once the ladder (or an immediate 4xx) gives up.
+`CaptureIngestWorker.onCaptureDeadLetter` does exactly two things (`recordDeadLetter`):
+(a) `captureRepo.markFailed(id, error)` — the SAME method the pre-Rabbit code already used,
+so `GET /api/capture/failed`, `SyncPage.loadFailed()`, and manual retry/dismiss are all
+UNCHANGED from the frontend's perspective; (b) `PipelineFailureRepository.record("capture",
+"ingest_submit", {captureId, sourceRef, sourceType}, null, error, null)` — a plain JDBC
+insert into the SAME `pipeline_failures` table `embedder/failures.py` writes (see Change
+Index) — chosen over a Python-side write because the whole point of that table is to be a
+single shared ledger regardless of which pipeline (Java or Python) produced the failure;
+debugging a capture dead-letter now looks identical to debugging an ingest failure.
+
+**Dead-lettering does NOT poison a capture forever.** It only stops the AUTOMATIC ladder —
+`POST /api/capture/{id}/retry` → `requeueFailed()` (`failed`→`queued`) → `ingestWorker.nudge()`
+re-enters the exact same flow from rung 1 (attempt 0), same as a brand new capture. There is
+still no lifetime cap on MANUAL retries — the old "forever, but session-capped" behavior's
+spirit is preserved: automatic retries are now bounded by the ladder (3 rungs, not an
+in-memory session counter), but a human can always keep trying.
+
+**`ridingLadder` (in-memory, `CaptureIngestWorker`) — the one deliberate touch to
+`cleanupOrphanSources()`.** A capture riding the 6h/24h rung stays `processing` for far
+longer than `cleanupMinAgeMs` (30min default) with no notes and no active embedder job — by
+the OLD orphan-sweep predicate that looks exactly like an abandoned row, and it would trash
+the kept source file out from under a capture that's still legitimately auto-retrying. Fixed
+with the smallest possible guard: `sweepOrphan()` also skips any id in `ridingLadder` (added
+on `publishToRung`, removed on success/dead-letter). Lost on restart, like the old
+`sessionRetryAttempts` was — a restart during a rung wait re-exposes the row to the sweep for
+at most one cleanup cycle (~2min default). Accepted, rare edge case; flagged here because
+item 4 of the Phase 4 brief asked for orphan-cleanup to stay untouched, and this is the one
+line that isn't.
 
 ## Technology Notes
 
 - **Durable queue vs in-memory job queue.** The `capture` table survives restart; the embedder's
   `jobs.py` dict does not. That's the whole reason the drainer exists — capture-while-offline is
-  submitted on recovery. Cost: a resource waits one drain (≤ tick, or instant via `nudge()`).
-- **Atomic claim, not just the lane guard.** `WorkerLane` already prevents two overlapping drains,
-  but `claim()` (`UPDATE … WHERE status='queued'`) is the real correctness guarantee — a `nudge()`
-  racing a `tick()` can't double-submit the same row (which for standalone = duplicate notes, since
-  the embedder only de-dups in-place (note,embed) jobs).
-- **Indefinite retry on transport failure is intended.** A 5xx/unreachable row returns to `queued`
-  forever until the embedder accepts it — matches ImageProcessingWorker's "leave PENDING". Only a
-  4xx (the embedder rejected the request shape) is terminal (`failed`).
+  submitted on recovery. Cost: a resource waits at most one safety-net tick (5min) in the rare
+  case the instant Rabbit path is somehow lost; the common case is sub-second.
+- **Atomic claim, not just the lane guard.** `WorkerLane` already prevents two overlapping poll
+  drains, but `claim()` (`UPDATE … WHERE status='queued'`) is the real correctness guarantee — the
+  instant Rabbit listener and the poll safety net (or two overlapping drains) racing for the same
+  row can't double-submit it (which for standalone = duplicate notes, since the embedder only
+  de-dups in-place (note,embed) jobs). Deliberately redundant: `nudge()` still triggers an
+  immediate poll drain on every enqueue on TOP of the outbox publish, exactly like before Phase 4
+  — the atomic claim is what makes that safe rather than a race condition.
+- **A 5xx/transport failure now backs off instead of hammering immediately.** Before Phase 4 a
+  5xx row went straight back to `queued` and could be re-tried on the very next tick (15s) —
+  effectively no backoff at all. Now it rides the retry ladder (1h → 6h → 24h) — see Retry Ladder
+  above. Only an immediate 4xx (the embedder rejected the request shape) skips the ladder.
+- **Outbox reuses Phase 3's infra as-is.** `CaptureController.enqueueAndPublish` /
+  `enqueuePlaylistItemAndPublish` are the Group B equivalent of `ImageScanService.registerImages`'s
+  chokepoint — same `OutboxRepository`/`OutboxRelay` (`@TransactionalEventListener(AFTER_COMMIT)`
+  + 5s sweep fallback), same `outbox_events` table, just a different `queue_name` (`capture`
+  instead of `embed`/`embed-chunk`). Uses `TransactionTemplate` rather than `@Transactional`
+  because `capturePlaylist()` calls the per-item insert via self-invocation from `capture()` —
+  a proxy-based annotation would silently not apply there (same landmine Phase 3 hit in
+  `ImageProcessingWorker.handleResult`).
+- **`CaptureIngestWorker`/`PollingQueueWorker` — a deliberate non-migration.** Unlike Group A,
+  `CaptureIngestWorker`'s poll loop was NOT refactored onto `WorkQueue<T>`/`PollingQueueWorker`
+  (Phase 2's abstraction) — `RetryPolicy` doesn't yet model DLX/TTL ladders (only
+  `unbounded()`/`capped(n)`, see its own doc comment: "future phases add .backoff(...),
+  .deadLetter(...)"), so forcing it through that interface today would add indirection with
+  nothing yet to plug into it. Same call Phase 3 made for `ResourceScanService.retryPendingIngests`.
 - **`embedder.url` default drift fixed.** Pre-centralization, ResourceScanService defaulted to
   `localhost:8000` and CaptureController to `embedder:8000`. `IngestClient` has one default
   (`localhost:8000`); the real value is `EMBEDDER_URL` in application.properties.
@@ -153,17 +240,21 @@ explicit `POST /api/capture/{id}/dismiss`.
 |---|---|
 | Capture intake endpoint | `CaptureController.capture()` (`POST /api/capture`, url/text) |
 | Shared-file intake (PDF/av) | `CaptureController.captureFile()` (`POST /api/capture/file`, multipart); `classifyFile`/`storeBinaryResource` |
-| Resource → queue insert | `CaptureRepository.enqueue()` (status `queued`) |
-| Continuous drain cadence / batch | `ingest.capture.delay-ms` / `ingest.capture.batch-limit` env |
+| Resource → queue insert + outbox publish | `CaptureController.enqueueAndPublish()` / `enqueuePlaylistItemAndPublish()` (one TransactionTemplate) → `CaptureRepository.enqueue()` (status `queued`) + `OutboxRepository.enqueue(CAPTURE_QUEUE, {id})` |
+| Instant submit path | `CaptureIngestWorker.onCaptureMessage()` (`@RabbitListener(CAPTURE_QUEUE)`) |
+| Safety-net poll cadence / batch | `ingest.capture.delay-ms` (default 5min) / `ingest.capture.batch-limit` env |
 | Claim / queued query | `CaptureRepository.claim()` / `findQueued()` |
+| Shared submit-and-route logic (both paths) | `CaptureIngestWorker.processCapture()` |
 | Payload rebuilt from row | `CaptureIngestWorker.submit()` (text reads .md back) |
 | The single embedder /ingest gate | `common/IngestClient` (`submitInPlace`/`submitStandalone`/`submitText`) |
 | Embedder URL / submit timeout | `embedder.url` / `ingest.submit.timeout-ms` env |
 | Master ingest on/off | `ingest.enabled` (shared with ResourceScanService) |
 | Capture lifecycle transitions | `queued`→`processing` here; `filed` in `inbox/InboxController` |
 | **Failure visibility** (job failed after submit) | `CaptureIngestWorker.pollFailures()` polls `IngestClient.listJobs()` → `CaptureRepository.markFailed(id, error)` (stranded `processing`→`failed`, records `last_error`); DEFERRED → `markDeferred()` |
-| **Failed-capture auto-retry** (unbounded, forever) | `CaptureIngestWorker.retryFailed()` (`onAppReady` + `ingest.capture.retry-failed-ms`, 6h) → `CaptureRepository.requeueFailed()`; per-session cap `ingest.capture.session-max-retries` (in-memory `sessionRetryAttempts`, resets on restart) |
-| **Failed-capture list / manual retry / dismiss** | `GET /api/capture/failed` · `POST /api/capture/{id}/retry` (bypasses session cap) · `POST /api/capture/{id}/dismiss` → `CaptureController` + `CaptureRepository.listFailed/requeueFailed/dismissFailed` |
+| **Retry ladder** (5xx/transport failures) | `RabbitQueueConfig` (`CAPTURE_QUEUE`/`CAPTURE_RUNG_QUEUES`/`CAPTURE_DEADLETTER_QUEUE`, `capture.retry.rung{1,2,3}-ttl-ms` = 1h/6h/24h) → `CaptureIngestWorker.publishToRung()`; header `x-attempt-count` |
+| **4xx / ladder-exhausted → dead-letter** | `CaptureIngestWorker.deadLetter()` → `capture.deadletter` queue → `onCaptureDeadLetter()`/`recordDeadLetter()` → `CaptureRepository.markFailed()` + `common/PipelineFailureRepository.record("capture", "ingest_submit", …)` |
+| **cleanupOrphanSources() ladder-wait guard** (the one touch to an otherwise-untouched sweep) | `CaptureIngestWorker.ridingLadder` (in-memory `Set`), checked in `sweepOrphan()` |
+| **Failed-capture list / manual retry / dismiss** (bypasses the ladder entirely, re-enters at rung 1) | `GET /api/capture/failed` · `POST /api/capture/{id}/retry` · `POST /api/capture/{id}/dismiss` → `CaptureController` + `CaptureRepository.listFailed/requeueFailed/dismissFailed` — UNCHANGED from Phase 4 |
 | **Synthesis durability retry** | `CaptureIngestWorker.retryDeferred()`/`drainDeferred()` → `IngestClient.resume(bundle_ref,…)`; cadence `ingest.capture.retry-deferred-ms` (3min) |
 | **Deferred state + bundle** | `CaptureRepository.markDeferred/findDeferred/claimDeferred`; `bundle_ref` column; status `deferred` |
 | **Orphan-source cleanup** ("no children → trash source"), `processing` only — `failed` is excluded, see failed-capture rows above | `CaptureIngestWorker.cleanupOrphanSources()` (age + no-active-job + `countLiveReferencesToFile` guards) → `FileRepository.softDeleteFile`; env `ingest.cleanup.min-age-ms` |
