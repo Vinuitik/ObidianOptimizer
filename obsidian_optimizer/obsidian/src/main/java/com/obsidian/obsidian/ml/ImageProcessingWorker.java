@@ -10,12 +10,15 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -98,17 +101,21 @@ public class ImageProcessingWorker {
         pool.shutdownNow();
     }
 
-    /** Tick: hand the drain to the image lane and return immediately. */
-    @Scheduled(fixedDelay = 30_000)
+    /** Tick: hand the drain to the image lane and return immediately. Now the SAFETY
+     *  NET (default 1h, was 30s) — the outbox+RabbitMQ path from ImageScanService's
+     *  chokepoint is the primary trigger, delivering within seconds instead of waiting
+     *  for this tick. See QUEUE_UNIFICATION_PLAN.md Phase 5. */
+    @Scheduled(fixedDelayString = "${image.scan.delay-ms:3600000}",
+               initialDelayString = "${image.scan.initial-delay-ms:30000}")
     public void processPendingImages() {
         if (!enabled) return;
         lane.trigger(this::drain);
     }
 
-    /** Runs on the image lane. One batch per tick — the 30s pacing is deliberate,
-     *  since captioning hits rate-limited vision providers; a tight drain loop would
-     *  hammer cooled providers. The blocking invokeAll now blocks the lane, not the
-     *  scheduler thread, so embedding/cards/chrono keep running alongside it. */
+    /** Runs on the image lane. One batch per tick — deliberate pacing even now that
+     *  it's a safety net, since captioning hits rate-limited vision providers; a tight
+     *  drain loop would hammer cooled providers. The blocking invokeAll now blocks the
+     *  lane, not the scheduler thread, so embedding/cards/chrono keep running alongside it. */
     void drain() {
         List<PendingImageJob> batch = jobRepo.findPending(BATCH_SIZE);
         if (batch.isEmpty()) return;
@@ -152,17 +159,104 @@ public class ImageProcessingWorker {
 
     /** Daily maintenance: drop orphan jobs (note gone → "stored by no one"), then
      *  give the remaining SKIPPED jobs (permanent-looking failures) another retry.
-     *  Prune first so orphan SKIPPED rows aren't pointlessly requeued. */
+     *  Prune first so orphan SKIPPED rows aren't pointlessly requeued.
+     *
+     * <p>Revived rows also get a fresh outbox publish, one per id — requeuing to
+     * PENDING alone would otherwise sit invisible until the (now-hourly) poll safety
+     * net happens to notice it, instead of being picked up by the listener in seconds
+     * like every other path onto this queue. */
     @Scheduled(fixedDelay = 86_400_000, initialDelay = 3_600_000)
     public void requeueSkipped() {
         int pruned = jobRepo.pruneOrphans();
         if (pruned > 0) {
             log.info("[ImageProcessingWorker] pruned {} orphan image job(s) (embedding note gone)", pruned);
         }
-        int requeued = jobRepo.requeueSkipped();
-        if (requeued > 0) {
-            log.info("[ImageProcessingWorker] requeued {} SKIPPED image job(s) for daily retry", requeued);
+        List<String> requeuedIds = jobRepo.requeueSkipped();
+        for (String id : requeuedIds) {
+            outboxRepo.enqueue(ImageCaptionQueueConfig.IMAGE_CAPTION_QUEUE, Map.of("jobId", id));
         }
+        if (!requeuedIds.isEmpty()) {
+            log.info("[ImageProcessingWorker] requeued {} SKIPPED image job(s) for daily retry", requeuedIds.size());
+        }
+    }
+
+    /**
+     * Fast path: consumes the "image-caption" outbox queue, one image per message.
+     * Reuses {@link #handleResult} — the SAME per-job logic the poll fallback uses via
+     * {@link #processJobBatch} — the only difference is the per-message error handling
+     * needed to drive the retry-wait ladder (see {@link ImageCaptionQueueConfig}).
+     *
+     * <p>Concurrency = {@code image.worker.parallelism} (same property that sizes the
+     * poll fallback's inner thread pool), so both paths pull the same total weight
+     * against the wrapper's rate-limited providers.
+     *
+     * <p>Re-reads the job row fresh by id rather than trusting the message payload —
+     * the idempotency check: a stale/redelivered message for an already-DONE/SKIPPED
+     * job (poll fallback or another delivery got there first) is a safe no-op (ack,
+     * no re-caption). A missing row (note deleted, pruneOrphans ran) is likewise a
+     * safe no-op.
+     */
+    @RabbitListener(queues = ImageCaptionQueueConfig.IMAGE_CAPTION_QUEUE,
+                     concurrency = "${image.worker.parallelism:4}")
+    public void onImageCaptionMessage(String payloadJson) {
+        if (!enabled) {
+            // Boot-light/testing mode: park the message and try again later rather
+            // than dropping it — mirrors the poll fallback's "just skip this tick".
+            throw new AmqpRejectAndDontRequeueException("image captioning disabled");
+        }
+        String jobId;
+        try {
+            jobId = objectMapper.readTree(payloadJson).path("jobId").asText(null);
+        } catch (Exception e) {
+            log.warn("[ImageProcessingWorker] malformed image-caption message, dropping: {}", e.getMessage());
+            return;
+        }
+        if (jobId == null) return;
+
+        PendingImageJob job = jobRepo.findById(jobId).orElse(null);
+        if (job == null || !"PENDING".equals(job.getStatus())) {
+            return; // already handled, or the note/job is gone — nothing to do
+        }
+
+        try {
+            JsonNode result = callProcessImage(job.getImagePath());
+            String provider = result.path("provider").asText("unknown");
+            handleResult(job, result, provider);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AmqpRejectAndDontRequeueException("interrupted", e);
+        } catch (Exception e) {
+            // network/timeout/non-200 that isn't a clear "image gone" — transient.
+            // Reject (not requeue-into-self, which would tight-loop) so it dead-letters
+            // into the wait queue and comes back after image.caption.retry.wait-ms.
+            log.warn("[ImageProcessingWorker] fast-path caption failed for {} — retrying via wait queue: {}",
+                job.getImagePath(), e.getMessage());
+            throw new AmqpRejectAndDontRequeueException("transient caption failure", e);
+        }
+    }
+
+    /** Calls the wrapper's single-image endpoint and normalizes its response into the
+     *  same shape {@link #handleResult} already expects from the batch endpoint
+     *  ({@code {"text":...}} / {@code {"error":"not_found"}}) — the wrapper's actual
+     *  404 body is {@code {"error":"not_found: <path>"}}, so that translation happens
+     *  here rather than duplicating handleResult's error-matching. Throws on anything
+     *  else non-200 or a transport failure; the caller decides retry semantics. */
+    private JsonNode callProcessImage(String imagePath) throws IOException, InterruptedException {
+        String body = objectMapper.writeValueAsString(Map.of("image_path", imagePath));
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(wrapperUrl + "/process-image"))
+            .timeout(WRAPPER_TIMEOUT)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body))
+            .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() == 404) {
+            return objectMapper.createObjectNode().put("error", "not_found");
+        }
+        if (response.statusCode() != 200) {
+            throw new IOException("wrapper returned HTTP " + response.statusCode());
+        }
+        return objectMapper.readTree(response.body());
     }
 
     private void processJobBatch(List<PendingImageJob> jobs) {

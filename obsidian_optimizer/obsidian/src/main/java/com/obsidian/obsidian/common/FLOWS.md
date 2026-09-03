@@ -118,8 +118,11 @@ transparently reopened if found closed.
 - **No DLX or backoff configured on the `embed`/`embed-chunk` queues yet.** A
   consumer that fails just drops the message (RabbitListener default ack-on-return,
   no exception thrown on a logged failure) and relies entirely on the safety-net poll
-  (now hourly) to catch it eventually. This is deliberate Phase 3 scope — the
-  DLX+TTL retry ladder is Phase 4's job (`RetryPolicy`), for Group B's pilot queue.
+  (now hourly) to catch it eventually. This is deliberate Phase 3 scope for Group A —
+  its self-healing poll makes a DLX unnecessary. `pending_image_jobs` (Group B, Phase
+  5) DOES have a DLX+TTL wait-queue now (`ml/ImageCaptionQueueConfig.java`) since its
+  poll fallback is much slower and captioning hits rate-limited providers where a
+  tight instant-requeue would hurt; see `ml/FLOWS.md` "Image Pipeline".
 - **`RabbitBackedQueue` is unused in production today.** It exists to prove
   `PollingQueueWorker` genuinely doesn't care which `WorkQueue` implementation it
   drives — see `RabbitBackedQueueIT` for its ack/nack contract proven against a real

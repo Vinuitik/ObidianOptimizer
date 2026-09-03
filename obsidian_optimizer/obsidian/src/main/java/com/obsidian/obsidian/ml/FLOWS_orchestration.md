@@ -27,7 +27,7 @@ guard, so a tick mid-drain is a no-op, never stacks). To change the pattern:
 | Worker · method | Tick | Finds work by | Lane | Drain style |
 |---|---|---|---|---|
 | `NoteEmbeddingWorker.embedPendingNotes` | 1h (was 60s — now a SAFETY NET, see below) | `content_hash` diff (`findNotesNeedingEmbedding`) | `embed` | **continuous** — loops while a batch is full AND progress is made (fast backlog drain); stops on partial batch or zero progress |
-| `ImageProcessingWorker.processPendingImages` | 30s | `pending_image_jobs` table | `image` | **CAPTION stage** — one batch/tick (30s pacing avoids hammering cooled vision providers); inner `pool` parallelises across notes. Writes chunk text with a **NULL vector** and marks DONE = "captioned" — never re-captions, never loses a caption to an embed hiccup |
+| `ImageProcessingWorker.processPendingImages` | 1h (was 30s — now a SAFETY NET, Phase 5, see below) | `pending_image_jobs` table | `image` | **CAPTION stage** — one batch/tick; inner `pool` parallelises across notes. Writes chunk text with a **NULL vector** and marks DONE = "captioned" — never re-captions, never loses a caption to an embed hiccup |
 | `ChunkEmbeddingReconciler.reconcilePendingChunks` | 1h (was 15s — now a SAFETY NET, see below) | `note_chunks WHERE embedding IS NULL` (the **embed queue**) | `embed-reconcile` | continuous drain; embeds any NULL-vector chunk (image OR text), sets the vector only on success (fail → stays NULL → retried next tick) |
 | `CardJobWorker.scanAndGenerate` | 30min | `body_hash` diff | `cards` | one batch/tick (credit-capped) |
 | `ChronoService.scheduledRun` | 2am cron | scans all md | `chrono` | full nightly pass (`runAllJobs`) |
@@ -56,6 +56,18 @@ NULL-vector chunk (`ImageScanService.registerImages`, `ImageProcessingWorker
 the instant the write commits — a `@RabbitListener` on the same worker class embeds it
 within seconds, reusing the exact same per-item logic the poll fallback uses
 (`embedOne` / `embedChunk`). Full mechanism: `common/FLOWS.md`.
+
+### Fast path: image captioning (Phase 5)
+Same shape, `pending_image_jobs`' own queue: `ImageScanService.registerImages`'s
+`upsertPending` call (and `ImageProcessingWorker.requeueSkipped`'s daily revive) publish
+to the `image-caption` outbox queue; `ImageProcessingWorker.onImageCaptionMessage`
+(`@RabbitListener`, concurrency = `image.worker.parallelism`) captions one image per
+message, reusing `handleResult`. Unlike Group A's queues, a transient failure here
+rejects into a short TTL "wait" queue (`ImageCaptionQueueConfig`, default 5min) rather
+than requeuing instantly — captioning hits the same rate-limited vision providers the
+30s poll cadence used to pace against. A `not_found` still goes straight to `SKIPPED`,
+NOT a hard dead-letter — this table's daily self-heal sweep is unchanged. Full
+mechanism: `ml/FLOWS.md` "Image Pipeline".
 
 ### Why this fixes the old bug
 Before: no custom `TaskScheduler` → Spring's **single** scheduler thread ran every

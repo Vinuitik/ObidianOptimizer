@@ -1,6 +1,6 @@
 # ML Domain Flows
 
-Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java, NoteEmbeddingWorker.java, ResourceScanService.java
+Files: SearchController.java, SearchService.java, EmbeddingService.java, MarkdownPreprocessor.java, NoteChunkRepository.java, PendingImageJobRepository.java, ImageScanService.java, ImageProcessingWorker.java, ImageCaptionQueueConfig.java, NoteEmbeddingWorker.java, ResourceScanService.java
 
 Ingest agent (resource → in-place notes): embedder/ingest/FLOWS.md
 
@@ -192,7 +192,43 @@ Queue table: `pending_image_jobs` (PENDING / DONE / SKIPPED).
 2. `ImageScanService.registerImages(path, content)` — after every note write in `FileRepository`
 3. `ChronoService` hash loop — SHA-256 detects external Obsidian edits, calls `registerImages`
 
-**Drained by** `ImageProcessingWorker` (`@Scheduled` every 30s):
+Each of these calls `jobRepo.upsertPending(notePath, ref)`, then — if the row actually
+needs captioning (not already DONE) — publishes an outbox row on the `image-caption`
+queue keyed by the job's id (QUEUE_UNIFICATION_PLAN.md Phase 5; same transactional-
+outbox mechanism Phase 3 built for the embed queues, see `common/FLOWS.md`).
+
+### Fast path: outbox + RabbitMQ (Phase 5)
+
+`ImageProcessingWorker.onImageCaptionMessage` (`@RabbitListener(queues = "image-caption",
+concurrency = "${image.worker.parallelism:4}")`) captions one image per message —
+concurrency reuses the SAME property that used to size only the poll fallback's inner
+thread pool, so both paths pull the same total weight against the wrapper:
+
+```
+message {jobId} → jobRepo.findById(jobId)
+  → missing, or status != PENDING → no-op (already handled / note gone) — ack
+  → PENDING → callProcessImage(imagePath):
+      POST http://host.docker.internal:5001/process-image {image_path}
+      → 200 → JSON passed straight to handleResult (same method the poll fallback uses)
+      → 404  → normalized to {"error":"not_found"} → handleResult → markSkipped (ack —
+                NOT a hard dead-letter; SKIPPED self-heals via the daily sweep below,
+                exactly as before Phase 5)
+      → anything else (503 exhausted, timeout, network error) → throw
+                AmqpRejectAndDontRequeueException → dead-letters into
+                image-caption-wait-exchange → image-caption.wait (TTL
+                image.caption.retry.wait-ms, default 5min) → dead-letters AGAIN back
+                into image-caption → redelivered. See ImageCaptionQueueConfig.
+```
+
+No hard dead-letter queue: a persistently-failing transient case just keeps
+cycling image-caption ↔ image-caption.wait forever, same "retry forever, no ladder"
+behavior this table always had — deliberately NOT given `capture`'s capped ladder (see
+QUEUE_UNIFICATION_PLAN.md Phase 5 discussion).
+
+### Safety net: the poll fallback (now hourly, was 30s)
+
+`ImageProcessingWorker.processPendingImages` (`@Scheduled`, default
+`image.scan.delay-ms=3600000`):
 ```
 batch of PENDING rows, PRIORITISED by the embedding note's deadline —
   findPending JOINs notes ON note_path, ORDER BY sr_due ASC NULLS LAST, created_at.
@@ -206,17 +242,23 @@ batch of PENDING rows, PRIORITISED by the embedding note's deadline —
 images across providers (image A → Gemini while image B → Groq).
 Same-note images stay sequential — getNextChunkIndex() would collide otherwise.
 
-per job: POST http://host.docker.internal:5001/process-image {image_path}
-  → 200: {"text", "provider"} → chunk if > 1000 chars → EmbeddingService.embed() → upsert note_chunks → DONE
-  → 404 (image file gone): SKIPPED
-  → 503 / network error (LLM providers exhausted): stays PENDING — retried next 30s cycle
-SKIPPED rows get one retry per day: ImageProcessingWorker.requeueSkipped()
-  (which first calls jobRepo.pruneOrphans() to drop note-gone jobs)
+per job: POST http://host.docker.internal:5001/process-images {image_paths: [...]}
+  (batch endpoint — the poll path still batches same-note images into ONE wrapper
+  call; the Rabbit fast path above calls the per-image /process-image endpoint instead,
+  since a message is already one image)
+  → 200: {"results":[{"text"}|{"error":"not_found"}], "provider"} → per result: handleResult
+  → 503 / network error (LLM providers exhausted): stays PENDING — retried next cycle
 ```
 
+`ImageProcessingWorker.requeueSkipped()` (daily): `pruneOrphans()` first, then
+`jobRepo.requeueSkipped()` flips SKIPPED rows back to PENDING and returns their ids —
+each id gets a fresh `image-caption` outbox publish so a revived row is picked up by
+the listener in seconds instead of waiting for the next hourly poll tick.
+
 To change image prompt: `host-wrapper/main.py → IMAGE_PROMPT`  
-To change schedule: `ImageProcessingWorker @Scheduled(fixedDelay = ...)`  
-To change parallelism: `.env → IMAGE_WORKER_PARALLELISM` (≈ number of configured vision providers)  
+To change poll fallback schedule: `image.scan.delay-ms` / `image.scan.initial-delay-ms`  
+To change retry-wait TTL: `image.caption.retry.wait-ms` (`ImageCaptionQueueConfig`)  
+To change parallelism (poll pool AND listener concurrency): `.env → IMAGE_WORKER_PARALLELISM`  
 To change provider order/keys: root `.env` → see `host-wrapper/FLOWS.md`  
 To change chunking threshold: `ImageProcessingWorker.IMAGE_CHUNK_THRESHOLD`
 
@@ -288,9 +330,14 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 | Search result limit | `SearchService.SEARCH_LIMIT` |
 | Chunk size / overlap | `MarkdownPreprocessor` constants |
 | Image processing prompt | `host-wrapper/main.py → IMAGE_PROMPT` |
-| Image worker schedule | `ImageProcessingWorker @Scheduled` |
+| Image worker poll-fallback schedule | `image.scan.delay-ms` / `image.scan.initial-delay-ms` |
 | Image job priority (deadline) | `PendingImageJobRepository.findPending()` — JOIN notes, ORDER BY sr_due |
 | Orphan image job cleanup | `PendingImageJobRepository.pruneOrphans()` — called daily in `ImageProcessingWorker.requeueSkipped()` |
+| image-caption fast-path queue/listener | `ImageProcessingWorker.onImageCaptionMessage` (`@RabbitListener`) |
+| image-caption queue topology + retry-wait TTL | `ImageCaptionQueueConfig.java` — `image.caption.retry.wait-ms` |
+| image-caption listener concurrency | `image.worker.parallelism` (shared with the poll fallback's thread pool) |
+| Outbox publish at the image-job chokepoint | `PendingImageJobRepository.upsertPending()` (returns `UpsertResult`) + `ImageScanService.registerImages()` |
+| Revived SKIPPED rows re-publish to Rabbit | `ImageProcessingWorker.requeueSkipped()` |
 | Note embedding batch/schedule | `NoteEmbeddingWorker.BATCH_SIZE / @Scheduled` |
 | Chunks per embed request | `EmbeddingService.EMBED_BATCH` (64) |
 | Embedding work list rule | `NoteIndexRepository.findNotesNeedingEmbedding()` |

@@ -9,6 +9,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 @Component
 public class PendingImageJobRepository {
@@ -37,9 +39,15 @@ public class PendingImageJobRepository {
             "CREATE INDEX IF NOT EXISTS idx_pending_image_status ON pending_image_jobs(status) WHERE status = 'PENDING'");
     }
 
-    /** Inserts a PENDING row if (note_path, image_path) not already DONE. */
-    public void upsertPending(String notePath, String imagePath) {
-        jdbc.update("""
+    /** Result of {@link #upsertPending}: the row's id, and whether it actually needs
+     *  captioning (false when the row was already DONE — nothing to enqueue). */
+    public record UpsertResult(String id, boolean needsProcessing) {}
+
+    /** Inserts a PENDING row if (note_path, image_path) not already DONE. Returns the
+     *  row's id so the caller (ImageScanService) can publish the outbox fast-path
+     *  message keyed to it — see QUEUE_UNIFICATION_PLAN.md Phase 5. */
+    public UpsertResult upsertPending(String notePath, String imagePath) {
+        Map<String, Object> row = jdbc.queryForMap("""
             INSERT INTO pending_image_jobs(note_path, image_path, status)
             VALUES (?, ?, 'PENDING')
             ON CONFLICT (note_path, image_path) DO UPDATE
@@ -47,7 +55,17 @@ public class PendingImageJobRepository {
                 WHEN pending_image_jobs.status = 'DONE' THEN 'DONE'
                 ELSE 'PENDING'
               END
+            RETURNING id::text AS id, status
             """, notePath, imagePath);
+        return new UpsertResult((String) row.get("id"), "PENDING".equals(row.get("status")));
+    }
+
+    public Optional<PendingImageJob> findById(String id) {
+        List<PendingImageJob> rows = jdbc.query("""
+            SELECT id, note_path, image_path, status, content_hash, created_at, processed_at
+            FROM pending_image_jobs WHERE id::text = ?
+            """, new JobRowMapper(), id);
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
     public List<PendingImageJob> findPending(int batchSize) {
@@ -92,9 +110,14 @@ public class PendingImageJobRepository {
             "UPDATE pending_image_jobs SET status = 'SKIPPED', processed_at = now() WHERE id::text = ?", id);
     }
 
-    /** Daily safety net: gives SKIPPED jobs another chance. Returns rows requeued. */
-    public int requeueSkipped() {
-        return jdbc.update("UPDATE pending_image_jobs SET status = 'PENDING' WHERE status = 'SKIPPED'");
+    /** Daily safety net: gives SKIPPED jobs another chance. Returns the ids revived —
+     *  the caller (ImageProcessingWorker.requeueSkipped) publishes a fresh outbox
+     *  message per id so reviving a row doesn't have to wait for the (now-hourly)
+     *  poll safety net to notice it. */
+    public List<String> requeueSkipped() {
+        return jdbc.query(
+            "UPDATE pending_image_jobs SET status = 'PENDING' WHERE status = 'SKIPPED' RETURNING id::text AS id",
+            (rs, rowNum) -> rs.getString("id"));
     }
 
     /** status → count, for the info dashboard. */
