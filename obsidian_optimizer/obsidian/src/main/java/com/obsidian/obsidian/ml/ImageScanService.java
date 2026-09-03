@@ -72,7 +72,14 @@ public class ImageScanService {
     public int registerImages(String notePath, String content) {
         List<String> refs = extractImageRefs(content);
         for (String ref : refs) {
-            jobRepo.upsertPending(notePath, ref);
+            PendingImageJobRepository.UpsertResult result = jobRepo.upsertPending(notePath, ref);
+            // Only publish when the row actually needs captioning — an already-DONE
+            // image (re-registered because the note's OTHER content changed) has
+            // nothing for the listener to do. Same chokepoint, fourth job: the
+            // outbox+RabbitMQ fast path for image captioning (Phase 5).
+            if (result.needsProcessing()) {
+                outboxRepo.enqueue(ImageCaptionQueueConfig.IMAGE_CAPTION_QUEUE, Map.of("jobId", result.id()));
+            }
         }
         String hash = ContentHashing.sha256(content);
         String bodyHash = ContentHashing.sha256(MarkdownPreprocessor.stripFrontmatter(content));

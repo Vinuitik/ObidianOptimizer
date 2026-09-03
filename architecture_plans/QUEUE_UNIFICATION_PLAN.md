@@ -268,8 +268,32 @@ Group B. See Phase 3.
   UI's perspective; a forced yt-dlp failure (the reel case) rides the ladder, escalates, and
   only then surfaces as a notified, debuggable `pipeline_failures` row.
 
-### Phase 5 — `pending_image_jobs` → `RabbitBackedQueue` — not started
-- Same shape as Phase 4; existing thread-pool concurrency (4) maps to consumer prefetch count.
+### Phase 5 — `pending_image_jobs` → outbox + RabbitMQ — ✅ DONE
+- Built on the Phase 3 outbox mechanism (`OutboxRepository`/`OutboxRelay`), NOT
+  `RabbitBackedQueue`'s poll-shaped manual-ack — a push `@RabbitListener` on
+  `ImageProcessingWorker` was the actual ask, matching this table's existing lifecycle
+  (PENDING/DONE/SKIPPED) instead of the claim/mark abstraction. `upsertPending`
+  (`ImageScanService.registerImages`) and the daily `requeueSkipped` revive both
+  publish to the new `image-caption` outbox queue.
+- `image.worker.parallelism` now sizes BOTH the poll fallback's thread pool and the
+  `@RabbitListener` concurrency — one property, two consumers of the same weight.
+- **Deliberately NOT "same shape as Phase 4"**: no capped ladder, no escalation.py
+  hookup, no hard dead-letter. A transient failure rejects into a short-TTL wait queue
+  (`ImageCaptionQueueConfig`, default 5min) and comes back to the main queue — matching
+  this table's existing "retry forever, no ladder" behavior, just with backoff instead
+  of an instant tight loop. A `not_found` still goes straight to `SKIPPED`, self-healed
+  by the existing daily sweep — never a hard DLQ. This preserves a self-heal design this
+  table already had, rather than replacing it with capture's harsher shape.
+- Poll fallback (`processPendingImages`) demoted from 30s to 1h (`image.scan.delay-ms`),
+  same pattern as Phase 3's Group A pollers.
+- **Open judgment call, not decided here:** whether `pending_image_jobs` should EVER
+  get a genuine dead-letter (e.g. for a caption that fails transiently forever, never
+  hitting `not_found`) is left open — today it just cycles the wait queue indefinitely,
+  identical to the pre-Phase-5 "stays PENDING forever" behavior. Revisit if that proves
+  to actually happen in production.
+- Tests: `ImageCaptionFlowIT` (Testcontainers Postgres+RabbitMQ, stubbed host-wrapper) —
+  proves the listener path (not poll) captions a fresh job, a forced transient failure
+  retries after the wait TTL and succeeds, and `not_found` still lands on SKIPPED.
 
 ### Phase 6 — `sync_queue` → `RabbitBackedQueue` (LAST) — not started
 - Biggest surface: concurrency pool, tombstones, janitor, nightly DB-backup piggyback. Only
