@@ -221,12 +221,38 @@ Group B. See Phase 3.
 - **Acceptance:** identical behavior (same predicates, same cadence), existing tests +
   one canary run.
 
-### Phase 3 — outbox + RabbitMQ stood up, Group A migrated — not started
-- Add `outbox_events` table + ONE generic `OutboxRelay` job (see "Group A revised" above).
-- Single-instance RabbitMQ container; Spring AMQP (Java) + `pika` (Python) deps.
-- Implement `RabbitBackedQueue<T>` alongside `PollingTableQueue<T>` — both implement
-  `WorkQueue<T>`, proving the abstraction actually decouples backend choice.
-- Group A's `WorkQueue` implementation swaps to the outbox+Rabbit path.
+### Phase 3 — outbox + RabbitMQ stood up, Group A migrated — ✅ DONE
+- `docker-compose.yml`: `rabbitmq` service (3.13-management-alpine), internal-network-only
+  (no host ports — avoids colliding with an unrelated RabbitMQ container already on this
+  host), named volume, healthcheck, `backend` depends on it.
+- `spring-boot-starter-amqp` + `outbox_events` table (`OutboxRepository`, same inline
+  `CREATE TABLE IF NOT EXISTS` convention as the rest of this codebase) + `OutboxRelay`
+  (`@TransactionalEventListener(AFTER_COMMIT)` for the instant path, a 5s scheduled sweep as
+  the only-matters-on-failure fallback).
+- `RabbitBackedQueue<T>` implements `WorkQueue<T>` via manual ack/nack — `PollingQueueWorker`
+  (Phase 2) can drive it with zero changes, proving the interface decouples backend choice.
+  Not wired into a real worker yet (that's Phases 4-6); proven against a real broker in
+  `RabbitBackedQueueIT`.
+- **Group A migrated:** `NoteEmbeddingWorker` and `ChunkEmbeddingReconciler` now publish
+  instantly via the outbox at their confirmed producer chokepoints
+  (`ImageScanService.registerImages()` and `ImageProcessingWorker.handleResult()`
+  respectively) with a `@RabbitListener` doing the real work; their polling loops became
+  1-hour safety nets (down from 60s/15s). `ResourceScanService.retryPendingIngests()`
+  deliberately left as pure Phase-2 polling — it already had its own eager-trigger-plus-
+  safety-net shape via a different, pre-existing mechanism (eager off-thread HTTP submit
+  inside `scan()`), so migrating it added complexity for no gain.
+- **Two non-obvious bugs caught during implementation:** (1) unconditional `@RabbitListener`
+  beans broke every other `@SpringBootTest` IT (a failed listener-container startup is fatal
+  to context refresh) — fixed via `spring.rabbitmq.listener.simple.auto-startup` defaulting
+  off, turned on explicitly in docker-compose and in the ITs that need it. (2)
+  `ImageProcessingWorker.handleResult()` is only ever called via self-invocation, which
+  bypasses Spring's AOP proxy — `@Transactional` there would have silently never applied;
+  used `TransactionTemplate` instead.
+- Correction from the original text above: no Python (`pika`) dependency was needed — every
+  Group A/B member turned out to be Java-side.
+- Validated: `docker compose config` clean; `java-unit` + `java-it` both pass (49 test
+  classes, 0 failures/0 errors, independently re-run and confirmed via `surefire-reports/`
+  before merge — not just taken on the implementing agent's word).
 
 ### Phase 4 — pilot: `capture` / `CaptureIngestWorker` → RabbitMQ — not started
 - Swap `capture`'s `WorkQueue` to `RabbitBackedQueue`. Table keeps its exact schema — it's the
