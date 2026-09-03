@@ -18,11 +18,13 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -54,6 +56,12 @@ public class MailboxConsumeService {
     private final FlaggedCardRegenService flaggedCardRegen;
     private final CaptureController captureController;
     private final ObjectMapper mapper = new ObjectMapper();
+
+    // Raw bytes, before the client's base64 inflation. Keep in sync with the client's
+    // MAILBOX_FILE_MAX_BYTES (mailbox.js) — a file it thought was small enough that the
+    // server then rejects just gets dropped here, so the two should agree.
+    @Value("${mailbox.file.max-bytes:104857600}")
+    private long mailboxFileMaxBytes;
 
     public MailboxConsumeService(DriveService drive,
                                  VaultEncryptionService encryption,
@@ -142,6 +150,7 @@ public class MailboxConsumeService {
                     case "acknowledge" -> inbox.acknowledgeCapture(ev.path("captureId").asText());
                     case "flag"        -> applyFlag(ev);
                     case "capture", "captureText" -> applyCapture(ev);
+                    case "captureFile" -> applyCaptureFile(ev);
                     default -> {
                         allCommitted = false; // unknown kind → keep the file for a newer server
                         continue;
@@ -216,6 +225,31 @@ public class MailboxConsumeService {
             captureController.enqueueCapture(url, text, title, trackId, newTrackTitle, newTrackType);
         } catch (CaptureController.DuplicateCaptureException e) {
             log.info("[Mailbox] capture already in pipeline, treating as consumed: {}", e.getMessage());
+        }
+    }
+
+    /** A file (PDF/video/audio) shared into the app while the phone was online but the
+     *  SERVER was unreachable — base64'd into the mailbox envelope by mailbox.js (blobs
+     *  don't survive JSON). Drains through the same captureFileBytes() the HTTP endpoint
+     *  uses. Oversize (client mis-estimated, or MAILBOX_FILE_MAX_BYTES was raised on one
+     *  device but not this server) → drop rather than retry forever; nothing recovers it. */
+    private void applyCaptureFile(JsonNode ev) throws Exception {
+        byte[] bytes = Base64.getDecoder().decode(ev.path("fileBase64").asText(""));
+        if (bytes.length > mailboxFileMaxBytes) {
+            log.warn("[Mailbox] captureFile {} is {} bytes (max {}) — dropping",
+                ev.path("filename").asText(""), bytes.length, mailboxFileMaxBytes);
+            return;
+        }
+        JsonNode trackOpts = ev.path("trackOpts");
+        Long trackId = trackOpts.hasNonNull("trackId") ? trackOpts.get("trackId").asLong() : null;
+        String newTrackTitle = trackOpts.hasNonNull("newTrackTitle") ? trackOpts.get("newTrackTitle").asText() : null;
+        String newTrackType  = trackOpts.hasNonNull("newTrackType")  ? trackOpts.get("newTrackType").asText()  : null;
+        String filename = ev.path("filename").asText("shared");
+        String title = ev.hasNonNull("title") ? ev.path("title").asText() : null;
+        try {
+            captureController.captureFileBytes(bytes, filename, title, trackId, newTrackTitle, newTrackType);
+        } catch (CaptureController.UnsupportedFileTypeException e) {
+            log.warn("[Mailbox] captureFile {} unsupported type, dropping: {}", filename, e.getMessage());
         }
     }
 

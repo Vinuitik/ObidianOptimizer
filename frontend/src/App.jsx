@@ -15,6 +15,8 @@ import QuitGuard from './components/organisms/QuitGuard';
 import Toast from './components/atoms/Toast';
 import useStore from './store/useStore';
 import { flushOutbox, OUTBOX_RETRY_MS } from './pwa/offlineApi';
+import { pushMailbox } from './pwa/mailbox';
+import { hasCreds } from './pwa/setup';
 import { onConnectivityChange } from './pwa/connectivity';
 import { showLocalNotification } from './pwa/quitNotify';
 import styles from './App.module.css';
@@ -74,8 +76,16 @@ export default function App() {
   // (reconnect, refocus), so a queue built up because the SERVER was down (5xx/530, not a
   // device connectivity change — see offlineApi.js isServerUnreachable) never got retried
   // if the user just kept watching the app the whole time. The interval closes that gap.
+  //
+  // Drive-linked devices also get pushMailbox() first, same as MobileLayout.jsx: this
+  // laptop isn't the server, and a laptop that's online while the SERVER is down should
+  // drain to Drive, not just keep retrying a dead origin. Push-side only — desktop always
+  // reads review data live from the server (useStore.fetchReviewNotes), so there's no
+  // Drive-pull/driveMode flip here; that's scoped to the installed-PWA offline set.
   useEffect(() => {
-    const flushAndNotify = () => flushOutbox().then(({ sent }) => {
+    const flushAndNotify = async () => {
+      if (await hasCreds().catch(() => false)) await pushMailbox().catch(() => {});
+      const { sent } = await flushOutbox();
       if (sent > 0) {
         showToast(`Back online — ${sent} synced`);
         // Positive confirmation that queued offline work actually landed on the server —
@@ -86,12 +96,12 @@ export default function App() {
           { body: 'Your offline grades/captures made it to the server.', tag: 'obsopt-outbox-sync' },
         );
       }
-    }).catch(() => {});
-    flushAndNotify();
-    const onVis = () => { if (document.visibilityState === 'visible' && navigator.onLine) flushAndNotify(); };
+    };
+    flushAndNotify().catch(() => {});
+    const onVis = () => { if (document.visibilityState === 'visible' && navigator.onLine) flushAndNotify().catch(() => {}); };
     document.addEventListener('visibilitychange', onVis);
-    const offConnectivity = onConnectivityChange(on => { if (on) flushAndNotify(); });
-    const id = setInterval(() => { if (navigator.onLine) flushAndNotify(); }, OUTBOX_RETRY_MS);
+    const offConnectivity = onConnectivityChange(on => { if (on) flushAndNotify().catch(() => {}); });
+    const id = setInterval(() => { if (navigator.onLine) flushAndNotify().catch(() => {}); }, OUTBOX_RETRY_MS);
     return () => {
       document.removeEventListener('visibilitychange', onVis);
       offConnectivity();

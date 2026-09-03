@@ -28,6 +28,18 @@ import {
   enqueueFile, enqueueDiscard, enqueueAcknowledge, enqueueFlag, flush,
 } from './outbox';
 import { isOnline } from './connectivity';
+import { hasCreds } from './setup';
+import { pushMailbox } from './mailbox';
+
+// Device online but the SERVER unreachable, and this device is Drive-linked: relay this
+// one capture to Drive right away instead of leaving it for the next foreground interval
+// (App.jsx / MobileLayout.jsx retry every OUTBOX_RETRY_MS) — the queue-then-drift gap that
+// motivated pushMailbox in the first place. Best-effort: a failure here just leaves the
+// event in the outbox for the next scheduled pushMailbox()/flush() pass to pick up.
+async function relayToMailboxIfUnreachable(reason) {
+  if (reason !== 'unreachable') return;
+  if (await hasCreds().catch(() => false)) await pushMailbox().catch(() => {});
+}
 
 // How often App.jsx / MobileLayout.jsx retry the outbox/mailbox while the tab stays open
 // and foregrounded — the point of queueing is that a blip self-heals without the user
@@ -161,7 +173,12 @@ export async function captureUrl(url, trackOpts = {}) {
     // at all, vs. the device is online but the server/tunnel answered broken (5xx/530) or
     // didn't answer (TypeError). Those are different facts and were getting flattened into
     // one misleading "Offline" message — see captureText for the same fix.
-    async () => { await enqueueCapture(url, trackOpts); return { queued: true, reason: isOnline() ? 'unreachable' : 'offline' }; },
+    async () => {
+      await enqueueCapture(url, trackOpts);
+      const reason = isOnline() ? 'unreachable' : 'offline';
+      await relayToMailboxIfUnreachable(reason);
+      return { queued: true, reason };
+    },
   );
 }
 
@@ -187,7 +204,9 @@ export async function captureText(text, title, trackOpts = {}) {
     },
     async () => {
       await enqueueCaptureText(text, title, trackOpts);
-      return { queued: true, reason: isOnline() ? 'unreachable' : 'offline' };
+      const reason = isOnline() ? 'unreachable' : 'offline';
+      await relayToMailboxIfUnreachable(reason);
+      return { queued: true, reason };
     },
   );
 }

@@ -261,12 +261,12 @@ async function handleShareTarget(request) {
     });
     if (res.ok) return Response.redirect('/capture?shared=ok', 303);
     if (res.status === 401) {
-      await enqueueOutbox({ kind: 'capture', url: shared });
+      await enqueueOutbox({ kind: 'capture', url: shared, eventId: crypto.randomUUID() });
       return Response.redirect('/capture?shared=auth', 303);
     }
     throw new Error('capture failed: ' + res.status);
   } catch (e) {
-    await enqueueOutbox({ kind: 'capture', url: shared });
+    await enqueueOutbox({ kind: 'capture', url: shared, eventId: crypto.randomUUID() });
     // Same device-offline vs. server-unreachable-while-online distinction as offlineApi.js —
     // don't tell someone "offline" when their connection is fine and it's the origin/tunnel
     // that's down.
@@ -275,7 +275,8 @@ async function handleShareTarget(request) {
 }
 
 // Shared file → /api/capture/file (multipart). Offline / 401 → queue the Blob in the outbox
-// (kind 'captureFile'); the client replays it on reconnect (src/pwa/outbox.js flush()).
+// (kind 'captureFile'); the client replays it on reconnect (src/pwa/outbox.js flush()), or
+// mailbox.js relays it to Drive (base64) if the SERVER specifically is what's unreachable.
 async function handleShareFile(file, title) {
   const fd = new FormData();
   fd.append('file', file, file.name);
@@ -286,12 +287,12 @@ async function handleShareFile(file, title) {
     });
     if (res.ok) return Response.redirect('/capture?shared=ok', 303);
     if (res.status === 401) {
-      await enqueueOutbox({ kind: 'captureFile', blob: file, filename: file.name });
+      await enqueueOutbox({ kind: 'captureFile', blob: file, filename: file.name, eventId: crypto.randomUUID() });
       return Response.redirect('/capture?shared=auth', 303);
     }
     throw new Error('capture/file failed: ' + res.status);
   } catch (e) {
-    await enqueueOutbox({ kind: 'captureFile', blob: file, filename: file.name });
+    await enqueueOutbox({ kind: 'captureFile', blob: file, filename: file.name, eventId: crypto.randomUUID() });
     return Response.redirect(`/capture?shared=${self.navigator.onLine ? 'unreachable' : 'offline'}`, 303);
   }
 }

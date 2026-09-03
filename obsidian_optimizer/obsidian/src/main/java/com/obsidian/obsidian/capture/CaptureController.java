@@ -307,33 +307,50 @@ public class CaptureController {
         if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "file required"));
         }
-        String original = file.getOriginalFilename();
-        String ext = fileExt(original);
-        String sourceType = classifyFile(ext);
-        if (sourceType == null) {
+        try {
+            String captureId = captureFileBytes(file.getBytes(), file.getOriginalFilename(),
+                title, trackId, newTrackTitle, newTrackType);
+            return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
+        } catch (UnsupportedFileTypeException e) {
             return ResponseEntity.status(415).body(Map.of(
                 "error", "unsupported file type",
                 "message", "Share a PDF, video, or audio file."));
+        } catch (Exception e) {
+            log.warn("[Capture] file enqueue failed: {}", e.toString());
+            return ResponseEntity.status(500).body(Map.of("error", "could not queue file"));
         }
+    }
+
+    /** Same as the {@code capture/file} HTTP handler, callable directly — used by
+     *  MailboxConsumeService to replay a captureFile event pushed to Drive (base64) because
+     *  the phone was online but the SERVER was unreachable at share time. @return captureId. */
+    public String captureFileBytes(byte[] bytes, String filename, String title,
+            Long trackId, String newTrackTitle, String newTrackType) throws Exception {
+        String ext = fileExt(filename);
+        String sourceType = classifyFile(ext);
+        if (sourceType == null) throw new UnsupportedFileTypeException(ext);
 
         String captureId = UUID.randomUUID().toString().substring(0, 12);
         try {
             // The stored file is BOTH the capture's source_ref (what the worker submits to the
             // embedder — it resolves the vault-relative path) and its kept local copy.
-            String sourcePath = storeBinaryResource(captureId, ext, file.getBytes());
+            String sourcePath = storeBinaryResource(captureId, ext, bytes);
             String display = (title != null && !title.isBlank()) ? title.trim()
-                : (original != null && !original.isBlank() ? original : sourcePath);
+                : (filename != null && !filename.isBlank() ? filename : sourcePath);
             enqueueAndPublish(captureId, sourceType, sourcePath, sourcePath, display);
             Long resolvedTrackId = resolveTrackId(trackId, newTrackTitle, newTrackType);
             if (resolvedTrackId != null) captureRepo.setTrackId(captureId, resolvedTrackId);
             ingestWorker.nudge();
-            log.info("[Capture] enqueued file {} ({}, {} bytes)", captureId, sourceType, file.getSize());
-            return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
+            log.info("[Capture] enqueued file {} ({}, {} bytes)", captureId, sourceType, bytes.length);
+            return captureId;
         } catch (Exception e) {
             captureRepo.updateStatus(captureId, "failed");
-            log.warn("[Capture] file enqueue failed for {}: {}", captureId, e.toString());
-            return ResponseEntity.status(500).body(Map.of("error", "could not queue file"));
+            throw e;
         }
+    }
+
+    public static class UnsupportedFileTypeException extends RuntimeException {
+        public UnsupportedFileTypeException(String ext) { super(ext); }
     }
 
     private static final Set<String> VIDEO_EXT = Set.of("mp4", "mov", "mkv", "webm", "avi");
