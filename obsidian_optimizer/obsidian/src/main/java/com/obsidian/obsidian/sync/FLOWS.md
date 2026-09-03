@@ -111,6 +111,76 @@ To change schedule: `SYNC_UPLOAD_CRON` env / `sync.upload.cron`; concurrency: `S
 
 ---
 
+## Upload fast path — outbox + RabbitMQ (QUEUE_UNIFICATION_PLAN.md Phase 6)
+
+`SyncQueueRepository.markPending` is the single funnel every producer goes through
+(FileRepository create/update/patch/rename/move, MediaController.uploadFile,
+ChronoService's hash loop, SyncService.initialScan) — so it's also the one place that
+publishes to the outbox, no per-call-site hook needed:
+
+```
+markPending(path, hash)
+    │
+    ├─ UPSERT sync_queue (unchanged, same status-column source of truth)
+    └─ OutboxRepository.enqueue("sync-upload", {path})
+             │
+        (same instant-publish + sweep-fallback mechanism as Phase 3 — see
+         common/FLOWS.md "Phase 3 shape: the outbox")
+             │
+        RabbitMQ queue "sync-upload"
+             │
+  @RabbitListener SyncService.onSyncUploadMessage (concurrency = SYNC_UPLOAD_CONCURRENCY)
+    → re-reads the row fresh (idempotency check: DONE/DELETE_PENDING/dead-lettered
+      FAILED → no-op, someone else already resolved it)
+    → SyncService.uploadOne(entry, vaultRoot, deviceId)   — SAME method the polling
+      safety net calls per row; the only substantive upload/encrypt/mark logic in
+      the codebase, reused by both paths
+    success → ack (row is DONE)
+    failure → uploadOne already called markFailed (retry_count++, exactly as before)
+       retry_count < SYNC_UPLOAD_MAX_RETRIES → throw AmqpRejectAndDontRequeueException
+           → nacked, routed via "sync-upload"'s DLX to "sync-upload-wait"
+           → TTL sync.upload.retry-delay-ms (default 60s) → dead-lettered back to
+             "sync-upload" → redelivered
+       retry_count >= cap → just ack, drop — row stays FAILED (dead-lettered),
+           same as the polling model's findUploadable() cap check
+```
+
+`SyncWorker.scheduledUpload()` is now the SAFETY NET only, cadence left UNCHANGED at
+6h (unlike Group A's 15-60s→1h demotion) — sync's default was already coarse relative
+to Group A's, and a missed-publish file only needs the poll to catch it once, not
+frequently; see the comment on `scheduledUpload` for the full reasoning.
+
+**Concurrency vs. DB backup/restore.** The polling drain and DB backup/restore always
+shared one `WorkerLane` (single-threaded, so they could never overlap). The Rabbit
+listener runs on its own consumer threads, outside that lane — a real new race, since
+`pg_restore --clean` drops and recreates every table, `sync_queue` included.
+`SyncService.dbBackupLock` (a `ReentrantReadWriteLock`) closes this: `SyncWorker`
+wraps every `DbBackupService` call in `syncService.runExclusiveOfUploads(...)` (write
+lock); `onSyncUploadMessage` takes the read lock for the span of one `uploadOne` call.
+Multiple uploads still run concurrently with each other (read locks don't exclude
+each other) — only a backup/restore gets true exclusivity. `DbBackupService.java`
+itself is untouched; the lock is only taken at the `SyncWorker` call sites.
+
+`SyncService.uploadsInFlight` (a `ConcurrentHashMap` key set) guards the other new
+race: the polling batch loop and the Rabbit listener are now two independent paths
+that could both reach the same row at once (previously impossible — only one drain
+ever ran at a time). Whichever path loses the race is a no-op, not a double-upload.
+
+To change the retry ladder's cadence: `SYNC_UPLOAD_RETRY_DELAY_MS` env /
+`sync.upload.retry-delay-ms` (default 60000). Cap reuses the existing
+`SYNC_UPLOAD_MAX_RETRIES` / `sync.upload.max-retries` — no new "how many retries"
+knob. Queue names/DLX wiring: `RabbitQueueConfig.SYNC_UPLOAD_QUEUE` /
+`SYNC_UPLOAD_WAIT_QUEUE`.
+
+**Deliberately NOT migrated in Phase 6** (left exactly as before, on the shared
+`WorkerLane` / plain `@Scheduled` cadence): tombstone processing
+(`processTombstones`/`DELETE_PENDING`), the weekly janitor, DB backup/restore
+internals, and the whole download direction (`downloadAll`/`downloadAllQuiet`) — none
+of these are "local file changed, upload it" events, so they don't fit the
+`markPending` chokepoint this phase hooks.
+
+---
+
 ## Download Flow
 
 `POST /api/sync/download` → `SyncService.downloadAll()`:
@@ -345,6 +415,23 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 - **Large resource files**: no chunking — a 100MB video is encrypted in-memory as a single byte[]. If this becomes a problem, split into chunks before encryption.
 - **Scheduled upload only, no download**: `SyncWorker` auto-uploads but never auto-downloads. Download is manual (`POST /api/sync/download`) or part of restore (`downloadAllQuiet`). Add a second `@Scheduled` worker if you want auto pull. Note: a stranded download file is NOT auto-re-driven later (no queue row) — the in-pass retry sweeps + `downloadFile` `withRetry` are the safety net; a permanent failure needs a manual re-Sync.
 - **`POST /sync/download` is synchronous (blocks the request thread)** — unlike upload/restore which run on the sync lane and return 202. Fine for a manual button, but a huge pull holds the connection open. Move it onto `syncWorker` if that bites. Restore's `downloadAllQuiet` already runs on the lane (async), so the app stays responsive during it.
+- **`dbBackupLock` blocks Rabbit consumer threads for the FULL duration of a backup/
+  restore** (a `ReentrantReadWriteLock`, not a queue-length-bounded wait) — a message
+  stays unacked on the broker that whole time. `pg_dump`/`pg_restore` are "a few
+  minutes" per the DB Backup section above, well under RabbitMQ's default 30-minute
+  consumer-ack timeout, so this hasn't been an issue in testing — but if a restore
+  ever grows much larger (or the DB does), that timeout is the thing that would fire
+  first, requeuing the in-flight message.
+- **The polling-vs-Rabbit double-upload guard (`uploadsInFlight`) is in-memory, not
+  cross-instance** — fine for this single-backend-instance deployment; would need a
+  DB-level lock (e.g. `pg_advisory_lock` on the path) if this ever ran with more than
+  one backend replica.
+- **Phase 6 was explicitly called out as the riskiest queue to migrate** (concurrency
+  pool + tombstones + janitor + DB-backup piggyback, see QUEUE_UNIFICATION_PLAN.md) —
+  only the upload direction (`markPending` → "sync-upload") was moved; tombstones,
+  the janitor, DB backup/restore internals, and the whole download direction were
+  deliberately left untouched (see "Upload fast path" above). Watch this one in
+  production longer than Phase 4/5 before treating it as settled.
 
 ---
 
@@ -362,6 +449,12 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 | Drive `_db/` ops + janitor skip | `DriveService.uploadDbBackup/listDbBackups/latestDbBackup`, `listRecursive` skip |
 | pg client version | `obsidian/Dockerfile` `postgresql18-client` (match server major) |
 | Upload retry cap (dead-letter) | `SYNC_UPLOAD_MAX_RETRIES` env / `sync.upload.max-retries` (default 5) |
+| Upload fast path (outbox publish) | `SyncQueueRepository.markPending()` (single funnel — see "Upload fast path" above) |
+| Upload fast path (consumer) | `SyncService.onSyncUploadMessage()` `@RabbitListener` |
+| Upload retry ladder cadence | `SYNC_UPLOAD_RETRY_DELAY_MS` env / `sync.upload.retry-delay-ms` (default 60000) |
+| Retry ladder queues (DLX/TTL) | `RabbitQueueConfig.SYNC_UPLOAD_QUEUE` / `SYNC_UPLOAD_WAIT_QUEUE` |
+| Upload-vs-DB-backup mutual exclusion | `SyncService.dbBackupLock` / `runExclusiveOfUploads()`; taken at `SyncWorker`'s DbBackupService call sites |
+| Cross-path double-upload guard | `SyncService.uploadsInFlight` |
 | Which Drive errors retry | `DriveService.isTransient()` + `withRetry()` backoff |
 | Folder double-create guard | `DriveService.folderLocks` (per-key lock in `getOrCreateFolder`) |
 | Manual upload = async 202 | `SyncController.triggerUpload()` → `SyncWorker.triggerManualUpload()` |

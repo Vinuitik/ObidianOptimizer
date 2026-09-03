@@ -1,6 +1,9 @@
 package com.obsidian.obsidian.sync;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.common.ContentHashing;
+import com.obsidian.obsidian.common.RabbitQueueConfig;
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.notes.FrontmatterParser;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
@@ -10,6 +13,8 @@ import com.obsidian.obsidian.sync.DriveService.DriveFileInfo;
 import com.obsidian.obsidian.sync.SyncQueueRepository.SyncEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -25,12 +30,15 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Service
 public class SyncService {
@@ -66,6 +74,27 @@ public class SyncService {
     // Restore-time retry of files that failed even after downloadFile's per-call backoff.
     private static final int  QUIET_RETRY_SWEEPS   = 3;
     private static final long QUIET_RETRY_PAUSE_MS = 3000;
+
+    // ── Phase 6 (RabbitMQ upload fast path) support ─────────────────────────────
+
+    // A pg_restore drops and recreates every table, sync_queue included — a Rabbit
+    // consumer thread reading/writing that table mid-drop is a real correctness risk
+    // the old poll-only model never had (uploads only ever ran on the same single
+    // "sync" WorkerLane as backup/restore, so they could never overlap). The listener
+    // path runs on its own consumer threads instead, so it takes this lock's read
+    // side for the span of one upload; SyncWorker takes the write side around every
+    // DbBackupService call. Multiple uploads can still run concurrently with each
+    // other (that's the whole point of SYNC_UPLOAD_CONCURRENCY) — only a backup/
+    // restore needs true exclusivity.
+    private final ReentrantReadWriteLock dbBackupLock = new ReentrantReadWriteLock();
+
+    // Guards against the safety-net poll (uploadPending) and the Rabbit listener
+    // picking up the same path at the same time — new risk introduced by having two
+    // independent code paths that can now both call uploadOne for the same row
+    // (previously only one drain could ever be in flight, via the single lane).
+    private final Set<String> uploadsInFlight = ConcurrentHashMap.newKeySet();
+
+    private final ObjectMapper mapper = new ObjectMapper();
 
     private final SyncQueueRepository   syncQueueRepo;
     private final VaultEncryptionService encryptionService;
@@ -195,7 +224,10 @@ public class SyncService {
             List<Future<?>> futures = new java.util.ArrayList<>(uploadable.size());
             for (SyncEntry entry : uploadable) {
                 futures.add(pool.submit(() -> {
-                    uploadOne(entry, vaultRoot, deviceId, uploaded, failed);
+                    Boolean ok = uploadOneGuarded(entry, vaultRoot, deviceId);
+                    if (ok != null) {
+                        if (ok) uploaded.incrementAndGet(); else failed.incrementAndGet();
+                    }
                     uploadDone.incrementAndGet();
                 }));
             }
@@ -210,9 +242,29 @@ public class SyncService {
         log.info("[SyncService.uploadPending] uploaded={}, failed={}", uploaded.get(), failed.get());
     }
 
-    /** Upload a single queue row; marks DONE (hash-conditional) or FAILED. Runs on a pool thread. */
-    private void uploadOne(SyncEntry entry, String vaultRoot, String deviceId,
-                           AtomicInteger uploaded, AtomicInteger failed) {
+    /** {@link #uploadOne} guarded against double-processing: the polling batch loop
+     *  and the Rabbit listener (see {@link #onSyncUploadMessage}) are now two
+     *  independent code paths that can both reach the same row, something that could
+     *  never happen when uploads only ever ran serialized on one lane. Returns null
+     *  (not a real outcome) if another attempt for this path is already in flight —
+     *  the loser doesn't touch the row and isn't counted as a success or a failure. */
+    private Boolean uploadOneGuarded(SyncEntry entry, String vaultRoot, String deviceId) {
+        if (!uploadsInFlight.add(entry.path())) {
+            log.debug("[SyncService.uploadPending] {} already uploading via another path — skipping", entry.path());
+            return null;
+        }
+        try {
+            return uploadOne(entry, vaultRoot, deviceId);
+        } finally {
+            uploadsInFlight.remove(entry.path());
+        }
+    }
+
+    /** Upload a single queue row; marks DONE (hash-conditional) or FAILED. Runs on a pool
+     *  thread (polling batch) or a RabbitMQ listener thread ({@link #onSyncUploadMessage}) —
+     *  same method either way, so there is exactly one place this logic exists.
+     *  @return true on success, false on failure (already marked FAILED internally). */
+    boolean uploadOne(SyncEntry entry, String vaultRoot, String deviceId) {
         try {
             String absPath   = Paths.get(vaultRoot, entry.path()).toString();
             byte[] plaintext = readFile(absPath, entry.path());
@@ -232,11 +284,91 @@ public class SyncService {
             if (!done) {
                 log.info("[SyncService.uploadPending] {} changed during upload — stays PENDING", entry.path());
             }
-            uploaded.incrementAndGet();
+            return true;
         } catch (Exception e) {
             log.error("[SyncService.uploadPending] failed for {}: {}", entry.path(), e.getMessage());
             syncQueueRepo.markFailed(entry.path());
-            failed.incrementAndGet();
+            return false;
+        }
+    }
+
+    // ── RabbitMQ fast path (QUEUE_UNIFICATION_PLAN.md Phase 6) ──────────────────
+
+    /**
+     * Consumes the "sync-upload" outbox queue, one file per message — reuses
+     * {@link #uploadOne} exactly, the same method the polling safety net calls per
+     * row. Re-reads the row fresh rather than trusting the message payload (the
+     * idempotency check, same pattern as NoteEmbeddingWorker's listener): a message
+     * for a path that has since gone to DONE, DELETE_PENDING, or dead-lettered FAILED
+     * is a safe no-op.
+     *
+     * <p>Retry ladder: on failure, {@link #uploadOne} has already called
+     * {@code markFailed} (retry_count++) exactly as the polling path always has. If
+     * the row is still under {@code sync.upload.max-retries}, throwing
+     * {@link AmqpRejectAndDontRequeueException} nacks the message without requeuing
+     * it onto the SAME queue — RabbitMQ instead routes it via "sync-upload"'s
+     * dead-letter-exchange to "sync-upload-wait" (TTL {@code sync.upload.retry-delay-ms}),
+     * which dead-letters it back to "sync-upload" once the TTL expires. Once
+     * retry_count reaches the cap, the row is already FAILED (dead-lettered, exactly
+     * like the polling model) — the message is simply acked and dropped rather than
+     * cycling forever.
+     */
+    @RabbitListener(queues = RabbitQueueConfig.SYNC_UPLOAD_QUEUE,
+                     concurrency = "${sync.upload.concurrency:3}")
+    public void onSyncUploadMessage(String payloadJson) {
+        String path;
+        try {
+            JsonNode node = mapper.readTree(payloadJson);
+            path = node.path("path").asText(null);
+        } catch (Exception e) {
+            log.warn("[SyncService] malformed sync-upload message, dropping: {}", e.getMessage());
+            return;
+        }
+        if (path == null) return;
+
+        if (!encryptionService.isConfigured() || !driveService.isConfigured()) {
+            // Not set up yet — the row stays PENDING and the (much less frequent)
+            // polling safety net will pick it up once sync is configured.
+            return;
+        }
+
+        SyncEntry entry = syncQueueRepo.findByPath(path);
+        if (entry == null) return;                                    // deleted meanwhile
+        if ("DONE".equals(entry.status()) || "DELETE_PENDING".equals(entry.status())) return; // superseded
+        if ("FAILED".equals(entry.status()) && entry.retryCount() >= maxRetries) return;       // already dead-lettered
+
+        String vaultRoot = settingsRepo.getVaultPath();
+        String deviceId  = deviceIdentityService.getDeviceId();
+
+        dbBackupLock.readLock().lock();
+        Boolean ok;
+        try {
+            ok = uploadOneGuarded(entry, vaultRoot, deviceId);
+        } finally {
+            dbBackupLock.readLock().unlock();
+        }
+        if (ok == null || ok) return; // success, or another path already handled it — ack
+
+        SyncEntry after = syncQueueRepo.findByPath(path);
+        if (after != null && after.retryCount() < maxRetries) {
+            throw new AmqpRejectAndDontRequeueException(
+                "sync-upload failed for " + path + ", riding the retry ladder");
+        }
+        // retry cap reached — uploadOne already marked it FAILED; drop the message.
+    }
+
+    /** Acquired by {@link SyncWorker} around every DbBackupService call (backup and
+     *  restore) so a Rabbit-triggered upload can never write to sync_queue — or read
+     *  it mid pg_restore --clean, which drops and recreates the table — while a
+     *  backup/restore is in flight. The polling drain doesn't need this: it already
+     *  runs on the same single "sync" WorkerLane as backup/restore, so the two could
+     *  never overlap in the first place. */
+    public void runExclusiveOfUploads(Runnable dbBackupTask) {
+        dbBackupLock.writeLock().lock();
+        try {
+            dbBackupTask.run();
+        } finally {
+            dbBackupLock.writeLock().unlock();
         }
     }
 

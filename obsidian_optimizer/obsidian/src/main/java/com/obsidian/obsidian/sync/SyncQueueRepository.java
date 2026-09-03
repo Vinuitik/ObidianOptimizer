@@ -1,5 +1,7 @@
 package com.obsidian.obsidian.sync;
 
+import com.obsidian.obsidian.common.OutboxRepository;
+import com.obsidian.obsidian.common.RabbitQueueConfig;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -12,9 +14,11 @@ import java.util.Map;
 public class SyncQueueRepository {
 
     private final JdbcTemplate jdbc;
+    private final OutboxRepository outboxRepo;
 
-    public SyncQueueRepository(JdbcTemplate jdbc) {
+    public SyncQueueRepository(JdbcTemplate jdbc, OutboxRepository outboxRepo) {
         this.jdbc = jdbc;
+        this.outboxRepo = outboxRepo;
     }
 
     @PostConstruct
@@ -38,7 +42,16 @@ public class SyncQueueRepository {
             """);
     }
 
-    /** Upsert to PENDING. Idempotent — safe to call on every write. */
+    /**
+     * Upsert to PENDING. Idempotent — safe to call on every write. This is the single
+     * funnel every producer (FileRepository, MediaController, ChronoService,
+     * SyncService.initialScan) goes through, so it's also the one place that fires the
+     * outbox+RabbitMQ fast path (QUEUE_UNIFICATION_PLAN.md Phase 6) — no per-call-site
+     * publish needed. Not {@code @Transactional} itself: most callers do file I/O
+     * around this write and can't be wrapped in a DB transaction anyway, so the outbox
+     * event just publishes immediately (OutboxRelay's AFTER_COMMIT listener falls back
+     * to synchronous execution when there's no ambient transaction).
+     */
     public void markPending(String path, String contentHash) {
         jdbc.update("""
             INSERT INTO sync_queue(path, content_hash, status, retry_count)
@@ -48,6 +61,7 @@ public class SyncQueueRepository {
                 status       = 'PENDING',
                 retry_count  = 0
             """, path, contentHash);
+        outboxRepo.enqueue(RabbitQueueConfig.SYNC_UPLOAD_QUEUE, Map.of("path", path));
     }
 
     /**

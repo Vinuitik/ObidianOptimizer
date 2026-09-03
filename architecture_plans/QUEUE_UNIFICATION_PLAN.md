@@ -295,9 +295,30 @@ Group B. See Phase 3.
   proves the listener path (not poll) captions a fresh job, a forced transient failure
   retries after the wait TTL and succeeds, and `not_found` still lands on SKIPPED.
 
-### Phase 6 — `sync_queue` → `RabbitBackedQueue` (LAST) — not started
-- Biggest surface: concurrency pool, tombstones, janitor, nightly DB-backup piggyback. Only
-  attempt once Phases 4–5 have run in production for a couple of weeks without surprises.
+### Phase 6 — `sync_queue` → `RabbitBackedQueue` (LAST) — upload direction done, narrowed scope
+- Attempted in parallel with Phases 4–5 (explicit direction), not after the "couple of weeks
+  in production" validation window this doc originally called for — flagged as a deviation,
+  not a silent call.
+- **Scope narrowed to the upload direction only.** `SyncQueueRepository.markPending` (the
+  single funnel for every producer) now also enqueues to a "sync-upload" outbox/RabbitMQ
+  queue; `SyncService.onSyncUploadMessage` (`@RabbitListener`, concurrency =
+  `SYNC_UPLOAD_CONCURRENCY`) reuses the exact existing `uploadOne` per-row logic. Retry ladder:
+  a fixed-delay `sync-upload` ⇄ `sync-upload-wait` DLX/TTL pair (not the 1h/6h/24h multi-step
+  ladder used for Phase 4/5 — Drive's transient errors clear in seconds/minutes, not hours, and
+  `DriveService.withRetry`'s own exponential backoff already runs before a message ever lands
+  here), capped by the existing `retry_count`/`SYNC_UPLOAD_MAX_RETRIES`, then dead-lettered via
+  the existing `markFailed` — same `/api/sync/status` contract as before.
+- **Did NOT use `RabbitBackedQueue<T>`** (the poll-shaped, manual-ack `WorkQueue` impl from
+  Phase 3) — sync's per-item logic already lives in a plain method (`uploadOne`) called from a
+  push-style `@RabbitListener`, matching the `NoteEmbeddingWorker` precedent more closely than
+  the `RabbitBackedQueue` shape.
+- **Explicitly NOT migrated**, left exactly as before: tombstone processing (`DELETE_PENDING`),
+  the weekly janitor, DB backup/restore internals, and the whole download direction — none of
+  these are "local file changed, upload it" events that flow through `markPending`. See
+  `sync/FLOWS.md` "Upload fast path" for the full design, including the new
+  `SyncService.dbBackupLock` added specifically to keep the Rabbit-driven upload path from
+  racing a live `pg_restore` (a risk that couldn't exist in the old poll-only model, since
+  uploads and DB backup/restore always shared one `WorkerLane`).
 
 ---
 
