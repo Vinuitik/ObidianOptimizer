@@ -2,6 +2,8 @@ package com.obsidian.obsidian.capture;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.obsidian.obsidian.common.OutboxRepository;
+import com.obsidian.obsidian.common.RabbitQueueConfig;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.tracks.TrackRepository;
@@ -9,6 +11,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -69,6 +73,8 @@ public class CaptureController {
     private final CaptureIngestWorker ingestWorker;
     private final SettingsRepository settingsRepo;
     private final TrackRepository trackRepo;
+    private final OutboxRepository outboxRepo;
+    private final TransactionTemplate txTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // HTTP_1_1 is mandatory: the embedder is uvicorn, which drops POST bodies on the
@@ -83,12 +89,15 @@ public class CaptureController {
 
     public CaptureController(FileRepository repository, CaptureRepository captureRepo,
                              CaptureIngestWorker ingestWorker, SettingsRepository settingsRepo,
-                             TrackRepository trackRepo) {
+                             TrackRepository trackRepo, OutboxRepository outboxRepo,
+                             PlatformTransactionManager txManager) {
         this.repository = repository;
         this.captureRepo = captureRepo;
         this.ingestWorker = ingestWorker;
         this.settingsRepo = settingsRepo;
         this.trackRepo = trackRepo;
+        this.outboxRepo = outboxRepo;
+        this.txTemplate = new TransactionTemplate(txManager);
     }
 
     /** Resolve the Learning Track a fresh capture should tag its resulting notes into
@@ -166,10 +175,10 @@ public class CaptureController {
                 // proposed notes; the worker reads it back for the embedder's text route.
                 String t = (title != null && !title.isBlank()) ? title : firstLine(text);
                 String sourcePath = storeTextResource(captureId, t, text);
-                captureRepo.enqueue(captureId, "text", t, sourcePath, t);
+                enqueueAndPublish(captureId, "text", t, sourcePath, t);
             } else {
                 String ref = url.trim();
-                captureRepo.enqueue(captureId, classifyUrl(ref), ref, null, ref);
+                enqueueAndPublish(captureId, classifyUrl(ref), ref, null, ref);
             }
             if (resolvedTrackId != null) captureRepo.setTrackId(captureId, resolvedTrackId);
             ingestWorker.nudge();
@@ -179,6 +188,34 @@ public class CaptureController {
             captureRepo.updateStatus(captureId, "failed");
             throw e;
         }
+    }
+
+    /** Inserts the row AND publishes the {@code capture} outbox message in one DB
+     *  transaction (QUEUE_UNIFICATION_PLAN.md Phase 4 — same pattern as ImageScanService's
+     *  outbox chokepoint): the two writes can't come apart, so a crash between them never
+     *  strands a 'queued' row with no message ever coming for it. Uses TransactionTemplate
+     *  rather than {@code @Transactional} because {@code capturePlaylist()} calls this via
+     *  self-invocation from {@code capture()} — a proxy-based annotation would silently not
+     *  apply there (see ImageProcessingWorker's identical fix). CaptureIngestWorker's
+     *  {@code drain()} safety net still finds the row via {@code findQueued()} if this
+     *  publish is somehow lost, same self-healing guarantee as before. */
+    private void enqueueAndPublish(String id, String sourceType, String sourceRef,
+                                   String sourcePath, String title) {
+        txTemplate.executeWithoutResult(status -> {
+            captureRepo.enqueue(id, sourceType, sourceRef, sourcePath, title);
+            outboxRepo.enqueue(RabbitQueueConfig.CAPTURE_QUEUE, Map.of("id", id));
+        });
+    }
+
+    /** Same as {@link #enqueueAndPublish} but tags the row as part of a playlist
+     *  expansion — see {@link CaptureRepository#enqueuePlaylistItem}. */
+    private void enqueuePlaylistItemAndPublish(String id, String sourceType, String sourceRef,
+                                               String sourcePath, String title,
+                                               String playlistId, int position) {
+        txTemplate.executeWithoutResult(status -> {
+            captureRepo.enqueuePlaylistItem(id, sourceType, sourceRef, sourcePath, title, playlistId, position);
+            outboxRepo.enqueue(RabbitQueueConfig.CAPTURE_QUEUE, Map.of("id", id));
+        });
     }
 
     /** An exact URL already live in the pipeline — a misclick/re-share guard, not a real
@@ -242,7 +279,7 @@ public class CaptureController {
             if (videoUrl == null || videoUrl.isBlank()) continue;
             if (captureRepo.existsLiveForSource(videoUrl)) { skipped++; continue; }
             String childId = UUID.randomUUID().toString().substring(0, 12);
-            captureRepo.enqueuePlaylistItem(childId, classifyUrl(videoUrl), videoUrl, null, title,
+            enqueuePlaylistItemAndPublish(childId, classifyUrl(videoUrl), videoUrl, null, title,
                 playlistId, i);
             queued++;
         }
@@ -286,7 +323,7 @@ public class CaptureController {
             String sourcePath = storeBinaryResource(captureId, ext, file.getBytes());
             String display = (title != null && !title.isBlank()) ? title.trim()
                 : (original != null && !original.isBlank() ? original : sourcePath);
-            captureRepo.enqueue(captureId, sourceType, sourcePath, sourcePath, display);
+            enqueueAndPublish(captureId, sourceType, sourcePath, sourcePath, display);
             Long resolvedTrackId = resolveTrackId(trackId, newTrackTitle, newTrackType);
             if (resolvedTrackId != null) captureRepo.setTrackId(captureId, resolvedTrackId);
             ingestWorker.nudge();
