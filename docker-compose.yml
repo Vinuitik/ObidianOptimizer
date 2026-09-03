@@ -173,6 +173,10 @@ services:
       # bulk creates above that even with backoff. Retries per file before dead-lettering.
       - SYNC_UPLOAD_CONCURRENCY=${SYNC_UPLOAD_CONCURRENCY:-3}
       - SYNC_UPLOAD_MAX_RETRIES=${SYNC_UPLOAD_MAX_RETRIES:-5}
+      # sync-upload RabbitMQ retry ladder (Phase 6): a failed upload waits this long on
+      # the "sync-upload-wait" DLX queue before landing back on "sync-upload" for another
+      # attempt, up to SYNC_UPLOAD_MAX_RETRIES times.
+      - SYNC_UPLOAD_RETRY_DELAY_MS=${SYNC_UPLOAD_RETRY_DELAY_MS:-60000}
       # DB backup: nightly encrypted pg_dump → Drive _db/ (gated on auto-sync). Keep = rolling dumps retained.
       - SYNC_DBBACKUP_CRON=${SYNC_DBBACKUP_CRON:-0 0 3 * * *}
       - SYNC_DBBACKUP_KEEP=${SYNC_DBBACKUP_KEEP:-3}

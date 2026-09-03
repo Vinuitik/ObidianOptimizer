@@ -60,7 +60,7 @@ public class SyncWorker {
         }
         lane.trigger(() -> {
             log.info("[SyncWorker] scheduled DB backup triggered");
-            dbBackupService.backupNow();
+            syncService.runExclusiveOfUploads(dbBackupService::backupNow);
         });
     }
 
@@ -68,7 +68,7 @@ public class SyncWorker {
     public boolean triggerDbBackup() {
         return lane.trigger(() -> {
             log.info("[SyncWorker] manual DB backup triggered");
-            dbBackupService.backupNow();
+            syncService.runExclusiveOfUploads(dbBackupService::backupNow);
         });
     }
 
@@ -78,7 +78,7 @@ public class SyncWorker {
         return lane.trigger(() -> {
             log.info("[SyncWorker] full backup triggered (files + DB)");
             syncService.uploadPending();
-            dbBackupService.backupNow();
+            syncService.runExclusiveOfUploads(dbBackupService::backupNow);
         });
     }
 
@@ -86,12 +86,22 @@ public class SyncWorker {
     public boolean triggerDbRestore(boolean force) {
         return lane.trigger(() -> {
             log.info("[SyncWorker] DB restore triggered (force={})", force);
-            dbBackupService.restore(force);
+            syncService.runExclusiveOfUploads(() -> dbBackupService.restore(force));
         });
     }
 
-    // The Settings toggle gates only this automatic cron; the manual
-    // POST /api/sync/upload button works regardless (explicit user action).
+    // Now the SAFETY NET only (QUEUE_UNIFICATION_PLAN.md Phase 6): markPending's outbox
+    // fast path delivers within seconds via the "sync-upload" RabbitMQ listener, so this
+    // tick only ever finds work when a publish was missed (crash between the DB write
+    // and the publish attempt — OutboxRelay's own sweep already retries that within
+    // seconds, so even this is a second-order net) or the retry ladder's own dead cap
+    // reset a row. Cadence deliberately left at 6h, UNCHANGED — unlike Group A's
+    // original 15-60s pollers, sync's default was already coarse (file-sync latency was
+    // never sub-minute-sensitive), and demoting it further (e.g. to 24h, matching the
+    // "add a zero" pattern used elsewhere) would leave a missed-publish file stranded
+    // on only one device for up to a day for no real benefit — an idle findUploadable()
+    // scan costs one cheap query. The Settings toggle gates only this automatic cron;
+    // the manual POST /api/sync/upload button works regardless (explicit user action).
     @Scheduled(cron = "${sync.upload.cron:0 0 */6 * * *}")
     public void scheduledUpload() {
         if (!settingsRepo.isSyncEnabled()) {
