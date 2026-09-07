@@ -47,6 +47,20 @@ const AUTH_KEY = 'obsOpt_authOk';
 const persistedAuth = () => { try { return localStorage.getItem(AUTH_KEY) === '1'; } catch { return false; } };
 const setPersistedAuth = (ok) => { try { localStorage.setItem(AUTH_KEY, ok ? '1' : '0'); } catch {} };
 
+// RSVP reading speed — remembered per device (not per note), so the reader doesn't reopen
+// at the default speed and need re-dragging back to the usual pace each time. Lives in the
+// store (a real in-memory JS value shared app-wide) instead of per-component state, which
+// used to reset on every RsvpReader remount. Layer 1 of 3 (memory → localStorage → Drive,
+// once step 3 adds cross-device sync); localStorage is what survives an app restart today.
+const WPM_KEY = 'obsOpt_rsvpWpm';
+const persistedWpm = () => {
+  try {
+    const v = Number(localStorage.getItem(WPM_KEY));
+    return v >= 150 && v <= 800 ? v : 350;
+  } catch { return 350; }
+};
+const setPersistedWpm = (wpm) => { try { localStorage.setItem(WPM_KEY, String(wpm)); } catch {} };
+
 function getReviewSession() {
   const today = new Date().toISOString().slice(0, 10);
   try {
@@ -209,6 +223,9 @@ const useStore = create((set, get) => ({
   // corrects it to false only on a real 401 from a reachable server).
   isAuthenticated: persistedAuth(),
   showLogin: false,
+
+  rsvpWpm: persistedWpm(),
+  setRsvpWpm: (wpm) => { setPersistedWpm(wpm); set({ rsvpWpm: wpm }); },
 
   // Panel collapse — start closed on phones, where the panels render as
   // overlay drawers (SplitLayout.module.css) and would cover the editor
