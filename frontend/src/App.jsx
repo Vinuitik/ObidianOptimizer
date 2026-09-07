@@ -59,6 +59,7 @@ export default function App() {
   const checkAuth  = useStore(s => s.checkAuth);
   const showLogin  = useStore(s => s.showLogin);
   const showToast  = useStore(s => s.showToast);
+  const initRsvpWpmFromDrive = useStore(s => s.initRsvpWpmFromDrive);
 
   // Re-validate on mount AND whenever the tab regains focus, so a backend restart
   // (session cookie invalidated) is detected proactively — not left showing stale
@@ -69,6 +70,10 @@ export default function App() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [checkAuth]);
+
+  // Pull any Drive-synced prefs (e.g. RSVP speed) once at startup — no-ops if this
+  // device was never Drive-linked.
+  useEffect(() => { initRsvpWpmFromDrive(); }, [initRsvpWpmFromDrive]);
 
   // Grades/captures made during a network blip queue to the outbox (offlineApi).
   // Replay them on load, whenever connectivity returns, on visibilitychange (a

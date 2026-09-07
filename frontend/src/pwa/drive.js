@@ -102,6 +102,17 @@ export async function driveDownload(token, fileId) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+// Overwrite an existing file's content IN PLACE (same id, same location) — unlike
+// driveCreateFile, which always spawns a new file. Used for a single mutable value
+// (e.g. _prefs/settings.json.enc) that should have one stable file, not one per write.
+export async function driveUpdateFile(token, fileId, bytes) {
+  await driveFetch(token, `${UPLOAD_API}/files/${fileId}?uploadType=media`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: bytes,
+  });
+}
+
 // Find (or create) a folder by name under a parent. Used for _mailbox/ writes.
 export async function findOrCreateFolder(token, name, parentId) {
   const existing = await driveList(

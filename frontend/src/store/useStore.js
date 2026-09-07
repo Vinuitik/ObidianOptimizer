@@ -31,6 +31,7 @@ import {
 } from '../pwa/offlineApi';
 import { allocateTracks } from '../pwa/reviewPlan';
 import { getMeta } from '../pwa/db';
+import { readPrefs, writePrefs } from '../pwa/prefsSync';
 import { setPendingBlobs } from '../utils/obsidianImagePlugin';
 import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
@@ -225,7 +226,24 @@ const useStore = create((set, get) => ({
   showLogin: false,
 
   rsvpWpm: persistedWpm(),
-  setRsvpWpm: (wpm) => { setPersistedWpm(wpm); set({ rsvpWpm: wpm }); },
+  // Local write is immediate and authoritative for THIS session; the Drive write is
+  // best-effort "just in case" (prefsSync swallows its own errors) — never awaited, so a
+  // slow/unreachable Drive never delays the slider.
+  setRsvpWpm: (wpm) => {
+    setPersistedWpm(wpm);
+    set({ rsvpWpm: wpm });
+    writePrefs({ rsvpWpm: wpm });
+  },
+  // Called once at app startup (App.jsx / MobileLayout.jsx): pulls the last value ANY
+  // Drive-linked device wrote, so this device's default matches it instead of whatever
+  // was last set locally. No-ops (resolves to null) when unlinked/unreachable/unset.
+  initRsvpWpmFromDrive: async () => {
+    const prefs = await readPrefs();
+    if (typeof prefs?.rsvpWpm === 'number') {
+      setPersistedWpm(prefs.rsvpWpm);
+      set({ rsvpWpm: prefs.rsvpWpm });
+    }
+  },
 
   // Panel collapse — start closed on phones, where the panels render as
   // overlay drawers (SplitLayout.module.css) and would cover the editor

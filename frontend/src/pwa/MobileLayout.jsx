@@ -48,6 +48,11 @@ export default function MobileLayout() {
   // IndexedDB (not the server). Unlinked → falls back to the server path (still works online).
   useEffect(() => { hasCreds().then(setDriveMode).catch(() => {}); }, []);
 
+  // Pull any Drive-synced prefs (e.g. RSVP speed) once at startup — no-ops if this
+  // device was never Drive-linked.
+  const initRsvpWpmFromDrive = useStore(s => s.initRsvpWpmFromDrive);
+  useEffect(() => { initRsvpWpmFromDrive(); }, [initRsvpWpmFromDrive]);
+
   // Reconnect → sync the outbox. Drive-linked: pushMailbox() drains most kinds (including
   // capture/captureText) to Drive first — durable even if the SERVER is what's unreachable,
   // not just the phone's own connection; flushOutbox() then handles anything left (401s,
