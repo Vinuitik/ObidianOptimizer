@@ -9,7 +9,7 @@ import { fetchChildren, updateNote } from '../../api/notes';
 import { splitInboxNote, moveInboxNote, createInboxFolder } from '../../api/inbox';
 import { getMeta, setMeta } from '../../pwa/db';
 import { offlineChildrenOf } from '../../utils/offlineFolders';
-import { buildSourceColors, groupBySource, captureLabel, buildInboxTree, folderAllItems } from '../../utils/sourceColor';
+import { buildSourceColors, groupBySource, captureLabel, buildInboxTree, folderAllItems, inboxGroupKey } from '../../utils/sourceColor';
 import { markLearnTaskDone } from '../../utils/dailyDuty';
 import useStore from '../../store/useStore';
 import { useIsMobile } from '../../utils/useMediaQuery';
@@ -22,15 +22,15 @@ import styles from './InboxReview.module.css';
 const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
 const dirName  = p => p.replace(/[/\\]+$/, '').replace(/[/\\][^/\\]*$/, '');
 
-// A note's source group (same key groupBySource / buildSourceColors use).
-const groupKeyOf = it => it?.captureId || it?.path;
-
 // After acting on a note, the next one to review WITHIN its source group: the first remaining
 // group member in review order (groupBySource). The acted note is already gone from `list`, so
 // what's left flows in reading order. null → the group is exhausted (caller then auto-picks
-// nothing, per the "don't jump to an unrelated source" rule).
+// nothing, per the "don't jump to an unrelated source" rule). Uses the same inboxGroupKey as
+// color banding/the folder tree (sourceColor.js) — a local captureId-or-path-only copy of this
+// used to live here and silently broke auto-advance for inboxFolder-grouped (non-captured)
+// notes, since a note with neither captureId nor a shared folder falls through to its own path.
 function nextInGroup(list, groupKey) {
-  const inGroup = groupBySource(list).filter(i => groupKeyOf(i) === groupKey);
+  const inGroup = groupBySource(list).filter(i => inboxGroupKey(i) === groupKey);
   return inGroup[0] || null;
 }
 
@@ -179,7 +179,7 @@ export default function InboxReview({ onCount }) {
   async function fileGroup(items, base, segments) {
     if (!items.length) return;
     const target = [base.replace(/\/+$/, ''), ...segments.map(segClean)].join('/');
-    const group = groupKeyOf(items[0]);
+    const group = inboxGroupKey(items[0]);
     setBusy(true); setStatus(`Filing ${items.length} note(s)…`);
     let failed = 0;
     for (const it of items) {
@@ -219,7 +219,7 @@ export default function InboxReview({ onCount }) {
   async function file() {
     if (!current) return;
     if (!dest.trim()) { setStatus('Pick a destination folder.'); return; }
-    const group = groupKeyOf(current);
+    const group = inboxGroupKey(current);
     setBusy(true); setStatus('Filing…');
     try { await fileInboxNote(current.path, dest.trim(), draft); markLearnTaskDone(); setStatus(''); load({ preferGroup: group }); }
     catch (e) { setStatus(`Failed: ${e.message || e}`); }
@@ -228,7 +228,7 @@ export default function InboxReview({ onCount }) {
 
   async function acknowledge() {
     if (!current) return;
-    const group = groupKeyOf(current);
+    const group = inboxGroupKey(current);
     setBusy(true); setStatus('Saving…');
     try {
       // Best-effort: offline this hits no server — the acknowledge still queues. (Filing
@@ -243,7 +243,7 @@ export default function InboxReview({ onCount }) {
 
   async function discard() {
     if (!current) return;
-    const group = groupKeyOf(current);
+    const group = inboxGroupKey(current);
     setBusy(true);
     try { await discardInboxNote(current.path); load({ preferGroup: group }); }
     catch (e) { setStatus(`Failed: ${e.message || e}`); }
@@ -325,7 +325,7 @@ export default function InboxReview({ onCount }) {
 
   // ── collapsible tree rendering ───────────────────────────────────────────────
   function renderNoteRow(it, depth) {
-    const color = sourceColors.get(it.captureId || it.inboxFolder || it.path);
+    const color = sourceColors.get(inboxGroupKey(it));
     const drag = isDraggable(it);
     return (
       <div key={it.path}
