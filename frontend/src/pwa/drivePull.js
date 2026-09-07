@@ -5,12 +5,24 @@ import { getCreds, refreshCreds } from './setup';
 import { getAccessToken, driveList, driveDownload } from './drive';
 import { deriveKey, decryptText } from './crypto';
 import { splitFrontmatter, parseFrontmatterFields } from '../utils/frontmatter';
-import { putReviewNotes, putAssignments, setMeta } from './db';
+import { putReviewNotes, putAssignments, setMeta, getMeta, getAllReviewNotes } from './db';
 import { fetchNames } from '../api/notes';
 
 const REVIEW_BUNDLE = 'review-bundle.json.enc';
 const CARDS_BUNDLE = 'cards.json.enc';
 const INBOX_BUNDLE = 'inbox.json.enc';
+
+// Once today's review LIST is set, a background pull (autoSync, a reconnect) must not
+// silently reshuffle or replace it — only cards/inbox refresh in the background; the
+// note SET you're actually reviewing stays put until a new calendar day, or an explicit
+// forced refresh (the manual "Download for offline" tap). This does NOT pin media
+// warming — a connection drop mid-warm still needs to keep retrying for whatever's
+// already on today's list, just not change WHICH notes are on it.
+const REVIEW_LIST_DATE_KEY = 'reviewListDate';
+const todayStr = () => new Date().toISOString().slice(0, 10);
+async function reviewListAlreadyPreparedToday() {
+  return (await getMeta(REVIEW_LIST_DATE_KEY).catch(() => null)) === todayStr();
+}
 
 // sr-due lives in the note's own frontmatter → the phone can compute due-ness itself.
 function dueOf(content) {
@@ -36,7 +48,9 @@ async function findOfflineFile(token, folderId, name) {
 
 // Download + decrypt the review bundle into the reviewNotes store. Returns {notes, generatedAt}.
 // onStage?.({ stage }) fires as each bundle phase starts so the UI can name what's downloading.
-export async function pullReviewFromDrive({ onStage } = {}) {
+// force=true (the manual "Download for offline" tap) bypasses the daily pin below; every
+// other caller (autoSync, a reconnect) leaves it false and respects it.
+export async function pullReviewFromDrive({ onStage, force = false } = {}) {
   let creds = await getCreds();
   if (!creds) throw new Error('Link this device first (Drive link, below).');
   // Self-heal a device that linked too early (blank folder id cached): re-read the server
@@ -59,7 +73,14 @@ export async function pullReviewFromDrive({ onStage } = {}) {
     content: n.content,
     srDue: dueOf(n.content),
   }));
-  await putReviewNotes(records);
+  // Skip overwriting the list itself if today's was already prepared — see the pin note
+  // above. The bundle is still downloaded (cheap enough) so cards/inbox below still get
+  // fresh, and so the caller can tell listPinned happened rather than silently no-op'ing.
+  const listPinned = !force && await reviewListAlreadyPreparedToday();
+  if (!listPinned) {
+    await putReviewNotes(records);
+    await setMeta(REVIEW_LIST_DATE_KEY, todayStr());
+  }
 
   // Cache the review caps the bundle carried so the offline hybrid split matches the
   // desktop (the store reads this in Drive mode — see useStore.fetchReviewNotes).
@@ -99,33 +120,40 @@ export async function pullReviewFromDrive({ onStage } = {}) {
 
   await setMeta('lastSync', Date.now());
   await setMeta('driveSource', true);
-  return { notes: records.length, cards, inbox, generatedAt: bundle.generatedAt };
+  // notes reports what's actually ON the phone: the just-pulled count normally, or the
+  // existing local count when the list was pinned (so a "0 notes" summary doesn't read as
+  // a failed/empty pull when really nothing was supposed to change).
+  const notes = listPinned ? (await getAllReviewNotes()).length : records.length;
+  return { notes, cards, inbox, generatedAt: bundle.generatedAt, listPinned };
 }
 
 // Ask the server (while it's up) to rebuild the bundle, then pull it. Used at home so the
 // train set is fresh; falls back to pulling the existing bundle if the server is off.
-// onStage?.({ stage, done, total }) reports progress phase-by-phase for the UI.
-export async function refreshAndPull({ onStage } = {}) {
+// onStage?.({ stage, done, total }) reports progress phase-by-phase for the UI. force is
+// forwarded to pullReviewFromDrive — see its daily-pin note.
+export async function refreshAndPull({ onStage, force = false } = {}) {
   let serverUp = false;
   try {
     await fetch('/api/pwa/export', { method: 'POST', credentials: 'same-origin' });
     serverUp = true;
   } catch { /* server off — pull whatever bundle is already on Drive */ }
-  const res = await pullReviewFromDrive({ onStage });
-  // Heavy media (images + A/V) comes DIRECT from the server, not Drive — only possible while
-  // it's up. Best-effort: a failed warm never fails the pull. Scoped + self-evicting inside.
-  if (serverUp) {
-    try {
-      const { warmReviewMedia } = await import('./warmMedia');
-      res.media = await warmReviewMedia({
-        onProgress: p => onStage?.({ stage: p.phase, done: p.done, total: p.total }),
-      });
-    } catch { /* keep the note set even if media warming fails */ }
+  const res = await pullReviewFromDrive({ onStage, force });
+  // Media warming always runs now, server up or not — warmReviewMedia falls back to
+  // fetching images/plain files directly from Drive (same mirrored resources/ files the
+  // vault sync already uploads) when the server-direct fetch is unavailable. Video/audio
+  // and PDF pages still need the live server (transcoding/rendering happens there) — see
+  // warmMedia.js. Best-effort either way: a failed warm never fails the pull.
+  try {
+    const { warmReviewMedia } = await import('./warmMedia');
+    res.media = await warmReviewMedia({
+      onProgress: p => onStage?.({ stage: p.phase, done: p.done, total: p.total }),
+    });
+  } catch { /* keep the note set even if media warming fails */ }
 
+  if (serverUp) {
     // Piggyback: cache the full vault's note names for offline search/link fallback
-    // (utils/offlineSearch.js). Same reasoning as media above — /names is server-direct,
-    // not on Drive, so this can only run while the server answered. Best-effort; drift
-    // accepted otherwise.
+    // (utils/offlineSearch.js). /names is server-direct, not on Drive, so this can only
+    // run while the server answered. Best-effort; drift accepted otherwise.
     try {
       await setMeta('cachedNoteNames', await fetchNames());
     } catch { /* offline name cache is best-effort */ }

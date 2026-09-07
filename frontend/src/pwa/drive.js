@@ -102,6 +102,17 @@ export async function driveDownload(token, fileId) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+// Every file the vault sync uploads (notes AND resources — SyncService.java) carries an
+// appProperties.vault_path set to its exact vault-relative path (DriveService.uploadFile),
+// so a resource (e.g. "resources/images/photo.png") can be found in one query — no folder
+// traversal needed, unlike driveFindFirstFile's predicate-scan use case.
+export async function driveFindByVaultPath(token, relativePath) {
+  const escaped = relativePath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const q = `appProperties has { key='vault_path' and value='${escaped}' } and trashed=false`;
+  const hits = await driveList(token, q, { fields: 'files(id,name,appProperties)' });
+  return hits[0] || null;
+}
+
 // Overwrite an existing file's content IN PLACE (same id, same location) — unlike
 // driveCreateFile, which always spawns a new file. Used for a single mutable value
 // (e.g. _prefs/settings.json.enc) that should have one stable file, not one per write.

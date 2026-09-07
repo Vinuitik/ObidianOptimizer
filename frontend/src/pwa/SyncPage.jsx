@@ -243,9 +243,11 @@ export default function SyncPage() {
         // Push my grades to the Drive mailbox first (server drains them on its next boot),
         // then pull the freshest bundle. Works even with the laptop off.
         const up = await pushMailbox().catch(() => ({ pushed: 0 }));
+        // force: true — an explicit manual tap is allowed to replace today's already-
+        // prepared list (unlike autoSync/reconnect, which must not — see drivePull.js).
         const res = online
-          ? await refreshAndPull({ onStage: setStage })
-          : await pullReviewFromDrive({ onStage: setStage });
+          ? await refreshAndPull({ onStage: setStage, force: true })
+          : await pullReviewFromDrive({ onStage: setStage, force: true });
         setLastSync(Date.now());
         const summary = mediaSummary(res.media?.byPhase);
         setStatus({
