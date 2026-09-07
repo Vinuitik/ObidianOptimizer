@@ -2,6 +2,17 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { tokenize, dwellMs, splitAtOrp } from '../../utils/rsvp';
 import styles from './RsvpReader.module.css';
 
+// Remembered per-device (not per-note) — otherwise every note reopens at the default
+// speed and the reader has to re-drag the slider back to their usual pace each time.
+const WPM_KEY = 'obsOpt_rsvpWpm';
+const getPersistedWpm = () => {
+  try {
+    const v = Number(localStorage.getItem(WPM_KEY));
+    return v >= 150 && v <= 800 ? v : 350;
+  } catch { return 350; }
+};
+const setPersistedWpm = (wpm) => { try { localStorage.setItem(WPM_KEY, String(wpm)); } catch {} };
+
 // RSVP reader (INGESTION_V2_FLOWS §7): flashes one word at a time at a fixed point with
 // the ORP letter highlighted, so reading is saccade-free and fast. Drives the pure
 // helpers in utils/rsvp.js on a self-scheduling timer (each word's dwell depends on its
@@ -10,8 +21,9 @@ export default function RsvpReader({ text }) {
   const words = useMemo(() => tokenize(text), [text]);
   const [i, setI] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [wpm, setWpm] = useState(350);
+  const [wpm, setWpmState] = useState(getPersistedWpm);
   const timer = useRef(null);
+  const setWpm = useCallback((v) => { setWpmState(v); setPersistedWpm(v); }, []);
 
   useEffect(() => { setI(0); setPlaying(false); }, [text]);
 
