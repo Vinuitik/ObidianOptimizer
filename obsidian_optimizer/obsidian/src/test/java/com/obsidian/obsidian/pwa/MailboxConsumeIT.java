@@ -170,8 +170,11 @@ class MailboxConsumeIT {
         // hinge: every event committed → the mailbox file is deleted
         verify(drive).deleteFile("f1");
         assertThat(ledger.alreadyConsumed("e-1")).isTrue();
-        // the phone's next pull must reflect this grade
-        verify(offlineExport).exportReviewBundle(200);
+        // The phone's next pull must reflect this grade — and, since a drain can apply any
+        // mix of grade/assignment/file/discard/acknowledge events, ALL THREE bundles get
+        // rebuilt, not just review (a `grade`-only re-export used to leave cards/inbox
+        // stale until the next boot or the nightly cron).
+        verify(offlineExport).exportAll();
     }
 
     // ── idempotency: reprocessing a file is a no-op ──────────────────────────

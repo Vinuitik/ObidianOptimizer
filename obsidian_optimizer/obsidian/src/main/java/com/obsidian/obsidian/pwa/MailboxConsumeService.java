@@ -114,8 +114,14 @@ public class MailboxConsumeService {
                 }
             }
             if (applied > 0) {
-                // The phone's next pull should reflect the grades we just applied.
-                try { offlineExport.exportReviewBundle(200); }
+                // The phone's next pull should reflect whatever we just applied — grades
+                // (review), assignment completions (cards), AND file/discard/acknowledge
+                // (inbox). Used to only re-export the review bundle, so a drained file/
+                // discard/acknowledge/assignment event left the cards/inbox bundles stale
+                // until the next boot or the 3:30am nightly cron — the phone's next pull
+                // would then hand back an old snapshot, undoing progress it had already
+                // made locally.
+                try { offlineExport.exportAll(); }
                 catch (Exception e) { log.warn("[Mailbox] re-export after consume failed: {}", e.getMessage()); }
             }
         } catch (Exception e) {

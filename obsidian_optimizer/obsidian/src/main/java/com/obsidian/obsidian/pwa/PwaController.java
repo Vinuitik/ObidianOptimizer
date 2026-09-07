@@ -2,6 +2,8 @@ package com.obsidian.obsidian.pwa;
 
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.sync.DeviceIdentityService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,15 +31,19 @@ import java.util.Map;
 @RequestMapping("/pwa")
 public class PwaController {
 
+    private static final Logger log = LoggerFactory.getLogger(PwaController.class);
+
     private final SettingsRepository settings;
     private final DeviceIdentityService deviceIdentity;
     private final OfflineExportService offlineExport;
+    private final MailboxConsumeService mailboxConsume;
 
     public PwaController(SettingsRepository settings, DeviceIdentityService deviceIdentity,
-                         OfflineExportService offlineExport) {
+                         OfflineExportService offlineExport, MailboxConsumeService mailboxConsume) {
         this.settings = settings;
         this.deviceIdentity = deviceIdentity;
         this.offlineExport = offlineExport;
+        this.mailboxConsume = mailboxConsume;
     }
 
     public record PwaSetup(
@@ -82,14 +88,28 @@ public class PwaController {
             clientId, clientSecret, refreshToken, folderId, passphrase, deviceIdentity.getDeviceId()));
     }
 
-    /** "Prep offline set" — rebuild the encrypted review bundle on Drive now. Runs while
-     *  the server is up (nightly + on-boot cover the rest). */
+    /** "Prep offline set" — rebuild ALL THREE encrypted bundles on Drive now (review, cards,
+     *  AND inbox — the inbox bundle used to be left out here, so it only ever refreshed on
+     *  server boot or the 3:30am nightly cron; a phone reconnecting mid-day pulled a stale
+     *  Learn queue that could be many hours old, discarding whatever the phone had already
+     *  locally triaged since). Drains the Drive mailbox FIRST so this reflects grades/files/
+     *  discards the phone just pushed moments ago, not the server's state from before that —
+     *  otherwise "reconnect → rebuild → pull" could still hand the phone back a snapshot that
+     *  doesn't yet include what it just sent, undoing its own local progress. Best-effort:
+     *  a drain failure (e.g. Drive briefly unreachable) doesn't block exporting whatever the
+     *  server currently has. */
     @PostMapping("export")
     public ResponseEntity<?> export() {
         try {
+            mailboxConsume.consumeAll();
+        } catch (Exception e) {
+            log.warn("[PwaController] mailbox drain before export failed: {}", e.getMessage());
+        }
+        try {
             int notes = offlineExport.exportReviewBundle(200);
             int assignments = offlineExport.exportCards(50);
-            return ResponseEntity.ok(Map.of("notes", notes, "assignments", assignments));
+            int inbox = offlineExport.exportInbox();
+            return ResponseEntity.ok(Map.of("notes", notes, "assignments", assignments, "inbox", inbox));
         } catch (IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
         } catch (Exception e) {
