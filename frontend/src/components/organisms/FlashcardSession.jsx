@@ -129,9 +129,12 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
       const raw = answers[c.id];
       const sent = (raw == null || raw === IDK) ? '' : raw;
       try {
-        results[c.id] = await submitAttempt(assignment.id, c.id, sent);
+        // card + its frozen variant let submitAttemptOffline grade mcq/exercise locally
+        // when offline (see localGrade.js) — ignored by the online path, which the server
+        // grades as always.
+        results[c.id] = await submitAttempt(assignment.id, c.id, sent, c, variants[c.id]);
       } catch (e) {
-        results[c.id] = { verdict: 'WRONG', pointsEarned: 0, maxPoints: 0, feedback: 'verification failed' };
+        results[c.id] = { verdict: 'WRONG', pointsEarned: 0, maxPoints: 0, feedback: 'verification failed', deferred: false };
       }
     }));
     setVerdicts(results);
@@ -225,34 +228,51 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
 
   // ── Result phase ──────────────────────────────────────────────────────────
 
-  const deferred = Boolean(completion?.deferred);   // offline: server grades on sync
+  // Two independent "not fully known yet" flags, not one blanket one: completionDeferred
+  // is about the NOTE's own FSRS/bandit reschedule (only the server does that, so it's
+  // always deferred while the completeAssignment call is queued — e.g. every driveMode
+  // session). cardDeferred (below, per card) is about that ONE card's verdict — mcq/
+  // exercise are graded locally the instant you submit (see localGrade.js), so only
+  // 'open' (free-text, needs the LLM judge) is ever actually deferred. The two are
+  // independent: a driveMode session routinely has completionDeferred=true while most
+  // cards already show a real ✓/✗.
+  const completionDeferred = Boolean(completion?.deferred);
   // Flagged cards are excluded from both numerator and denominator server-side
   // (AssignmentService.submitAttempt never records an attempt for one) — match that here
   // so the displayed total agrees with noteResult.band, which comes from the same query.
   const scoredCards = cards.filter(c => verdicts[c.id]?.verdict !== 'FLAGGED');
-  const earned = scoredCards.reduce((sum, c) => sum + (verdicts[c.id]?.pointsEarned ?? 0), 0);
-  const max    = scoredCards.reduce((sum, c) => sum + c.difficulty, 0);
+  const knownCards  = scoredCards.filter(c => !verdicts[c.id]?.deferred);
+  const anyCardDeferred = scoredCards.length > knownCards.length;
+  const earned = knownCards.reduce((sum, c) => sum + (verdicts[c.id]?.pointsEarned ?? 0), 0);
+  const max    = knownCards.reduce((sum, c) => sum + c.difficulty, 0);
   const noteResult = completion?.notes?.find(n => n.notePath === notePath) ?? completion?.notes?.[0];
 
   return (
     <div className={styles.session} data-testid="flashcard-result">
       <div className={styles.resultHeader}>
         <h2 className={styles.resultTitle}>Session complete</h2>
-        {!deferred && (
+        {knownCards.length > 0 && (
           <div className={styles.scoreBlock}>
             <span className={styles.scoreBig}>{earned}</span>
-            <span className={styles.scoreOf}>/ {max} pts</span>
+            <span className={styles.scoreOf}>/ {max} pts{anyCardDeferred ? ' so far' : ''}</span>
           </div>
         )}
       </div>
 
-      {deferred && (
+      {anyCardDeferred && (
         <p className={styles.lockedNote} data-testid="deferred-result">
-          Answers recorded ✓ — they’ll be graded and this note rescheduled when you sync.
+          {scoredCards.length - knownCards.length} card{scoredCards.length - knownCards.length === 1 ? '' : 's'}{' '}
+          need{scoredCards.length - knownCards.length === 1 ? 's' : ''} the model to grade — recorded ✓, scored when you sync.
         </p>
       )}
 
-      {noteResult && !deferred && (
+      {completionDeferred && (
+        <p className={styles.lockedNote} data-testid="reschedule-deferred-result">
+          This note will be rescheduled once everything syncs.
+        </p>
+      )}
+
+      {noteResult && !completionDeferred && (
         <p className={styles.lockedNote} data-testid="band-result">
           Graded <strong>{noteResult.band.replace('_', ' ')}</strong> — next review{' '}
           {new Date(noteResult.due).toLocaleDateString()}
@@ -263,10 +283,12 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
         {cards.map(c => {
           const v = verdicts[c.id];
           const flaggedResult = v?.verdict === 'FLAGGED';
-          // Deferred (offline): neutral mark, no correctness/answer reveal — the server
-          // hasn't graded yet. Flagged: also neutral — excluded from grading, not "wrong".
-          // Online otherwise: the usual correct/partial/wrong breakdown.
-          const cls = deferred || flaggedResult ? styles.resultPending
+          const cardDeferred = Boolean(v?.deferred);
+          // Deferred (an 'open' card still awaiting the LLM judge): neutral mark, no
+          // correctness/answer reveal yet. Flagged: also neutral — excluded from grading,
+          // not "wrong". Otherwise (including mcq/exercise, graded locally offline or on):
+          // the usual correct/partial/wrong breakdown.
+          const cls = cardDeferred || flaggedResult ? styles.resultPending
                     : v?.verdict === 'CORRECT' ? styles.resultCorrect
                     : v?.verdict === 'PARTIAL' ? styles.resultPending
                     : styles.resultWrong;
@@ -274,7 +296,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
             <div key={c.id} className={`${styles.resultCard} ${cls}`}
                  data-testid={`result-card-${c.id}`}>
               <span className={styles.resultMark}>
-                {deferred ? '◐' : flaggedResult ? '🚩'
+                {cardDeferred ? '◐' : flaggedResult ? '🚩'
                   : v?.verdict === 'CORRECT' ? '✓' : v?.verdict === 'PARTIAL' ? '◐' : '✗'}
               </span>
               <div className={styles.resultCardBody}>
@@ -284,18 +306,18 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
                 ) : (
                   <p className={styles.resultAnswer}>
                     Your answer: {answerDisplayOf(c, answers[c.id])}
-                    {!deferred && <>{' '}· {v?.pointsEarned ?? 0}/{c.difficulty} pts</>}
+                    {!cardDeferred && <>{' '}· {v?.pointsEarned ?? 0}/{c.difficulty} pts</>}
                   </p>
                 )}
-                {!deferred && !flaggedResult && v?.verdict !== 'CORRECT' && correctAnswerOf(c, variants) != null && (
+                {!cardDeferred && !flaggedResult && v?.verdict !== 'CORRECT' && correctAnswerOf(c, variants) != null && (
                   <p className={styles.resultCorrectAnswer}>
                     Correct answer: {String(correctAnswerOf(c, variants))}
                   </p>
                 )}
-                {!deferred && !flaggedResult && c.payload.explanation && (
+                {!cardDeferred && !flaggedResult && c.payload.explanation && (
                   <p className={styles.resultExplanation}>Why: {c.payload.explanation}</p>
                 )}
-                {!deferred && !flaggedResult && v?.feedback && (
+                {!cardDeferred && !flaggedResult && v?.feedback && (
                   <p className={styles.resultFeedback}>{v.feedback}</p>
                 )}
                 {/* Flag a bad card: quarantines it now and starts a replacement generating

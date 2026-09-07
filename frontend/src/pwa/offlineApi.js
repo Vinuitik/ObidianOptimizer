@@ -30,6 +30,7 @@ import {
 import { isOnline } from './connectivity';
 import { hasCreds } from './setup';
 import { pushMailbox } from './mailbox';
+import { gradeLocally } from './localGrade';
 
 // Device online but the SERVER unreachable, and this device is Drive-linked: relay this
 // one capture to Drive right away instead of leaving it for the next foreground interval
@@ -238,16 +239,21 @@ export async function buildAssignmentOffline(scope, points) {
   return { id: a.assignmentId, scope, targetPoints: points, cards: a.cards, variants: a.variants };
 }
 
-export async function submitAttemptOffline(assignmentId, cardId, answer) {
+// `card`/`variant` are only needed for the offline branches (mcq/exercise local grading —
+// see localGrade.js) — the caller (FlashcardSession.jsx) already has both in hand, so no
+// extra lookup/storage is needed here. The online path ignores them; the server grades.
+export async function submitAttemptOffline(assignmentId, cardId, answer, card, variant) {
   if (!driveMode) {
     try { return await netSubmitAttempt(assignmentId, cardId, answer); }
     catch (e) { if (!isServerUnreachable(e)) throw e; }
   }
-  // Record the raw answer; the server is authoritative and grades on consume/replay. No
-  // local verdict (open/exercise need the model) — the UI shows "recorded", score arrives
-  // on sync. Reached either in driveMode, or when the connection drops mid-session.
+  // Record the raw answer regardless (the server is authoritative and re-grades on
+  // consume/replay either way — this is just what the offline UI shows in the meantime).
   offlineAnswers[cardId] = answer ?? '';
-  return { verdict: 'RECORDED', pointsEarned: 0, maxPoints: 0, deferred: true };
+  // mcq/exercise are fully deterministic (no LLM) — grade them right now instead of making
+  // the student wait for a sync just to find out if they were right. Only 'open' (free-
+  // text, needs the server's LLM judge) actually has to stay deferred.
+  return gradeLocally(card, variant, answer);
 }
 
 export async function completeAssignmentOffline(assignmentId) {

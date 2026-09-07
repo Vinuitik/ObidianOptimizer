@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // IndexedDB-touching modules are mocked (jsdom has no indexedDB); we only exercise the
 // captureText transport-decision logic: POST when online, queue when offline / on 401.
@@ -14,11 +14,12 @@ vi.mock('./outbox', () => ({
 }));
 
 import {
-  captureText, flagCardOffline,
+  captureText, flagCardOffline, setDriveMode,
   buildAssignmentOffline, submitAttemptOffline, completeAssignmentOffline,
 } from './offlineApi';
 import { isOnline } from './connectivity';
 import { enqueueCaptureText, enqueueFlag, enqueueAssignment } from './outbox';
+import { getAssignmentByNote } from './db';
 
 describe('captureText', () => {
   beforeEach(() => {
@@ -159,5 +160,58 @@ describe('flashcard trio — mid-session connection drop (non-driveMode)', () =>
 
     await expect(submitAttemptOffline('a2', 'c1', 'answer')).rejects.toThrow();
     expect(enqueueAssignment).not.toHaveBeenCalled();
+  });
+});
+
+// driveMode: submitAttemptOffline grades mcq/exercise locally (see localGrade.js) instead
+// of blanket-deferring every card type — only 'open' actually needs the server's LLM judge.
+describe('flashcard trio — driveMode local grading', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch = vi.fn();
+    setDriveMode(true);
+  });
+  afterEach(() => setDriveMode(false));
+
+  const MCQ_CARD = { id: 'c1', type: 'mcq', difficulty: 2, payload: { correct: 1 } };
+  const OPEN_CARD = { id: 'c2', type: 'open', difficulty: 3, payload: {} };
+
+  it('never touches the network — driveMode always defers to the local/pulled path', async () => {
+    getAssignmentByNote.mockResolvedValue({ assignmentId: 'a1', cards: [MCQ_CARD], variants: {} });
+    await buildAssignmentOffline('n.md', 10);
+
+    await submitAttemptOffline('a1', 'c1', '1', MCQ_CARD, null);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('mcq answered correctly → graded immediately, not deferred', async () => {
+    getAssignmentByNote.mockResolvedValue({ assignmentId: 'a1', cards: [MCQ_CARD], variants: {} });
+    await buildAssignmentOffline('n.md', 10);
+
+    const result = await submitAttemptOffline('a1', 'c1', '1', MCQ_CARD, null);
+
+    expect(result).toEqual({ verdict: 'CORRECT', pointsEarned: 2, maxPoints: 2, deferred: false });
+  });
+
+  it('open card → still RECORDED/deferred (needs the server judge)', async () => {
+    getAssignmentByNote.mockResolvedValue({ assignmentId: 'a1', cards: [OPEN_CARD], variants: {} });
+    await buildAssignmentOffline('n.md', 10);
+
+    const result = await submitAttemptOffline('a1', 'c2', 'my answer', OPEN_CARD, null);
+
+    expect(result).toEqual({ verdict: 'RECORDED', pointsEarned: 0, maxPoints: 3, deferred: true });
+  });
+
+  it('completeAssignmentOffline queues the raw answers (server re-grades on drain, ' +
+     'regardless of what was already graded locally)', async () => {
+    getAssignmentByNote.mockResolvedValue({ assignmentId: 'a1', cards: [MCQ_CARD], variants: {} });
+    await buildAssignmentOffline('n.md', 10);
+    await submitAttemptOffline('a1', 'c1', '1', MCQ_CARD, null);
+
+    const result = await completeAssignmentOffline('a1');
+
+    expect(result).toEqual({ notes: [], deferred: true, queued: true });
+    expect(enqueueAssignment).toHaveBeenCalledWith('a1', 'n.md', { c1: '1' });
   });
 });
