@@ -7,6 +7,7 @@ import { pushMailbox } from './mailbox';
 import { hasCreds } from './setup';
 import { maybeAutoSync } from './autoSync';
 import { armQuitNotify, showLocalNotification } from './quitNotify';
+import { stageText } from './syncStageLabel';
 import LoginModal from '../components/organisms/LoginModal';
 import RouteErrorBoundary from '../components/organisms/RouteErrorBoundary';
 import BottomNav from './BottomNav';
@@ -23,6 +24,7 @@ export default function MobileLayout() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const showLogin       = useStore(s => s.showLogin);
   const showToast       = useStore(s => s.showToast);
+  const syncStage       = useStore(s => s.syncStage);
   const online          = useOffline();
 
   // Same bootstrap the desktop App does — auth gate + revalidate on focus — but the
@@ -118,6 +120,12 @@ export default function MobileLayout() {
       <TopBar />
       {!online && (
         <div className={styles.offlineBar}>Offline — showing your downloaded set</div>
+      )}
+      {/* Visible from every page, not just SyncPage — a manual download or the background
+          auto-sync (autoSync.js) both report into the same store field, so this never
+          disappears just because you switched tabs mid-sync. */}
+      {syncStage && (
+        <div className={styles.offlineBar}>{stageText(syncStage)}</div>
       )}
       <main className={styles.content}>
         <RouteErrorBoundary>

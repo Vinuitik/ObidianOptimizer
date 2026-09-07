@@ -9,6 +9,7 @@ import { refreshAndPull, pullReviewFromDrive } from './drivePull';
 import { pushMailbox } from './mailbox';
 import { notificationsSupported, notificationPermission, requestNotificationPermission, showLocalNotification } from './quitNotify';
 import { fetchFailedCaptures, retryCapture, dismissCapture } from '../api/capture';
+import { stageText } from './syncStageLabel';
 import styles from './MobilePages.module.css';
 
 // Baseline for "did the failed-capture count grow since last time we checked", persisted
@@ -29,16 +30,6 @@ function ago(ts) {
   return `${Math.round(hrs / 24)} d ago`;
 }
 
-// User-facing names for each download phase (stage key → label).
-const STAGE_LABELS = {
-  notes: 'notes', cards: 'flashcards', inbox: 'inbox',
-  images: 'images', media: 'video & audio', pdf: 'PDF pages',
-};
-function stageText(s) {
-  if (!s) return 'Downloading…';
-  const label = STAGE_LABELS[s.stage] || s.stage;
-  return `Downloading ${label}${s.total ? ` ${s.done}/${s.total}` : ''}…`;
-}
 // "12 images · 3 video/audio · 8 PDF pages" from a warm's byPhase counts (skip zeros).
 function mediaSummary(byPhase) {
   if (!byPhase) return '';
@@ -58,10 +49,13 @@ export default function SyncPage() {
   const loadSettings    = useStore(s => s.loadSettings);
   const applySettings   = useStore(s => s.applySettings);
   const online          = useOffline();
+  // Store-backed (not local state): survives navigating away mid-download instead of
+  // vanishing the moment this page unmounts — see useStore.js's syncStage.
+  const stage           = useStore(s => s.syncStage);
+  const setStage        = useStore(s => s.setSyncStage);
 
   const [lastSync, setLastSync] = useState(null);
   const [busy, setBusy]         = useState(false);
-  const [stage, setStage]       = useState(null); // { stage, done, total }
   const [status, setStatus]     = useState(null);  // { text, tone }
   const [linked, setLinked]     = useState(false);
   const [driveMsg, setDriveMsg] = useState(null);  // { text, tone }
@@ -313,9 +307,12 @@ export default function SyncPage() {
       )}
 
       {isAuthenticated ? (
-        <button className={styles.captureBtn} onClick={download} disabled={busy || !online}
+        // stage (store-backed) reflects a sync in flight even if THIS mount of the page
+        // didn't start it — e.g. the background auto-sync, or a manual download begun
+        // before navigating away and still running now that you're back.
+        <button className={styles.captureBtn} onClick={download} disabled={busy || Boolean(stage) || !online}
                 style={{ marginTop: 14, width: '100%', padding: '12px 16px' }}>
-          {busy ? stageText(stage) : 'Download for offline'}
+          {stage ? stageText(stage) : (busy ? 'Working…' : 'Download for offline')}
         </button>
       ) : (
         <button className={styles.captureBtn} onClick={() => setShowLogin(true)}

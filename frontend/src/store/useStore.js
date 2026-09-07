@@ -225,6 +225,14 @@ const useStore = create((set, get) => ({
   isAuthenticated: persistedAuth(),
   showLogin: false,
 
+  // Drive-sync download progress ({ stage, done, total } | null) — lives here, not in
+  // SyncPage's own state, so it survives navigating away mid-download instead of vanishing
+  // the moment the page unmounts. Set by both the manual "Download for offline" button
+  // (SyncPage.jsx) and the cron-like background auto-sync (pwa/autoSync.js), so either one
+  // shows the same persistent, app-wide "still downloading 123/500" signal.
+  syncStage: null,
+  setSyncStage: (stage) => set({ syncStage: stage }),
+
   rsvpWpm: persistedWpm(),
   // Local write is immediate and authoritative for THIS session; the Drive write is
   // best-effort "just in case" (prefsSync swallows its own errors) — never awaited, so a

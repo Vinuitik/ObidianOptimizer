@@ -8,6 +8,7 @@ import { getMeta } from './db';
 import { hasCreds, refreshCreds } from './setup';
 import { refreshAndPull } from './drivePull';
 import { pushMailbox } from './mailbox';
+import useStore from '../store/useStore';
 
 const FRESH_MS = 6 * 60 * 60 * 1000;   // set is "fresh" for 6h; older → re-pull
 
@@ -27,7 +28,16 @@ export async function maybeAutoSync({ force = false } = {}) {
       if (!force && last && Date.now() - last < FRESH_MS) return null;
       await refreshCreds().catch(() => {});   // re-read server creds (folder id / rotated token)
       await pushMailbox().catch(() => {});    // send my grades up before pulling the new set
-      return await refreshAndPull();          // rebuild-on-server (if up) + pull → IndexedDB
+      // Same store field the manual "Download for offline" button reports into (SyncPage.jsx)
+      // — so a background auto-sync shows the same persistent "downloading 123/500" signal,
+      // visible from whatever page the user's actually on, not just a page they'd have to
+      // be sitting on already.
+      const setSyncStage = useStore.getState().setSyncStage;
+      try {
+        return await refreshAndPull({ onStage: setSyncStage }); // rebuild-on-server (if up) + pull → IndexedDB
+      } finally {
+        setSyncStage(null);
+      }
     } catch {
       return null;                            // best-effort: keep the existing set
     } finally {
