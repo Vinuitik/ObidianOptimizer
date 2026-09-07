@@ -309,12 +309,17 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
                     {!cardDeferred && <>{' '}· {v?.pointsEarned ?? 0}/{c.difficulty} pts</>}
                   </p>
                 )}
-                {!cardDeferred && !flaggedResult && v?.verdict !== 'CORRECT' && correctAnswerOf(c, variants) != null && (
+                {/* The answer key and explanation are static content — already downloaded
+                    with the card, same online or off — so they reveal regardless of
+                    cardDeferred. Only the VERDICT (was the student's specific answer judged
+                    right — genuinely unknown for 'open' until the LLM judge runs) and the
+                    points below stay gated on it. */}
+                {!flaggedResult && v?.verdict !== 'CORRECT' && correctAnswerOf(c, variants) != null && (
                   <p className={styles.resultCorrectAnswer}>
                     Correct answer: {String(correctAnswerOf(c, variants))}
                   </p>
                 )}
-                {!cardDeferred && !flaggedResult && c.payload.explanation && (
+                {!flaggedResult && c.payload.explanation && (
                   <p className={styles.resultExplanation}>Why: {c.payload.explanation}</p>
                 )}
                 {!cardDeferred && !flaggedResult && v?.feedback && (

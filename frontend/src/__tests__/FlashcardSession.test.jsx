@@ -171,6 +171,34 @@ describe('FlashcardSession — Finish (batch grading)', () => {
     expect(screen.getByTestId('result-card-c1').textContent).toMatch(/Correct answer: Scheduler/);
   });
 
+  it('open card: reveals the reference answer even though its own verdict is deferred ' +
+     '(needs the LLM judge) — the answer key is static content, already downloaded', async () => {
+    api.buildAssignment.mockResolvedValue({
+      ...ASSIGNMENT,
+      cards: [
+        ASSIGNMENT.cards[0],
+        { id: 'c2', type: 'open', difficulty: 3,
+          payload: { question: 'Explain stability.', reference_answers: ['Resistance to forgetting'] } },
+      ],
+    });
+    api.submitAttempt.mockImplementation(async (assignmentId, cardId) => (
+      cardId === 'c2'
+        ? { verdict: 'RECORDED', pointsEarned: 0, maxPoints: 3, deferred: true }
+        : { verdict: 'CORRECT', pointsEarned: 2, maxPoints: 2 }
+    ));
+
+    await renderSession();
+    fireEvent.click(screen.getByTestId('option-0'));
+    fireEvent.click(screen.getByTestId('next-btn'));
+    fireEvent.change(screen.getByTestId('open-textarea'), { target: { value: 'my guess' } });
+    fireEvent.click(screen.getByTestId('next-btn'));
+    await waitFor(() => screen.getByTestId('flashcard-result'));
+
+    const openCardEl = screen.getByTestId('result-card-c2');
+    expect(openCardEl.textContent).toMatch(/Correct answer: Resistance to forgetting/);
+    expect(openCardEl.textContent).not.toMatch(/pts/); // points/verdict stay hidden — genuinely unknown
+  });
+
   it('review note button navigates to the note', async () => {
     const onReviewNote = vi.fn();
     render(<FlashcardSession notePath="/vault/note.md" onReviewNote={onReviewNote} onClose={noop} />);
