@@ -331,6 +331,23 @@ const useStore = create((set, get) => ({
     set(s => ({ reviewNotes: s.reviewNotes.filter(n => n.fullPath !== fullPath) }));
   },
 
+  // Centralizes "run a grade/complete call, then dismiss on success (a queued-offline
+  // result counts as success — the server finishes it on sync) or toast on a genuine
+  // failure" — previously duplicated (with drifting error handling) across the slideshow
+  // self-grade path, the flashcard Finish button, and the ReviewRating dropdown. Re-throws
+  // after toasting so a caller that needs to skip its own follow-up state (e.g. not
+  // recording a completed flashcard test) still can.
+  completeReview: async (fullPath, action) => {
+    try {
+      const result = await action();
+      get().dismissFromReview(fullPath);
+      return result;
+    } catch (e) {
+      get().showToast(`Rating failed: ${e.message ?? e}`);
+      throw e;
+    }
+  },
+
   // A flashcard test finished → count it against today's flashcard budget so a reload
   // won't re-offer flashcard slots past the cap. (Read/self-grade reviews don't count.)
   recordFlashcardDone: () => { bumpFlashcardsDone(); },

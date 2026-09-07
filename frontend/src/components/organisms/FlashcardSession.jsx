@@ -43,7 +43,7 @@ function answerDisplayOf(card, value) {
 }
 
 export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
-  const dismissFromReview   = useStore(s => s.dismissFromReview);
+  const completeReview      = useStore(s => s.completeReview);
   const recordFlashcardDone = useStore(s => s.recordFlashcardDone);
   const showToast           = useStore(s => s.showToast);
   const [flagged, setFlagged]       = useState({});        // { [cardId]: true } once flagged
@@ -136,16 +136,16 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
     }));
     setVerdicts(results);
     try {
-      const result = await completeAssignment(assignment.id);
+      // completeReview dismisses from the review list on success (including a queued-
+      // offline result — the server finishes grading on sync) and toasts on a genuine
+      // failure, same as the slideshow/ReviewRating paths. Without this the note used to
+      // linger looking un-reviewed with no indication anything went wrong.
+      const result = await completeReview(notePath, () => completeAssignment(assignment.id));
       setCompletion(result);
-      // Grading succeeded server-side (FSRS + bandit rescheduled the note), so it's
-      // no longer due — drop it from the visible review list. Slideshow mode does
-      // the same on rate(). Without this the note lingers and looks un-reviewed.
-      dismissFromReview(notePath);
       // Count this test against today's flashcard budget so a reload won't re-offer
       // flashcard slots past the daily cap (see reviewPlan.js / getReviewSession).
       recordFlashcardDone();
-    } catch { /* result phase still renders per-card verdicts */ }
+    } catch { /* toast already shown by completeReview; result phase still renders per-card verdicts */ }
     setSubmitting(false);
     setPhase('result');
   }

@@ -13,9 +13,12 @@ vi.mock('./outbox', () => ({
   enqueueAcknowledge: vi.fn(), enqueueFlag: vi.fn(), flush: vi.fn(),
 }));
 
-import { captureText, flagCardOffline } from './offlineApi';
+import {
+  captureText, flagCardOffline,
+  buildAssignmentOffline, submitAttemptOffline, completeAssignmentOffline,
+} from './offlineApi';
 import { isOnline } from './connectivity';
-import { enqueueCaptureText, enqueueFlag } from './outbox';
+import { enqueueCaptureText, enqueueFlag, enqueueAssignment } from './outbox';
 
 describe('captureText', () => {
   beforeEach(() => {
@@ -116,5 +119,45 @@ describe('flagCardOffline', () => {
 
     expect(res).toEqual({ queued: true });
     expect(enqueueFlag).toHaveBeenCalledWith('card-4', 'reason');
+  });
+});
+
+// Outside driveMode, a session still starts live (no local content otherwise), but a
+// connection drop mid-session must not silently lose already-entered answers — it used to,
+// because submitAttemptOffline/completeAssignmentOffline only ever queued in driveMode.
+describe('flashcard trio — mid-session connection drop (non-driveMode)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch = vi.fn();
+  });
+
+  it('a drop after the session started queues the answers instead of losing them', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ id: 'a1', scope: 'n.md', targetPoints: 10, cards: [], variants: {} }),
+    });
+    await buildAssignmentOffline('n.md', 10);
+
+    global.fetch.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const submitResult = await submitAttemptOffline('a1', 'c1', 'my answer');
+    expect(submitResult).toEqual({ verdict: 'RECORDED', pointsEarned: 0, maxPoints: 0, deferred: true });
+
+    const completeResult = await completeAssignmentOffline('a1');
+    expect(completeResult).toEqual({ notes: [], deferred: true, queued: true });
+    expect(enqueueAssignment).toHaveBeenCalledWith('a1', 'n.md', { c1: 'my answer' });
+  });
+
+  it('a genuine (non-unreachable) error still propagates, not queued', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ id: 'a2', scope: 'n.md', targetPoints: 10, cards: [], variants: {} }),
+    });
+    await buildAssignmentOffline('n.md', 10);
+
+    global.fetch.mockResolvedValue({ ok: false, status: 400 });
+
+    await expect(submitAttemptOffline('a2', 'c1', 'answer')).rejects.toThrow();
+    expect(enqueueAssignment).not.toHaveBeenCalled();
   });
 });

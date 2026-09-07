@@ -174,19 +174,15 @@ const BANDS = [
 // slideshow, so the note is actually rescheduled instead of being read-only.
 
 function InlineNoteReview({ note, onBack, onClose }) {
-  const dismissFromReview = useStore(s => s.dismissFromReview);
-  const showToast         = useStore(s => s.showToast);
+  const completeReview = useStore(s => s.completeReview);
   const [graded, setGraded] = useState(null);
   const canGrade = note.canGrade ?? false;
 
   async function rate(band) {
     try {
-      const result = await gradeNote(note.fullPath, band);
+      const result = await completeReview(note.fullPath, () => gradeNote(note.fullPath, band));
       setGraded(result);
-      dismissFromReview(note.fullPath);
-    } catch (e) {
-      showToast(`Rating failed: ${e.message ?? e}`);
-    }
+    } catch { /* toast already shown by completeReview */ }
   }
 
   return (

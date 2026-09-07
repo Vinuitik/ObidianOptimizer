@@ -12,7 +12,7 @@ const OPTIONS = [
 
 export default function ReviewRating({ fullPath }) {
   const [open, setOpen] = useState(false);
-  const dismissFromReview = useStore(s => s.dismissFromReview);
+  const completeReview = useStore(s => s.completeReview);
   const wrapperRef = useRef(null);
 
   useEffect(() => {
@@ -29,9 +29,7 @@ export default function ReviewRating({ fullPath }) {
   function handleRate(e, value) {
     e.stopPropagation();
     setOpen(false);
-    gradeNote(fullPath, value)
-      .then(() => dismissFromReview(fullPath))
-      .catch(err => console.error('grade failed:', err));
+    completeReview(fullPath, () => gradeNote(fullPath, value)).catch(() => {});
   }
 
   return (

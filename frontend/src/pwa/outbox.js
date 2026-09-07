@@ -1,7 +1,9 @@
-// Grade + capture outbox. Writes made while offline (or while the session is
-// expired) are queued here and replayed on reconnect / re-login.
+// Offline write outbox (grade, assignment, inbox file/discard/acknowledge, flag, capture).
+// Writes made while offline (or while the session is expired) are queued here and
+// replayed on reconnect / re-login.
 import { addToOutbox, getOutbox, deleteFromOutbox } from './db';
-import { gradeNote } from '../api/notes';
+import { gradeNote, submitAttempt, completeAssignment, flagCard } from '../api/notes';
+import { fileInboxNote, discardInboxNote, acknowledgeCapture } from '../api/inbox';
 import { captureSentNotifyEnabled, notifyCaptureSent } from './captureSentNotify';
 
 // eventId makes mailbox replay idempotent — the server dedupes on it (consumed_events).
@@ -82,6 +84,21 @@ export async function flush() {
           method: 'POST', credentials: 'same-origin', body: fd,
         });
         if (!res.ok) throw new Error('captureFile ' + res.status);
+      } else if (item.kind === 'assignment') {
+        // Mirrors MailboxConsumeService.applyAssignment: replay each recorded answer as a
+        // real attempt, then complete — same as an interactive session would have done.
+        for (const [cardId, answer] of Object.entries(item.answers || {})) {
+          await submitAttempt(item.assignmentId, cardId, answer);
+        }
+        await completeAssignment(item.assignmentId);
+      } else if (item.kind === 'file') {
+        await fileInboxNote(item.path, item.targetFolder, item.content);
+      } else if (item.kind === 'discard') {
+        await discardInboxNote(item.path);
+      } else if (item.kind === 'acknowledge') {
+        await acknowledgeCapture(item.captureId);
+      } else if (item.kind === 'flag') {
+        await flagCard(item.cardId, item.reason);
       }
       await deleteFromOutbox(item.id);
       sent++;

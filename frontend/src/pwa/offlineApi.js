@@ -76,15 +76,16 @@ function isServerUnreachable(e) {
 }
 
 // The ONE offline-resilience shape reused by every function below except the deferred-test
-// trio (buildAssignmentOffline/submitAttemptOffline/completeAssignmentOffline — those are
-// driveMode-gated in-memory session state, not a per-call live-vs-queue decision, so they
-// don't fit this): attempt `live()` only when not driveMode (driveMode never hits the
-// server directly for these — it defers to the Drive-pulled cache or the mailbox) and
-// actually online; on an unreachable server, or when skipped for the reasons above, fall
-// back to `fallback()`. A genuine error (a real 401/4xx `live()` chooses to throw) is NOT
-// swallowed — it propagates so the caller's own handling (e.g. a login prompt) still runs.
-// `live()` may itself decide to queue-and-return for a case it wants to handle specially
-// (captureUrl/captureText's 401 → queued with `reason:'auth'` instead of a login rethrow).
+// trio (buildAssignmentOffline/submitAttemptOffline/completeAssignmentOffline — those keep
+// their own in-memory session state across calls, so they inline this same live/fallback
+// decision instead of calling through it): attempt `live()` only when not driveMode
+// (driveMode never hits the server directly for these — it defers to the Drive-pulled
+// cache or the mailbox) and actually online; on an unreachable server, or when skipped for
+// the reasons above, fall back to `fallback()`. A genuine error (a real 401/4xx `live()`
+// chooses to throw) is NOT swallowed — it propagates so the caller's own handling (e.g. a
+// login prompt) still runs. `live()` may itself decide to queue-and-return for a case it
+// wants to handle specially (captureUrl/captureText's 401 → queued with `reason:'auth'`
+// instead of a login rethrow).
 async function withOfflineFallback(live, fallback) {
   if (!driveMode && isOnline()) {
     try { return await live(); }
@@ -213,13 +214,23 @@ export async function captureText(text, title, trackOpts = {}) {
 
 // ── Offline flashcard tests (deferred grading) ────────────────────────────────
 // In driveMode the phone runs a PRE-BUILT assignment from IndexedDB (server export),
-// records the raw answers, and the server grades them on mailbox consume. Online (or
-// desktop) these pass straight through to the real endpoints.
+// records the raw answers, and the server grades them on mailbox consume. Outside
+// driveMode a session still starts live (needs the server — no local content otherwise),
+// but a connection drop mid-session now queues the same way instead of losing answers.
 let offlineAnswers = {};        // { [cardId]: answer } for the in-progress test
 let offlineCtx = null;          // { assignmentId, notePath }
 
+// Starting a session cold with zero connectivity stays Drive-only — the prebuilt card
+// content only ever exists locally via a Drive pull, so there's nothing to build offline
+// otherwise. But once a session IS running (built live), a mid-session connection drop
+// must not lose answers — see submitAttemptOffline/completeAssignmentOffline below.
 export async function buildAssignmentOffline(scope, points) {
-  if (!driveMode) return netBuildAssignment(scope, points);
+  if (!driveMode) {
+    const result = await netBuildAssignment(scope, points);
+    offlineAnswers = {};
+    offlineCtx = { assignmentId: result.id, notePath: scope };
+    return result;
+  }
   const a = await getAssignmentByNote(scope);
   if (!a) throw new Error('No offline test downloaded for this note.');
   offlineAnswers = {};
@@ -228,15 +239,26 @@ export async function buildAssignmentOffline(scope, points) {
 }
 
 export async function submitAttemptOffline(assignmentId, cardId, answer) {
-  if (!driveMode) return netSubmitAttempt(assignmentId, cardId, answer);
-  // Record the raw answer; the server is authoritative and grades on consume. No local
-  // verdict (open/exercise need the model) — the UI shows "recorded", score arrives on sync.
+  if (!driveMode) {
+    try { return await netSubmitAttempt(assignmentId, cardId, answer); }
+    catch (e) { if (!isServerUnreachable(e)) throw e; }
+  }
+  // Record the raw answer; the server is authoritative and grades on consume/replay. No
+  // local verdict (open/exercise need the model) — the UI shows "recorded", score arrives
+  // on sync. Reached either in driveMode, or when the connection drops mid-session.
   offlineAnswers[cardId] = answer ?? '';
   return { verdict: 'RECORDED', pointsEarned: 0, maxPoints: 0, deferred: true };
 }
 
 export async function completeAssignmentOffline(assignmentId) {
-  if (!driveMode) return netCompleteAssignment(assignmentId);
+  if (!driveMode) {
+    try { return await netCompleteAssignment(assignmentId); }
+    catch (e) { if (!isServerUnreachable(e)) throw e; }
+  }
+  // Queue whatever answers didn't make it live (driveMode: all of them; a mid-session
+  // drop: just the ones that failed — the rest already landed server-side via the live
+  // submitAttempt calls above). flush()'s 'assignment' branch replays submitAttempt for
+  // each queued answer, then completeAssignment, once reachable again.
   const ctx = offlineCtx || { assignmentId, notePath: null };
   await enqueueAssignment(ctx.assignmentId, ctx.notePath, offlineAnswers);
   offlineAnswers = {};
