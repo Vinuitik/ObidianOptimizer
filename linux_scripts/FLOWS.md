@@ -1,5 +1,5 @@
 # Deploy / Boot FLOWS
-Files: start.sh, obsidian-optimizer.service, install-service.sh, redeploy.sh, deploy-extension.sh, build-firefox-extension.sh, test.sh, ingest_live_e2e.py
+Files: start.sh, stop.sh, obsidian-optimizer.service, install-service.sh, redeploy.sh, deploy-extension.sh, build-firefox-extension.sh, test.sh, ingest_live_e2e.py
 
 Boot → always-online stack:
 
@@ -8,6 +8,14 @@ Boot → always-online stack:
 - The service is installed once via `install-service.sh` (copies unit to `/etc/systemd/system`, `enable --now`). To reinstall after editing the unit: re-run `install-service.sh` — the copy is not live-linked.
 - `Restart=always` (unit) → if `start.sh`/compose dies, systemd relaunches in 10s. To change: `obsidian-optimizer.service` `RestartSec`.
 - On `systemctl stop`: SIGTERM hits the cgroup → `start.sh` EXIT trap kills the wrapper process group + `docker compose down`. Give it time via `TimeoutStopSec` (unit).
+
+## Stop + stay stopped ("restart unless stopped")
+`stop.sh` → writes `<repo>/.stopped` → `sudo systemctl stop obsidian-optimizer` (EXIT trap: `compose down` + wrapper kill)
+- Flag set + systemd runs `start.sh` (restart, reboot, post-commit hook's `systemctl restart`) → `start.sh` exits **42** → unit's `RestartPreventExitStatus=42` → stays down. Unit shows `failed` (cosmetic).
+- Resume: run `start.sh` by hand (clears flag), or `rm .stopped && sudo systemctl start obsidian-optimizer`. No flag → `Restart=always` behaves as before (crash → back in 10s).
+- Verified 2026-10-06: flagged restart stays down; unflagged start comes up; `kill -9` of start.sh restarts. Not tested: a real reboot, and start.sh-by-hand clearing the flag.
+- Cloudflared is in compose profile `tunnel`; `.env` has `COMPOSE_PROFILES=tunnel` so plain `docker compose down` covers it.
+- Unit edits need root: copy to `/etc/systemd/system/` + `systemctl daemon-reload` (`install-service.sh` does it; my sudo can't).
 
 ## Restart-on-crash coverage
 - **Containers**: `restart: unless-stopped` in `docker-compose.yml` (all 5). Docker daemon restarts them on crash/boot. To change: per-service `restart:` key.
@@ -83,6 +91,8 @@ To change: `linux_scripts/ingest_live_e2e.py` `journey()`.
 | Want to change | Where |
 |---|---|
 | Boot auto-start on/off | `systemctl enable/disable obsidian-optimizer` |
+| Stop and stay down | `./linux_scripts/stop.sh` (flag path: `STOP_FLAG` in `start.sh`) |
+| Exit code that means "stay down" | `start.sh` `exit 42` + unit `RestartPreventExitStatus` |
 | Service restart delay | `obsidian-optimizer.service` → `RestartSec` |
 | Graceful-stop timeout | `obsidian-optimizer.service` → `TimeoutStopSec` |
 | Reinstall unit after edit | re-run `install-service.sh` |
