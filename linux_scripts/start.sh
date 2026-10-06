@@ -4,6 +4,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$ROOT_DIR/.env"
+STOP_FLAG="$ROOT_DIR/.stopped"
+
+# "Restart unless stopped": linux_scripts/stop.sh drops this flag. Under systemd a
+# flagged start (restart or reboot) exits 42, which the unit's
+# RestartPreventExitStatus=42 treats as "stay down". Run by hand, start.sh is an
+# explicit "bring it back up", so it clears the flag and carries on.
+if [[ -e "$STOP_FLAG" ]]; then
+    if [[ -n "${INVOCATION_ID:-}" ]]; then
+        echo "Stopped via stop.sh ($STOP_FLAG exists) — staying down. Run linux_scripts/start.sh by hand to resume." >&2
+        exit 42
+    fi
+    rm -f "$STOP_FLAG"
+fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "Error: .env not found. Copy .env.example to .env and set HOST_VAULT_PATH to your vault directory." >&2

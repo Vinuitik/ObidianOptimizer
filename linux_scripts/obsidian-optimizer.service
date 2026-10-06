@@ -13,9 +13,11 @@ Group=victor
 WorkingDirectory=/home/victor/Desktop/ObidianOptimizer
 ExecStart=/usr/bin/env bash /home/victor/Desktop/ObidianOptimizer/linux_scripts/start.sh
 
-# Keep the stack online: relaunch if start.sh (or the attached compose) ever exits.
+# Keep the stack online: relaunch if start.sh (or the attached compose) ever exits,
+# EXCEPT exit 42 = start.sh saw the .stopped flag written by stop.sh.
 Restart=always
 RestartSec=10
+RestartPreventExitStatus=42
 
 # On `systemctl stop`, SIGTERM reaches the cgroup (bash + `docker compose up`),
 # mirroring a Ctrl-C: compose stops the containers, then start.sh's EXIT trap
