@@ -16,3 +16,8 @@
   overflow-y: auto;
   min-height: 0;
 }
+
+/* Phone: MobileTabBar owns the bottom safe-area inset, so don't pad twice. */
+@media (max-width: 768px) {
+  .shell { padding-bottom: 0; }
+}

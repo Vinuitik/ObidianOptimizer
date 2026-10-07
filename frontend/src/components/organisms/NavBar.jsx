@@ -1,63 +1,31 @@
-import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import ObsidianMark from '../atoms/ObsidianMark';
 import RefreshButton from '../atoms/RefreshButton';
+import useNavItems from './useNavItems';
 import styles from './NavBar.module.css';
-
-const NAV_ITEMS = [
-  { to: '/',         label: 'Notes' },
-  { to: '/learn',    label: 'Learn' },
-  { to: '/review',   label: 'Review', flashcardsOnly: true },
-  { to: '/tracks',   label: 'Tracks', tracksOnly: true },
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/failures', label: 'Failures' },
-  { to: '/get-app',  label: 'Get App' },
-  { to: '/settings', label: 'Settings' },
-];
 
 export default function NavBar() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
   const logout = useStore(s => s.logout);
   const setShowLogin = useStore(s => s.setShowLogin);
-  // Flashcards off → the review-list system runs inline on the Notes page, so the
-  // dedicated flashcard Review tab disappears (mutually exclusive systems).
-  const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
-  // Tracks off → nav item hidden, but the feature stays reachable at /tracks directly.
-  const tracksEnabled = useStore(s => s.settings.tracksEnabled ?? true);
-  const items = NAV_ITEMS
-    .filter(it => !it.flashcardsOnly || flashcardsEnabled)
-    .filter(it => !it.tracksOnly || tracksEnabled);
-
-  // Mobile: the links row is collapsed behind a hamburger so the header stays a
-  // single slim strip (brand + auth) instead of eating a quarter of the screen.
-  // Desktop ignores this — the .menuBtn is display:none and .links is always shown.
-  const [menuOpen, setMenuOpen] = useState(false);
+  const items = useNavItems();
 
   return (
     <nav className={styles.nav}>
       <div className={styles.brand}>
-        <button
-          className={styles.menuBtn}
-          onClick={() => setMenuOpen(o => !o)}
-          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-          aria-expanded={menuOpen}
-        >
-          {menuOpen ? '✕' : '☰'}
-        </button>
         <ObsidianMark size={22} glow={false} />
         <span className={styles.brandText}>
           Obsidian<span className={styles.brandAccent}> Optimizer</span>
         </span>
       </div>
 
-      <div className={`${styles.links} ${menuOpen ? styles.linksOpen : ''}`}>
+      <div className={styles.links}>
         {items.map(({ to, label }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
-            onClick={() => setMenuOpen(false)}
             className={({ isActive }) =>
               `${styles.link} ${isActive ? styles.linkActive : ''}`
             }
@@ -71,7 +39,7 @@ export default function NavBar() {
         <RefreshButton />
         <span className={styles.avatar}>V</span>
         {isAuthenticated ? (
-          <button className={styles.authBtn} onClick={logout}>Sign out</button>
+          <button className={`${styles.authBtn} ${styles.authOut}`} onClick={logout}>Sign out</button>
         ) : (
           <button className={styles.authBtn} onClick={() => setShowLogin(true)}>Sign in</button>
         )}

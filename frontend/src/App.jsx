@@ -10,6 +10,8 @@ import DashboardPage from './pages/DashboardPage';
 import GetAppPage from './pages/GetAppPage';
 import PipelineFailuresPage from './pages/PipelineFailuresPage';
 import NavBar from './components/organisms/NavBar';
+import MobileTabBar from './components/organisms/MobileTabBar';
+import { useIsMobile } from './utils/useMediaQuery';
 import LoginModal from './components/organisms/LoginModal';
 import SyncBanner from './components/organisms/SyncBanner';
 import QuitGuard from './components/organisms/QuitGuard';
@@ -56,6 +58,7 @@ function AnimatedRoutes() {
 }
 
 export default function App() {
+  const isMobile   = useIsMobile();
   const checkAuth  = useStore(s => s.checkAuth);
   const showLogin  = useStore(s => s.showLogin);
   const showToast  = useStore(s => s.showToast);
@@ -122,6 +125,7 @@ export default function App() {
         <NavBar />
         <SyncBanner />
         <AnimatedRoutes />
+        {isMobile && <MobileTabBar />}
         {showLogin && <LoginModal />}
         <QuitGuard />
         <Toast />

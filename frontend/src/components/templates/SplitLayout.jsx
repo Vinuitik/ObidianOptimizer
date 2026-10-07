@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import useStore from '../../store/useStore';
 import PanelHeader from '../molecules/PanelHeader';
 import FolderTree from '../organisms/FolderTree';
@@ -104,6 +104,13 @@ export default function SplitLayout() {
     if (showRight && !rightCollapsed) toggleRight();
   };
 
+  // Picking a note from the Files drawer should reveal the note, not leave the drawer
+  // covering it (desktop keeps the panel open — it sits beside the editor).
+  useEffect(() => {
+    if (isMobile && currentNotePath && !useStore.getState().leftCollapsed) toggleLeft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentNotePath]);
+
   const title = noteTitle(currentNotePath);
   const folderHint = noteFolderHint(currentNotePath);
   const titleIsPlaceholder = centerMode === 'view' && !title;
@@ -195,7 +202,7 @@ export default function SplitLayout() {
               <>
                 {!isMutable && isInReview && <ReviewRating fullPath={currentNotePath} />}
                 {!isMutable && (
-                  <Chip>
+                  <Chip className={styles.optimizeChip}>
                     <Icon name="sparkle" size={14} color="var(--color-accent-soft)" />
                     Optimize
                   </Chip>

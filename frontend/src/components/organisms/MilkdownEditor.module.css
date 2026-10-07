@@ -353,3 +353,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+@media (max-width: 768px) {
+  .wrapper { padding: var(--sp-3) var(--sp-4); }
+}
+
+@media (max-width: 768px) {
+  .milkdownWrapper :global(.ProseMirror h1) { font-size: var(--text-xl); }
+  .milkdownWrapper :global(.ProseMirror h2) { font-size: var(--text-lg); }
+}

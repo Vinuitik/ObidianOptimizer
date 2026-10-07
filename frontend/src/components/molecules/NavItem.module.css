@@ -134,3 +134,14 @@
   color: var(--color-danger);
   background: rgba(224, 92, 92, 0.12);
 }
+
+/* Phone: long note/folder names wrap to 2 lines instead of being cut at ~15 chars. */
+@media (max-width: 768px) {
+  .label {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+  }
+}
