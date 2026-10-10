@@ -119,6 +119,16 @@ capture call chain (`capture`/`captureText`/`routeText`/`capturePage`/`escalate`
 (and refreshes the list if a new track was just created). *To change:* `popup.js`
 `trackSelection()`/`loadTracks()`; `background.js` `listTracks()`.
 
+## Flow — Subscribe to Feed (with preview, P3)
+`popup.js #subscribe-page` opens the form (prefilled with the active tab's URL) → **Preview**
+(`#sub-preview-btn`) → `send('resolveSource', {url})` → `background.resolveSource()` →
+`POST /feed/sources/resolve` (preview-only, nothing persisted server-side) → renders `{kind,
+title}` + up to 3 item titles in `#sub-preview`. **Confirm subscribe** (`#sub-confirm`) → the
+real `send('subscribeSource', {url})` → `POST /feed/sources` (unchanged from before P3) → source
+created, backlog lands in Learn ▸ Feed as pending. **Back**/**Cancel** discard the preview without
+calling `subscribeSource` at all. *To change:* `popup.js` `pendingSubscribeUrl` + the
+`sub-preview-btn`/`sub-confirm`/`sub-back` handlers; `background.js resolveSource()`.
+
 ## Flow — duplicate guard
 `background.capture()` surfaces the backend's **409** (`existsLiveForSource`) as
 `{duplicate:true}`; `routeText`/`capturePage` propagate it; `popup.handleResult` shows it LOUD
@@ -159,8 +169,9 @@ mid-flight. **Scope — only failures that never reach a created capture row**: 
 `/capture` returns 200 and a row exists, ANY downstream failure is already covered by
 `CaptureIngestWorker`'s own retry-ladder dead-letter write (`capture/FLOWS.md`) — reporting
 it again here would just duplicate that row. So this only fires for: the initial `/capture`/
-`/workspace/upload`/`/feed/sources` POST itself getting rejected (`captureText`, `capture`,
-`uploadFile`, `subscribeSource`), and `captureDriveFile()`'s Drive-side fetch (never touches
+`/workspace/upload`/`/feed/sources`/`/feed/sources/resolve` POST itself getting rejected
+(`captureText`, `capture`, `uploadFile`, `subscribeSource`, `resolveSource`), and
+`captureDriveFile()`'s Drive-side fetch (never touches
 our backend at all — reported directly via `reportFailure()`, no `handleFailure()` to
 classify against since there's no backend `Response` to classify). Network-down failures are
 deliberately NOT reported — the report endpoint is on the same unreachable backend, there's
@@ -244,4 +255,4 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | Icons / branding | `icons/` + `manifest.json` `icons` / `action.default_icon` (shared, both browsers) |
 | Permissions / hosts | `manifest.json` `permissions` + `host_permissions` (shared, both browsers) |
 | Look & feel | `popup.css` (tokens mirrored from `frontend/src/styles/tokens.css`) |
-| Subscribe button (Chrome + Firefox share this popup) | `popup.js #sub-confirm` → `background.subscribeSource()` → `POST /feed/sources {url}` |
+| Subscribe button (Chrome + Firefox share this popup) | `popup.js #sub-preview-btn` → `background.resolveSource()` (preview) → `#sub-confirm` → `background.subscribeSource()` → `POST /feed/sources {url}` |
