@@ -17,10 +17,34 @@ Related: tracks/FLOWS.md (scheduler), inbox/FLOWS.md (Learn triage), sync/FLOWS.
 - `SubscriptionPollWorker` → `TrackAgentClient.discover()` (YouTube channel / RSS-Atom) →
   every new URL **immediately enqueued for ingest** (= auto-accept, no triage) → Inbox.
 - Dedup = `CaptureRepository.existsForSource(url)` (permanent).
-- Poll: 5-min tick checks which sources are due; per-source interval `subscriptionsPollIntervalMs` = 1h.
+- Poll: 5-min tick checks which sources are due; per-source interval `subscriptionsPollIntervalMs`
+  code default = 6h (P0, was 1h) — **but the live `app_settings` row seeded on 2026-08-26 still
+  holds `3600000`** (`insertDefault` is `ON CONFLICT DO NOTHING`), so live effective = 1h until
+  that row is updated/deleted. Not exposed in `GET /settings` either.
 
 ### P0 findings — URL-shape matrix
-[filled by P0]
+Probed 2026-10-10 (a Saturday) via `POST embedder:8000/subscriptions/discover` (discover-only, nothing
+enqueued). `source_type` is NOT detected server-side — the UI pre-picks it by regex
+(`youtube.com|youtu.be` → `youtube_channel`, else `feed`); the table uses that pick.
+
+| URL | type sent | ok? | #candidates (= first-subscribe backlog) | title | itemUrl | publishedAt | thumb | duration | note / error |
+|---|---|---|---|---|---|---|---|---|---|
+| `youtube.com/@veritasium` | youtube_channel | ok but **wrong** | 2 | Y | Y | – | – | – | candidates are the channel **tabs** (`…/videos`, `…/shorts`), not videos |
+| `youtube.com/channel/UCHnyf…` | youtube_channel | ok but **wrong** | 2 | Y | Y | – | – | – | same: tab URLs |
+| `youtube.com/@veritasium/videos` (extra) | youtube_channel | ok | 20 (hard cap `limit=20`) | Y | Y | – | – | – | real `watch?v=` URLs; same for `/channel/UC…/videos` |
+| `youtube.com/feeds/videos.xml?channel_id=UC…` (extra) | feed | ok | 15 | Y | Y | Y | – | – | RSS includes Shorts (`/shorts/…`) |
+| `youtube.com/@veritasium` (extra) | feed | 422 | – | | | | | | "no feed found" — autodiscovery doesn't see the channel's RSS link |
+| `youtube.com/watch?v=JsBZOcqZerk` | youtube_channel | 422 | – | | | | | | "not a playlist (no entries)" |
+| `rss.arxiv.org/rss/cs.LG` | feed | 422 | – (0 entries) | | | | | | valid feed, 0 items on weekends → treated as failure → homepage fallback → "no feed found" |
+| `arxiv.org/list/cs.LG/recent` | feed | 422 | – | | | | | | listing HTML has no `<link rel=alternate>` |
+| `lilianweng.github.io/` | feed | ok | 53 (whole archive) | Y | Y | Y | – | – | resolved → `/index.xml` |
+| `kaggle.com/learn-guide/5-day-genai` | feed | 422 | – | | | | | | Kaggle = JS SPA shell, no feed; whitepapers live at `kaggle.com/whitepaper-<slug>` (e.g. `whitepaper-agents`, also 422); no listing page found (`/whitepapers` is an unrelated profile) |
+
+Implications:
+- **P3 must normalise YouTube URLs** (`@handle`/`/channel/UC…` → `/videos` tab, or → `feeds/videos.xml?channel_id=`); today the natural URL a user pastes subscribes to two tab URLs that then get enqueued for ingest.
+- **P1a card fields**: `thumbnail` and `duration` are never returned by any branch; `publishedAt` is null for every yt-dlp YouTube candidate (only RSS has it). P1a needs either the YouTube RSS path or a flat-entry field passthrough (yt-dlp flat entries carry `duration`/`thumbnails`) — `TrackAgentClient.Candidate` also drops anything beyond 3 fields.
+- **An empty feed must not be an error** (arXiv weekends): `discover()` treats 0 entries as "not a feed" and 422s; P1a should return `[]`.
+- **Backlog on first subscribe is unbounded for feeds** (53 for one blog, 20/15 for YouTube) → P1a's "pending, not auto-ingested" default is essential; arXiv listing + Kaggle need `page_watch` (P3), Kaggle likely needs JS rendering.
 
 ## 1. Target pipeline
 
