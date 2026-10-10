@@ -74,7 +74,7 @@ public class SettingsRepository {
         insertDefault("chronicNeglectDays", "7");
         // Learning Tracks — default ON (finished work ships live, not behind a flag).
         insertDefault("tracksEnabled", "true");
-        insertDefault("subscriptionsPollIntervalMs", "3600000");
+        insertDefault("subscriptionsPollIntervalMs", "21600000"); // 6h
 
         // Google Drive sync (SyncController / DriveService / VaultEncryptionService).
         // Env-backed keys use seedIfBlank, NOT insertDefault: on live installs the rows
@@ -181,7 +181,7 @@ public class SettingsRepository {
     /** How often {@code SubscriptionPollWorker} re-checks a subscription track it has
      *  already checked before (a due track with a null lastCheckedAt is always polled). */
     public long getSubscriptionPollIntervalMs() {
-        return Long.parseLong(getOrDefault("subscriptionsPollIntervalMs", "3600000"));
+        return Long.parseLong(getOrDefault("subscriptionsPollIntervalMs", "21600000"));
     }
 
     // ── Google Drive sync ─────────────────────────────────────────────────────

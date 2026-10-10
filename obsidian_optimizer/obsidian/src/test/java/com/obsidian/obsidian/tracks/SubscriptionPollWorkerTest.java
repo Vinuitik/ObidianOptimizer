@@ -46,7 +46,7 @@ class SubscriptionPollWorkerTest {
         settingsRepo = mock(SettingsRepository.class);
         trackAgentClient = mock(TrackAgentClient.class);
         worker = new SubscriptionPollWorker(trackRepo, captureRepo, captureIngestWorker, settingsRepo, trackAgentClient);
-        when(settingsRepo.getSubscriptionPollIntervalMs()).thenReturn(3_600_000L);
+        when(settingsRepo.getSubscriptionPollIntervalMs()).thenReturn(21_600_000L);
     }
 
     @Test
