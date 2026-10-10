@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { captureUrl, captureText } from './offlineApi';
-import { fetchTracks, createTrack } from '../api/tracks';
+import { fetchTracks } from '../api/tracks';
+import { addFeedSource } from '../api/feed';
 import { ApiError } from '../api/notes';
 import { getMeta, setMeta } from './db';
 import useOffline from './useOffline';
@@ -40,12 +41,9 @@ export default function CapturePage() {
   const [status, setStatus] = useState(null); // { text, tone }
   const [busy, setBusy] = useState(false);
 
-  // Subscribe (tracks/FLOWS.md subscription discovery) — deliberate, infrequent action,
+  // Subscribe → POST /feed/sources (tracks/FLOWS_feed.md) — deliberate, infrequent action,
   // unlike Link/Note which go through the offline outbox. No queueing here by design.
-  const [subTitle, setSubTitle] = useState('');
   const [subUrl, setSubUrl] = useState('');
-  const [subType, setSubType] = useState('feed');
-  const [subTypeTouched, setSubTypeTouched] = useState(false);
 
   // Track picker (tracks/FLOWS.md Phase 1b) — this manual capture form is already a
   // deliberate multi-field form (not fire-and-forget like the share-target), so it gets
@@ -128,30 +126,19 @@ export default function CapturePage() {
     }
   }
 
-  function handleSubUrlChange(value) {
-    setSubUrl(value);
-    if (!subTypeTouched) {
-      setSubType(/youtube\.com|youtu\.be/.test(value) ? 'youtube_channel' : 'feed');
-    }
-  }
-
   async function submitSubscribe(e) {
     e.preventDefault();
-    const title = subTitle.trim();
     const link = subUrl.trim();
-    if (!title || !link) return;
+    if (!link) return;
     if (!online) {
       setStatus({ text: "You're offline — try again once connected.", tone: 'warn' });
       return;
     }
     setBusy(true);
     try {
-      await createTrack(title, 'subscription', { sourceUrl: link, sourceType: subType });
-      setStatus({ text: 'Subscribed.', tone: 'ok' });
-      setSubTitle('');
+      await addFeedSource(link);
+      setStatus({ text: 'Subscribed — new items will show up in Learn ▸ Feed.', tone: 'ok' });
       setSubUrl('');
-      setSubType('feed');
-      setSubTypeTouched(false);
     } catch (e) {
       const clean4xx = e instanceof ApiError && e.status >= 400 && e.status < 500;
       setStatus(clean4xx
@@ -251,31 +238,15 @@ export default function CapturePage() {
         <form onSubmit={submitSubscribe} className={styles.captureFormCol}>
           <input
             className={styles.captureInput}
-            type="text"
-            placeholder="Track title"
-            value={subTitle}
-            onChange={e => setSubTitle(e.target.value)}
-          />
-          <input
-            className={styles.captureInput}
             type="url"
             inputMode="url"
-            placeholder="Channel or feed URL"
+            placeholder="Channel, feed or page URL"
             value={subUrl}
-            onChange={e => handleSubUrlChange(e.target.value)}
+            onChange={e => setSubUrl(e.target.value)}
           />
-          <select
-            className={styles.captureInput}
-            value={subType}
-            onChange={e => { setSubType(e.target.value); setSubTypeTouched(true); }}
-            aria-label="Source type"
-          >
-            <option value="youtube_channel">YouTube channel</option>
-            <option value="feed">RSS/Atom feed</option>
-          </select>
           <button
             className={styles.captureBtn} type="submit"
-            disabled={busy || !subTitle.trim() || !subUrl.trim()}
+            disabled={busy || !subUrl.trim()}
           >
             {busy ? 'Subscribing…' : 'Subscribe'}
           </button>
@@ -295,7 +266,7 @@ export default function CapturePage() {
           ? 'Tip: once installed, share any link — or a PDF/video/audio file — from another app and pick “Obsidian Optimizer”.'
           : mode === 'note'
           ? 'Rough notes you’d never revisit? Dump them here — the inbox guarantees you triage each one at least once.'
-          : 'Browsing a YouTube channel or blog? Subscribe here and new items will show up in the track automatically.'}
+          : 'Browsing a YouTube channel or blog? Subscribe here and new items will show up in Learn ▸ Feed for you to swipe.'}
       </p>
     </div>
   );
