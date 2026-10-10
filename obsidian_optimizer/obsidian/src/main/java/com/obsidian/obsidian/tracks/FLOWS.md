@@ -4,8 +4,10 @@ Files: TrackRepository.java, TrackController.java, TodayPlanService.java, TrackP
 Tests: TrackRepositoryIT.java, TodayPlanServiceTest.java, TrackProgressServiceTest.java, TrackReviewHandoffTest.java
 Frontend: frontend/src/pages/TracksPage.jsx, frontend/src/api/tracks.js, frontend/src/store/useStore.js (Tracks section)
 Plan: /home/victor/.claude/plans/adaptive-finding-bubble.md (Phase 1 of the full Learning Tracks plan)
-Sub-flow: [FLOWS_feed.md](FLOWS_feed.md) — subscriptions → swipe Feed → Learn (plan; subscriptions currently live here as `type=subscription` tracks)
-Subscriptions (shipped): SubscriptionPollWorker.java, TrackAgentClient.java, embedder/subscriptions/discover.py — see "Subscriptions (current)" below
+Sub-flow: [FLOWS_feed.md](FLOWS_feed.md) — Passive Feed design/plan (P0–P4 phasing). Backend (P1a) is
+built — see [feed/FLOWS.md](../feed/FLOWS.md) for the real flows. Subscriptions moved out of `tracks/`
+entirely (see "Subscriptions — moved" below); `TrackAgentClient.java` (discover client) stays here,
+shared by `feed/`.
 
 ---
 
@@ -217,36 +219,22 @@ captures. The manual capture form (`CapturePage.jsx`, both Link and Note modes) 
 extension popup both got the full picker; MCP got `create_track` + `track_id` on
 `ingest_resource`/`create_note`.
 
-## Subscriptions (current — superseded by FLOWS_feed.md)
+## Subscriptions — moved to feed/ (P1a, 2026-10-10)
 
-Built 2026-08-26, 0 live rows as of 2026-10-10. A subscription is a track with
-`type='subscription'` + `source_url` + `source_type` (`youtube_channel` | `feed`).
+The 2026-08-26 subscription implementation (a track with `type='subscription'` + `source_url`/
+`source_type`, auto-ingesting every discovered item with no triage) had 0 live rows and has been
+replaced wholesale by the Passive Feed backend. `SubscriptionPollWorker` and `TrackController.pollNow`
+are deleted; `TrackRepository.create()` no longer takes `sourceUrl`/`sourceType`. The legacy
+`tracks.source_url`/`source_type`/`last_checked_at` columns are left in the schema (no live data, no
+destructive migration) but are unused code paths now.
 
-```
-Subscribe: TracksPage.jsx / pwa/CapturePage.jsx / extension popup.js
-  → source_type pre-picked by regex (youtube.com|youtu.be → youtube_channel, else feed), user can override
-  → POST /api/tracks {title, type:'subscription', sourceUrl, sourceType} → TrackController.create() → TrackRepository.create()
+`POST /api/tracks {sourceUrl: "..."}` (old Subscribe button contract, still called by not-yet-updated
+frontend surfaces) is redirected server-side: `TrackController.create()` detects `sourceUrl` and
+forwards to `FeedController.createSource()`, returning a `Source` instead of a `Track`.
 
-Poll: SubscriptionPollWorker.tick()   (@Scheduled every subscriptions.poll.tick-ms = 5 min, WorkerLane "subscription-poll")
-  → drain(): for each active track with type=subscription && source_url:
-       due = last_checked_at == null || now > last_checked_at + SettingsRepository.getSubscriptionPollIntervalMs()
-  → pollTrack(t) → TrackAgentClient.discover(sourceUrl, sourceType)
-       → POST embedder /subscriptions/discover → subscriptions/discover.py discover():
-           youtube_channel → yt-dlp flat playlist (list_playlist_entries, limit=20), published_at always null
-           feed            → feedparser(url); 0 entries/bozo → find_feed_url() (<link rel=alternate>, then /feed,/rss.xml,… HEAD probes)
-       ← {candidates:[{item_url,title,published_at}], resolvedFeedUrl}
-     !ok → return (last_checked_at untouched → retried next tick, i.e. every 5 min while failing)
-  → per candidate: CaptureRepository.existsForSource(itemUrl)? skip
-       else CaptureRepository.enqueue(uuid, CaptureController.classifyUrl(url), url, null, title)
-            + CaptureRepository.setTrackId(captureId, trackId)
-  → enqueued > 0 → CaptureIngestWorker.nudge() → normal capture ingest → Inbox (+ track item via Phase 1b linkToTrack)
-  → TrackRepository.markChecked(trackId, now)
-
-Manual: POST /api/tracks/{id}/poll-now → TrackController.pollNow() → SubscriptionPollWorker.pollNow(id) (ignores the interval)
-```
-To change poll cadence: `app_settings.subscriptionsPollIntervalMs` (code default 6h; live row may still say 1h — see FLOWS_feed.md §0).
-To change tick: `subscriptions.poll.tick-ms`. To change YouTube candidate cap: `discover.py` `discover_youtube_channel(limit=20)`.
-To change what a candidate carries: `discover.py` dicts + `TrackAgentClient.Candidate` (3 fields only).
+See **[feed/FLOWS.md](../feed/FLOWS.md)** for the real poll/accept/bin/restore flows, the data model,
+and the API contract. `TrackAgentClient.java` (the embedder discover HTTP client) still lives here —
+`feed/` depends on it rather than duplicating it.
 
 ## Settings gate (nav visibility only)
 
@@ -302,27 +290,10 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
   embedder job/tool call, because MCP-originated ingest never creates a `capture` row to
   look anything up from. They converge on the same effect (`trackRepo.addItem`) through
   different plumbing — see the Phase 1b flow diagram above.
-- **Subscriptions auto-ingest every discovered item** — no triage step. First subscribe =
-  whole backlog enqueued at once (P0 probe: 53 posts for one blog, 20 YouTube videos) → GPU
-  transcription + LLM synthesis per item and an Inbox flood. This is why FLOWS_feed.md adds
-  a pending/swipe stage.
-- **Subscription dedup = exact `capture.source_ref` string match, forever**
-  (`CaptureRepository.existsForSource`). No URL normalisation (`youtu.be/x` ≠
-  `youtube.com/watch?v=x`, tracking params differ → re-ingest), and deleting the capture row
-  (retention cleanup) makes the item "new" again. Seen-forever also means an item ingested
-  once by hand is never offered by a subscription.
-- **A YouTube RSS feed holds only the latest ~15 uploads** (incl. Shorts); the yt-dlp path
-  is hard-capped at 20. A source not polled for longer than ~15 uploads silently misses the
-  gap — no backfill. Both are fine at the 6h cadence for normal channels.
-- **YouTube channel root URLs discover tabs, not videos**: `@handle` / `/channel/UC…` with
-  `youtube_channel` returns `…/videos` + `…/shorts` as the 2 candidates (yt-dlp flat extract
-  of a channel root). Use the `/videos` URL until FLOWS_feed.md P3 normalises it.
-- **Failed discover retries every 5-min tick** (`last_checked_at` only advances on success) —
-  e.g. an arXiv RSS feed is empty on weekends, `discover.py` treats 0 entries as "not a
-  feed" → 422 → re-polled every tick all weekend.
-- **Poll interval default is seed-once**: `insertDefault("subscriptionsPollIntervalMs")` is
-  `ON CONFLICT DO NOTHING`, so changing the code default doesn't touch an existing install's
-  row; not exposed in `GET/PUT /settings`.
+- **Subscription/feed poll-interval default is seed-once**: `insertDefault("subscriptionsPollIntervalMs")`
+  is `ON CONFLICT DO NOTHING`, so changing the code default doesn't touch an existing install's row;
+  not exposed in `GET/PUT /settings`. See feed/FLOWS.md for the rest of the poll/dedup/auto-accept
+  behavior (that implementation superseded the one originally documented in this section).
 
 ## Change Index
 
@@ -357,10 +328,6 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 | **Phase 1d** — onTrack calc | `TrackProgressService.progress(LocalDate)` / `toProgress()` |
 | **Phase 1d** — shared capacity-window sum | `TrackRepository.capacityBetween()` (public; `TodayPlanService` keeps its own private copy — see Technology Notes) |
 | **Phase 1d** — Progress tab UI | `TracksPage.jsx` `ProgressTab`; card styles in `TracksPage.module.css` `.progressGrid`/`.progressCard*` |
-| Subscriptions — poll tick / due check | `SubscriptionPollWorker.tick()`/`drain()`; `subscriptions.poll.tick-ms` (5 min) |
-| Subscriptions — poll interval | `SettingsRepository.getSubscriptionPollIntervalMs()` (`app_settings.subscriptionsPollIntervalMs`, default 6h, seed-once) |
-| Subscriptions — discover call + candidate shape | `TrackAgentClient.discover()` / `Candidate`; embedder `main.py` `/subscriptions/discover` → `subscriptions/discover.py` |
-| Subscriptions — YouTube cap / feed autodiscovery | `discover.py` `discover_youtube_channel(limit=20)` / `find_feed_url()` `_FALLBACK_PATHS` |
-| Subscriptions — dedup + enqueue | `SubscriptionPollWorker.pollTrack()` → `CaptureRepository.existsForSource()` / `enqueue()` / `setTrackId()` |
-| Subscriptions — manual poll | `POST /tracks/{id}/poll-now` → `TrackController.pollNow()` |
-| Subscriptions — source_type pre-pick | `TracksPage.jsx` (`SOURCE_TYPES`), `pwa/CapturePage.jsx` `subType`, `extension/popup.js` `#sub-type` |
+| Subscriptions (now "Passive Feed") — everything poll/accept/bin/restore/dedup | **[feed/FLOWS.md](../feed/FLOWS.md)** |
+| Legacy Subscribe-button redirect (`sourceUrl` on `POST /tracks`) | `TrackController.create()` |
+| Discover HTTP client (shared with `feed/`) | `TrackAgentClient.discover()` / `Candidate` |

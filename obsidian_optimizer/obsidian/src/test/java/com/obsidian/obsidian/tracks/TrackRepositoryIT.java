@@ -353,27 +353,6 @@ class TrackRepositoryIT {
     }
 
     @Test
-    void create_fiveArg_setsSourceUrlAndType() {
-        Track t = repo.create("Channel", "subscription", "manual",
-            "https://youtube.com/@ch", "youtube_channel");
-
-        assertThat(t.sourceUrl()).isEqualTo("https://youtube.com/@ch");
-        assertThat(t.sourceType()).isEqualTo("youtube_channel");
-        assertThat(repo.get(t.id())).isEqualTo(t);
-    }
-
-    @Test
-    void markChecked_setsLastCheckedAt() {
-        Track t = repo.create("Channel", "subscription", "manual",
-            "https://youtube.com/@ch", "youtube_channel");
-        Instant when = Instant.now();
-
-        repo.markChecked(t.id(), when);
-
-        assertThat(repo.get(t.id()).lastCheckedAt()).isCloseTo(when, within(1, java.time.temporal.ChronoUnit.SECONDS));
-    }
-
-    @Test
     void initSchema_isIdempotent() {
         repo.initSchema();
         repo.initSchema();

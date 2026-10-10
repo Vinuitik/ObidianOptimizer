@@ -119,8 +119,10 @@ def test_discover_feed_returns_entries(monkeypatch):
 
     out = discover.discover_feed("https://example.com/feed.xml")
     assert out == [
-        {"item_url": "https://example.com/p1", "title": "Post 1", "published_at": "2026-08-01T00:00:00Z"},
-        {"item_url": "https://example.com/p2", "title": "Post 2", "published_at": None},
+        {"item_url": "https://example.com/p1", "title": "Post 1", "published_at": "2026-08-01T00:00:00Z",
+         "thumb_url": None, "duration_s": None},
+        {"item_url": "https://example.com/p2", "title": "Post 2", "published_at": None,
+         "thumb_url": None, "duration_s": None},
     ]
 
 
@@ -138,7 +140,8 @@ def test_discover_feed_bozo_but_has_entries_does_not_raise(monkeypatch):
     monkeypatch.setattr(discover.feedparser, "parse", lambda url: _fake_parsed(fake_entries, bozo=True))
 
     out = discover.discover_feed("https://example.com/feed.xml")
-    assert out == [{"item_url": "https://example.com/p1", "title": "Post 1", "published_at": None}]
+    assert out == [{"item_url": "https://example.com/p1", "title": "Post 1", "published_at": None,
+                    "thumb_url": None, "duration_s": None}]
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +151,7 @@ def test_discover_feed_bozo_but_has_entries_does_not_raise(monkeypatch):
 def test_discover_dispatches_to_youtube_channel(monkeypatch):
     monkeypatch.setattr(discover, "discover_youtube_channel",
                         lambda url, limit=20: [{"item_url": "u", "title": "t", "published_at": None}])
-    candidates, resolved = discover.discover("https://youtube.com/@x", "youtube_channel")
+    candidates, resolved = discover.discover("https://www.youtube.com/playlist?list=PL1", "youtube_channel")
     assert candidates == [{"item_url": "u", "title": "t", "published_at": None}]
     assert resolved is None
 
@@ -190,6 +193,72 @@ def test_discover_feed_raises_when_autodiscovery_finds_nothing(monkeypatch):
 
     with pytest.raises(ValueError, match="no feed found"):
         discover.discover("https://example.com/", "feed")
+
+
+def test_discover_feed_parses_media_thumbnail_and_duration(monkeypatch):
+    class FakeEntry(dict):
+        def get(self, k, default=None):
+            return dict.get(self, k, default)
+    e = FakeEntry({"link": "https://y/v", "title": "T", "media_thumbnail": [{"url": "https://i/t.jpg"}],
+                   "itunes_duration": "1:02:03"})
+    monkeypatch.setattr(discover.feedparser, "parse", lambda url: _fake_parsed([e]))
+    out = discover.discover_feed("https://y/feed")
+    assert out[0]["thumb_url"] == "https://i/t.jpg"
+    assert out[0]["duration_s"] == 3723
+
+
+def test_discover_feed_valid_empty_feed_is_ok(monkeypatch):
+    monkeypatch.setattr(discover.feedparser, "parse",
+                        lambda url: types.SimpleNamespace(
+                            get=lambda k, default=None: {"version": "rss20"}.get(k, default), entries=[]))
+    assert discover.discover_feed("https://rss.arxiv.org/rss/cs.LG") == []
+
+
+def test_discover_feed_no_entries_no_version_is_not_a_feed(monkeypatch):
+    monkeypatch.setattr(discover.feedparser, "parse", lambda url: _fake_parsed([]))
+    with pytest.raises(ValueError):
+        discover.discover_feed("https://example.com/")
+
+
+def test_discover_empty_valid_direct_feed_skips_autodiscovery(monkeypatch):
+    monkeypatch.setattr(discover, "discover_feed", lambda url: [])
+    monkeypatch.setattr(discover, "find_feed_url",
+                        lambda url: (_ for _ in ()).throw(AssertionError("no autodiscovery")))
+    assert discover.discover("https://rss.arxiv.org/rss/cs.LG", "feed") == ([], None)
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.youtube.com/channel/UCabc_123-x/videos",
+    "https://www.youtube.com/@veritasium",
+    "https://youtu.be/JsBZOcqZerk",
+    "https://www.youtube.com/watch?v=JsBZOcqZerk",
+])
+def test_youtube_urls_resolve_to_channel_rss(monkeypatch, url):
+    monkeypatch.setattr(discover, "_youtube_channel_id", lambda u: "UCabc_123-x")
+    assert discover.youtube_feed_url(url) == "https://www.youtube.com/feeds/videos.xml?channel_id=UCabc_123-x"
+
+
+def test_youtube_feed_url_passthrough_playlist_and_nonyoutube():
+    assert discover.youtube_feed_url("https://www.youtube.com/playlist?list=PL1") is None
+    assert discover.youtube_feed_url("https://example.com/@x") is None
+    f = "https://www.youtube.com/feeds/videos.xml?channel_id=UCx"
+    assert discover.youtube_feed_url(f) == f
+
+
+def test_youtube_unresolvable_raises(monkeypatch):
+    monkeypatch.setattr(discover, "_youtube_channel_id", lambda u: None)
+    with pytest.raises(ValueError, match="could not resolve"):
+        discover.youtube_feed_url("https://www.youtube.com/@ghost")
+
+
+def test_discover_youtube_handle_uses_rss_and_keeps_shorts(monkeypatch):
+    monkeypatch.setattr(discover, "_youtube_channel_id", lambda u: "UCx")
+    rows = [{"item_url": "https://www.youtube.com/shorts/a", "title": "s", "published_at": "p",
+             "thumb_url": "t", "duration_s": None}]
+    monkeypatch.setattr(discover, "discover_feed", lambda url: rows)
+    cands, resolved = discover.discover("https://www.youtube.com/@x", "youtube_channel")
+    assert cands == rows
+    assert resolved == "https://www.youtube.com/feeds/videos.xml?channel_id=UCx"
 
 
 def test_discover_unknown_source_type_raises():

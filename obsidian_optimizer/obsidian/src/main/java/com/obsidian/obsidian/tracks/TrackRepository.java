@@ -84,6 +84,7 @@ public class TrackRepository {
               capacity  NUMERIC NOT NULL
             )
             """);
+        // Legacy subscription columns: unused since the Passive Feed (feed/FLOWS.md), kept (no destructive migration).
         jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS source_url TEXT");
         jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS source_type TEXT"); // 'youtube_channel' | 'feed'
         jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ");
@@ -121,21 +122,21 @@ public class TrackRepository {
     // ── Tracks ───────────────────────────────────────────────────────────────
 
     public Track create(String title, String type, String source) {
-        return create(title, type, source, null, null);
-    }
-
-    public Track create(String title, String type, String source, String sourceUrl, String sourceType) {
         long id = jdbc.queryForObject("""
-            INSERT INTO tracks(title, type, source, source_url, source_type) VALUES (?, ?, ?, ?, ?)
+            INSERT INTO tracks(title, type, source) VALUES (?, ?, ?)
             RETURNING id
-            """, Long.class, title, type, source == null ? "manual" : source, sourceUrl, sourceType);
+            """, Long.class, title, type, source == null ? "manual" : source);
         return get(id);
     }
 
-    /** Poll cursor for a subscription track — {@link SubscriptionPollWorker} calls this after
-     *  a discovery pass so the next tick's due-check has a fresh baseline. */
-    public void markChecked(long id, Instant when) {
-        jdbc.update("UPDATE tracks SET last_checked_at = ? WHERE id = ?", Timestamp.from(when), id);
+    /** The feed's default target: one auto-created "Passive" track (no deadline, priority
+     *  could), found by source='passive-feed'. Used by feed/ accept (see feed/FLOWS.md). */
+    public Track getOrCreatePassive() {
+        List<Track> rows = jdbc.query(
+            "SELECT * FROM tracks WHERE source = 'passive-feed' ORDER BY id LIMIT 1", TrackRepository::mapTrack);
+        if (!rows.isEmpty()) return rows.get(0);
+        Track t = create("Passive", "custom", "passive-feed");
+        return update(t.id(), null, null, null, null, "could", null, false);
     }
 
     public Track get(long id) {

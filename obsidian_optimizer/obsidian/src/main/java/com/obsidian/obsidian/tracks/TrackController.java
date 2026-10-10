@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.tracks;
 
+import com.obsidian.obsidian.feed.FeedController;
 import com.obsidian.obsidian.tracks.TodayPlanService.TodayPlan;
 import com.obsidian.obsidian.tracks.TrackRepository.Track;
 import com.obsidian.obsidian.tracks.TrackRepository.TrackItem;
@@ -22,17 +23,17 @@ public class TrackController {
     private final TrackReviewHandoff reviewHandoff;
     private final TrackProgressService progressService;
     private final TrackAgentClient trackAgentClient;
-    private final SubscriptionPollWorker subscriptionPollWorker;
+    private final FeedController feedController;
 
     TrackController(TrackRepository trackRepo, TodayPlanService todayPlan,
                     TrackReviewHandoff reviewHandoff, TrackProgressService progressService,
-                    TrackAgentClient trackAgentClient, SubscriptionPollWorker subscriptionPollWorker) {
+                    TrackAgentClient trackAgentClient, FeedController feedController) {
         this.trackRepo = trackRepo;
         this.todayPlan = todayPlan;
         this.reviewHandoff = reviewHandoff;
         this.progressService = progressService;
         this.trackAgentClient = trackAgentClient;
-        this.subscriptionPollWorker = subscriptionPollWorker;
+        this.feedController = feedController;
     }
 
     // ── Tracks ───────────────────────────────────────────────────────────────
@@ -47,9 +48,14 @@ public class TrackController {
         if (req.title() == null || req.title().isBlank()) {
             return ResponseEntity.badRequest().body("title is required");
         }
+        // Legacy Subscribe path (extension / PWA / TracksPage): subscriptions moved to the
+        // Passive Feed — redirect to feed/ and return the Source instead of creating a track.
+        if (req.sourceUrl() != null && !req.sourceUrl().isBlank()) {
+            return feedController.createSource(new FeedController.CreateSourceRequest(
+                req.sourceUrl(), req.title(), null, null));
+        }
         String type = req.type() == null || req.type().isBlank() ? "custom" : req.type();
-        return ResponseEntity.ok(trackRepo.create(req.title().trim(), type, "manual",
-            req.sourceUrl(), req.sourceType()));
+        return ResponseEntity.ok(trackRepo.create(req.title().trim(), type, "manual"));
     }
 
     @PatchMapping("{id}")
@@ -71,15 +77,6 @@ public class TrackController {
     public ResponseEntity<?> delete(@PathVariable long id) {
         trackRepo.delete(id);
         return ResponseEntity.ok().build();
-    }
-
-    /** Manual "check now" for a subscription track — bypasses the poll worker's interval
-     *  gate and polls immediately. */
-    @PostMapping("{id}/poll-now")
-    public ResponseEntity<?> pollNow(@PathVariable long id) {
-        return subscriptionPollWorker.pollNow(id)
-            ? ResponseEntity.ok().build()
-            : ResponseEntity.badRequest().body("not a subscription track");
     }
 
     // ── Items ────────────────────────────────────────────────────────────────

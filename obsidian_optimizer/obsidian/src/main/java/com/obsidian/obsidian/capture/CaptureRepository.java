@@ -111,6 +111,12 @@ public class CaptureRepository {
         jdbc.update("UPDATE capture SET status = ? WHERE id = ?", status, id);
     }
 
+    /** Cancel a capture that has not been claimed yet (queued → discarded). Atomic against
+     *  {@link #claim}; returns false if the ingest worker already took it (restore → 409). */
+    public boolean cancelQueued(String id) {
+        return jdbc.update("UPDATE capture SET status = 'discarded' WHERE id = ? AND status = 'queued'", id) > 0;
+    }
+
     /** Tag a capture with the Learning Track its resulting notes should be filed into
      *  (tracks/FLOWS.md Phase 1b) — set right after enqueue, read back by
      *  InternalAgentController.createNote() when each synthesized note lands. */
