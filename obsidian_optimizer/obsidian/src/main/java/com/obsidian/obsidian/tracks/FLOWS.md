@@ -4,7 +4,7 @@ Files: TrackRepository.java, TrackController.java, TodayPlanService.java, TrackP
 Tests: TrackRepositoryIT.java, TodayPlanServiceTest.java, TrackProgressServiceTest.java, TrackReviewHandoffTest.java
 Frontend: frontend/src/pages/TracksPage.jsx, frontend/src/api/tracks.js, frontend/src/store/useStore.js (Tracks section)
 Plan: /home/victor/.claude/plans/adaptive-finding-bubble.md (Phase 1 of the full Learning Tracks plan)
-Sub-flow: [FLOWS_feed.md](FLOWS_feed.md) — Passive Feed design/plan (P0–P4 phasing). Backend (P1a) is
+Sub-flow: [FLOWS_feed.md](../feed/FLOWS_feed.md) — Passive Feed design/plan (P0–P4 phasing). Backend (P1a) is
 built — see [feed/FLOWS.md](../feed/FLOWS.md) for the real flows. Subscriptions moved out of `tracks/`
 entirely (see "Subscriptions — moved" below); `TrackAgentClient.java` (discover client) stays here,
 shared by `feed/`.

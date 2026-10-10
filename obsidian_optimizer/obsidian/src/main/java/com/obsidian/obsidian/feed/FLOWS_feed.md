@@ -63,7 +63,7 @@ Source (youtube | rss | page_watch)
 To change poll cadence: `subscriptionsPollIntervalMs` (default → **6h**, was 1h).
 To change default triage: setting `feedAutoAccept` (default **false** = swipe).
 
-## 2. Data model `[NOT IMPLEMENTED]`
+## 2. Data model — `SourceRepository.initSchema()` / `FeedRepository.initSchema()`
 
 ```
 sources     (id, kind, url, feed_url, title, auto_accept BOOL NULL /*null=inherit global*/,
@@ -173,12 +173,15 @@ while a sibling agent is committing.
 - Context: this doc §1 + P1a contract, frontend/src/pages/FLOWS.md (Learn), components/FLOWS.md,
   store/FLOWS.md, pwa/FLOWS.md (mobile shell), extension/FLOWS.md.
 
-### P1v — merge + live verify
-- Merge P1a/P1b, run all suites, then live: add Veritasium as a source (autoAccept off) → Feed shows
-  backlog → accept 1 (one ingest, lands in Learn Inbox tagged "Passive"), bin 2, restore 1, undo 1;
-  DB states match UI. `browse` screenshots desktop + mobile width (`GSTACK_CHROMIUM_NO_SANDBOX=1`).
-- DoD: all metrics above observed live; FLOWS_feed.md flows flipped from `[NOT IMPLEMENTED]` to real
-  `Class.method()` refs; feed docs move to `feed/FLOWS.md`; root FLOWS.md index updated.
+### P1v — merge + live verify (DONE 2026-10-10)
+- Merged P1a/P1b to master, all suites green (`java-unit java-it embedder frontend`). Live against
+  Veritasium (`@veritasium`, autoAccept off): source create → 15-item backlog, 0 captures; accept
+  idempotent (2nd call returns same `captureId`); bin 2 + restore 1; re-poll → 0 new rows; restore
+  on an already-QUEUED capture → 409 (`FeedService.CaptureStartedException`, "undo after ingest
+  started is not undo", matches Technology Notes). `browse` screenshots desktop (1280px) + mobile
+  (390px), one swipe-accept exercised live on `FeedView.jsx`.
+- DoD met: metrics observed live; data model flipped to real refs (§2); feed docs moved to
+  `feed/FLOWS_feed.md`; root FLOWS.md indexes `feed/FLOWS.md` + this file.
 
 ### P2 — offline feed
 - Scope: `OfflineExportService.exportFeed()` → `_offline/feed.json.enc` (pending, cap 200, text-only);

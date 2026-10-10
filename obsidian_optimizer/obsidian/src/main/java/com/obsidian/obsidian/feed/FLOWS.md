@@ -3,11 +3,13 @@
 Files: SourceRepository.java, FeedRepository.java, FeedService.java, FeedController.java, SourcePollWorker.java
 Tests: SourceRepositoryIT.java, FeedRepositoryIT.java, FeedAcceptRestoreIT.java, SourcePollWorkerTest.java
 Embedder: embedder/subscriptions/discover.py (`youtube_feed_url`, `discover_feed`, `discover`)
-Plan: tracks/FLOWS_feed.md (design doc — §0 P0 findings, §2 data model, "### P1a" scope/contract)
+Plan: FLOWS_feed.md (design doc — §0 P0 findings, §2 data model, "### P1a" scope/contract)
 Related: tracks/FLOWS.md (Passive track via `TrackRepository.getOrCreatePassive()`, Phase 1b tagging),
 capture/FLOWS.md (`CaptureRepository.enqueue`/`cancelQueued`), settings/FLOWS.md (`feedAutoAccept`)
 
-Frontend (P1b): not built yet — this package is backend-only. `[NOT IMPLEMENTED]`
+Frontend (P1b): built — `frontend/src/components/organisms/FeedView.jsx` + `FeedSources.jsx`,
+`frontend/src/api/feed.js`, `LearnPage.jsx` Feed/Inbox switch. See frontend/src/pages/FLOWS.md,
+frontend/src/components/FLOWS.md.
 
 ---
 

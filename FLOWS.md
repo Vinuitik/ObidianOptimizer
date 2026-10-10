@@ -41,7 +41,8 @@ Naming: `FLOWS.md` = a folder's main flows; `FLOWS_<topic>.md` = a focused sub-f
 | [PWA FLOWS](frontend/src/pwa/FLOWS.md) | Flows | Mobile shell, offline review seam, share-target, activation steps |
 | [Capture FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/capture/FLOWS.md) | Flows | Resource intake → durable `capture` queue → ingest → notes |
 | [Tracks FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/tracks/FLOWS.md) | Flows | Learning tracks: CRUD, Today planner (capacity/deadline/MoSCoW), Progress, FSRS handoff |
-| [Passive Feed FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/tracks/FLOWS_feed.md) | Flows (plan) | Subscriptions → swipe Feed → Learn; backup/offline/encryption integration [MOSTLY NOT IMPLEMENTED] |
+| [Feed FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/feed/FLOWS.md) | Flows | Passive Feed backend: sources/feed_items, poll worker, accept/bin/restore (P1a, implemented) |
+| [Passive Feed plan](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/feed/FLOWS_feed.md) | Flows (plan) | Subscriptions → swipe Feed → Learn; P0–P1v shipped, P2 offline/P3 subscribe-any-URL pending |
 | [PWA backend FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/pwa/FLOWS.md) | Flows | Drive-mediated offline: encrypted `_offline/` export, `_mailbox/` consume |
 | [Notes FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/notes/FLOWS.md) | Flows | Note index, startup disk sync, file CRUD |
 | [Settings FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/settings/FLOWS.md) | Flows | `app_settings` EAV table, settings API |
