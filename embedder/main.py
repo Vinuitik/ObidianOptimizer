@@ -127,7 +127,7 @@ class SubsRequest(BaseModel):
 
 class SubscriptionDiscoverRequest(BaseModel):
     source_url: str
-    source_type: str                # youtube_channel | feed
+    source_type: str                # youtube_channel | feed | page_watch | youtube_posts
 
 
 # ---------------------------------------------------------------------------
