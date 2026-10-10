@@ -54,10 +54,23 @@ export async function fetchReview(offset = 0, limit = 40) {
   return res.json();
 }
 
+// Flaky WiFi tends to hang a request rather than fail it, which left tab open/switch stuck
+// with no error. A timeout is rethrown as TypeError ("unreachable") so offlineApi's
+// withOfflineFallback serves the downloaded copy, same as a hard network failure.
+export const NOTE_FETCH_TIMEOUT_MS = 8000;
+
 export async function fetchNoteContent(fullPath) {
-  const res = await fetch(`${BASE}/text?noteName=${encodeURIComponent(fullPath)}`, { cache: 'no-store' });
-  if (!res.ok) throw new ApiError(res.status);
-  return res.text();
+  try {
+    const res = await fetch(`${BASE}/text?noteName=${encodeURIComponent(fullPath)}`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(NOTE_FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new ApiError(res.status);
+    return await res.text();
+  } catch (e) {
+    if (e?.name === 'TimeoutError') throw new TypeError(`Note fetch timed out after ${NOTE_FETCH_TIMEOUT_MS}ms`);
+    throw e;
+  }
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────

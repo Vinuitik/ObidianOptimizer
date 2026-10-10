@@ -21,7 +21,7 @@ Write calls use `credentials: 'same-origin'` — session cookie included automat
 | `fetchNames()` | `GET /api/names` | Yes |
 | `fetchChildren(folder?)` | `GET /api/children[?folder=]` | Yes |
 | `fetchReview(offset, limit)` | `GET /api/review?offset=&limit=` | Yes |
-| `fetchNoteContent(path)` | `GET /api/text?noteName=` | Yes |
+| `fetchNoteContent(path)` | `GET /api/text?noteName=` (8s timeout → TypeError, so offline fallback kicks in; `NOTE_FETCH_TIMEOUT_MS`) | Yes |
 | `checkAuth()` | `GET /api/me` | — |
 | `login(username, password)` | `POST /api/login` (form-encoded) | No |
 | `logout()` | `POST /api/logout` | No |
@@ -65,3 +65,4 @@ offline search/link fallback — see `utils/FLOWS.md` "offlineSearch.js".
 | 401 interception | `api/notes.js` fetch wrapper + store `showLogin` check |
 | Search debounce delay | `utils/useSearch.js` — `setTimeout(…, 500)` |
 | Search result limit | `api/notes.js searchNotes()` — `limit=10` query param |
+| Note-open timeout (flaky WiFi) | `api/notes.js NOTE_FETCH_TIMEOUT_MS` |

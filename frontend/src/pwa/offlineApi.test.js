@@ -16,10 +16,27 @@ vi.mock('./outbox', () => ({
 import {
   captureText, flagCardOffline, setDriveMode,
   buildAssignmentOffline, submitAttemptOffline, completeAssignmentOffline,
+  fetchNoteContentOffline,
 } from './offlineApi';
 import { isOnline } from './connectivity';
 import { enqueueCaptureText, enqueueFlag, enqueueAssignment } from './outbox';
-import { getAssignmentByNote } from './db';
+import { getAssignmentByNote, getReviewNote } from './db';
+
+describe('fetchNoteContentOffline — hung request', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setDriveMode(false);
+    isOnline.mockReturnValue(true);
+  });
+
+  it('a timed-out fetch falls back to the downloaded copy instead of hanging/throwing', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    getReviewNote.mockResolvedValue({ path: 'A.md', content: 'cached body' });
+
+    await expect(fetchNoteContentOffline('A.md')).resolves.toBe('cached body');
+    expect(global.fetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+});
 
 describe('captureText', () => {
   beforeEach(() => {
