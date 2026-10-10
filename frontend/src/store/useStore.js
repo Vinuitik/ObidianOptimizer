@@ -1131,6 +1131,13 @@ const useStore = create((set, get) => ({
     }
   },
 
+  // "Subscribe to this channel" on a feed card (P3) — same POST as the Sources tab's
+  // add-by-URL, just a one-click entry point; createSource is idempotent so clicking it
+  // on an item from a channel already subscribed to is a harmless no-op.
+  subscribeToChannel: async (url) => {
+    if (await get().addFeedSource(url)) get().setFeedNotice('Subscribed to this channel.');
+  },
+
   // autoAccept: true | false | null (inherit global)
   setFeedSourceAutoAccept: async (id, autoAccept) => {
     const prev = get().feedSources;
