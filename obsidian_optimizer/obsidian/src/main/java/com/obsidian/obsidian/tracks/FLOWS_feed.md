@@ -194,7 +194,7 @@ while a sibling agent is committing.
   RSS `<link rel=alternate>` autodiscovery; `page_watch` kind (snapshot same-site links, new ones
   = items); "subscribe to this channel" on a card; extension Subscribe shows the preview.
 - Metrics: every row of the P0 matrix resolves; page_watch second poll of an unchanged page → 0 new items.
-- YouTube **Posts** (channel community/text posts) as a source kind: no RSS exists → spike first
+- YouTube **Posts** (channel community/text posts) as a source kind: no RSS exists → build our own: poll `/@handle/posts`, parse the embedded `ytInitialData` JSON, diff post IDs (spike first)
   (yt-dlp / page fetch); text posts ingest as text notes. Goal = maximum breadth (user 2026-10-10).
 - Kaggle: OUT — treated as a manually managed opportunity (user 2026-10-10).
 - Context: this doc §3 + P0 matrix, embedder discover module, extension/FLOWS.md.
