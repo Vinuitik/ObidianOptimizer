@@ -90,6 +90,24 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'feed',
+    title: 'Feed',
+    description: 'Subscribed sources (Learn ▸ Feed) — swipe to accept or bin new items.',
+    fields: [
+      {
+        key: 'feedAutoAccept',
+        label: 'Auto-accept new feed items',
+        type: 'select',
+        options: [
+          { value: false, label: 'Off — swipe each item (default)' },
+          { value: true,  label: 'On — new items go straight to the Inbox' },
+        ],
+        hint: 'Global default; each source can override it (inherit / on / off). A source\'s first '
+          + 'poll (backlog) is never auto-accepted.',
+      },
+    ],
+  },
+  {
     id: 'advanced',
     title: 'Advanced',
     description: 'Performance and startup behaviour.',
