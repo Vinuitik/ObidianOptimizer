@@ -4,6 +4,7 @@ Files: TrackRepository.java, TrackController.java, TodayPlanService.java, TrackP
 Tests: TrackRepositoryIT.java, TodayPlanServiceTest.java, TrackProgressServiceTest.java, TrackReviewHandoffTest.java
 Frontend: frontend/src/pages/TracksPage.jsx, frontend/src/api/tracks.js, frontend/src/store/useStore.js (Tracks section)
 Plan: /home/victor/.claude/plans/adaptive-finding-bubble.md (Phase 1 of the full Learning Tracks plan)
+Sub-flow: [FLOWS_feed.md](FLOWS_feed.md) — subscriptions → swipe Feed → Learn (plan; subscriptions currently live here as `type=subscription` tracks)
 
 ---
 

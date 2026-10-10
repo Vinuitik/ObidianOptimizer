@@ -6,9 +6,10 @@ Spring Boot API + React frontend for browsing and reviewing an Obsidian vault.
 
 ## Find all project docs
 
-```powershell
-Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notlike "*node_modules*" -and $_.FullName -notlike "*target*" } | Select-Object -ExpandProperty FullName
+```bash
+find . -name 'FLOWS*.md' -not -path '*/node_modules/*' -not -path '*/target/*' -not -path './.claude/*'
 ```
+Naming: `FLOWS.md` = a folder's main flows; `FLOWS_<topic>.md` = a focused sub-flow in the same folder (e.g. `ml/FLOWS_orchestration.md`, `tracks/FLOWS_feed.md`).
 
 ---
 
@@ -38,6 +39,25 @@ Get-ChildItem -Path . -Recurse -Filter "*.md" | Where-Object { $_.FullName -notl
 | [Sync Retention Plan](architecture_plans/SYNC_RETENTION_PLAN.md) | Architecture | Drive delete propagation, orphan janitor, quota visibility [NOT IMPLEMENTED] |
 | [PWA Mobile Architecture](architecture_plans/PWA_MOBILE_ARCH.md) | Architecture | Installable offline PWA; P1–P4 built but dormant in `frontend/src/pwa/` |
 | [PWA FLOWS](frontend/src/pwa/FLOWS.md) | Flows | Mobile shell, offline review seam, share-target, activation steps |
+| [Capture FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/capture/FLOWS.md) | Flows | Resource intake → durable `capture` queue → ingest → notes |
+| [Tracks FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/tracks/FLOWS.md) | Flows | Learning tracks: CRUD, Today planner (capacity/deadline/MoSCoW), Progress, FSRS handoff |
+| [Passive Feed FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/tracks/FLOWS_feed.md) | Flows (plan) | Subscriptions → swipe Feed → Learn; backup/offline/encryption integration [MOSTLY NOT IMPLEMENTED] |
+| [PWA backend FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/pwa/FLOWS.md) | Flows | Drive-mediated offline: encrypted `_offline/` export, `_mailbox/` consume |
+| [Notes FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/notes/FLOWS.md) | Flows | Note index, startup disk sync, file CRUD |
+| [Settings FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/settings/FLOWS.md) | Flows | `app_settings` EAV table, settings API |
+| [Config FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/config/FLOWS.md) | Flows | Spring Security auth, remember-me, app config |
+| [Chrono FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/chrono/FLOWS.md) | Flows | Daily jobs trigger points (FileMover, bankruptcy, regen) |
+| [Common FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/common/FLOWS.md) | Flows | Shared queue/concurrency infra (WorkerLane etc.) |
+| [Media FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/media/FLOWS.md) | Flows | Upload + media serving |
+| [Host FS FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/hostfs/FLOWS.md) | Flows | Host filesystem browser / vault picker |
+| [Workspace FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/workspace/FLOWS.md) | Flows | `_workspace/` manual media shelf (legacy Learn library) |
+| [Frontend API FLOWS](frontend/src/api/FLOWS.md) | Flows | API client layer, ApiError |
+| [Frontend Pages FLOWS](frontend/src/pages/FLOWS.md) | Flows | MainPage, Learn (= Inbox review), Review, Dashboard, Settings |
+| [Frontend Components FLOWS](frontend/src/components/FLOWS.md) | Flows | Milkdown editor, InboxReview, LearnLayout, etc. |
+| [Frontend Store FLOWS](frontend/src/store/FLOWS.md) | Flows | Zustand state shape + actions |
+| [Frontend Utils FLOWS](frontend/src/utils/FLOWS.md) | Flows | diff/patch, search, misc helpers |
+| [Extension FLOWS](extension/FLOWS.md) | Flows | Chrome extension capture into the Learn queue (incl. Subscribe button) |
+| [Firefox Extension FLOWS](extension-firefox/FLOWS.md) | Flows | Firefox build of the capture extension |
 | [Backend Testing](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/FLOWS.md#testing) | Testing | Unit tests (7 service layers), MockMvc controller tests, Testcontainers IT |
 | [Frontend Testing](frontend/FLOWS.md#testing) | Testing | Vitest: useStore, TabBar, FolderTree filter, diff, LoginModal, NewNoteForm |
 | [CI Pipeline](.github/workflows/ci.yml) | CI/CD | GitHub Actions: backend-unit, backend-integration, frontend, docker-build |
