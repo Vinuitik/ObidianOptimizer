@@ -8,6 +8,7 @@ import com.obsidian.obsidian.cards.CardRepository;
 import com.obsidian.obsidian.cards.FlaggedCardRegenService;
 import com.obsidian.obsidian.cards.ReviewService;
 import com.obsidian.obsidian.capture.CaptureController;
+import com.obsidian.obsidian.feed.FeedService;
 import com.obsidian.obsidian.inbox.InboxController;
 import com.obsidian.obsidian.sync.DriveService;
 import com.obsidian.obsidian.sync.DriveService.MailboxFile;
@@ -37,7 +38,12 @@ import java.util.List;
  * Runs on boot (whenever the laptop comes online) and on a short cron while up. P3 handles
  * {@code grade} events; {@code file}/{@code discard}/{@code assignment} arrive in P4/P5;
  * {@code flag} (2026-08-24) triggers an immediate feedback-aware regen, same as the online
- * path. An unsupported kind leaves the file in place (no data loss) until the server learns it.
+ * path; {@code feed_accept}/{@code feed_bin}/{@code feed_restore} (feed/FLOWS_feed.md P2)
+ * replay offline swipe decisions through {@link FeedService} — {@code feed_restore} against
+ * an item whose capture already left QUEUED throws (same 409 as the online path), which is a
+ * genuine permanent failure, not a retry-until-it-works one: that event (and its file) is
+ * stuck until the user discards the note from Inbox instead (see Technology Notes). An
+ * unsupported kind leaves the file in place (no data loss) until the server learns it.
  */
 @Service
 public class MailboxConsumeService {
@@ -55,6 +61,7 @@ public class MailboxConsumeService {
     private final CardRepository cardRepo;
     private final FlaggedCardRegenService flaggedCardRegen;
     private final CaptureController captureController;
+    private final FeedService feedService;
     private final ObjectMapper mapper = new ObjectMapper();
 
     // Raw bytes, before the client's base64 inflation. Keep in sync with the client's
@@ -73,7 +80,8 @@ public class MailboxConsumeService {
                                  OfflineExportService offlineExport,
                                  CardRepository cardRepo,
                                  FlaggedCardRegenService flaggedCardRegen,
-                                 CaptureController captureController) {
+                                 CaptureController captureController,
+                                 FeedService feedService) {
         this.drive = drive;
         this.encryption = encryption;
         this.reviewService = reviewService;
@@ -85,6 +93,7 @@ public class MailboxConsumeService {
         this.cardRepo = cardRepo;
         this.flaggedCardRegen = flaggedCardRegen;
         this.captureController = captureController;
+        this.feedService = feedService;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -157,6 +166,9 @@ public class MailboxConsumeService {
                     case "flag"        -> applyFlag(ev);
                     case "capture", "captureText" -> applyCapture(ev);
                     case "captureFile" -> applyCaptureFile(ev);
+                    case "feed_accept"  -> feedService.accept(ev.path("itemId").asLong());
+                    case "feed_bin"     -> feedService.bin(ev.path("itemId").asLong());
+                    case "feed_restore" -> feedService.restore(ev.path("itemId").asLong());
                     default -> {
                         allCommitted = false; // unknown kind → keep the file for a newer server
                         continue;

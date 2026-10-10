@@ -2,6 +2,7 @@ package com.obsidian.obsidian.feed;
 
 import com.obsidian.obsidian.common.WorkerLane;
 import com.obsidian.obsidian.feed.SourceRepository.Source;
+import com.obsidian.obsidian.pwa.OfflineExportService;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.tracks.TrackAgentClient;
 import com.obsidian.obsidian.tracks.TrackAgentClient.Candidate;
@@ -40,15 +41,18 @@ public class SourcePollWorker {
     private final FeedService feedService;
     private final SettingsRepository settingsRepo;
     private final TrackAgentClient trackAgentClient;
+    private final OfflineExportService offlineExport;
     private final WorkerLane lane = new WorkerLane("feed-poll");
 
     public SourcePollWorker(SourceRepository sourceRepo, FeedRepository feedRepo, FeedService feedService,
-                            SettingsRepository settingsRepo, TrackAgentClient trackAgentClient) {
+                            SettingsRepository settingsRepo, TrackAgentClient trackAgentClient,
+                            OfflineExportService offlineExport) {
         this.sourceRepo = sourceRepo;
         this.feedRepo = feedRepo;
         this.feedService = feedService;
         this.settingsRepo = settingsRepo;
         this.trackAgentClient = trackAgentClient;
+        this.offlineExport = offlineExport;
     }
 
     @Scheduled(fixedDelayString = "${subscriptions.poll.tick-ms:300000}",
@@ -109,6 +113,10 @@ public class SourcePollWorker {
         if (inserted > 0) {
             log.info("[SourcePollWorker] source {} ({}): {} new item(s){}", s.id(), s.url(), inserted,
                 backlog ? " (backlog)" : auto ? " (auto-accepted)" : "");
+            // The phone's pending swipe stack just changed — refresh its offline bundle
+            // (best-effort: no Drive/passphrase configured is the common case, not an error).
+            try { offlineExport.exportFeed(); }
+            catch (Exception e) { log.warn("[SourcePollWorker] offline feed export failed: {}", e.getMessage()); }
         }
         return inserted;
     }

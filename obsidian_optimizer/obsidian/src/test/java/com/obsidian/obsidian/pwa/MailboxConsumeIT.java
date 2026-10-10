@@ -3,6 +3,9 @@ package com.obsidian.obsidian.pwa;
 import com.obsidian.obsidian.capture.CaptureIngestWorker;
 import com.obsidian.obsidian.capture.CaptureRepository;
 import com.obsidian.obsidian.chrono.ChronoService;
+import com.obsidian.obsidian.feed.FeedRepository;
+import com.obsidian.obsidian.feed.FeedService;
+import com.obsidian.obsidian.feed.SourceRepository;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.sync.DriveService;
@@ -87,6 +90,9 @@ class MailboxConsumeIT {
     @Autowired NoteIndexRepository    noteIndex;
     @Autowired CaptureRepository      captureRepo;
     @Autowired JdbcTemplate           jdbc;
+    @Autowired FeedRepository         feedRepo;
+    @Autowired SourceRepository       sourceRepo;
+    @Autowired FeedService            feedService;
 
     private static final String YESTERDAY = LocalDate.now().minusDays(1).toString();
 
@@ -106,6 +112,14 @@ class MailboxConsumeIT {
         jdbc.execute("TRUNCATE consumed_events");
         jdbc.execute("TRUNCATE capture");
         jdbc.execute("DELETE FROM note_reviews");
+        jdbc.execute("TRUNCATE feed_items, sources RESTART IDENTITY CASCADE");
+    }
+
+    private long newFeedItem() {
+        long sid = sourceRepo.create("youtube", "https://www.youtube.com/@mbtest" + System.nanoTime(),
+            null, "MB Source", null, null).id();
+        return feedRepo.insertIfNew(sid, "https://www.youtube.com/watch?v=" + "mb" + System.nanoTime() % 1_000_000,
+            "MB item", null, null, null);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -338,5 +352,99 @@ class MailboxConsumeIT {
         assertThat(applied).isEqualTo(1);
         verify(drive).deleteFile("f1");
         assertThat(ledger.alreadyConsumed("e-cap-dup")).isTrue();
+    }
+
+    // ── feed_accept / feed_bin / feed_restore: offline swipe replay (P2) ─────────────
+
+    @Test
+    void feedAcceptEvent_ingestsExactlyOneCapture_fileDeleted() throws Exception {
+        long itemId = newFeedItem();
+        String ev = """
+            {"kind":"feed_accept","eventId":"e-fa","itemId":%d}
+            """.formatted(itemId).trim();
+        stageMailbox(envelope(ev));
+
+        int applied = consume.consumeAll();
+
+        assertThat(applied).isEqualTo(1);
+        assertThat(feedRepo.get(itemId).status()).isEqualTo("accepted");
+        assertThat(feedRepo.get(itemId).captureId()).isNotNull();
+        verify(drive).deleteFile("f1");
+        assertThat(ledger.alreadyConsumed("e-fa")).isTrue();
+    }
+
+    @Test
+    void feedAcceptEvent_consumedTwice_noDuplicateCapture() throws Exception {
+        long itemId = newFeedItem();
+        String ev = """
+            {"kind":"feed_accept","eventId":"e-fa-dup","itemId":%d}
+            """.formatted(itemId).trim();
+        stageMailbox(envelope(ev));
+        assertThat(consume.consumeAll()).isEqualTo(1);
+        String capId = feedRepo.get(itemId).captureId();
+
+        // same mailbox file reprocessed (delete raced/failed last pass) → ledger short-circuits
+        stageMailbox(envelope(ev));
+        int replayApplied = consume.consumeAll();
+
+        assertThat(replayApplied).isZero();
+        assertThat(feedRepo.get(itemId).captureId()).isEqualTo(capId); // no 2nd capture row
+        assertThat(captureRepo.listAll()).hasSize(1);
+    }
+
+    @Test
+    void feedBinEvent_binsItem_idempotentOnReplay() throws Exception {
+        long itemId = newFeedItem();
+        String ev = """
+            {"kind":"feed_bin","eventId":"e-fb","itemId":%d}
+            """.formatted(itemId).trim();
+        stageMailbox(envelope(ev));
+
+        assertThat(consume.consumeAll()).isEqualTo(1);
+        assertThat(feedRepo.get(itemId).status()).isEqualTo("binned");
+        verify(drive).deleteFile("f1");
+
+        stageMailbox(envelope(ev));
+        assertThat(consume.consumeAll()).isZero(); // eventId already consumed
+        assertThat(feedRepo.get(itemId).status()).isEqualTo("binned");
+    }
+
+    @Test
+    void feedRestoreEvent_bannedItem_backToPending() throws Exception {
+        long itemId = newFeedItem();
+        feedService.bin(itemId);
+        String ev = """
+            {"kind":"feed_restore","eventId":"e-fr","itemId":%d}
+            """.formatted(itemId).trim();
+        stageMailbox(envelope(ev));
+
+        int applied = consume.consumeAll();
+
+        assertThat(applied).isEqualTo(1);
+        assertThat(feedRepo.get(itemId).status()).isEqualTo("pending");
+        verify(drive).deleteFile("f1");
+    }
+
+    // A restore queued offline AFTER the server already let the ingest worker claim the
+    // capture is a genuine conflict (feed/FLOWS_feed.md: "undo after ingest started is not
+    // undo"), not a transient failure — it throws every pass, so the file is never deleted.
+    // This is the documented mailbox poison-event gap, same as any other permanently-failing
+    // kind (see pwa/FLOWS.md Technology Notes).
+    @Test
+    void feedRestoreEvent_afterCaptureClaimed_poisonsTheFile_notRetriedAsSuccess() throws Exception {
+        long itemId = newFeedItem();
+        String cap = feedService.accept(itemId);
+        captureRepo.claim(cap);
+        String ev = """
+            {"kind":"feed_restore","eventId":"e-fr-409","itemId":%d}
+            """.formatted(itemId).trim();
+        stageMailbox(envelope(ev));
+
+        int applied = consume.consumeAll();
+
+        assertThat(applied).isZero();
+        assertThat(feedRepo.get(itemId).status()).isEqualTo("accepted");
+        verify(drive, never()).deleteFile(anyString());
+        assertThat(ledger.alreadyConsumed("e-fr-409")).isFalse();
     }
 }

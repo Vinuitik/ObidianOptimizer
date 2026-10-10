@@ -1,6 +1,7 @@
 package com.obsidian.obsidian.feed;
 
 import com.obsidian.obsidian.feed.SourceRepository.Source;
+import com.obsidian.obsidian.pwa.OfflineExportService;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.tracks.TrackAgentClient;
 import com.obsidian.obsidian.tracks.TrackAgentClient.Candidate;
@@ -25,6 +26,7 @@ class SourcePollWorkerTest {
     FeedService feedService;
     SettingsRepository settings;
     TrackAgentClient client;
+    OfflineExportService offlineExport;
     SourcePollWorker worker;
 
     static Source src(long id, Boolean auto, Instant lastChecked) {
@@ -41,7 +43,8 @@ class SourcePollWorkerTest {
         feedService = mock(FeedService.class);
         settings = mock(SettingsRepository.class);
         client = mock(TrackAgentClient.class);
-        worker = new SourcePollWorker(sourceRepo, feedRepo, feedService, settings, client);
+        offlineExport = mock(OfflineExportService.class);
+        worker = new SourcePollWorker(sourceRepo, feedRepo, feedService, settings, client, offlineExport);
         when(settings.getSubscriptionPollIntervalMs()).thenReturn(21_600_000L);
         when(feedRepo.insertIfNew(anyLong(), any(), any(), any(), any(), any())).thenReturn(100L, 101L, 102L);
     }
@@ -137,6 +140,40 @@ class SourcePollWorkerTest {
         worker.drain();
 
         verify(feedRepo, never()).insertIfNew(anyLong(), any(), any(), any(), any(), any());
+        verify(sourceRepo).markChecked(eq(1L), any());
+    }
+
+    @Test
+    void newItemsInserted_triggersOfflineFeedExport() throws Exception {
+        Source s = src(1, false, Instant.now().minusSeconds(7 * 3600));
+        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        discovers(cand("https://blog.example/a"));
+
+        worker.drain();
+
+        verify(offlineExport).exportFeed();
+    }
+
+    @Test
+    void noNewItems_doesNotTriggerExport() {
+        Source s = src(1, true, Instant.now().minusSeconds(7 * 3600));
+        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        discovers(); // empty feed → inserted == 0
+
+        worker.drain();
+
+        verifyNoInteractions(offlineExport);
+    }
+
+    @Test
+    void exportFailure_isSwallowed_doesNotBreakDrain() throws Exception {
+        Source s = src(1, false, Instant.now().minusSeconds(7 * 3600));
+        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        discovers(cand("https://blog.example/a"));
+        doThrow(new IllegalStateException("Drive not connected")).when(offlineExport).exportFeed();
+
+        worker.drain(); // must not throw
+
         verify(sourceRepo).markChecked(eq(1L), any());
     }
 

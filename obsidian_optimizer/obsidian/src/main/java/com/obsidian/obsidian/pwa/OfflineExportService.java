@@ -2,6 +2,8 @@ package com.obsidian.obsidian.pwa;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.obsidian.obsidian.cards.AssignmentService;
+import com.obsidian.obsidian.feed.FeedRepository;
+import com.obsidian.obsidian.feed.FeedRepository.FeedItem;
 import com.obsidian.obsidian.inbox.InboxController;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.sync.DriveService;
@@ -37,9 +39,11 @@ public class OfflineExportService {
     static final String REVIEW_BUNDLE = "review-bundle.json.enc";
     static final String CARDS_BUNDLE = "cards.json.enc";
     static final String INBOX_BUNDLE = "inbox.json.enc";
+    static final String FEED_BUNDLE = "feed.json.enc";
     private static final int DEFAULT_LIMIT = 200;
     private static final int SESSION_POINTS = 10;   // matches the online FlashcardSession budget
     private static final int CARDS_NOTE_LIMIT = 50; // pre-build assignments for this many due notes
+    private static final int FEED_ITEM_LIMIT = 200;
 
     private final FileRepository repository;
     private final VaultEncryptionService encryption;
@@ -47,6 +51,7 @@ public class OfflineExportService {
     private final AssignmentService assignmentService;
     private final InboxController inbox;
     private final com.obsidian.obsidian.settings.SettingsRepository settingsRepo;
+    private final FeedRepository feedRepo;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public OfflineExportService(FileRepository repository,
@@ -54,13 +59,15 @@ public class OfflineExportService {
                                 DriveService drive,
                                 AssignmentService assignmentService,
                                 InboxController inbox,
-                                com.obsidian.obsidian.settings.SettingsRepository settingsRepo) {
+                                com.obsidian.obsidian.settings.SettingsRepository settingsRepo,
+                                FeedRepository feedRepo) {
         this.repository = repository;
         this.encryption = encryption;
         this.drive = drive;
         this.assignmentService = assignmentService;
         this.inbox = inbox;
         this.settingsRepo = settingsRepo;
+        this.feedRepo = feedRepo;
     }
 
     /** Build + encrypt + upload the due-notes bundle. Returns the note count. */
@@ -146,11 +153,45 @@ public class OfflineExportService {
         return n;
     }
 
+    /** The Passive Feed's pending swipe stack → _offline/feed.json.enc, so swiping works
+     *  offline (feed/FLOWS_feed.md §4/P2). Text-only (no thumbUrl/durationS) — the phone has
+     *  no offline thumbnail cache yet, so shipping them would just be dead weight in the
+     *  bundle; FeedCard already renders fine with a missing thumbUrl. */
+    public int exportFeed() throws Exception {
+        if (!drive.isConfigured())      throw new IllegalStateException("Drive not connected");
+        if (!encryption.isConfigured()) throw new IllegalStateException("Sync passphrase not set");
+
+        List<FeedItem> pending = feedRepo.list("pending", FEED_ITEM_LIMIT);
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (FeedItem it : pending) {
+            Map<String, Object> rec = new LinkedHashMap<>();
+            rec.put("id", it.id());
+            rec.put("sourceId", it.sourceId());
+            rec.put("sourceTitle", it.sourceTitle());
+            rec.put("itemUrl", it.itemUrl());
+            rec.put("title", it.title());
+            // String, not the raw Instant — this mapper has no jsr310 module (unlike the
+            // Spring-managed one @RestController responses use), so an Instant throws here.
+            rec.put("publishedAt", it.publishedAt() == null ? null : it.publishedAt().toString());
+            rec.put("status", it.status());
+            rows.add(rec);
+        }
+        Map<String, Object> bundle = new LinkedHashMap<>();
+        bundle.put("generatedAt", System.currentTimeMillis());
+        bundle.put("items", rows);
+
+        byte[] encrypted = encryption.encrypt(mapper.writeValueAsBytes(bundle));
+        drive.uploadOffline(FEED_BUNDLE, encrypted);
+        log.info("[OfflineExport] exported {} feed items → _offline/{}", rows.size(), FEED_BUNDLE);
+        return rows.size();
+    }
+
     /** All bundles — used by the boot/nightly/manual triggers. */
     public void exportAll() throws Exception {
         exportReviewBundle(DEFAULT_LIMIT);
         exportCards(CARDS_NOTE_LIMIT);
         exportInbox();
+        exportFeed();
     }
 
     @Scheduled(cron = "${offline.export.cron:0 30 3 * * *}")
