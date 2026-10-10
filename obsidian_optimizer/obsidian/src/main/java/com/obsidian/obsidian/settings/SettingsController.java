@@ -41,6 +41,7 @@ public class SettingsController {
             settingsRepo.getEmbedModel(),
             settingsRepo.isFlashcardsEnabled(),
             settingsRepo.isTracksEnabled(),
+            settingsRepo.isFeedAutoAccept(),
             settingsRepo.isSyncEnabled(),
             settingsRepo.getSyncClientId(),
             // Secrets never leave the server — the UI only needs "is it saved?"
@@ -101,6 +102,9 @@ public class SettingsController {
             if (req.tracksEnabled() != null) {
                 settingsRepo.set("tracksEnabled", String.valueOf(req.tracksEnabled()));
             }
+            if (req.feedAutoAccept() != null) {
+                settingsRepo.set("feedAutoAccept", String.valueOf(req.feedAutoAccept()));
+            }
             if (req.embedModel() != null) {
                 String model = req.embedModel().trim();
                 if (model.isBlank()) {
@@ -138,14 +142,14 @@ public class SettingsController {
                                    String startupSyncMode, int maxDailyReviews, int maxDailyFlashcards,
                                    int bankruptcyLimit,
                                    int chronicNeglectDays, String embedModel, boolean flashcardsEnabled,
-                                   boolean tracksEnabled,
+                                   boolean tracksEnabled, boolean feedAutoAccept,
                                    boolean syncEnabled, String syncClientId,
                                    boolean syncClientSecretSet, boolean syncPassphraseSet) {}
     record UpdateSettingsRequest(String vaultPath, String resourcePath, Integer reviewPageSize,
                                  String startupSyncMode, Integer maxDailyReviews, Integer maxDailyFlashcards,
                                  Integer bankruptcyLimit,
                                  Integer chronicNeglectDays, String embedModel, Boolean flashcardsEnabled,
-                                 Boolean tracksEnabled,
+                                 Boolean tracksEnabled, Boolean feedAutoAccept,
                                  Boolean syncEnabled, String syncClientId,
                                  String syncClientSecret, String syncPassphrase) {}
 }

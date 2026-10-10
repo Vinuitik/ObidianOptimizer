@@ -75,6 +75,8 @@ public class SettingsRepository {
         // Learning Tracks — default ON (finished work ships live, not behind a flag).
         insertDefault("tracksEnabled", "true");
         insertDefault("subscriptionsPollIntervalMs", "21600000"); // 6h
+        // Passive Feed: false = swipe to triage; true = auto-accept NEW items (see feed/FLOWS.md).
+        insertDefault("feedAutoAccept", "false");
 
         // Google Drive sync (SyncController / DriveService / VaultEncryptionService).
         // Env-backed keys use seedIfBlank, NOT insertDefault: on live installs the rows
@@ -178,8 +180,13 @@ public class SettingsRepository {
         return Boolean.parseBoolean(getOrDefault("tracksEnabled", "true"));
     }
 
-    /** How often {@code SubscriptionPollWorker} re-checks a subscription track it has
-     *  already checked before (a due track with a null lastCheckedAt is always polled). */
+    /** Global default for sources whose own auto_accept is NULL. */
+    public boolean isFeedAutoAccept() {
+        return Boolean.parseBoolean(getOrDefault("feedAutoAccept", "false"));
+    }
+
+    /** How often {@code SourcePollWorker} re-checks a feed source it has already checked
+     *  before (a due source with a null lastCheckedAt is always polled). */
     public long getSubscriptionPollIntervalMs() {
         return Long.parseLong(getOrDefault("subscriptionsPollIntervalMs", "21600000"));
     }

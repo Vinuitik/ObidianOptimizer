@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.Instant;
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -43,14 +44,14 @@ class TrackControllerTest {
     @Mock TrackReviewHandoff reviewHandoff;
     @Mock TrackProgressService progressService;
     @Mock TrackAgentClient trackAgentClient;
-    @Mock SubscriptionPollWorker subscriptionPollWorker;
+    @Mock com.obsidian.obsidian.feed.FeedController feedController;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         TrackController controller = new TrackController(
-            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, subscriptionPollWorker);
+            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, feedController);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -233,21 +234,16 @@ class TrackControllerTest {
         verify(trackRepo, never()).addItem(eq(10L), eq("Orphan Item"), isNull());
     }
 
-    // ── Subscription poll-now (Step 6) ──────────────────────────────────────────
-
     @Test
-    void pollNow_subscriptionTrack_returnsOk() throws Exception {
-        when(subscriptionPollWorker.pollNow(1L)).thenReturn(true);
+    void create_withSourceUrl_redirectsToFeed_noTrackCreated() throws Exception {
+        org.mockito.Mockito.doReturn(org.springframework.http.ResponseEntity.ok(java.util.Map.of("id", 7)))
+            .when(feedController).createSource(any());
 
-        mvc.perform(post("/tracks/1/poll-now"))
-            .andExpect(status().isOk());
-    }
+        mvc.perform(post("/tracks").contentType("application/json")
+                .content("{\"title\":\"Ch\",\"type\":\"subscription\",\"sourceUrl\":\"https://youtube.com/@x\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(7));
 
-    @Test
-    void pollNow_nonSubscriptionTrack_returnsBadRequest() throws Exception {
-        when(subscriptionPollWorker.pollNow(1L)).thenReturn(false);
-
-        mvc.perform(post("/tracks/1/poll-now"))
-            .andExpect(status().isBadRequest());
+        verify(trackRepo, never()).create(any(), any(), any());
     }
 }
