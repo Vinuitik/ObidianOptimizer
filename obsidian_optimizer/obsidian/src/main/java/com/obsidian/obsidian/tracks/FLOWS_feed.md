@@ -134,6 +134,11 @@ while a sibling agent is committing.
   normalization (YouTube variants → `watch?v=ID`, strip `utm_*`), discover returns
   `thumbUrl`/`durationS` where the source has them (embedder change). Tracks' subscription code
   paths removed; **old `tracks` columns left in place** (no destructive migration).
+- P0 fixes folded in (decided 2026-10-10): any YouTube channel URL (`@handle`, `/channel/UC…`,
+  `/c/…`, `/user/…`) resolves to its RSS feed `feeds/videos.xml?channel_id=UC…` (gives
+  publishedAt + `media:thumbnail`); a valid feed with 0 entries = ok/empty, NOT a failure
+  (`last_checked_at` advances); Shorts are NOT filtered (user swipes them away); a video URL →
+  subscribe to its channel. Default `feedAutoAccept=false` (swipe). Kaggle/JS pages out of scope.
 - API contract (P1b codes against this; nginx strips `/api`):
   ```
   GET    /feed/items?status=pending|binned|accepted&limit=50   newest published first
