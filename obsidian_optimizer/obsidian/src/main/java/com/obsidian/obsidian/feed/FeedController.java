@@ -85,17 +85,55 @@ public class FeedController {
         Source existing = sourceRepo.getByUrl(url);
         if (existing != null) return ResponseEntity.ok(existing);
 
-        boolean yt = isYoutube(url);
-        DiscoverResult res = trackAgentClient.discover(url, yt ? "youtube_channel" : "feed");
-        if (!res.ok()) {
-            return ResponseEntity.unprocessableEntity().body("could not read a feed from that URL");
-        }
-        String feedUrl = res.resolvedFeedUrl() != null ? res.resolvedFeedUrl() : url;
-        String kind = (yt || isYoutube(feedUrl)) ? "youtube" : "rss";
+        Resolved r = resolve(url);
+        if (r == null) return ResponseEntity.unprocessableEntity().body("could not read a feed from that URL");
         String title = (req.title() != null && !req.title().isBlank()) ? req.title().trim() : defaultTitle(url);
-        Source s = sourceRepo.create(kind, url, feedUrl, title, req.autoAccept(), req.targetTrackId());
-        pollWorker.ingestCandidates(s, res.candidates(), true);
+        Source s = sourceRepo.create(r.kind(), url, r.feedUrl(), title, req.autoAccept(), req.targetTrackId());
+        pollWorker.ingestCandidates(s, r.candidates(), true);
         return ResponseEntity.ok(sourceRepo.get(s.id()));
+    }
+
+    public record ResolveRequest(String url) {}
+    public record PreviewItem(String title, String itemUrl, String publishedAt, String thumbUrl, Integer durationS) {}
+    public record ResolveResponse(String kind, String feedUrl, String title, List<PreviewItem> preview) {}
+
+    /** Preview-only: same resolution §3 does for a real subscribe, but nothing is persisted
+     *  and no backlog is inserted — "what would I get" before committing. Used by the
+     *  extension's Subscribe flow and any future "preview before subscribing" UI. */
+    @PostMapping("sources/resolve")
+    public ResponseEntity<?> resolveSource(@RequestBody ResolveRequest req) {
+        if (req.url() == null || req.url().isBlank()) return ResponseEntity.badRequest().body("url is required");
+        String url = req.url().trim();
+        Resolved r = resolve(url);
+        if (r == null) return ResponseEntity.unprocessableEntity().body("could not read a feed from that URL");
+        List<PreviewItem> preview = r.candidates().stream().limit(3)
+            .map(c -> new PreviewItem(c.title(), c.itemUrl(), c.publishedAt(), c.thumbUrl(), c.durationS()))
+            .toList();
+        return ResponseEntity.ok(new ResolveResponse(r.kind(), r.feedUrl(), defaultTitle(url), preview));
+    }
+
+    private record Resolved(String kind, String feedUrl, List<TrackAgentClient.Candidate> candidates) {}
+
+    /** youtube/@handle/channel/video → youtube (channel RSS); a youtube …/posts URL →
+     *  youtube_posts (Community tab, no RSS); any other page → RSS/Atom autodiscovery (rss);
+     *  nothing found there either → page_watch (same-site link diff) — never a hard failure
+     *  unless the URL itself is unreachable. See feed/FLOWS_feed.md §3. Shared by createSource
+     *  (persists) and resolveSource (preview only). */
+    private Resolved resolve(String url) {
+        boolean yt = isYoutube(url);
+        if (yt && url.toLowerCase().contains("/posts")) {
+            DiscoverResult res = trackAgentClient.discover(url, "youtube_posts");
+            return res.ok() ? new Resolved("youtube_posts", null, res.candidates()) : null;
+        }
+        DiscoverResult res = trackAgentClient.discover(url, yt ? "youtube_channel" : "feed");
+        if (res.ok()) {
+            String feedUrl = res.resolvedFeedUrl() != null ? res.resolvedFeedUrl() : url;
+            String kind = (yt || isYoutube(feedUrl)) ? "youtube" : "rss";
+            return new Resolved(kind, feedUrl, res.candidates());
+        }
+        if (yt) return null;   // a broken YouTube URL doesn't fall back to page_watch
+        DiscoverResult pw = trackAgentClient.discover(url, "page_watch");
+        return pw.ok() ? new Resolved("page_watch", null, pw.candidates()) : null;
     }
 
     @PatchMapping("sources/{id}")

@@ -32,7 +32,7 @@ class SourcePollWorkerTest {
             auto, null, "active", lastChecked, Instant.now(), 0);
     }
 
-    static Candidate cand(String url) { return new Candidate(url, "T " + url, "2026-08-01T00:00:00Z", "https://i/t.jpg", 60); }
+    static Candidate cand(String url) { return new Candidate(url, "T " + url, "2026-08-01T00:00:00Z", "https://i/t.jpg", 60, null); }
 
     @BeforeEach
     void setup() {
@@ -43,7 +43,7 @@ class SourcePollWorkerTest {
         client = mock(TrackAgentClient.class);
         worker = new SourcePollWorker(sourceRepo, feedRepo, feedService, settings, client);
         when(settings.getSubscriptionPollIntervalMs()).thenReturn(21_600_000L);
-        when(feedRepo.insertIfNew(anyLong(), any(), any(), any(), any(), any())).thenReturn(100L, 101L, 102L);
+        when(feedRepo.insertIfNew(anyLong(), any(), any(), any(), any(), any(), any())).thenReturn(100L, 101L, 102L);
     }
 
     private void discovers(Candidate... cs) {
@@ -58,7 +58,7 @@ class SourcePollWorkerTest {
 
         worker.drain();
 
-        verify(feedRepo, times(2)).insertIfNew(eq(1L), any(), any(), eq("https://i/t.jpg"), eq(60), any());
+        verify(feedRepo, times(2)).insertIfNew(eq(1L), any(), any(), eq("https://i/t.jpg"), eq(60), any(), any());
         verify(feedService, never()).accept(anyLong());
         verify(sourceRepo).markChecked(eq(1L), any());
     }
@@ -111,7 +111,7 @@ class SourcePollWorkerTest {
 
         worker.drain();
 
-        verify(feedRepo, times(2)).insertIfNew(anyLong(), any(), any(), any(), any(), any());
+        verify(feedRepo, times(2)).insertIfNew(anyLong(), any(), any(), any(), any(), any(), any());
         verify(feedService, never()).accept(anyLong());
         verify(sourceRepo).markChecked(eq(1L), any());
     }
@@ -120,7 +120,7 @@ class SourcePollWorkerTest {
     void duplicate_insertReturnsNull_notAccepted() {
         Source s = src(1, true, Instant.now().minusSeconds(7 * 3600));
         when(sourceRepo.listActive()).thenReturn(List.of(s));
-        when(feedRepo.insertIfNew(anyLong(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(feedRepo.insertIfNew(anyLong(), any(), any(), any(), any(), any(), any())).thenReturn(null);
         discovers(cand("https://blog.example/a"));
 
         worker.drain();
@@ -136,7 +136,7 @@ class SourcePollWorkerTest {
 
         worker.drain();
 
-        verify(feedRepo, never()).insertIfNew(anyLong(), any(), any(), any(), any(), any());
+        verify(feedRepo, never()).insertIfNew(anyLong(), any(), any(), any(), any(), any(), any());
         verify(sourceRepo).markChecked(eq(1L), any());
     }
 
@@ -169,8 +169,8 @@ class SourcePollWorkerTest {
 
         worker.drain();
 
-        verify(feedRepo).insertIfNew(eq(1L), eq("https://www.youtube.com/watch?v=abcdefghijk"), any(), any(), any(), any());
-        verify(feedRepo).insertIfNew(eq(1L), eq("https://blog.example/p?id=3"), any(), any(), any(), any());
+        verify(feedRepo).insertIfNew(eq(1L), eq("https://www.youtube.com/watch?v=abcdefghijk"), any(), any(), any(), any(), any());
+        verify(feedRepo).insertIfNew(eq(1L), eq("https://blog.example/p?id=3"), any(), any(), any(), any(), any());
     }
 
     @Test

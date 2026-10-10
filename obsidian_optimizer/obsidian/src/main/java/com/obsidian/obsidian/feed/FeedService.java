@@ -28,14 +28,17 @@ public class FeedService {
     private final CaptureRepository captureRepo;
     private final CaptureIngestWorker ingestWorker;
     private final TrackRepository trackRepo;
+    private final CaptureController captureController;
 
     public FeedService(FeedRepository feedRepo, SourceRepository sourceRepo, CaptureRepository captureRepo,
-                       CaptureIngestWorker ingestWorker, TrackRepository trackRepo) {
+                       CaptureIngestWorker ingestWorker, TrackRepository trackRepo,
+                       CaptureController captureController) {
         this.feedRepo = feedRepo;
         this.sourceRepo = sourceRepo;
         this.captureRepo = captureRepo;
         this.ingestWorker = ingestWorker;
         this.trackRepo = trackRepo;
+        this.captureController = captureController;
     }
 
     /** pending/binned → accepted + exactly one capture tagged with the target track.
@@ -53,8 +56,18 @@ public class FeedService {
             long trackId = (src != null && src.targetTrackId() != null)
                 ? src.targetTrackId() : trackRepo.getOrCreatePassive().id();
             String title = (item.title() == null || item.title().isBlank()) ? item.itemUrl() : item.title();
-            captureRepo.enqueue(captureId, CaptureController.classifyUrl(item.itemUrl()),
-                item.itemUrl(), null, title);
+            if (item.body() != null && !item.body().isBlank()) {
+                // youtube_posts: the full text is already in hand (see feed/FLOWS.md) — a
+                // text capture, not a URL fetch.
+                try {
+                    captureController.enqueueTextCapture(captureId, title, item.body());
+                } catch (java.io.IOException e) {
+                    throw new RuntimeException("could not store post text for capture " + captureId, e);
+                }
+            } else {
+                captureRepo.enqueue(captureId, CaptureController.classifyUrl(item.itemUrl()),
+                    item.itemUrl(), null, title);
+            }
             captureRepo.setTrackId(captureId, trackId);
         } catch (RuntimeException e) {
             feedRepo.markPending(itemId);   // don't strand an 'accepted' row with no capture

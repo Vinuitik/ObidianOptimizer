@@ -71,9 +71,11 @@ public class TrackAgentClient {
     }
 
     /** One item the embedder found for a subscription source (new YouTube upload, new feed
-     *  entry) — not yet ingested. */
+     *  entry, a YouTube Community post, a page_watch link) — not yet ingested. {@code body}
+     *  is only non-null for youtube_posts candidates (the post's full text — there's no
+     *  separate page worth fetching for it at accept-time, see feed/FLOWS.md). */
     public record Candidate(String itemUrl, String title, String publishedAt,
-                            String thumbUrl, Integer durationS) {}
+                            String thumbUrl, Integer durationS, String body) {}
 
     /** Outcome of a discovery poll. {@code ok} = HTTP 200 AND the body parsed; on either
      *  failure {@code candidates} is empty so the poll worker just skips the tick and
@@ -92,7 +94,8 @@ public class TrackAgentClient {
             List<Candidate> candidates = new ArrayList<>();
             for (JsonNode c : root.path("candidates")) {
                 candidates.add(new Candidate(txt(c, "item_url"), txt(c, "title"), txt(c, "published_at"),
-                    txt(c, "thumb_url"), c.path("duration_s").isNumber() ? c.path("duration_s").asInt() : null));
+                    txt(c, "thumb_url"), c.path("duration_s").isNumber() ? c.path("duration_s").asInt() : null,
+                    txt(c, "body")));
             }
             return new DiscoverResult(true, candidates, txt(root, "resolvedFeedUrl"));
         } catch (Exception e) {
