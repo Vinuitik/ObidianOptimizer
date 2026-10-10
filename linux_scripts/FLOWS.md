@@ -7,13 +7,15 @@ Boot → always-online stack:
 
 - The service is installed once via `install-service.sh` (copies unit to `/etc/systemd/system`, `enable --now`). To reinstall after editing the unit: re-run `install-service.sh` — the copy is not live-linked.
 - `Restart=always` (unit) → if `start.sh`/compose dies, systemd relaunches in 10s. To change: `obsidian-optimizer.service` `RestartSec`.
+- **By hand** (`./linux_scripts/start.sh` from any shell) → not in the unit's cgroup → clears `.stopped` → `sudo -n systemctl restart obsidian-optimizer` → returns in <1s; stack is systemd-owned, survives the shell closing. No passwordless sudo → fallback `setsid nohup` re-exec (`OBS_DETACHED=1`), logs `~/obsidian_start.log`. To change: hand-off block at top of `start.sh`.
+- "Am I the service?" = `/proc/self/cgroup` contains `obsidian-optimizer.service` (`UNDER_UNIT`). **Not** `$INVOCATION_ID` — VS Code/GNOME terminals inherit their own, which made by-hand runs look supervised (bug found 2026-10-10).
 - On `systemctl stop`: SIGTERM hits the cgroup → `start.sh` EXIT trap kills the wrapper process group + `docker compose down`. Give it time via `TimeoutStopSec` (unit).
 
 ## Stop + stay stopped ("restart unless stopped")
 `stop.sh` → writes `<repo>/.stopped` → `sudo systemctl stop obsidian-optimizer` (EXIT trap: `compose down` + wrapper kill)
 - Flag set + systemd runs `start.sh` (restart, reboot, post-commit hook's `systemctl restart`) → `start.sh` exits **42** → unit's `RestartPreventExitStatus=42` → stays down. Unit shows `failed` (cosmetic).
-- Resume: run `start.sh` by hand (clears flag), or `rm .stopped && sudo systemctl start obsidian-optimizer`. No flag → `Restart=always` behaves as before (crash → back in 10s).
-- Verified 2026-10-06: flagged restart stays down; unflagged start comes up; `kill -9` of start.sh restarts. Not tested: a real reboot, and start.sh-by-hand clearing the flag.
+- Resume: run `start.sh` by hand (clears flag + hands off to systemd). No flag → `Restart=always` behaves as before (crash → back in 10s).
+- Verified 2026-10-06: flagged restart stays down; unflagged start comes up; `kill -9` of start.sh restarts. 2026-10-10: by-hand hand-off verified (returns in 0.7s, stack stays up). Not tested: a real reboot.
 - Cloudflared is in compose profile `tunnel`; `.env` has `COMPOSE_PROFILES=tunnel` so plain `docker compose down` covers it.
 - Unit edits need root: copy to `/etc/systemd/system/` + `systemctl daemon-reload` (`install-service.sh` does it; my sudo can't).
 
@@ -43,6 +45,8 @@ docker compose ps                         # all 5 Up; postgres/embedder healthy
 - `update_url` is baked into `extension/manifest.firefox.overlay.json` → the **first** signed `.xpi` (the one carrying it) must be installed once by hand; every later version auto-updates. To change the poll URL: that `gecko.update_url` (must match `BASE_URL` in `deploy-extension.sh` and the nginx `/ext/` route).
 - Patch version auto-bumps each run (AMO rejects a duplicate version) — **this is a release counter for the overlay file only, independent of Chrome's `manifest.json` version**, which has no publish pipeline yet. Diverging version numbers between the two are expected, not a bug. To change the scheme: the `NEW=` line in `deploy-extension.sh`.
 - `.xpi` + `updates.json` land in host `./ext-dist` (gitignored), mounted `:ro` at `/ext-dist` — new versions appear live, **no** frontend rebuild. Only editing the nginx `/ext/` block or the compose mount needs `systemctl restart obsidian-optimizer`.
+- **Auto on every start**: `start.sh` (after image build, before `compose up`) hashes `extension/` → differs from `<repo>/.ext-deployed-hash` (gitignored) → runs `deploy-extension.sh` + `build-chrome-extension-zip.sh` in the **background**, log lines prefixed `[extension]` in journalctl → on success writes the post-bump hash. Unchanged → skipped. Failure → warning, retried next start, site unaffected. Force a redeploy: `rm .ext-deployed-hash` + restart. To change: `ext_hash()` / the gated block in `start.sh`.
+- Side effect: the version bump edits `extension/manifest.firefox.overlay.json` in the working tree → commit it (it's in the hash, so committing doesn't re-trigger). A restart mid-signing kills the job after the bump → next run bumps again (skipped version numbers, harmless).
 - Requires `AMO_KEY`/`AMO_SECRET` (AMO JWT issuer/secret) exported. Signing JWT capped via `--timeout=240000` (< AMO's 5-min `exp`, sign-addon#1273).
 
 ## Testing — `test.sh` + `ingest_live_e2e.py`
@@ -84,7 +88,7 @@ To change: `linux_scripts/ingest_live_e2e.py` `journey()`.
 - **systemd `Restart=always` + `--build`**: every boot/restart re-runs `docker compose up --build`. A broken build (no network, bad Dockerfile) → the service crash-loops every 10s. Symptom: `journalctl` shows repeated build attempts. Not silent — check the log.
 - **Host-wrapper respawn loop, not a unit**: a tight crash loop (wrapper fails instantly every time) will respawn every 3s forever with no backoff cap. Acceptable because the wrapper is non-critical; if it ever becomes load-bearing, promote it to its own `Restart=always` unit instead.
 - **Orphan safety net**: if the trap's group-kill misses the python child, `cleanup()` in `start.sh` reaps whatever holds `PORT` (default 5500) on the next start via `lsof`. So a stale wrapper never blocks a restart.
-- **Agent/SSH shell reaping**: running `start.sh` directly from this repo's agent shell gets reaped (see memory `deploy-sandbox-reaping`). Production path is systemd — unaffected. To start manually from such a shell, use `docker compose up -d` and skip the wrapper.
+- **Agent/SSH shell reaping**: a foreground `start.sh` dies with its shell — and its EXIT trap runs `compose down`, taking the site down. Fixed 2026-10-10: by-hand runs now hand off to systemd instead of running in the foreground.
 - **Not dockerized**: the host-wrapper runs on the host (port 5500) so it can reach host-only resources; containers reach it via `host.docker.internal` (`extra_hosts: host-gateway` on Linux). If `PORT`/`WRAPPER_URL` in `.env` drift apart, the backend/embedder can't reach it.
 
 ## Change Index
@@ -100,7 +104,9 @@ To change: `linux_scripts/ingest_live_e2e.py` `journey()`.
 | Wrapper respawn delay | `start.sh` → `sleep 3` in the setsid loop |
 | Wrapper port | `.env` → `PORT` (and matching `WRAPPER_URL`) |
 | View logs | `journalctl -u obsidian-optimizer` / `docker compose logs` |
-| Ship a new extension version | `./linux_scripts/deploy-extension.sh` (needs `AMO_KEY`/`AMO_SECRET`) |
+| Ship a new extension version | automatic on start when `extension/` changed; manual: `./linux_scripts/deploy-extension.sh` (needs `AMO_KEY`/`AMO_SECRET`) |
+| Force extension redeploy on next start | `rm .ext-deployed-hash` |
+| By-hand start behavior (systemd hand-off / detached fallback) | top of `start.sh` (`UNDER_UNIT`, `OBS_DETACHED`) |
 | Extension auto-update poll URL | `extension/manifest.firefox.overlay.json` → `gecko.update_url` + nginx `/ext/` + `BASE_URL` in `deploy-extension.sh` |
 | Extension version scheme | `deploy-extension.sh` → `NEW=` bump line |
 | Where signed `.xpi`/`updates.json` live | host `./ext-dist` → nginx `/ext/` (compose `frontend` volume) |

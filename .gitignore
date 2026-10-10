@@ -33,3 +33,4 @@ ext-dist/
 # Unified test runner outputs (linux_scripts/test.sh)
 test-results/
 .stopped
+.ext-deployed-hash

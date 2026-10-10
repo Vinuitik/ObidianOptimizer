@@ -6,12 +6,37 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$ROOT_DIR/.env"
 STOP_FLAG="$ROOT_DIR/.stopped"
 
+# "Am I the obsidian-optimizer.service process?" — checked via cgroup membership, NOT
+# $INVOCATION_ID: terminals launched from a systemd user session (VS Code, GNOME
+# Terminal) inherit their own INVOCATION_ID, which made a by-hand run look supervised.
+UNDER_UNIT=""
+grep -q 'obsidian-optimizer\.service' /proc/self/cgroup 2>/dev/null && UNDER_UNIT=1
+
 # "Restart unless stopped": linux_scripts/stop.sh drops this flag. Under systemd a
 # flagged start (restart or reboot) exits 42, which the unit's
 # RestartPreventExitStatus=42 treats as "stay down". Run by hand, start.sh is an
 # explicit "bring it back up", so it clears the flag and carries on.
+#
+# Run by hand from a shell, the stack must survive that shell closing (a foreground
+# start.sh gets reaped with its terminal). So a by-hand run clears the flag and hands
+# off to the systemd unit — supervised, restart-on-crash, logs in journalctl — then
+# returns. Fallback when passwordless sudo isn't available: re-exec detached (setsid
+# + nohup), logging to ~/obsidian_start.log. OBS_DETACHED marks that re-exec so it
+# doesn't hand off again.
+if [[ -z "$UNDER_UNIT" && -z "${OBS_DETACHED:-}" ]]; then
+    rm -f "$STOP_FLAG"
+    if sudo -n systemctl restart obsidian-optimizer 2>/dev/null; then
+        echo "Handed off to systemd (obsidian-optimizer.service) — safe to close this shell."
+        echo "Logs: journalctl -u obsidian-optimizer -f"
+    else
+        OBS_DETACHED=1 setsid nohup bash "$0" > "$HOME/obsidian_start.log" 2>&1 < /dev/null &
+        echo "systemd hand-off unavailable — started detached (PID $!). Logs: ~/obsidian_start.log"
+    fi
+    exit 0
+fi
+
 if [[ -e "$STOP_FLAG" ]]; then
-    if [[ -n "${INVOCATION_ID:-}" ]]; then
+    if [[ -n "$UNDER_UNIT" ]]; then
         echo "Stopped via stop.sh ($STOP_FLAG exists) — staying down. Run linux_scripts/start.sh by hand to resume." >&2
         exit 42
     fi
@@ -168,4 +193,30 @@ if ! docker compose "${COMPOSE_ARGS[@]}" build; then
     echo "WARNING: image build FAILED — starting last-good images instead." >&2
     echo "         Fix the build, then: systemctl restart obsidian-optimizer" >&2
 fi
+
+# Extensions: redeploy only when extension/ changed since the last successful deploy
+# (content hash in .ext-deployed-hash). Gated because deploy-extension.sh bumps the
+# version + re-signs via AMO every run — unconditional would publish a new Firefox
+# version on every restart. Backgrounded + non-fatal: signing takes minutes and a
+# failure (AMO down, bad creds) must not keep the site down. The hash is taken AFTER
+# the deploy so it includes the bumped manifest version. Chrome zip rides along.
+EXT_STAMP="$ROOT_DIR/.ext-deployed-hash"
+ext_hash() {
+    find "$ROOT_DIR/extension" -type f -not -path '*/node_modules/*' -print0 \
+        | sort -z | xargs -0 sha256sum | sed "s#$ROOT_DIR/##" | sha256sum | awk '{print $1}'
+}
+if [[ "$(ext_hash)" != "$(cat "$EXT_STAMP" 2>/dev/null)" ]]; then
+    (
+        echo "extension/ changed since last deploy — publishing ..."
+        if bash "$SCRIPT_DIR/deploy-extension.sh" && bash "$SCRIPT_DIR/build-chrome-extension-zip.sh"; then
+            ext_hash > "$EXT_STAMP"
+            echo "extension deploy done."
+        else
+            echo "WARNING: extension deploy FAILED — will retry on next start." >&2
+        fi
+    ) 2>&1 | sed -u 's/^/[extension] /' &
+else
+    echo "extension/ unchanged since last deploy — skipping."
+fi
+
 docker compose "${COMPOSE_ARGS[@]}" up
