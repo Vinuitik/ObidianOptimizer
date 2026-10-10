@@ -1,7 +1,7 @@
 // Shared with anywhere that shows Drive-sync progress (SyncPage's own readout, the
 // persistent MobileLayout banner) so the wording never drifts between the two.
 const STAGE_LABELS = {
-  notes: 'notes', cards: 'flashcards', inbox: 'inbox',
+  notes: 'notes', cards: 'flashcards', inbox: 'inbox', feed: 'feed',
   images: 'images', media: 'video & audio', pdf: 'PDF pages',
 };
 

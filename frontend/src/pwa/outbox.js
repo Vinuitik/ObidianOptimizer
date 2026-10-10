@@ -4,6 +4,7 @@
 import { addToOutbox, getOutbox, deleteFromOutbox } from './db';
 import { gradeNote, submitAttempt, completeAssignment, flagCard } from '../api/notes';
 import { fileInboxNote, discardInboxNote, acknowledgeCapture } from '../api/inbox';
+import { acceptFeedItem, binFeedItem, restoreFeedItem } from '../api/feed';
 import { captureSentNotifyEnabled, notifyCaptureSent } from './captureSentNotify';
 
 // eventId makes mailbox replay idempotent — the server dedupes on it (consumed_events).
@@ -47,6 +48,21 @@ export function enqueueAcknowledge(captureId) {
 
 export function enqueueFlag(cardId, reason) {
   return addToOutbox({ kind: 'flag', cardId, reason, eventId: newId() });
+}
+
+// Passive Feed offline swipe decisions (feed/FLOWS_feed.md P2) — replayed through the SAME
+// FeedService.accept/bin/restore the online buttons call, server-side (MailboxConsumeService
+// for the Drive-mailbox path below; flush() here for the server-direct outbox path).
+export function enqueueFeedAccept(itemId) {
+  return addToOutbox({ kind: 'feed_accept', itemId, eventId: newId() });
+}
+
+export function enqueueFeedBin(itemId) {
+  return addToOutbox({ kind: 'feed_bin', itemId, eventId: newId() });
+}
+
+export function enqueueFeedRestore(itemId) {
+  return addToOutbox({ kind: 'feed_restore', itemId, eventId: newId() });
 }
 
 // Replay everything. Returns { sent, failed }. A 401 leaves items queued (the
@@ -99,6 +115,12 @@ export async function flush() {
         await acknowledgeCapture(item.captureId);
       } else if (item.kind === 'flag') {
         await flagCard(item.cardId, item.reason);
+      } else if (item.kind === 'feed_accept') {
+        await acceptFeedItem(item.itemId);
+      } else if (item.kind === 'feed_bin') {
+        await binFeedItem(item.itemId);
+      } else if (item.kind === 'feed_restore') {
+        await restoreFeedItem(item.itemId);
       }
       await deleteFromOutbox(item.id);
       sent++;

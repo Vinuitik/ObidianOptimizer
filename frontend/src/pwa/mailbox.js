@@ -34,7 +34,8 @@ export async function pushMailbox() {
 
   const all = await getOutbox();
   // Server consume handles all of these kinds (MailboxConsumeService).
-  const KINDS = new Set(['grade', 'assignment', 'file', 'discard', 'acknowledge', 'flag', 'capture', 'captureText', 'captureFile']);
+  const KINDS = new Set(['grade', 'assignment', 'file', 'discard', 'acknowledge', 'flag', 'capture', 'captureText', 'captureFile',
+    'feed_accept', 'feed_bin', 'feed_restore']);
   const sendable = all.filter(e => KINDS.has(e.kind) &&
     !(e.kind === 'captureFile' && e.blob?.size > MAILBOX_FILE_MAX_BYTES));
   if (!sendable.length) return { pushed: 0 };

@@ -22,10 +22,17 @@ import {
   discardInboxNote as netDiscardInbox,
   acknowledgeCapture as netAcknowledge,
 } from '../api/inbox';
+import {
+  fetchFeedItems as netFetchFeedItems,
+  acceptFeedItem as netAcceptFeedItem,
+  binFeedItem as netBinFeedItem,
+  restoreFeedItem as netRestoreFeedItem,
+} from '../api/feed';
 import { getAllReviewNotes, getReviewNote, getAssignmentByNote, getAllAssignments, getMeta, setMeta } from './db';
 import {
   enqueueGrade, enqueueCapture, enqueueCaptureText, enqueueAssignment,
-  enqueueFile, enqueueDiscard, enqueueAcknowledge, enqueueFlag, flush,
+  enqueueFile, enqueueDiscard, enqueueAcknowledge, enqueueFlag,
+  enqueueFeedAccept, enqueueFeedBin, enqueueFeedRestore, flush,
 } from './outbox';
 import { isOnline } from './connectivity';
 import { hasCreds } from './setup';
@@ -314,6 +321,52 @@ export async function acknowledgeOffline(captureId) {
     async () => {
       await enqueueAcknowledge(captureId);
       await dropFromInbox(i => i.captureId !== captureId);
+      return { queued: true };
+    },
+  );
+}
+
+// ── Offline Passive Feed (swipe pending stack) ─────────────────────────────────
+// Mirrors the inbox pattern above: a "pending" cache in meta (fed by the server export —
+// drivePull.js — and trimmed optimistically on decide), so a reload mid-offline-session
+// still reflects decisions already made. Bin tab / Sources stay online-only (not exported —
+// see feed/FLOWS_feed.md §4/P2); only the swipe stack + Undo-of-the-last-decision need this.
+async function pulledFeed() { return (await getMeta('feedItems')) || []; }
+async function dropFromFeed(id) {
+  const items = await pulledFeed();
+  await setMeta('feedItems', items.filter(i => i.id !== id));
+}
+
+export async function fetchFeedOffline() {
+  return withOfflineFallback(() => netFetchFeedItems('pending'), pulledFeed);
+}
+
+export async function acceptFeedOffline(id) {
+  return withOfflineFallback(
+    () => netAcceptFeedItem(id),
+    async () => { await enqueueFeedAccept(id); await dropFromFeed(id); return { queued: true }; },
+  );
+}
+
+export async function binFeedOffline(id) {
+  return withOfflineFallback(
+    () => netBinFeedItem(id),
+    async () => { await enqueueFeedBin(id); await dropFromFeed(id); return { queued: true }; },
+  );
+}
+
+// Takes the full item (not just an id) so an offline Undo can put it back in the cached
+// pending list — dropFromFeed already erased it at accept/bin time, and there's no server
+// copy to re-fetch while offline.
+export async function restoreFeedOffline(item) {
+  return withOfflineFallback(
+    () => netRestoreFeedItem(item.id),
+    async () => {
+      await enqueueFeedRestore(item.id);
+      const items = await pulledFeed();
+      if (!items.some(i => i.id === item.id)) {
+        await setMeta('feedItems', [{ ...item, status: 'pending' }, ...items]);
+      }
       return { queued: true };
     },
   );

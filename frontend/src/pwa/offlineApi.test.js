@@ -10,17 +10,28 @@ vi.mock('./db', () => ({
 vi.mock('./outbox', () => ({
   enqueueGrade: vi.fn(), enqueueCapture: vi.fn(), enqueueCaptureText: vi.fn(),
   enqueueAssignment: vi.fn(), enqueueFile: vi.fn(), enqueueDiscard: vi.fn(),
-  enqueueAcknowledge: vi.fn(), enqueueFlag: vi.fn(), flush: vi.fn(),
+  enqueueAcknowledge: vi.fn(), enqueueFlag: vi.fn(),
+  enqueueFeedAccept: vi.fn(), enqueueFeedBin: vi.fn(), enqueueFeedRestore: vi.fn(),
+  flush: vi.fn(),
+}));
+vi.mock('../api/feed', () => ({
+  fetchFeedItems: vi.fn(), acceptFeedItem: vi.fn(), binFeedItem: vi.fn(), restoreFeedItem: vi.fn(),
 }));
 
 import {
   captureText, flagCardOffline, setDriveMode,
   buildAssignmentOffline, submitAttemptOffline, completeAssignmentOffline,
   fetchNoteContentOffline,
+  fetchFeedOffline, acceptFeedOffline, binFeedOffline, restoreFeedOffline,
 } from './offlineApi';
 import { isOnline } from './connectivity';
-import { enqueueCaptureText, enqueueFlag, enqueueAssignment } from './outbox';
-import { getAssignmentByNote, getReviewNote } from './db';
+import {
+  enqueueCaptureText, enqueueFlag, enqueueAssignment,
+  enqueueFeedAccept, enqueueFeedBin, enqueueFeedRestore,
+} from './outbox';
+import { getAssignmentByNote, getReviewNote, getMeta, setMeta } from './db';
+import { fetchFeedItems, acceptFeedItem, binFeedItem, restoreFeedItem } from '../api/feed';
+import { ApiError } from '../api/notes';
 
 describe('fetchNoteContentOffline — hung request', () => {
   beforeEach(() => {
@@ -230,5 +241,123 @@ describe('flashcard trio — driveMode local grading', () => {
 
     expect(result).toEqual({ notes: [], deferred: true, queued: true });
     expect(enqueueAssignment).toHaveBeenCalledWith('a1', 'n.md', { c1: '1' });
+  });
+});
+
+// Passive Feed offline swipe (feed/FLOWS_feed.md §4/P2) — same withOfflineFallback shape as
+// the inbox file/discard/acknowledge trio above, just against api/feed.js instead of
+// api/inbox.js. fetchFeedOffline/acceptFeedOffline/binFeedOffline/restoreFeedOffline.
+describe('offline Passive Feed', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setDriveMode(false);
+  });
+
+  it('fetchFeedOffline: online → server list, no meta read', async () => {
+    isOnline.mockReturnValue(true);
+    fetchFeedItems.mockResolvedValue([{ id: 1, title: 'A' }]);
+
+    const res = await fetchFeedOffline();
+
+    expect(res).toEqual([{ id: 1, title: 'A' }]);
+    expect(getMeta).not.toHaveBeenCalled();
+  });
+
+  it('fetchFeedOffline: offline → reads the cached pending list from meta', async () => {
+    isOnline.mockReturnValue(false);
+    getMeta.mockResolvedValue([{ id: 2, title: 'Cached' }]);
+
+    const res = await fetchFeedOffline();
+
+    expect(res).toEqual([{ id: 2, title: 'Cached' }]);
+    expect(fetchFeedItems).not.toHaveBeenCalled();
+  });
+
+  it('fetchFeedOffline: no cached list yet → empty array, not null', async () => {
+    isOnline.mockReturnValue(false);
+    getMeta.mockResolvedValue(null);
+
+    await expect(fetchFeedOffline()).resolves.toEqual([]);
+  });
+
+  it('acceptFeedOffline: online + ok → POSTs accept, does not queue', async () => {
+    isOnline.mockReturnValue(true);
+    acceptFeedItem.mockResolvedValue({ captureId: 'c1' });
+
+    const res = await acceptFeedOffline(5);
+
+    expect(res).toEqual({ captureId: 'c1' });
+    expect(enqueueFeedAccept).not.toHaveBeenCalled();
+  });
+
+  it('acceptFeedOffline: offline → queues and drops the item from the cached pending list', async () => {
+    isOnline.mockReturnValue(false);
+    getMeta.mockResolvedValue([{ id: 5 }, { id: 6 }]);
+
+    const res = await acceptFeedOffline(5);
+
+    expect(res).toEqual({ queued: true });
+    expect(enqueueFeedAccept).toHaveBeenCalledWith(5);
+    expect(setMeta).toHaveBeenCalledWith('feedItems', [{ id: 6 }]);
+  });
+
+  it('acceptFeedOffline: server unreachable (530) → queues same as offline', async () => {
+    isOnline.mockReturnValue(true);
+    acceptFeedItem.mockRejectedValue(new ApiError(530));
+    getMeta.mockResolvedValue([]);
+
+    const res = await acceptFeedOffline(5);
+
+    expect(res).toEqual({ queued: true });
+    expect(enqueueFeedAccept).toHaveBeenCalledWith(5);
+  });
+
+  it('acceptFeedOffline: a genuine 4xx error propagates, not queued', async () => {
+    isOnline.mockReturnValue(true);
+    acceptFeedItem.mockRejectedValue(new ApiError(404));
+
+    await expect(acceptFeedOffline(5)).rejects.toThrow();
+    expect(enqueueFeedAccept).not.toHaveBeenCalled();
+  });
+
+  it('binFeedOffline: offline → queues and drops the item', async () => {
+    isOnline.mockReturnValue(false);
+    getMeta.mockResolvedValue([{ id: 7 }]);
+
+    const res = await binFeedOffline(7);
+
+    expect(res).toEqual({ queued: true });
+    expect(enqueueFeedBin).toHaveBeenCalledWith(7);
+    expect(setMeta).toHaveBeenCalledWith('feedItems', []);
+  });
+
+  it('restoreFeedOffline: online → POSTs restore (a 409 propagates, matching the online contract)', async () => {
+    isOnline.mockReturnValue(true);
+    restoreFeedItem.mockRejectedValue(new ApiError(409));
+
+    await expect(restoreFeedOffline({ id: 8 })).rejects.toThrow();
+    expect(enqueueFeedRestore).not.toHaveBeenCalled();
+  });
+
+  it('restoreFeedOffline: offline → queues and re-adds the item to the cached pending list', async () => {
+    isOnline.mockReturnValue(false);
+    getMeta.mockResolvedValue([{ id: 1 }]);
+
+    const res = await restoreFeedOffline({ id: 9, title: 'Restored', status: 'binned' });
+
+    expect(res).toEqual({ queued: true });
+    expect(enqueueFeedRestore).toHaveBeenCalledWith(9);
+    expect(setMeta).toHaveBeenCalledWith('feedItems', [
+      { id: 9, title: 'Restored', status: 'pending' }, { id: 1 },
+    ]);
+  });
+
+  it('restoreFeedOffline: offline, item already cached → does not duplicate it', async () => {
+    isOnline.mockReturnValue(false);
+    getMeta.mockResolvedValue([{ id: 9, title: 'Already there' }]);
+
+    await restoreFeedOffline({ id: 9, title: 'Restored', status: 'binned' });
+
+    expect(setMeta).not.toHaveBeenCalled();
   });
 });

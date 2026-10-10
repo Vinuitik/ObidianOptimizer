@@ -11,6 +11,7 @@ import { fetchNames } from '../api/notes';
 const REVIEW_BUNDLE = 'review-bundle.json.enc';
 const CARDS_BUNDLE = 'cards.json.enc';
 const INBOX_BUNDLE = 'inbox.json.enc';
+const FEED_BUNDLE = 'feed.json.enc';
 
 // Once today's review LIST is set, a background pull (autoSync, a reconnect) must not
 // silently reshuffle or replace it — only cards/inbox refresh in the background; the
@@ -118,13 +119,27 @@ export async function pullReviewFromDrive({ onStage, force = false } = {}) {
     }
   } catch { /* Learn offline is optional */ }
 
+  // Best-effort: pull the Passive Feed's pending swipe stack too (offline swiping,
+  // feed/FLOWS_feed.md §4/P2). Stored in meta as a plain array, same shape as inboxItems —
+  // decideFeed/restoreFeedItem (offlineApi.js) mutate it optimistically and queue mailbox events.
+  let feed = 0;
+  try {
+    onStage?.({ stage: 'feed' });
+    const feedFile = await findOfflineFile(token, creds.driveFolderId, FEED_BUNDLE);
+    if (feedFile) {
+      const fb = JSON.parse(await decryptText(key, await driveDownload(token, feedFile.id)));
+      await setMeta('feedItems', fb.items || []);
+      feed = (fb.items || []).length;
+    }
+  } catch { /* offline feed is optional */ }
+
   await setMeta('lastSync', Date.now());
   await setMeta('driveSource', true);
   // notes reports what's actually ON the phone: the just-pulled count normally, or the
   // existing local count when the list was pinned (so a "0 notes" summary doesn't read as
   // a failed/empty pull when really nothing was supposed to change).
   const notes = listPinned ? (await getAllReviewNotes()).length : records.length;
-  return { notes, cards, inbox, generatedAt: bundle.generatedAt, listPinned };
+  return { notes, cards, inbox, feed, generatedAt: bundle.generatedAt, listPinned };
 }
 
 // Ask the server (while it's up) to rebuild the bundle, then pull it. Used at home so the

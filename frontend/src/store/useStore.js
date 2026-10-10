@@ -22,11 +22,13 @@ import {
   fetchTrackProgress as apiFetchTrackProgress,
 } from '../api/tracks';
 import {
-  fetchFeedItems as apiFetchFeedItems, acceptFeedItem as apiAcceptFeedItem,
-  binFeedItem as apiBinFeedItem, restoreFeedItem as apiRestoreFeedItem,
   fetchFeedSources as apiFetchFeedSources, addFeedSource as apiAddFeedSource,
   patchFeedSource as apiPatchFeedSource, deleteFeedSource as apiDeleteFeedSource,
   pollFeedSource as apiPollFeedSource,
+  // items/sources go through the offline-aware wrappers below (fetchFeed/decideFeed/
+  // restoreFeedItem) — see pwa/offlineApi.js. Bin tab list stays direct/online-only
+  // (not exported for offline — feed/FLOWS_feed.md §4/P2).
+  fetchFeedItems as apiFetchFeedBinned,
 } from '../api/feed';
 // Offline-aware drop-ins: identical to the api/notes versions when online (they
 // just delegate), but fall back to the downloaded IndexedDB subset when offline.
@@ -34,6 +36,7 @@ import {
 import {
   fetchReviewOffline as fetchReview,
   fetchNoteContentOffline as fetchNoteContent,
+  fetchFeedOffline, acceptFeedOffline, binFeedOffline, restoreFeedOffline,
   isDriveMode,
 } from '../pwa/offlineApi';
 import { allocateTracks } from '../pwa/reviewPlan';
@@ -1033,9 +1036,13 @@ const useStore = create((set, get) => ({
   },
   clearFeedNotice: () => set({ feedNotice: null }),
 
+  // fetchFeed/decideFeed/restoreFeedItem go through the offline-aware wrappers (pwa/offlineApi.js)
+  // so the swipe stack + Undo work with the laptop off (feed/FLOWS_feed.md §4/P2) — online
+  // behavior is unchanged, they just delegate straight through to the api/feed.js calls below.
+  // The Bin tab list itself stays direct/online-only (not exported for offline).
   fetchFeed: async () => {
     try {
-      const feedPending = await apiFetchFeedItems('pending');
+      const feedPending = await fetchFeedOffline();
       set({ feedPending });
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 401)) get().setFeedNotice("Couldn't load the feed.");
@@ -1044,7 +1051,7 @@ const useStore = create((set, get) => ({
 
   fetchFeedBin: async () => {
     try {
-      set({ feedBinned: await apiFetchFeedItems('binned') });
+      set({ feedBinned: await apiFetchFeedBinned('binned') });
     } catch {
       get().setFeedNotice("Couldn't load the bin.");
     }
@@ -1059,8 +1066,8 @@ const useStore = create((set, get) => ({
       feedNotice: null,
     }));
     try {
-      if (kind === 'accept') await apiAcceptFeedItem(item.id);
-      else await apiBinFeedItem(item.id);
+      if (kind === 'accept') await acceptFeedOffline(item.id);
+      else await binFeedOffline(item.id);
       get().setFeedNotice(kind === 'accept' ? 'Sent to Inbox.' : 'Binned.', true);
     } catch {
       set(s => ({
@@ -1079,7 +1086,7 @@ const useStore = create((set, get) => ({
       feedNotice: null,
     }));
     try {
-      await apiRestoreFeedItem(item.id);
+      await restoreFeedOffline(item);
     } catch (e) {
       set(s => ({ feedPending: s.feedPending.filter(i => i.id !== item.id) }));
       if (e instanceof ApiError && e.status === 409) {
@@ -1102,7 +1109,7 @@ const useStore = create((set, get) => ({
   ingestFeedItem: async (item) => {
     set(s => ({ feedBinned: s.feedBinned.filter(i => i.id !== item.id) }));
     try {
-      await apiAcceptFeedItem(item.id);
+      await acceptFeedOffline(item.id);
       get().setFeedNotice('Sent to Inbox.');
     } catch {
       set(s => ({ feedBinned: [item, ...s.feedBinned] }));

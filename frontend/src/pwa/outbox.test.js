@@ -15,6 +15,9 @@ vi.mock('../api/notes', () => ({
 vi.mock('../api/inbox', () => ({
   fileInboxNote: vi.fn(), discardInboxNote: vi.fn(), acknowledgeCapture: vi.fn(),
 }));
+vi.mock('../api/feed', () => ({
+  acceptFeedItem: vi.fn(), binFeedItem: vi.fn(), restoreFeedItem: vi.fn(),
+}));
 vi.mock('./captureSentNotify', () => ({
   captureSentNotifyEnabled: vi.fn().mockResolvedValue(false), notifyCaptureSent: vi.fn(),
 }));
@@ -23,6 +26,7 @@ import { flush } from './outbox';
 import { getOutbox, deleteFromOutbox } from './db';
 import { submitAttempt, completeAssignment, flagCard } from '../api/notes';
 import { fileInboxNote, discardInboxNote, acknowledgeCapture } from '../api/inbox';
+import { acceptFeedItem, binFeedItem, restoreFeedItem } from '../api/feed';
 
 describe('flush', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -88,6 +92,52 @@ describe('flush', () => {
   it('a failed replay stays queued (not deleted) and counts as failed', async () => {
     getOutbox.mockResolvedValue([{ id: 6, kind: 'discard', path: 'p.md' }]);
     discardInboxNote.mockRejectedValue(new Error('503'));
+
+    const { sent, failed } = await flush();
+
+    expect(deleteFromOutbox).not.toHaveBeenCalled();
+    expect(sent).toBe(0);
+    expect(failed).toBe(1);
+  });
+
+  // Passive Feed offline swipe (feed/FLOWS_feed.md P2) — the server-direct outbox replay
+  // path, alongside the Drive-mailbox path (mailbox.test.js).
+  it('replays a queued feed accept', async () => {
+    getOutbox.mockResolvedValue([{ id: 7, kind: 'feed_accept', itemId: 42 }]);
+    acceptFeedItem.mockResolvedValue({ captureId: 'c1' });
+
+    await flush();
+
+    expect(acceptFeedItem).toHaveBeenCalledWith(42);
+    expect(deleteFromOutbox).toHaveBeenCalledWith(7);
+  });
+
+  it('replays a queued feed bin', async () => {
+    getOutbox.mockResolvedValue([{ id: 8, kind: 'feed_bin', itemId: 43 }]);
+    binFeedItem.mockResolvedValue();
+
+    await flush();
+
+    expect(binFeedItem).toHaveBeenCalledWith(43);
+    expect(deleteFromOutbox).toHaveBeenCalledWith(8);
+  });
+
+  it('replays a queued feed restore', async () => {
+    getOutbox.mockResolvedValue([{ id: 9, kind: 'feed_restore', itemId: 44 }]);
+    restoreFeedItem.mockResolvedValue();
+
+    await flush();
+
+    expect(restoreFeedItem).toHaveBeenCalledWith(44);
+    expect(deleteFromOutbox).toHaveBeenCalledWith(9);
+  });
+
+  // A restore queued before the server let the ingest worker claim the capture is a genuine
+  // conflict (409), not a transient failure — stays queued, retried forever (same documented
+  // gap as the mailbox path; see outbox.js "feed_restore" comment).
+  it('a feed restore that 409s stays queued, not treated as sent', async () => {
+    getOutbox.mockResolvedValue([{ id: 10, kind: 'feed_restore', itemId: 45 }]);
+    restoreFeedItem.mockRejectedValue(new Error('409'));
 
     const { sent, failed } = await flush();
 

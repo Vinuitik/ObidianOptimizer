@@ -20,15 +20,19 @@ const CREDS = { driveFolderId: 'root1', passphrase: 'pw' };
 // Real Drive/decrypt behavior is mocked away entirely — this file's own logic (finding the
 // _offline folder, then the named bundle inside it) is exercised by pointing driveList at
 // canned answers keyed on what its query is asking for, not by faking real Drive responses.
-function stubBundle(notes) {
+function stubBundle(notes, feedItems) {
   driveList.mockImplementation(async (token, query) => {
     if (query.includes("name='_offline'")) return [{ id: 'offlineFolder' }];
     if (query.includes("name='review-bundle.json.enc'")) return [{ id: 'reviewFile' }];
-    return []; // cards/inbox bundles: not found → those best-effort sections just no-op
+    if (feedItems && query.includes("name='feed.json.enc'")) return [{ id: 'feedFile' }];
+    return []; // cards/inbox/feed bundles: not found → those best-effort sections just no-op
   });
   driveDownload.mockImplementation(async (_token, fileId) => fileId);
-  decryptText.mockImplementation(async (_key, bytes) =>
-    bytes === 'reviewFile' ? JSON.stringify({ notes, generatedAt: 123 }) : '{}');
+  decryptText.mockImplementation(async (_key, bytes) => {
+    if (bytes === 'reviewFile') return JSON.stringify({ notes, generatedAt: 123 });
+    if (bytes === 'feedFile') return JSON.stringify({ items: feedItems });
+    return '{}';
+  });
 }
 
 describe('pullReviewFromDrive — daily pin', () => {
@@ -86,5 +90,35 @@ describe('pullReviewFromDrive — daily pin', () => {
 
     expect(putReviewNotes).toHaveBeenCalled();
     expect(res.listPinned).toBe(false);
+  });
+});
+
+// Passive Feed offline swipe bundle (feed/FLOWS_feed.md §4/P2) — mirrors the cards/inbox
+// best-effort sections already covered above: present → cached into meta; absent → no-op.
+describe('pullReviewFromDrive — feed bundle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCreds.mockResolvedValue(CREDS);
+    getAllReviewNotes.mockResolvedValue([]);
+    getMeta.mockResolvedValue(null);
+  });
+
+  it('caches the pending feed items into meta.feedItems', async () => {
+    const items = [{ id: 1, title: 'Vid', status: 'pending' }];
+    stubBundle([{ path: 'n.md', shortName: 'n', content: '' }], items);
+
+    const res = await pullReviewFromDrive({});
+
+    expect(setMeta).toHaveBeenCalledWith('feedItems', items);
+    expect(res.feed).toBe(1);
+  });
+
+  it('no feed bundle on Drive yet → best-effort no-op, pull still succeeds', async () => {
+    stubBundle([{ path: 'n.md', shortName: 'n', content: '' }]); // no feedItems arg → not found
+
+    const res = await pullReviewFromDrive({});
+
+    expect(setMeta).not.toHaveBeenCalledWith('feedItems', expect.anything());
+    expect(res.feed).toBe(0);
   });
 });
