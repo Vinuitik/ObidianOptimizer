@@ -330,10 +330,39 @@ scoring: `offlineSearch.js`.
 - **`display-mode` is the switch.** `matchMedia('(display-mode: standalone)')` is reliable for installed-PWA-launch vs browser-tab; iOS uses `navigator.standalone`. jsdom has no `matchMedia` → `ResponsiveApp` renders `App` under test.
 - **Sync tab needs the tunnel.** `SyncPage` "Download for offline" (`syncForOffline`) runs only online and only where the SW is active — the self-signed `:8443` blocks the SW, so download over the real-cert tunnel domain.
 - **nginx strips `/api/`** (trailing-slash `proxy_pass`), so backend mappings are relative (`capture`, `review/bundle`) — matches NotesController.
+- **Offline Passive Feed covers only the swipe stack.** Bin tab and Sources (add/edit) are
+  online-only — not exported, so they read empty / fail silently offline. The export is also
+  text-only (no `thumbUrl`/`durationS`): there's no offline thumbnail cache yet, so `FeedCard`
+  just renders without an image, same code path it already uses when a candidate has none.
+  `[NOT IMPLEMENTED: offline bin/sources, offline thumbnails]`
 
 ### Subscribe (Capture ▸ Subscribe)
 `CapturePage.submitSubscribe()` → `api/feed.addFeedSource(url)` → `POST /feed/sources {url}` (online-only, no outbox) → new items appear in Learn ▸ Feed.
-To change: `CapturePage.jsx submitSubscribe()`. The feed itself needs the network; offline feed is `[NOT IMPLEMENTED]` (plan P2).
+To change: `CapturePage.jsx submitSubscribe()`. Adding/managing sources stays online-only;
+the pending **swipe stack** now works offline — see "Flow — offline Passive Feed (P2)" below.
+
+### Flow — offline Passive Feed (P2)
+`store.fetchFeed/decideFeed/restoreFeedItem/ingestFeedItem` (`useStore.js`) → `pwa/offlineApi.js`
+`fetchFeedOffline`/`acceptFeedOffline`/`binFeedOffline`/`restoreFeedOffline` — same
+`withOfflineFallback` shape as the Learn inbox trio above, just against `api/feed.js`:
+- **Pull (reconnect/boot/pull)**: `drivePull.pullReviewFromDrive()` downloads `_offline/feed.json.enc`
+  (server export, text-only, pending items only — no thumbnails) → `setMeta('feedItems', items)`.
+- **Read**: online → `GET /feed/items?status=pending`; offline/unreachable → `getMeta('feedItems')`.
+- **Decide offline**: `acceptFeedOffline(id)`/`binFeedOffline(id)` queue `outbox.enqueueFeedAccept/
+  Bin(itemId)` and drop the item from the cached `feedItems` list (so a reload mid-offline-session
+  doesn't resurrect a decision already made). `restoreFeedOffline(item)` queues `enqueueFeedRestore`
+  and re-adds the item to the cache (used by Undo and Bin ▸ Restore — see components/FLOWS.md).
+- **Bin tab / Sources stay online-only** — not exported (§4/P2 scope decision in feed/FLOWS_feed.md);
+  offline they just show empty / fail silently, same as before this phase.
+- **Replay on reconnect — two independent paths, same as every other offline write**:
+  `outbox.flush()` POSTs `/feed/items/{id}/accept|bin|restore` server-direct;
+  `mailbox.pushMailbox()` ships `feed_accept`/`feed_bin`/`feed_restore` events to Drive
+  `_mailbox/` for `MailboxConsumeService` to drain (pwa/FLOWS.md backend).
+- **`feed_restore` after the capture already left QUEUED is a genuine 409**, not a retry-until-
+  it-works failure — that queued/mailboxed event is stuck (poison) until the user discards the
+  note from Inbox instead. Same documented gap as any other permanently-failing kind.
+To change the cached read: `offlineApi.js` `pulledFeed()`/`dropFromFeed()`. To add a feed-offline
+field: `OfflineExportService.exportFeed()` (server) must carry it first.
 
 ## Change Index
 | Touch this | Where |
@@ -387,3 +416,8 @@ To change: `CapturePage.jsx submitSubscribe()`. The feed itself needs the networ
 | Desktop shell force-reload shortcut | `../../desktop/main.js` `before-input-event` handler |
 | **Offline boot on origin-down (Cloudflare 1033)** | `public/sw.js handleNavigate()` — network-first with timeout, falls back to cached shell on thrown error, timeout, OR non-ok RESPONSE (a down tunnel returns a real 5xx, so a plain `.catch()` leaked the error page). Bump `VERSION` to force re-cache. Needs ONE online load to install the new SW |
 | Subscribe button target | `CapturePage.jsx submitSubscribe()` → `api/feed.js addFeedSource()` |
+| Offline feed pull | `drivePull.js` (`FEED_BUNDLE` → `setMeta('feedItems', …)`) |
+| Offline feed read/decide | `pwa/offlineApi.js` `fetchFeedOffline`/`acceptFeedOffline`/`binFeedOffline`/`restoreFeedOffline` |
+| Offline feed outbox kinds | `pwa/outbox.js` `enqueueFeedAccept`/`enqueueFeedBin`/`enqueueFeedRestore` + `flush()` |
+| Offline feed mailbox kinds | `pwa/mailbox.js` `pushMailbox()` KINDS set |
+| Feed download-progress stage label | `syncStageLabel.js` `STAGE_LABELS.feed` |

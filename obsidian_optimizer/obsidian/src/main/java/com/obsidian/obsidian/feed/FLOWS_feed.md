@@ -95,9 +95,9 @@ any URL (Feed "+" box | extension Subscribe | PWA Capture Subscribe | card "subs
 | DB backup (`DbBackupService`, pg_dump whole DB) | **Yes** | nothing — new tables ride the dump |
 | Vault file sync (Drive) | **Yes** | accepted items become notes → synced like any note; feed rows aren't files |
 | Encryption (`VaultEncryptionService`) | **Yes, by reuse** | any new Drive artifact goes through `encrypt()` — no new crypto |
-| Offline read on phone | **No** | `OfflineExportService.exportFeed()` → `_offline/feed.json.enc` (copy of `exportInbox`) → `drivePull` → IDB |
-| Offline swipe on phone | **No** | mailbox kinds `feed_accept` / `feed_bin` / `feed_restore` → `MailboxConsumeService` switch (copy of `file`/`discard`); non-Drive path via `outbox` |
-| Offline thumbnails | **No** | v1: text-only cards offline; SW caches thumbs seen online. `[NOT IMPLEMENTED]` |
+| Offline read on phone | **Yes (P2)** | `OfflineExportService.exportFeed()` → `_offline/feed.json.enc` (copy of `exportInbox`) → `drivePull` → IDB meta `feedItems` |
+| Offline swipe on phone | **Yes (P2)** | mailbox kinds `feed_accept` / `feed_bin` / `feed_restore` → `MailboxConsumeService` switch (copy of `file`/`discard`); non-Drive path via `outbox` |
+| Offline thumbnails | **No** | v1 (P2): text-only cards offline; SW caching thumbs seen online is still `[NOT IMPLEMENTED]` |
 | Phone freshness | **Partly** | export runs boot/03:30/manual only → call `exportFeed()` after a poll inserts items |
 
 Offline accept only *enqueues*; ingest happens server-side when consumed — same as Inbox file.
@@ -183,13 +183,20 @@ while a sibling agent is committing.
 - DoD met: metrics observed live; data model flipped to real refs (§2); feed docs moved to
   `feed/FLOWS_feed.md`; root FLOWS.md indexes `feed/FLOWS.md` + this file.
 
-### P2 — offline feed
+### P2 — offline feed (DONE 2026-10-10)
 - Scope: `OfflineExportService.exportFeed()` → `_offline/feed.json.enc` (pending, cap 200, text-only);
   export triggered after a poll inserts items; mailbox kinds `feed_accept`/`feed_bin`/`feed_restore`
   in `MailboxConsumeService` + phone `mailbox.js`; outbox path for non-Drive; `drivePull` → IDB → FeedView offline.
-- Metrics: offline swipe 5 → reconnect → server state matches after one consume; same mailbox file
-  consumed twice → no duplicate capture; export decrypts round-trip.
-- Tests: extend `MailboxConsumeIT`, export unit test, vitest for offline feed store + mailbox kinds.
+- Metrics: offline swipe → reconnect → server state matches after one consume (idempotency via
+  `eventId`/`consumed_events`, same mechanism proved in P1v); same mailbox file consumed twice →
+  no duplicate capture (`feedAcceptEvent_consumedTwice_noDuplicateCapture`); export decrypts
+  round-trip (`OfflineExportServiceTest`, real AES-GCM). `feed_restore` after the capture already
+  left QUEUED is a genuine 409, not a transient failure — folded into the existing documented
+  mailbox-poison-event gap rather than special-cased.
+- Explicitly out of scope (not exported/offline): Bin tab, Sources add/edit, thumbnails/duration.
+- Tests: `MailboxConsumeIT` (+5 feed cases), `OfflineExportServiceTest` (new, plain unit),
+  `SourcePollWorkerTest` (+3 export-trigger cases), vitest `offlineApi.test.js`/`outbox.test.js`/
+  `drivePull.test.js` (+feed cases) + new `mailbox.test.js`. `test.sh java-unit java-it frontend` green.
 - Context: this doc §4 + P2, pwa/FLOWS.md (backend), frontend/src/pwa/FLOWS.md, sync/FLOWS.md "Encryption Detail".
 
 ### P3 — subscribe from any URL
@@ -237,7 +244,7 @@ a matching frontend registry — so a feature plugs in/out in one place. `[NOT I
 | Accept → ingest | `FeedController.accept()` → `CaptureRepository.enqueue` + `setTrackId` `[NEW]` |
 | Bin / restore / undo | `FeedController` `[NEW]` |
 | Feed dedup | `feed_items.item_url UNIQUE` `[NEW]` |
-| Offline export | `OfflineExportService.exportFeed()` `[NEW]` |
-| Offline swipe events | `MailboxConsumeService.consumeFile` switch + `pwa/mailbox.js` `[NEW]` |
+| Offline export | `OfflineExportService.exportFeed()` (P2, implemented) |
+| Offline swipe events | `MailboxConsumeService.consumeFile` switch + `pwa/mailbox.js`/`pwa/outbox.js` (P2, implemented) |
 | Feed UI | `LearnPage` mode switch + `FeedView.jsx` `[NEW]` |
 | Today allocation of passive items | `TodayPlanService.today()` (unchanged; via "Passive" track) |

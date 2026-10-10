@@ -1,15 +1,20 @@
-# Passive Feed — Backend (P1a, IMPLEMENTED)
+# Passive Feed — Backend (P1a/P2, IMPLEMENTED)
 
 Files: SourceRepository.java, FeedRepository.java, FeedService.java, FeedController.java, SourcePollWorker.java
 Tests: SourceRepositoryIT.java, FeedRepositoryIT.java, FeedAcceptRestoreIT.java, SourcePollWorkerTest.java
 Embedder: embedder/subscriptions/discover.py (`youtube_feed_url`, `discover_feed`, `discover`)
-Plan: FLOWS_feed.md (design doc — §0 P0 findings, §2 data model, "### P1a" scope/contract)
+Plan: FLOWS_feed.md (design doc — §0 P0 findings, §2 data model, "### P1a"/"### P2" scope/contract)
 Related: tracks/FLOWS.md (Passive track via `TrackRepository.getOrCreatePassive()`, Phase 1b tagging),
-capture/FLOWS.md (`CaptureRepository.enqueue`/`cancelQueued`), settings/FLOWS.md (`feedAutoAccept`)
+capture/FLOWS.md (`CaptureRepository.enqueue`/`cancelQueued`), settings/FLOWS.md (`feedAutoAccept`),
+pwa/FLOWS.md (backend offline export/mailbox — P2), frontend/src/pwa/FLOWS.md (phone offline feed — P2)
 
 Frontend (P1b): built — `frontend/src/components/organisms/FeedView.jsx` + `FeedSources.jsx`,
 `frontend/src/api/feed.js`, `LearnPage.jsx` Feed/Inbox switch. See frontend/src/pages/FLOWS.md,
 frontend/src/components/FLOWS.md.
+
+Offline (P2): built — the Stack's pending queue + Undo-of-the-last-decision work with the
+laptop off; Bin tab + Sources management stay online-only (not exported). See "Offline feed
+(P2)" below + pwa/FLOWS.md + frontend/src/pwa/FLOWS.md.
 
 ---
 
@@ -74,6 +79,38 @@ PATCH  /feed/sources/{id} {autoAccept?, targetTrackId?, status?, title?}
 DELETE /feed/sources/{id}           → ON DELETE CASCADE drops its feed_items; already-ingested notes untouched
 POST   /feed/sources/{id}/poll      → SourcePollWorker.pollNowAsync(id)  -- 202, bypasses the interval gate
 ```
+
+## Offline feed (P2)
+
+```
+SourcePollWorker.ingestCandidates()  -- inserted > 0 (new items landed, any source)
+  → OfflineExportService.exportFeed()           -- best-effort, same try/catch as everywhere
+       feedRepo.list("pending", 200) → _offline/feed.json.enc
+       text-only: id/sourceId/sourceTitle/itemUrl/title/publishedAt/status — NO thumbUrl/
+       durationS (no offline thumbnail cache yet; FeedCard already renders fine without one)
+  → drivePull.pullReviewFromDrive() (phone, same pull as review/cards/inbox)
+       → setMeta('feedItems', items)             -- offlineApi.js reads this when !online
+
+Swipe offline (FeedView → store.decideFeed/restoreFeedItem → offlineApi.js):
+  acceptFeedOffline/binFeedOffline/restoreFeedOffline
+    online+reachable → straight POST (unchanged)
+    offline/unreachable → outbox.enqueueFeedAccept/Bin/Restore(itemId) + drop/re-add in
+       meta.feedItems (so a reload mid-offline-session still reflects the decision)
+
+Reconnect — TWO replay paths (same split as every other offline write):
+  outbox.flush()      → server-direct POST  /feed/items/{id}/accept|bin|restore
+  mailbox.pushMailbox → Drive _mailbox/*.enc → MailboxConsumeService
+       "feed_accept"/"feed_bin"/"feed_restore" → FeedService.accept/bin/restore(itemId)
+       idempotent via eventId (consumed_events) — same file consumed twice ⇒ no 2nd capture
+```
+`feed_restore` against an item whose capture already left QUEUED throws `CaptureStartedException`
+(409, same as the online contract) — a genuine conflict, not a transient failure, so that event
+(and its mailbox file, or its outbox entry) is stuck until manually resolved (discard the note
+from Inbox). This is the SAME documented mailbox-poison-event gap as every other permanently-
+failing kind (pwa/FLOWS.md Technology Notes) — no special-casing added for feed.
+To change the export cap: `OfflineExportService.FEED_ITEM_LIMIT` (200).
+To add an offline feed field: `OfflineExportService.exportFeed()` (server) + whatever reads
+`meta.feedItems` client-side (offlineApi.js `pulledFeed()`).
 
 ## URL normalization (dedup key)
 
@@ -163,8 +200,11 @@ updating the frontend in the same change.
 - **`SourcePollWorker.pollNowAsync` is fire-and-forget** (`CompletableFuture.runAsync`, no executor
   injected — uses the common pool) — `POST /feed/sources/{id}/poll` returns 202 before the poll finishes;
   there's no per-call status to query, only the eventual `GET /feed/sources` `lastCheckedAt`/`pendingCount`.
-- **Mailbox/offline hooks don't exist yet** — `OfflineExportService.exportFeed()`, offline swipe mailbox
-  kinds, and `FeedView.jsx` are all P1b/P2 scope. `[NOT IMPLEMENTED]`
+- **Offline covers the swipe stack only, not Bin/Sources** — `OfflineExportService.exportFeed()`
+  exports pending items only (§4/P2 scope decision); Bin tab + Sources management stay
+  online-only. `[NOT IMPLEMENTED: offline bin/sources]`
+- **Offline export is text-only** — no `thumbUrl`/`durationS` (no offline thumb cache yet).
+  `[NOT IMPLEMENTED: offline thumbnail cache]`
 
 ## Change Index
 
@@ -186,6 +226,10 @@ updating the frontend in the same change.
 | Empty-feed-is-ok | embedder `discover.py` `discover_feed()` |
 | Candidate thumb/duration fields | embedder `discover.py` dicts → `TrackAgentClient.Candidate` |
 | Schema | `SourceRepository.initSchema()` / `FeedRepository.initSchema()` |
-| Frontend (Feed tab, swipe UI) | `[NOT IMPLEMENTED]` — P1b |
-| Offline export/swipe | `[NOT IMPLEMENTED]` — P2 |
+| Frontend (Feed tab, swipe UI) | `frontend/src/components/organisms/FeedView.jsx` (P1b) |
+| Offline export (pending, text-only, cap 200) | `OfflineExportService.exportFeed()` (P2) |
+| Offline export trigger | `SourcePollWorker.ingestCandidates()` (`inserted > 0`) |
+| Offline swipe mailbox kinds | `MailboxConsumeService.consumeFile` (`feed_accept`/`feed_bin`/`feed_restore`) |
+| Offline swipe outbox kinds | `pwa/outbox.js` `enqueueFeedAccept`/`enqueueFeedBin`/`enqueueFeedRestore` + `flush()` |
+| Offline swipe cache (phone) | `pwa/offlineApi.js` `pulledFeed()`/`dropFromFeed()` → IDB meta `feedItems` |
 | Subscribe-from-any-URL resolve preview, page_watch | `[NOT IMPLEMENTED]` — P3 |

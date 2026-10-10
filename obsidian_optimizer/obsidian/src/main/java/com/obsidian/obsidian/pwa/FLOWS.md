@@ -24,6 +24,11 @@ client → same `drive.file` namespace). 409 if Drive not connected / passphrase
 - `exportCards` → `cards.json.enc` — a pre-built `AssignmentService.build` per due note
   (real persisted assignment, so consume grades via the same engine). Capped `CARDS_NOTE_LIMIT`.
 - `exportInbox` → `inbox.json.enc` — `InboxController.listItems()` (Learn triage offline).
+- `exportFeed` → `feed.json.enc` — `FeedRepository.list("pending", 200)`, text-only (no
+  `thumbUrl`/`durationS` — no offline thumb cache yet). Offline swipe (feed/FLOWS.md P2).
+  Triggered after `exportAll()`'s usual cadence AND from `SourcePollWorker.ingestCandidates()`
+  whenever a poll inserts new items — otherwise the phone's pending stack goes stale until the
+  next boot/3:30am/manual export.
 Triggers (laptop often OFF, so belt-and-suspenders): `@EventListener(ApplicationReadyEvent)`,
 `@Scheduled(${offline.export.cron:0 30 3 * * *})`, and `POST /pwa/export`.
 - To change the exported set / limits: the three `export*` methods.
@@ -40,6 +45,10 @@ re-export. Triggers: on boot + `@Scheduled(${mailbox.consume.cron:0 */15 * * * *
 - `assignment` → replay `AssignmentService.submitAttempt` per answer + `complete` (P4);
   idempotent via `AssignmentRepository.attemptExists` + `assignments.completed_at`
 - `file`/`discard`/`acknowledge` → `InboxController.fileNote/discardNote/acknowledgeCapture` (P5)
+- `feed_accept`/`feed_bin`/`feed_restore` → `FeedService.accept/bin/restore(itemId)` (feed/FLOWS.md
+  P2, offline swipe). `feed_restore` against an item whose capture already left QUEUED throws
+  `CaptureStartedException` — a genuine 409 conflict, not transient, so it's a new entry in the
+  ⚠️ poison-event gap below, same as any other permanently-failing kind.
 - `capture` → [NOT IMPLEMENTED] (A-1); unsupported kinds leave the file intact (no data loss).
 - To add a kind: `consumeFile` switch + phone `pwa/mailbox.js` (client sends it).
 - ⚠️ A permanently-failing event loops (file never deletes) — needs a retry cap/dead-letter (P6).
@@ -62,6 +71,8 @@ re-export. Triggers: on boot + `@Scheduled(${mailbox.consume.cron:0 */15 * * * *
 | What the phone gets at install | `PwaController.PwaSetup` |
 | Manual "prep offline set" | `POST /api/pwa/export` → `OfflineExportService.exportReviewBundle` |
 | Exported review set / limit | `OfflineExportService.exportReviewBundle` |
+| Exported feed set / limit | `OfflineExportService.exportFeed` (`FEED_ITEM_LIMIT`=200) |
+| Feed export re-trigger on new items | `SourcePollWorker.ingestCandidates()` |
 | Export cadence | `offline.export.cron` (default 3:30am) + on-boot listener |
 | Mailbox drain + dispatch | `MailboxConsumeService.consumeFile` |
 | Consume cadence | `mailbox.consume.cron` (default every 15m) + on-boot listener |

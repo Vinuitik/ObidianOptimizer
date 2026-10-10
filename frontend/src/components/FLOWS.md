@@ -246,6 +246,9 @@ the full flow (SW update signal, `registerSW.js`, desktop shell). Mounted in
 Desktop: `window keydown` ←/→ (ignored in INPUT/TEXTAREA/SELECT) + buttons. All decisions → store `decideFeed()`.
 Mobile width: card `width: min(100%, 420px)`, rows wrap (`FeedView.module.css`); `touch-action: pan-y` keeps vertical scroll.
 To change threshold: `FeedView.jsx SWIPE_PX`. Auto-accept tri-state: `FeedSources.jsx toVal/fromVal`.
+`decideFeed`/`restoreFeedItem`/`ingestFeedItem` (store) now route through `pwa/offlineApi.js`
+(P2) so the swipe stack + Undo keep working with the laptop off — see `pwa/FLOWS.md` "offline
+Passive Feed". Bin tab / Sources stay online-only.
 Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so events are synthesized).
 
 ---
