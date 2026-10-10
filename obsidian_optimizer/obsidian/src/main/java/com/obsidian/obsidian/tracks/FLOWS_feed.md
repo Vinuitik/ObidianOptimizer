@@ -19,6 +19,9 @@ Related: tracks/FLOWS.md (scheduler), inbox/FLOWS.md (Learn triage), sync/FLOWS.
 - Dedup = `CaptureRepository.existsForSource(url)` (permanent).
 - Poll: 5-min tick checks which sources are due; per-source interval `subscriptionsPollIntervalMs` = 1h.
 
+### P0 findings — URL-shape matrix
+[filled by P0]
+
 ## 1. Target pipeline
 
 ```
@@ -77,11 +80,95 @@ Offline accept only *enqueues*; ingest happens server-side when consumed — sam
 
 ## 5. Phasing
 
-- **P0** — poll default 6h; smoke-test the existing flow (Veritasium + arXiv RSS); document it in tracks/FLOWS.md.
-- **P1** — `feed/` package: tables, poll worker moved+rewired to `feed_items`, accept/bin/undo/restore API, `feedAutoAccept` setting; Learn gets `[Feed | Inbox]` modes, Feed = card stack (swipe on mobile, ←/→ + buttons on desktop), Bin tab.
-- **P2** — offline: `exportFeed`, mailbox kinds, outbox path, drivePull → IDB. Text-only offline cards.
-- **P3** — simplified subscribe: `/resolve` with RSS autodiscovery + `page_watch` kind (Kaggle) + "subscribe to channel" from a card.
-- **P4** — Today plan surfaced inside Learn; Tracks page shrinks to track management.
+Execution: one subagent per box, each gets ONLY its milestone section + listed context docs.
+```
+P0 ──► P1a (backend) ─┐                 ┌─► P2 (offline) ─┐
+   └─► P1b (frontend) ┴─► P1v (verify) ─┤                 ├─► P4 (re-plan first)
+                                        └─► P3 (subscribe)┘
+```
+Parallel pairs run in git worktrees. ⚠️ `.git/hooks/post-commit` restarts the live stack on
+EVERY commit, worktree branches included → live verification only in P1v / after merge, never
+while a sibling agent is committing.
+
+### P0 — prove discovery, document what exists
+- Scope: `SettingsRepository.getSubscriptionPollIntervalMs` default 1h → 6h (+ any UI/test/doc
+  that hardcodes 1h); **discover-only** smoke test; document current subscriptions in tracks/FLOWS.md.
+- Why discover-only: creating a real subscription today auto-ingests EVERY feed item (GPU/LLM
+  cost + Inbox flood). Everything after `enqueue` is the same capture path the extension uses
+  daily (already proven), so the only unproven link is `discover`.
+- URL-shape matrix (grounding for P3): YouTube `@handle`, `/channel/UC…`, a video URL, arXiv
+  RSS (`rss.arxiv.org/rss/cs.LG`), arXiv listing page, a blog homepage with `<link rel=alternate>`,
+  the Kaggle whitepapers page.
+- DoD/metrics: matrix table (ok? / detected type / #candidates / fields present) written into §0
+  below; backlog size per source recorded; live `GET /settings` effective interval = 6h (or report
+  an explicit stored row overriding it — don't overwrite silently); `test.sh java-unit embedder` green.
+- Context: this doc §0–1, tracks/FLOWS.md, settings/FLOWS.md, `TrackAgentClient.java`.
+
+### P1a — feed backend (`feed/` package)
+- Scope: `sources` + `feed_items` tables (§2; follow existing schema/migration convention), poll
+  worker moved from `tracks/` and rewired to insert `feed_items`, `feedAutoAccept` setting, URL
+  normalization (YouTube variants → `watch?v=ID`, strip `utm_*`), discover returns
+  `thumbUrl`/`durationS` where the source has them (embedder change). Tracks' subscription code
+  paths removed; **old `tracks` columns left in place** (no destructive migration).
+- API contract (P1b codes against this; nginx strips `/api`):
+  ```
+  GET    /feed/items?status=pending|binned|accepted&limit=50   newest published first
+         → [{id, sourceId, sourceTitle, itemUrl, title, thumbUrl, durationS, publishedAt, status, decidedAt, captureId}]
+  POST   /feed/items/{id}/accept   → 200 {captureId}   idempotent (2nd call returns same captureId)
+  POST   /feed/items/{id}/bin      → 204               idempotent
+  POST   /feed/items/{id}/restore  → 204 → pending; 409 if its capture already left QUEUED
+  GET    /feed/sources             → [{id, kind, url, feedUrl, title, autoAccept|null, targetTrackId, status, lastCheckedAt, pendingCount}]
+  POST   /feed/sources {url, autoAccept?, targetTrackId?} → Source   (kind via existing discover; backlog → pending)
+  PATCH  /feed/sources/{id} {autoAccept?, targetTrackId?, status?, title?}
+  DELETE /feed/sources/{id}        → cascades feed_items; notes already ingested untouched
+  POST   /feed/sources/{id}/poll   → 202
+  ```
+  Undo = client-side `restore` of the last decision (no server undo stack).
+- Metrics: poll with autoAccept=false creates **0** capture rows; accept → exactly 1 capture tagged
+  with target track (double accept still 1); re-poll same feed → 0 new rows; first poll (backlog)
+  never auto-accepted even if source autoAccept=true; accept p95 < 300ms.
+- Tests: `*IT` (Testcontainers) for both repos + accept/restore; unit for poll worker
+  (autoAccept true/false/null-inherit, backlog, dedup, normalization). `test.sh java-unit java-it embedder`.
+- Context: this doc §1–2 + P1a, capture/FLOWS.md, tracks/FLOWS.md (Phase 1b tagging), settings/FLOWS.md.
+
+### P1b — feed frontend
+- Scope: Learn `[Feed | Inbox]` mode switch; `FeedView` card stack (swipe on touch, ←/→ +
+  buttons on desktop, optimistic UI), Bin tab (restore / "ingest anyway"), one-step Undo toast,
+  sources list + add-by-URL + per-source autoAccept toggle, global `feedAutoAccept` in Settings.
+  Repoint Subscribe buttons (PWA CapturePage, extension + extension-firefox popup) to
+  `POST /feed/sources`; remove subscription creation from TracksPage.
+- Metrics: next card visible < 100ms after a decision (no wait on server); failed request rolls the
+  card back + toast; works at mobile width in the installed-PWA shell.
+- Tests: vitest — swipe right/left, ←/→ keys, undo, bin restore, rollback on error, empty state.
+  `test.sh frontend`.
+- Context: this doc §1 + P1a contract, frontend/src/pages/FLOWS.md (Learn), components/FLOWS.md,
+  store/FLOWS.md, pwa/FLOWS.md (mobile shell), extension/FLOWS.md.
+
+### P1v — merge + live verify
+- Merge P1a/P1b, run all suites, then live: add Veritasium as a source (autoAccept off) → Feed shows
+  backlog → accept 1 (one ingest, lands in Learn Inbox tagged "Passive"), bin 2, restore 1, undo 1;
+  DB states match UI. `browse` screenshots desktop + mobile width (`GSTACK_CHROMIUM_NO_SANDBOX=1`).
+- DoD: all metrics above observed live; FLOWS_feed.md flows flipped from `[NOT IMPLEMENTED]` to real
+  `Class.method()` refs; feed docs move to `feed/FLOWS.md`; root FLOWS.md index updated.
+
+### P2 — offline feed
+- Scope: `OfflineExportService.exportFeed()` → `_offline/feed.json.enc` (pending, cap 200, text-only);
+  export triggered after a poll inserts items; mailbox kinds `feed_accept`/`feed_bin`/`feed_restore`
+  in `MailboxConsumeService` + phone `mailbox.js`; outbox path for non-Drive; `drivePull` → IDB → FeedView offline.
+- Metrics: offline swipe 5 → reconnect → server state matches after one consume; same mailbox file
+  consumed twice → no duplicate capture; export decrypts round-trip.
+- Tests: extend `MailboxConsumeIT`, export unit test, vitest for offline feed store + mailbox kinds.
+- Context: this doc §4 + P2, pwa/FLOWS.md (backend), frontend/src/pwa/FLOWS.md, sync/FLOWS.md "Encryption Detail".
+
+### P3 — subscribe from any URL
+- Scope: `POST /feed/sources/resolve {url}` → `{kind, feedUrl, title, preview[3]}` (no row);
+  RSS `<link rel=alternate>` autodiscovery; `page_watch` kind (snapshot same-site links, new ones
+  = items); "subscribe to this channel" on a card; extension Subscribe shows the preview.
+- Metrics: every row of the P0 matrix resolves; page_watch second poll of an unchanged page → 0 new items.
+- Context: this doc §3 + P0 matrix, embedder discover module, extension/FLOWS.md.
+
+### P4 — Today inside Learn
+Re-plan after P1–P3 land (depends on how the Feed actually gets used).
 
 ## 6. Decoupling note (later redesign, not this plan)
 
