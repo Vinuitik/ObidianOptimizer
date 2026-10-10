@@ -14,10 +14,11 @@ Two source kinds:
     the given URL is a homepage rather than a direct feed URL.
 """
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import feedparser
 import httpx
+import yt_dlp
 
 from download.downloader import list_playlist_entries
 
@@ -69,22 +70,85 @@ def find_feed_url(homepage_url: str) -> str | None:
     return None
 
 
+def _parse_duration(raw) -> int | None:
+    """itunes:duration -> seconds. Accepts '3600', '59:30', '1:02:03'. None if unparseable."""
+    if not raw:
+        return None
+    try:
+        parts = [int(p) for p in str(raw).strip().split(":")]
+    except ValueError:
+        return None
+    secs = 0
+    for p in parts:
+        secs = secs * 60 + p
+    return secs
+
+
+def _entry_thumb(e) -> str | None:
+    """media:thumbnail (YouTube RSS, many blogs) -> first url, else None."""
+    thumbs = e.get("media_thumbnail")
+    if thumbs and isinstance(thumbs, list) and isinstance(thumbs[0], dict):
+        return thumbs[0].get("url")
+    return None
+
+
 def discover_feed(feed_url: str) -> list[dict]:
-    """feedparser.parse(feed_url) -> [{"item_url", "title", "published_at"}, ...].
-    Raises ValueError if feedparser reports bozo AND there are zero entries — a bozo
-    flag alone isn't fatal (many real feeds set it on minor XML quirks but still
-    parse fine); only a hard failure when there's nothing usable."""
+    """feedparser.parse(feed_url) -> [{"item_url", "title", "published_at", "thumb_url",
+    "duration_s"}, ...]. Raises ValueError if it is NOT a feed: bozo with zero entries
+    (malformed / HTML) or zero entries with no feed version. A VALID feed with zero
+    entries (e.g. arXiv on a weekend) returns [] — empty is not a failure."""
     parsed = feedparser.parse(feed_url)
-    if parsed.get("bozo") and not parsed.entries:
-        raise ValueError(f"malformed feed, no entries: {feed_url}")
+    if not parsed.entries:
+        if parsed.get("bozo") or not parsed.get("version"):
+            raise ValueError(f"malformed feed, no entries: {feed_url}")
+        return []
     return [
         {
             "item_url": e.get("link"),
             "title": e.get("title"),
             "published_at": e.get("published"),
+            "thumb_url": _entry_thumb(e),
+            "duration_s": _parse_duration(e.get("itunes_duration")),
         }
         for e in parsed.entries
     ]
+
+
+_YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
+_YT_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id="
+
+
+def _youtube_channel_id(url: str) -> str | None:
+    """Channel id for a channel / @handle / video URL via yt-dlp (1 flat entry, no download)."""
+    opts = {"extract_flat": "in_playlist", "skip_download": True, "quiet": True,
+            "no_warnings": True, "playlistend": 1, "noplaylist": True}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False) or {}
+    cid = str(info.get("channel_id") or "")
+    return cid if cid.startswith("UC") else None
+
+
+def youtube_feed_url(url: str) -> str | None:
+    """Any YouTube channel/@handle//c//user/video URL -> its RSS feed URL. None if the URL
+    is not YouTube or is a playlist page (handled by the yt-dlp playlist path). Raises
+    ValueError if it is YouTube but the channel can't be resolved."""
+    u = urlparse(url)
+    if (u.hostname or "").lower() not in _YT_HOSTS:
+        return None
+    if u.path.startswith("/feeds/videos.xml"):
+        return url
+    if u.path.startswith("/playlist"):
+        return None
+    m = re.match(r"^/channel/(UC[\w-]+)", u.path)
+    if m:
+        return _YT_FEED + m.group(1)
+    try:
+        cid = _youtube_channel_id(url)
+    except Exception as e:
+        raise ValueError(f"could not resolve YouTube channel for {url}: {e}")
+    if not cid:
+        raise ValueError(f"could not resolve YouTube channel for {url}")
+    return _YT_FEED + cid
 
 
 def discover(source_url: str, source_type: str) -> tuple[list[dict], str | None]:
@@ -96,13 +160,15 @@ def discover(source_url: str, source_type: str) -> tuple[list[dict], str | None]
     are one) — avoids an extra HTML fetch. Only on failure (raise, or zero entries)
     fall back to find_feed_url() treating source_url as a homepage, then retry.
     """
+    if source_type in ("youtube_channel", "feed"):
+        yt_feed = youtube_feed_url(source_url)
+        if yt_feed:
+            return discover_feed(yt_feed), yt_feed
     if source_type == "youtube_channel":
         return discover_youtube_channel(source_url), None
     if source_type == "feed":
         try:
-            candidates = discover_feed(source_url)
-            if candidates:
-                return candidates, None
+            return discover_feed(source_url), None   # valid-but-empty feed is OK ([])
         except ValueError:
             pass
         resolved = find_feed_url(source_url)
