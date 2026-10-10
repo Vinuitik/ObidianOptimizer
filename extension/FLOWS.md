@@ -159,8 +159,8 @@ mid-flight. **Scope — only failures that never reach a created capture row**: 
 `/capture` returns 200 and a row exists, ANY downstream failure is already covered by
 `CaptureIngestWorker`'s own retry-ladder dead-letter write (`capture/FLOWS.md`) — reporting
 it again here would just duplicate that row. So this only fires for: the initial `/capture`/
-`/workspace/upload`/`/tracks` POST itself getting rejected (`captureText`, `capture`,
-`uploadFile`, `subscribeTrack`), and `captureDriveFile()`'s Drive-side fetch (never touches
+`/workspace/upload`/`/feed/sources` POST itself getting rejected (`captureText`, `capture`,
+`uploadFile`, `subscribeSource`), and `captureDriveFile()`'s Drive-side fetch (never touches
 our backend at all — reported directly via `reportFailure()`, no `handleFailure()` to
 classify against since there's no backend `Response` to classify). Network-down failures are
 deliberately NOT reported — the report endpoint is on the same unreachable backend, there's
@@ -244,3 +244,4 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | Icons / branding | `icons/` + `manifest.json` `icons` / `action.default_icon` (shared, both browsers) |
 | Permissions / hosts | `manifest.json` `permissions` + `host_permissions` (shared, both browsers) |
 | Look & feel | `popup.css` (tokens mirrored from `frontend/src/styles/tokens.css`) |
+| Subscribe button (Chrome + Firefox share this popup) | `popup.js #sub-confirm` → `background.subscribeSource()` → `POST /feed/sources {url}` |

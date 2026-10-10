@@ -331,6 +331,10 @@ scoring: `offlineSearch.js`.
 - **Sync tab needs the tunnel.** `SyncPage` "Download for offline" (`syncForOffline`) runs only online and only where the SW is active — the self-signed `:8443` blocks the SW, so download over the real-cert tunnel domain.
 - **nginx strips `/api/`** (trailing-slash `proxy_pass`), so backend mappings are relative (`capture`, `review/bundle`) — matches NotesController.
 
+### Subscribe (Capture ▸ Subscribe)
+`CapturePage.submitSubscribe()` → `api/feed.addFeedSource(url)` → `POST /feed/sources {url}` (online-only, no outbox) → new items appear in Learn ▸ Feed.
+To change: `CapturePage.jsx submitSubscribe()`. The feed itself needs the network; offline feed is `[NOT IMPLEMENTED]` (plan P2).
+
 ## Change Index
 | Touch this | Where |
 |---|---|
@@ -382,3 +386,4 @@ scoring: `offlineSearch.js`.
 | Update detection / manual refresh | `registerSW.js` (`onUpdateAvailable`, `checkForUpdate`, `reloadApp`) + `../components/atoms/RefreshButton.jsx` |
 | Desktop shell force-reload shortcut | `../../desktop/main.js` `before-input-event` handler |
 | **Offline boot on origin-down (Cloudflare 1033)** | `public/sw.js handleNavigate()` — network-first with timeout, falls back to cached shell on thrown error, timeout, OR non-ok RESPONSE (a down tunnel returns a real 5xx, so a plain `.catch()` leaked the error page). Bump `VERSION` to force re-cache. Needs ONE online load to install the new SW |
+| Subscribe button target | `CapturePage.jsx submitSubscribe()` → `api/feed.js addFeedSource()` |

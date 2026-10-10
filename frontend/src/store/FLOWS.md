@@ -165,6 +165,18 @@ To add a field that must be wiped on logout: put it in `initialDataState()`.
 
 `PATCH /api/notes/move` → `{ path: newAbsPath }` → update open tab path if source matches → `fetchChildrenOf` both source parent and target folder → `fetchNoteNames()`
 
+## Feed (Learn ▸ Feed)
+Files: useStore.js (feed* slice), api/feed.js
+`decideFeed('accept'|'bin')` → pop `feedPending[0]` (card gone instantly) + set `feedLastDecision` → `POST /feed/items/{id}/accept|bin`
+→ ok: `setFeedNotice(..., undo)` ‖ fail: card back at front + toast ("Couldn't accept — try again.").
+`undoFeed()` → `restoreFeedItem(lastDecision.item)` → `POST .../restore` → 409: "Already ingesting — discard it in Inbox."
+Bin tab: `fetchFeedBin()`; `restoreFeedItem(item)` (Restore), `ingestFeedItem(item)` (= accept).
+Sources: `fetchFeedSources / addFeedSource(url) → POST /feed/sources / setFeedSourceAutoAccept(id, true|false|null) / deleteFeedSource / checkFeedSource (poll, 202)`.
+Toast: `feedNotice` (local to FeedView, 5 s) — the PWA shell mounts no global `<Toast/>`.
+To change toast timing: `setFeedNotice()`. To change swipe threshold: `FeedView.jsx SWIPE_PX`.
+
+---
+
 ---
 
 ## Technology Notes
@@ -172,6 +184,10 @@ To add a field that must be wiped on logout: put it in `initialDataState()`.
 - **Zustand state is in-memory**: all tab state, pending edits, and blob URLs are lost on page refresh. There is no localStorage or sessionStorage persistence.
 - **`editorResetKey`**: the only reliable way to force Milkdown to remount without a navigation. Incrementing it changes the `key` on `MilkdownProvider`, causing a full schema context teardown.
 - **`setPendingBlobs` timing**: called in `useLayoutEffect` (before Milkdown's `useEffect`) to guarantee the blob registry is populated before `toDOM` runs during editor init.
+
+- **Feed state is in-memory and optimistic**: lost on refresh (re-fetched from the server by `fetchFeed()`); a decision whose request is still in flight is rolled back only if the request fails — close the tab mid-flight and the server may or may not have it.
+- **Undo is last-decision only**: `feedLastDecision` holds one item; a second swipe replaces it. Accept-undo works only while the capture is still QUEUED (else 409).
+- `fetchFeed` loads `limit=50` pending; the badge counts loaded items, not the server total.
 
 ---
 
@@ -188,3 +204,6 @@ To add a field that must be wiped on logout: put it in `initialDataState()`.
 | Logout wipe list | `useStore.js initialDataState()` |
 | Toast display timing | `useStore.js showToast()` (4 s timeout) |
 | Persist tabs on refresh | Add Zustand persist middleware (not implemented) |
+| Feed swipe / undo / rollback | `useStore.js decideFeed() / undoFeed() / restoreFeedItem()` |
+| Feed sources actions | `useStore.js addFeedSource() / setFeedSourceAutoAccept() / deleteFeedSource() / checkFeedSource()` |
+| Feed page size | `api/feed.js fetchFeedItems(limit=50)` |

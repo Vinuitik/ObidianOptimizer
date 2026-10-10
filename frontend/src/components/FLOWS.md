@@ -1,6 +1,6 @@
 # Components Flows
 
-Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, atoms/RefreshButton.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/QuitGuard.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx
+Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, atoms/RefreshButton.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/QuitGuard.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx, organisms/FeedView.jsx, organisms/FeedSources.jsx
 
 ---
 
@@ -241,6 +241,13 @@ Controlled by `store.toastMessage` + `showToast()`.
 the full flow (SW update signal, `registerSW.js`, desktop shell). Mounted in
 `organisms/NavBar.jsx` and `pwa/MobileLayout.jsx`.
 
+## FeedView / FeedSources (organisms)
+`FeedView` tabs Swipe | Bin | Sources. `FeedCard` pointer events (`onPointerDown/Move/Up`) → dx → transform; release past `SWIPE_PX` (80) → accept (right) / bin (left), else spring back.
+Desktop: `window keydown` ←/→ (ignored in INPUT/TEXTAREA/SELECT) + buttons. All decisions → store `decideFeed()`.
+Mobile width: card `width: min(100%, 420px)`, rows wrap (`FeedView.module.css`); `touch-action: pan-y` keeps vertical scroll.
+To change threshold: `FeedView.jsx SWIPE_PX`. Auto-accept tri-state: `FeedSources.jsx toVal/fromVal`.
+Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so events are synthesized).
+
 ---
 
 ## Change Index
@@ -279,3 +286,5 @@ the full flow (SW update signal, `registerSW.js`, desktop shell). Mounted in
 | Media URL encoding | `SourceSplicePanel.mediaUrl()` — per-segment `encodeURIComponent` (spaces/fullwidth-colon in yt-dlp names) |
 | Inbox order within a source | `utils/sourceColor.groupBySource()` → `sourcePosition()` (min page / clip start), NOT captureSeq — reading order |
 | Source footer parse (pages/clip/bbox) | `utils/inboxParse.parseSourceRegion()` (`pages`, `startSeconds`/`endSeconds`, `local`, `bboxes`) |
+| Swipe threshold / keys | `organisms/FeedView.jsx SWIPE_PX` / `Stack` keydown effect |
+| Feed sources panel | `organisms/FeedSources.jsx` |
