@@ -1,6 +1,6 @@
 # API Layer Flows
 
-Files: notes.js, stats.js, utils/useSearch.js
+Files: notes.js, stats.js, utils/useSearch.js, feed.js
 
 ---
 
@@ -56,6 +56,11 @@ offline search/link fallback — see `utils/FLOWS.md` "offlineSearch.js".
 
 ---
 
+## feed.js (contract: `tracks/FLOWS_feed.md` P1a)
+`fetchFeedItems(status)` GET `/feed/items` · `acceptFeedItem` POST `.../accept` (→ `{captureId}`) · `binFeedItem` · `restoreFeedItem` (409 → `ApiError(409)`)
+· `fetchFeedSources / addFeedSource({url}) / patchFeedSource / deleteFeedSource / pollFeedSource`. All throw `ApiError(status)`.
+`pollTrackNow` removed from `tracks.js` (old `/tracks/{id}/poll-now`).
+
 ## Change Index
 
 | Thing to change | Where |
@@ -66,3 +71,4 @@ offline search/link fallback — see `utils/FLOWS.md` "offlineSearch.js".
 | Search debounce delay | `utils/useSearch.js` — `setTimeout(…, 500)` |
 | Search result limit | `api/notes.js searchNotes()` — `limit=10` query param |
 | Note-open timeout (flaky WiFi) | `api/notes.js NOTE_FETCH_TIMEOUT_MS` |
+| Feed endpoints | `api/feed.js` |

@@ -21,6 +21,13 @@ import {
   setTrackMode as apiSetTrackMode,
   fetchTrackProgress as apiFetchTrackProgress,
 } from '../api/tracks';
+import {
+  fetchFeedItems as apiFetchFeedItems, acceptFeedItem as apiAcceptFeedItem,
+  binFeedItem as apiBinFeedItem, restoreFeedItem as apiRestoreFeedItem,
+  fetchFeedSources as apiFetchFeedSources, addFeedSource as apiAddFeedSource,
+  patchFeedSource as apiPatchFeedSource, deleteFeedSource as apiDeleteFeedSource,
+  pollFeedSource as apiPollFeedSource,
+} from '../api/feed';
 // Offline-aware drop-ins: identical to the api/notes versions when online (they
 // just delegate), but fall back to the downloaded IndexedDB subset when offline.
 // This is what makes review work with no network — see pwa/offlineApi.js.
@@ -199,7 +206,14 @@ const initialDataState = () => ({
   trackProgress: [], // Phase 1d — [{ id, title, type, itemsDone, itemsTotal, deadline, onTrack }]
 
   // Settings (loaded from backend on startup)
-  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true, tracksEnabled: true, maxDailyReviews: 50, maxDailyFlashcards: 20 },
+  settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true, tracksEnabled: true, feedAutoAccept: false, maxDailyReviews: 50, maxDailyFlashcards: 20 },
+
+  // Feed (tracks/FLOWS_feed.md) — in-memory only; optimistic state is lost on refresh.
+  feedPending: [],          // pending items, newest first; [0] is the card on screen
+  feedBinned: [],           // Bin tab
+  feedSources: [],
+  feedLastDecision: null,   // { item, kind: 'accept'|'bin' } — undo covers ONLY this one
+  feedNotice: null,         // { message, undo? } — local toast (PWA shell mounts no global <Toast/>)
 
   // Toast notification: null | { message: string }
   toast: null,
@@ -1006,6 +1020,151 @@ const useStore = create((set, get) => ({
 
   toggleLeft:  () => set(s => ({ leftCollapsed:  !s.leftCollapsed })),
   toggleRight: () => set(s => ({ rightCollapsed: !s.rightCollapsed })),
+
+  // ── Feed ──────────────────────────────────────────────────────────────────
+  // Decisions are optimistic: the card leaves the stack before the request resolves, and a
+  // failure puts it back at the front + sets feedNotice. Undo = `restore` of the LAST
+  // decision only (no server undo stack).
+
+  setFeedNotice: (message, undo = false) => {
+    const notice = { message, undo };
+    set({ feedNotice: notice });
+    setTimeout(() => set(s => s.feedNotice === notice ? { feedNotice: null } : {}), 5000);
+  },
+  clearFeedNotice: () => set({ feedNotice: null }),
+
+  fetchFeed: async () => {
+    try {
+      const feedPending = await apiFetchFeedItems('pending');
+      set({ feedPending });
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 401)) get().setFeedNotice("Couldn't load the feed.");
+    }
+  },
+
+  fetchFeedBin: async () => {
+    try {
+      set({ feedBinned: await apiFetchFeedItems('binned') });
+    } catch {
+      get().setFeedNotice("Couldn't load the bin.");
+    }
+  },
+
+  decideFeed: async (kind) => {
+    const item = get().feedPending[0];
+    if (!item) return;
+    set(s => ({
+      feedPending: s.feedPending.slice(1),
+      feedLastDecision: { item, kind },
+      feedNotice: null,
+    }));
+    try {
+      if (kind === 'accept') await apiAcceptFeedItem(item.id);
+      else await apiBinFeedItem(item.id);
+      get().setFeedNotice(kind === 'accept' ? 'Sent to Inbox.' : 'Binned.', true);
+    } catch {
+      set(s => ({
+        feedPending: s.feedPending.some(i => i.id === item.id) ? s.feedPending : [item, ...s.feedPending],
+        feedLastDecision: s.feedLastDecision?.item.id === item.id ? null : s.feedLastDecision,
+      }));
+      get().setFeedNotice(`Couldn't ${kind === 'accept' ? 'accept' : 'bin'} — try again.`);
+    }
+  },
+
+  // Shared by Undo and Bin ▸ Restore. `from` = where the item currently lives optimistically.
+  restoreFeedItem: async (item) => {
+    set(s => ({
+      feedPending: [item, ...s.feedPending.filter(i => i.id !== item.id)],
+      feedBinned: s.feedBinned.filter(i => i.id !== item.id),
+      feedNotice: null,
+    }));
+    try {
+      await apiRestoreFeedItem(item.id);
+    } catch (e) {
+      set(s => ({ feedPending: s.feedPending.filter(i => i.id !== item.id) }));
+      if (e instanceof ApiError && e.status === 409) {
+        get().setFeedNotice('Already ingesting — discard it in Inbox.');
+      } else {
+        set(s => item.status === 'binned' ? { feedBinned: [item, ...s.feedBinned] } : {});
+        get().setFeedNotice("Couldn't restore — try again.");
+      }
+    }
+  },
+
+  undoFeed: async () => {
+    const last = get().feedLastDecision;
+    if (!last) return;
+    set({ feedLastDecision: null });
+    await get().restoreFeedItem({ ...last.item, status: last.kind === 'bin' ? 'binned' : 'accepted' });
+  },
+
+  // Bin tab "Ingest anyway" (= accept).
+  ingestFeedItem: async (item) => {
+    set(s => ({ feedBinned: s.feedBinned.filter(i => i.id !== item.id) }));
+    try {
+      await apiAcceptFeedItem(item.id);
+      get().setFeedNotice('Sent to Inbox.');
+    } catch {
+      set(s => ({ feedBinned: [item, ...s.feedBinned] }));
+      get().setFeedNotice("Couldn't ingest — try again.");
+    }
+  },
+
+  fetchFeedSources: async () => {
+    try {
+      set({ feedSources: await apiFetchFeedSources() });
+    } catch {
+      get().setFeedNotice("Couldn't load sources.");
+    }
+  },
+
+  addFeedSource: async (url) => {
+    try {
+      const src = await apiAddFeedSource(url);
+      set(s => ({ feedSources: [src, ...s.feedSources] }));
+      get().fetchFeed();   // backlog lands as pending
+      return true;
+    } catch (e) {
+      get().setFeedNotice(e instanceof ApiError && e.status >= 400 && e.status < 500
+        ? "Couldn't subscribe to that URL." : "Couldn't add source — try again.");
+      return false;
+    }
+  },
+
+  // autoAccept: true | false | null (inherit global)
+  setFeedSourceAutoAccept: async (id, autoAccept) => {
+    const prev = get().feedSources;
+    set(s => ({ feedSources: s.feedSources.map(x => x.id === id ? { ...x, autoAccept } : x) }));
+    try {
+      const updated = await apiPatchFeedSource(id, { autoAccept });
+      set(s => ({ feedSources: s.feedSources.map(x => x.id === id ? { ...x, ...updated } : x) }));
+    } catch {
+      set({ feedSources: prev });
+      get().setFeedNotice("Couldn't update source.");
+    }
+  },
+
+  deleteFeedSource: async (id) => {
+    try {
+      await apiDeleteFeedSource(id);
+      set(s => ({
+        feedSources: s.feedSources.filter(x => x.id !== id),
+        feedPending: s.feedPending.filter(i => i.sourceId !== id),
+        feedBinned: s.feedBinned.filter(i => i.sourceId !== id),
+      }));
+    } catch {
+      get().setFeedNotice("Couldn't delete source.");
+    }
+  },
+
+  checkFeedSource: async (id) => {
+    try {
+      await apiPollFeedSource(id);
+      get().setFeedNotice('Checking… new items will appear shortly.');
+    } catch {
+      get().setFeedNotice("Couldn't check source.");
+    }
+  },
 
   // ── Settings ──────────────────────────────────────────────────────────────
 

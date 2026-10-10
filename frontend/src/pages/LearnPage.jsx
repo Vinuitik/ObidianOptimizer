@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import InboxReview from '../components/organisms/InboxReview';
+import FeedView from '../components/organisms/FeedView';
 import styles from './LearnPage.module.css';
 
 // Learn IS the ingest review now: capture a resource → it's segmented into proposed
@@ -13,6 +14,11 @@ export default function LearnPage() {
   const fetchNoteNames    = useStore(s => s.fetchNoteNames);
   const isAuthenticated   = useStore(s => s.isAuthenticated);
   const vaultRoot         = useStore(s => s.vaultRoot);
+  const fetchFeed         = useStore(s => s.fetchFeed);
+  const pendingCount      = useStore(s => s.feedPending.length);
+  const [mode, setMode]   = useState('inbox'); // 'feed' | 'inbox' — defaults to Inbox
+
+  useEffect(() => { if (isAuthenticated) fetchFeed(); }, [isAuthenticated, fetchFeed]);
 
   useEffect(() => {
     if (isAuthenticated && !vaultRoot) {
@@ -30,8 +36,22 @@ export default function LearnPage() {
 
   return (
     <div className={styles.page}>
+      <div className={styles.viewTabs} role="tablist">
+        <button
+          role="tab" aria-selected={mode === 'feed'}
+          className={`${styles.viewTab} ${mode === 'feed' ? styles.viewTabActive : ''}`}
+          onClick={() => setMode('feed')}
+        >
+          Feed {pendingCount > 0 && <span className={styles.badge} data-testid="feed-badge">{pendingCount}</span>}
+        </button>
+        <button
+          role="tab" aria-selected={mode === 'inbox'}
+          className={`${styles.viewTab} ${mode === 'inbox' ? styles.viewTabActive : ''}`}
+          onClick={() => setMode('inbox')}
+        >Inbox</button>
+      </div>
       <div className={styles.viewBody}>
-        <InboxReview />
+        {mode === 'feed' ? <FeedView /> : <InboxReview />}
       </div>
     </div>
   );

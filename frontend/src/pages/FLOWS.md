@@ -211,6 +211,15 @@ and the dev-facing `FLOWS.md`, keeps `README.md`).
 
 ---
 
+### Learn ▸ Feed (`[Feed | Inbox]` switch)
+`LearnPage` mode state (default `inbox`) → `fetchFeed()` on auth → Feed tab badge = `feedPending.length`
+→ mode `feed` → `organisms/FeedView` (Swipe | Bin | Sources) → decisions via store (`store/FLOWS.md` "Feed").
+To change default mode: `LearnPage.jsx` `useState('inbox')`.
+Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` SECTIONS `feed`) → `PUT /settings` (global default; per-source override in Sources tab).
+TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `subscription`; legacy ones stay editable).
+
+---
+
 ## Change Index
 
 | Thing to change | Where |
@@ -220,7 +229,7 @@ and the dev-facing `FLOWS.md`, keeps `README.md`).
 | Settings sections / fields | `SettingsPage.jsx SECTIONS` array |
 | Chrono result display | `SettingsPage.jsx` chrono status section |
 | Learn split orientation | `LearnPage.jsx` orientation ternary (video orient via `ResourcePanel` Viewer) |
-| Learn Library/Inbox toggle | `LearnPage.jsx` `view` state |
+| Learn Feed/Inbox toggle | `LearnPage.jsx` `mode` state |
 | Inbox triage UI | `organisms/InboxReview.jsx` + `api/inbox.js` (backend `inbox/InboxController`) |
 | Inbox folder tree grouping | `utils/sourceColor.js` (`buildInboxTree`, `folderAllItems`) |
 | File a whole folder/chapter | `InboxReview.jsx` (`fileGroup`, `openFolderFilePicker`, `openChapterFilePicker`) |
@@ -228,3 +237,6 @@ and the dev-facing `FLOWS.md`, keeps `README.md`).
 | Dashboard counters | `stats/StatsController.java` (backend) |
 | Get-app / get-extension CTAs | `GetAppPage.jsx` (device detection via `pwa/installPrompt.js`) |
 | Chrome extension download zip | `linux_scripts/build-chrome-extension-zip.sh` → `ext-dist/obsidian-optimizer-chrome.zip` |
+| Feed tab badge | `LearnPage.jsx` `pendingCount` |
+| `feedAutoAccept` setting | `SettingsPage.jsx` SECTIONS `feed` |
+| Legacy subscription tracks UI | `TracksPage.jsx` `NEW_TRACK_TYPES` |

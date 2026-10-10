@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import Ring from '../components/atoms/Ring';
-import { generateMinicourse, fetchMinicourseJob, approveMinicourse, importCsv, commitImport, pollTrackNow } from '../api/tracks';
+import { generateMinicourse, fetchMinicourseJob, approveMinicourse, importCsv, commitImport } from '../api/tracks';
 import { captureResource } from '../api/capture';
 import styles from './TracksPage.module.css';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const TRACK_TYPES = ['book', 'course', 'article', 'custom', 'subscription'];
-const SOURCE_TYPES = ['youtube_channel', 'feed'];
+// Subscriptions are created via Learn ▸ Feed ▸ Sources now; legacy ones stay editable.
+const NEW_TRACK_TYPES = TRACK_TYPES.filter(t => t !== 'subscription');
 
 // Pure rendering transform — items stay a flat array from the API/store. Items sharing a
 // groupId came from one source-ingestion event (e.g. a long video split into several notes);
@@ -168,34 +169,18 @@ function ManageTab() {
   const [selectedId, setSelectedId] = useState(null);
   const [newTitle, setNewTitle] = useState('');
   const [newType, setNewType] = useState('book');
-  const [sourceUrl, setSourceUrl] = useState('');
-  const [sourceType, setSourceType] = useState('feed');
-  const [sourceTypeTouched, setSourceTypeTouched] = useState(false);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
 
   useEffect(() => { fetchTracks(); }, [fetchTracks]);
-
-  function handleSourceUrlChange(value) {
-    setSourceUrl(value);
-    if (!sourceTypeTouched) {
-      setSourceType(/youtube\.com|youtu\.be/.test(value) ? 'youtube_channel' : 'feed');
-    }
-  }
 
   async function handleCreate(e) {
     e.preventDefault();
     if (!newTitle.trim()) return;
     setCreating(true);
     try {
-      const extra = newType === 'subscription' && sourceUrl.trim()
-        ? { sourceUrl: sourceUrl.trim(), sourceType }
-        : {};
-      const track = await createTrack(newTitle.trim(), newType, extra);
+      const track = await createTrack(newTitle.trim(), newType);
       setNewTitle('');
-      setSourceUrl('');
-      setSourceType('feed');
-      setSourceTypeTouched(false);
       setSelectedId(track.id);
     } catch (e) {
       showToast(`Couldn't create track: ${e.message ?? e}`);
@@ -218,25 +203,8 @@ function ManageTab() {
             onChange={e => setNewTitle(e.target.value)}
           />
           <select className={styles.select} value={newType} onChange={e => setNewType(e.target.value)}>
-            {TRACK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            {NEW_TRACK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          {newType === 'subscription' && (
-            <>
-              <input
-                className={styles.textInput}
-                placeholder="Feed or channel URL…"
-                value={sourceUrl}
-                onChange={e => handleSourceUrlChange(e.target.value)}
-              />
-              <select
-                className={styles.select}
-                value={sourceType}
-                onChange={e => { setSourceType(e.target.value); setSourceTypeTouched(true); }}
-              >
-                {SOURCE_TYPES.map(st => <option key={st} value={st}>{st}</option>)}
-              </select>
-            </>
-          )}
           <button className={styles.primaryBtn} type="submit" disabled={creating || !newTitle.trim()}>
             + New track
           </button>
@@ -503,7 +471,6 @@ function TrackDetail({ track, onDeleted }) {
   const [deadline, setDeadline] = useState(track.deadline ?? '');
   const [priority, setPriority] = useState(track.priority ?? '');
   const [includeInProgress, setIncludeInProgress] = useState(track.includeInProgress);
-  const [polling, setPolling] = useState(false);
 
   // Reset local form state whenever a different track is selected.
   useEffect(() => {
@@ -529,18 +496,6 @@ function TrackDetail({ track, onDeleted }) {
       onDeleted();
     } catch (e) {
       showToast(`Couldn't delete: ${e.message ?? e}`);
-    }
-  }
-
-  async function handlePoll() {
-    setPolling(true);
-    try {
-      await pollTrackNow(track.id);
-      await fetchTracks();
-    } catch (e) {
-      showToast(`Couldn't poll: ${e.message ?? e}`);
-    } finally {
-      setPolling(false);
     }
   }
 
@@ -576,17 +531,6 @@ function TrackDetail({ track, onDeleted }) {
             {['active', 'paused', 'done', 'archived'].map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-
-        {track.type === 'subscription' && (
-          <div className={styles.fieldRow}>
-            <span className={styles.fieldLabel}>
-              Last checked: {track.lastCheckedAt ? new Date(track.lastCheckedAt).toLocaleString() : 'never'}
-            </span>
-            <button className={styles.secondaryBtn} onClick={handlePoll} disabled={polling}>
-              {polling ? 'Polling…' : 'Poll now'}
-            </button>
-          </div>
-        )}
 
         <div className={styles.fieldRow}>
           <label className={styles.fieldLabel}>Deadline</label>

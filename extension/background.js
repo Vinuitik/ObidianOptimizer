@@ -194,12 +194,12 @@ async function capture(url, trackOpts = {}) {
   return { ok: true };
 }
 
-// A subscription track: the backend poller periodically checks sourceUrl for new
-// content and files it under this track.
-async function subscribeTrack({ title, sourceUrl, sourceType }) {
-  const res = await json('/tracks', 'POST', { title, type: 'subscription', sourceUrl, sourceType });
+// A feed source: the backend poller checks it and drops new items into Learn ▸ Feed
+// (swipe to accept/bin). Never creates a track.
+async function subscribeSource({ url }) {
+  const res = await json('/feed/sources', 'POST', { url });
   if (res.status === 401) return { ok: false, status: 401 };
-  if (!res.ok) return handleFailure(res, 'subscribe_track', { title, sourceUrl, sourceType });
+  if (!res.ok) return handleFailure(res, 'subscribe_source', { url });
   return { ok: true };
 }
 
@@ -405,7 +405,7 @@ const HANDLERS = {
   capturePage,
   uploadFile,
   listTracks: () => listTracks(),
-  subscribeTrack,
+  subscribeSource,
   getConfig: () => getConfig(),
   setConfig: (patch) => setConfig(patch).then(() => { connectAgentWs(); return { ok: true }; }),
 };
