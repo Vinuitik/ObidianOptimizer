@@ -107,7 +107,7 @@ export default function NotePanel() {
           </div>
         )}
 
-        {error   && <p className={styles.statusLine} style={{ color: 'var(--color-danger)' }}>{error}</p>}
+        {error   && <p className={styles.statusLine} style={{ color: 'var(--danger)' }}>{error}</p>}
         {loading && <p className={styles.statusLine}>Loading…</p>}
 
         {!loading && !error && entries.folders.length === 0 && entries.files.length === 0 && !creating && (

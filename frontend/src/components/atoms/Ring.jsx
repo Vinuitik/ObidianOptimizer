@@ -8,13 +8,13 @@ export default function Ring({ pct, size = 44, strokeWidth = 4 }) {
       <circle
         cx={center} cy={center} r={r}
         fill="none"
-        stroke="var(--color-border)"
+        stroke="var(--line)"
         strokeWidth={strokeWidth}
       />
       <circle
         cx={center} cy={center} r={r}
         fill="none"
-        stroke="var(--color-accent)"
+        stroke="var(--accent)"
         strokeWidth={strokeWidth}
         strokeLinecap="round"
         strokeDasharray={circumference}
@@ -24,7 +24,7 @@ export default function Ring({ pct, size = 44, strokeWidth = 4 }) {
       <text
         x={center} y={center + 4}
         textAnchor="middle"
-        fill="var(--color-text)"
+        fill="var(--text)"
         fontSize="12"
         fontFamily="var(--font-mono)"
       >

@@ -58,7 +58,7 @@ export default function SearchBar({ value, onChange }) {
 
   return (
     <div ref={containerRef} className={styles.container}>
-      <Icon name="search" size={15} color="var(--color-muted)" />
+      <Icon name="search" size={15} color="var(--text-3)" />
       <input
         ref={inputRef}
         className={styles.input}

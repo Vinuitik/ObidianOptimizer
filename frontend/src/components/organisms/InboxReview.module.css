@@ -8,7 +8,7 @@
 .queue {
   display: flex;
   flex-direction: column;
-  width: 220px;
+  width: 260px;
   flex: none;
   border-right: 1px solid var(--line);
   background: var(--surface);
@@ -91,7 +91,7 @@
 }
 .folderToggle:hover { background: var(--raised); }
 .folderChevron { flex: none; color: var(--text-2); width: 10px; }
-.folderTitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folderTitle { flex: 1; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folderCount {
   flex: none; font-size: var(--fs-13); font-weight: 400; color: var(--text-2);
   background: var(--raised); border-radius: var(--r-sm); padding: 0 var(--sp-1);
@@ -100,7 +100,7 @@
   flex: none; font-size: var(--fs-13); padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--line); border-radius: var(--r-sm);
   background: transparent; color: var(--text-2); cursor: pointer;
-  max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .folderFileBtn:hover { color: var(--text); border-color: var(--line-strong); }
 

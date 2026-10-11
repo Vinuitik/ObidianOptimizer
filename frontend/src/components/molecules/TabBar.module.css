@@ -1,8 +1,8 @@
 .tabBar {
   display: flex;
   align-items: stretch;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
   overflow-x: auto;
   flex-shrink: 0;
   scrollbar-width: none;
@@ -21,25 +21,25 @@
   max-width: 200px;
   height: 36px;
   border: none;
-  border-right: 1px solid var(--color-border);
+  border-right: 1px solid var(--line);
   background: transparent;
-  color: var(--color-muted);
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: var(--fs-14);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background var(--ease-fast), color var(--ease-fast);
+  transition: background var(--dur-1) ease, color var(--dur-1) ease;
   position: relative;
 }
 
 .tab:hover {
-  background: var(--color-accent-dim);
-  color: var(--color-text);
+  background: var(--accent-tint);
+  color: var(--text);
 }
 
 .tab.active {
-  background: var(--color-page);
-  color: var(--color-text);
+  background: var(--bg);
+  color: var(--text);
   font-weight: 500;
 }
 
@@ -51,7 +51,7 @@
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--color-accent);
+  background: var(--accent);
 }
 
 .title {
@@ -63,7 +63,7 @@
 }
 
 .dirty {
-  color: var(--color-accent-soft);
+  color: var(--accent-text);
   font-size: 16px;
   line-height: 1;
   flex-shrink: 0;
@@ -76,12 +76,12 @@
   justify-content: center;
   width: 16px;
   height: 16px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-md);
   font-size: 14px;
   line-height: 1;
-  color: var(--color-muted);
+  color: var(--text-3);
   opacity: 0;
-  transition: opacity var(--ease-fast), background var(--ease-fast), color var(--ease-fast);
+  transition: opacity var(--dur-1) ease, background var(--dur-1) ease, color var(--dur-1) ease;
 }
 
 .tab:hover .close,
@@ -90,6 +90,6 @@
 }
 
 .close:hover {
-  background: var(--color-accent-dim);
-  color: var(--color-text);
+  background: var(--accent-tint);
+  color: var(--text);
 }

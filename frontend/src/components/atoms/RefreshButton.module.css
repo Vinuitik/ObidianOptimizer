@@ -6,26 +6,26 @@
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-card);
-  color: var(--color-text-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text-2);
   cursor: pointer;
   flex-shrink: 0;
-  transition: color var(--ease-fast), border-color var(--ease-fast), background var(--ease-fast);
+  transition: color var(--dur-1) ease, border-color var(--dur-1) ease, background var(--dur-1) ease;
 }
 
 .btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-border-hover);
+  color: var(--text);
+  border-color: var(--line-strong);
 }
 
 .btn.ready {
   width: auto;
   padding: 0 10px;
-  border-color: var(--color-accent-border);
-  background: var(--color-accent-dim);
-  color: var(--color-accent-soft);
+  border-color: var(--accent-line);
+  background: var(--accent-tint);
+  color: var(--accent-text);
   animation: pulse 1.8s ease-in-out infinite;
 }
 

@@ -3,14 +3,14 @@
   align-items: center;
   gap: 8px;
   padding: 8px 11px;
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm2);
-  transition: border-color var(--ease-fast);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  transition: border-color var(--dur-1) ease;
 }
 
 .container:focus-within {
-  border-color: var(--color-accent-border);
+  border-color: var(--accent-line);
 }
 
 .input {
@@ -19,21 +19,21 @@
   background: none;
   border: none;
   outline: none;
-  font-family: var(--font-body);
+  font-family: var(--font-ui);
   font-size: 13.5px;
-  color: var(--color-text);
-  caret-color: var(--color-accent);
+  color: var(--text);
+  caret-color: var(--accent);
 }
 
 .input::placeholder {
-  color: var(--color-muted);
+  color: var(--text-3);
 }
 
 .kbd {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--color-muted);
-  border: 1px solid var(--color-border);
+  color: var(--text-3);
+  border: 1px solid var(--line);
   border-radius: 5px;
   padding: 1px 5px;
   flex-shrink: 0;
@@ -43,17 +43,17 @@
 .clear {
   background: none;
   border: none;
-  color: var(--color-muted);
+  color: var(--text-3);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
   padding: 0 2px;
   flex-shrink: 0;
-  transition: color var(--ease-fast);
+  transition: color var(--dur-1) ease;
 }
 
 .clear:hover {
-  color: var(--color-text);
+  color: var(--text);
 }
 
 /* ── Semantic search dropdown (portal, fixed position) ─────────────────────── */
@@ -61,10 +61,10 @@
 .dropdown {
   position: fixed;
   z-index: 1000;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
   max-height: 320px;
   overflow-y: auto;
@@ -73,7 +73,7 @@
 .dropLoading {
   padding: 10px 14px;
   font-size: 12px;
-  color: var(--color-muted);
+  color: var(--text-3);
 }
 
 .dropItem {
@@ -84,10 +84,10 @@
   text-align: left;
   background: none;
   border: none;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--line);
   padding: 9px 13px;
   cursor: pointer;
-  transition: background var(--ease-fast);
+  transition: background var(--dur-1) ease;
 }
 
 .dropItem:last-child {
@@ -95,13 +95,13 @@
 }
 
 .dropItem:hover {
-  background: var(--color-card);
+  background: var(--raised);
 }
 
 .dropTitle {
   font-size: 13px;
   font-weight: 500;
-  color: var(--color-text);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -109,7 +109,7 @@
 
 .dropSnippet {
   font-size: 11.5px;
-  color: var(--color-muted);
+  color: var(--text-3);
   line-height: 1.4;
   display: -webkit-box;
   -webkit-line-clamp: 2;
