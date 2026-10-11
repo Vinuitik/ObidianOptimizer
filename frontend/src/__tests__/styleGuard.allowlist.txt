@@ -1,6 +1,1 @@
-# Pre-existing offenders (generated in F0). Each W-milestone REMOVES its files; must be empty at F-final.
-# New primitive/page CSS must NOT be added here.
-components/molecules/ImageLightbox.module.css
-components/molecules/NavItem.module.css
-components/molecules/SearchBar.module.css
-components/organisms/SyncBanner.module.css
+# Must stay empty: new CSS uses tokens from styles/tokens.css, no colour/font literals.

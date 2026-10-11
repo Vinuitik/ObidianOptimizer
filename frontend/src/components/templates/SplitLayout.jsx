@@ -264,7 +264,7 @@ export default function SplitLayout() {
                 {!isMutable && isInReview && <ReviewRating fullPath={currentNotePath} />}
                 {!isMutable && (
                   <Chip className={styles.optimizeChip}>
-                    <Icon name="sparkle" size={14} color="var(--color-accent-soft)" />
+                    <Icon name="sparkle" size={14} color="var(--accent-text)" />
                     Optimize
                   </Chip>
                 )}

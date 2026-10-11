@@ -8,7 +8,7 @@ export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDrag
         {isActive && <span className={styles.accentBar} />}
         {isFolder && (
           <span className={`${styles.chevron} ${isOpen ? styles.chevronOpen : ''}`}>
-            <Icon name="chevron" size={13} strokeWidth={2} color="var(--color-muted)" />
+            <Icon name="chevron" size={13} strokeWidth={2} color="var(--text-3)" />
           </span>
         )}
         <Icon
@@ -16,14 +16,14 @@ export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDrag
           size={15}
           color={
             isFolder
-              ? (isOpen ? 'var(--color-accent-soft)' : 'var(--color-text-2)')
-              : (isActive ? 'var(--color-accent-soft)' : 'var(--color-muted)')
+              ? (isOpen ? 'var(--accent-text)' : 'var(--text-2)')
+              : (isActive ? 'var(--accent-text)' : 'var(--text-3)')
           }
         />
         <span className={`${styles.label} ${isFolder ? styles.folder : styles.file} ${isActive ? styles.fileActive : ''}`}>
           {name}
         </span>
-        {isAI && <Icon name="sparkle" size={13} color="var(--color-accent-soft)" />}
+        {isAI && <Icon name="sparkle" size={13} color="var(--accent-text)" />}
         {onAddFolder && (
           <button
             className={styles.addBtn}

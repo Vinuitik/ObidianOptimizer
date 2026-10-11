@@ -5,7 +5,7 @@
   /* dvh tracks the *visible* viewport on mobile (URL bar, keyboard); vh doesn't */
   height: 100dvh;
   overflow: hidden;
-  background: var(--color-page);
+  background: var(--bg);
   padding-bottom: env(safe-area-inset-bottom);
 }
 

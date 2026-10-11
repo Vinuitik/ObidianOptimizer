@@ -11,7 +11,7 @@
   justify-content: center;
   height: 100%;
   gap: var(--sp-3);
-  color: var(--color-muted);
+  color: var(--text-3);
 }
 
 .emptyIcon {
@@ -20,8 +20,8 @@
 }
 
 .emptyText {
-  font-size: var(--text-base);
-  color: var(--color-muted);
+  font-size: var(--fs-16);
+  color: var(--text-3);
 }
 
 @media (max-width: 768px) {

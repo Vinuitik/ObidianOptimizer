@@ -2,7 +2,7 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.92);
+  background: var(--scrim-strong);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -42,10 +42,10 @@
   height: 40px;
   border: none;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  background: var(--glass-btn);
+  color: var(--on-accent);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
 }
-.close:hover { background: rgba(255, 255, 255, 0.24); }
+.close:hover { background: var(--glass-btn-hover); }

@@ -2,17 +2,17 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: var(--font-body);
-  font-size: var(--text-xs);
+  font-family: var(--font-ui);
+  font-size: var(--fs-13);
   font-weight: 500;
-  color: var(--color-text-2);
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
+  color: var(--text-2);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
   padding: 7px 12px;
   white-space: nowrap;
   cursor: default;
-  transition: border-color var(--ease-fast), background var(--ease-fast);
+  transition: border-color var(--dur-1) ease, background var(--dur-1) ease;
 }
 
 button.chip {
@@ -20,6 +20,6 @@ button.chip {
 }
 
 button.chip:hover {
-  background: var(--color-surface);
-  border-color: var(--color-border-hover);
+  background: var(--surface);
+  border-color: var(--line-strong);
 }
