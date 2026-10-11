@@ -230,6 +230,64 @@ class TodayPlanServiceTest {
         assertThat(plan.overBudget()).isFalse();
     }
 
+    // ── Reason strings (one per branch) + planned/capacity ──────────────────────
+
+    private String reasonFor(TodayPlan plan, long trackId) {
+        return plan.items().stream().filter(i -> i.trackId() == trackId).findFirst().orElseThrow().reason();
+    }
+
+    @Test
+    void reason_deadlineAndLeftover_withPlannedAndCapacity() {
+        LocalDate today = LocalDate.of(2026, 8, 17); // Monday
+        Track deadline = deadlineTrack(1, "Deadline", today.plusDays(1), "should"); // Tue
+        Track manual = manualTrack(2, "Manual");
+        when(trackRepo.listActive()).thenReturn(List.of(deadline, manual));
+        stubItems(1); stubItems(2);
+        when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(7);
+        when(trackRepo.getScheduleBudget(2, 0)).thenReturn(5);
+
+        TodayPlan plan = service.today(today);
+
+        assertThat(reasonFor(plan, 1)).isEqualTo("Due Tue · ~7/day to finish");
+        assertThat(reasonFor(plan, 2)).isEqualTo("Fills leftover capacity");
+        assertThat(plan.planned()).isEqualTo(10);
+        assertThat(plan.capacity()).isEqualTo(10);
+    }
+
+    @Test
+    void reason_lockIn() {
+        when(settingsRepo.getOrDefault(TodayPlanService.MODE_KEY, TodayPlanService.MODE_NORMAL))
+            .thenReturn(TodayPlanService.MODE_LOCKIN);
+        LocalDate today = LocalDate.of(2026, 8, 17);
+        Track t = deadlineTrack(1, "T", today.plusDays(1), "must");
+        when(trackRepo.listActive()).thenReturn(List.of(t));
+        stubItems(1);
+        when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(3);
+
+        TodayPlan plan = service.today(today);
+
+        assertThat(reasonFor(plan, 1)).isEqualTo("Focus: most urgent deadline · Due Tue");
+        assertThat(plan.planned()).isEqualTo(3);
+    }
+
+    @Test
+    void reason_overBudget() {
+        LocalDate today = LocalDate.of(2026, 8, 17);
+        LocalDate tomorrow = today.plusDays(1);
+        when(trackRepo.listActive()).thenReturn(List.of(
+            deadlineTrack(1, "M1", tomorrow, "must"), deadlineTrack(2, "M2", tomorrow, "must")));
+        stubItems(1); stubItems(2);
+        when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(8);
+        when(trackRepo.countPendingItems(2)).thenReturn(8);
+
+        TodayPlan plan = service.today(today);
+
+        assertThat(reasonFor(plan, 1)).isEqualTo("Due Tue · trimmed: must deadlines exceed today's capacity");
+    }
+
     // ── 7 covered at the repository level (TrackRepositoryIT: capacity seed + partial edit) ──
 
     // ── 8. Mode toggle delegates to the same persisted-settings mechanism as everything else ──

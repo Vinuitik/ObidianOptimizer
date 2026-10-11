@@ -60,7 +60,7 @@ export default function TracksPage() {
         ))}
       </div>
 
-      {tab === 'today' && <TodayTab />}
+      {tab === 'today' && <TodayTab onCreateTrack={() => setTab('manage')} />}
       {tab === 'manage' && <ManageTab />}
       {tab === 'progress' && <ProgressTab />}
     </div>
@@ -69,10 +69,13 @@ export default function TracksPage() {
 
 // ── Today ─────────────────────────────────────────────────────────────────────
 
-function TodayTab() {
+function TodayTab({ onCreateTrack }) {
   const todayItems     = useStore(s => s.todayItems);
   const todayMode      = useStore(s => s.todayMode);
   const todayOverBudget = useStore(s => s.todayOverBudget);
+  const todayCapacity  = useStore(s => s.todayCapacity);
+  const tracks         = useStore(s => s.tracks);
+  const fetchTracks    = useStore(s => s.fetchTracks);
   const fetchTodayPlan = useStore(s => s.fetchTodayPlan);
   const setTrackMode   = useStore(s => s.setTrackMode);
   const completeTrackItem = useStore(s => s.completeTrackItem);
@@ -81,7 +84,7 @@ function TodayTab() {
   const [busy, setBusy] = useState(null); // itemId currently completing
   const [switching, setSwitching] = useState(false);
 
-  useEffect(() => { fetchTodayPlan(); }, [fetchTodayPlan]);
+  useEffect(() => { fetchTodayPlan(); fetchTracks(); }, [fetchTodayPlan, fetchTracks]);
 
   async function markDone(item) {
     setBusy(item.itemId);
@@ -109,10 +112,10 @@ function TodayTab() {
     <div className={styles.todayList}>
       <div className={styles.modeRow}>
         <span className={styles.modeLabel}>
-          {todayMode === 'lockin' ? 'Lock-in mode — single-track focus' : 'Normal mode'}
+          {todayMode === 'lockin' ? 'Focus on one track' : 'Balanced'}
         </span>
         <button className={styles.secondaryBtn} onClick={toggleMode} disabled={switching}>
-          Switch to {todayMode === 'lockin' ? 'Normal' : 'Lock-in'}
+          Switch to {todayMode === 'lockin' ? 'Balanced' : 'Focus on one track'}
         </button>
       </div>
 
@@ -120,19 +123,38 @@ function TodayTab() {
         <div className={styles.overBudgetBanner}>
           <span>You're behind — must-priority deadlines alone exceed today's capacity.</span>
           <button className={styles.secondaryBtn} onClick={toggleMode} disabled={switching}>
-            Switch to Lock-in?
+            Focus on one track?
           </button>
         </div>
       )}
 
+      {todayItems.length > 0 && todayCapacity != null && (
+        <div className={styles.todayHeader}>{todayItems.length} of {todayCapacity} for today</div>
+      )}
+
       {todayItems.length === 0 && (
-        <p className={styles.emptyMsg}>Nothing scheduled for today — create a track and set its weekly schedule under "Manage tracks".</p>
+        <div className={styles.emptyMsg}>
+          {tracks.length === 0 ? (
+            <>
+              <p>Nothing here yet. A track is a book, course or topic you work through a little each day.</p>
+              <button className={styles.primaryBtn} onClick={onCreateTrack}>Create your first track</button>
+            </>
+          ) : (
+            <>
+              <p>Nothing scheduled for today. Give a track a deadline or a weekly schedule.</p>
+              <button className={styles.secondaryBtn} onClick={onCreateTrack}>Set up a schedule</button>
+            </>
+          )}
+        </div>
       )}
       {todayItems.map(item => (
         <div key={item.itemId} className={styles.todayItem}>
           <div className={styles.todayItemMain}>
             <span className={styles.trackBadge}>{item.trackTitle}</span>
-            <span className={styles.todayItemTitle}>{item.title}</span>
+            <div className={styles.todayTextCol}>
+              <span className={styles.todayItemTitle}>{item.title}</span>
+              {item.reason && <span className={styles.todayReason}>{item.reason}</span>}
+            </div>
           </div>
           <div className={styles.todayItemActions}>
             {item.notePath && (

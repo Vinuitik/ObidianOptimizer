@@ -203,6 +203,8 @@ const initialDataState = () => ({
   todayItems: [],
   todayMode: 'normal',
   todayOverBudget: false,
+  todayPlanned: null,
+  todayCapacity: null,
   trackItems: {},
   trackSchedules: {},
   trackCapacity: {}, // weekday(0=Mon..6=Sun) -> items/day ceiling (Phase 1c)
@@ -426,10 +428,11 @@ const useStore = create((set, get) => ({
   fetchTodayPlan: async () => {
     try {
       const plan = await apiFetchTodayPlan();
-      set({ todayItems: plan.items, todayMode: plan.mode, todayOverBudget: plan.overBudget });
+      set({ todayItems: plan.items, todayMode: plan.mode, todayOverBudget: plan.overBudget,
+        todayPlanned: plan.planned ?? null, todayCapacity: plan.capacity ?? null });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        set({ todayItems: [], todayMode: 'normal', todayOverBudget: false });
+        set({ todayItems: [], todayMode: 'normal', todayOverBudget: false, todayPlanned: null, todayCapacity: null });
       } else throw e;
     }
   },

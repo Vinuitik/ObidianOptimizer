@@ -9,7 +9,9 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.time.format.TextStyle;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -41,13 +43,20 @@ public class TodayPlanService {
     }
 
     public record TodayItem(long itemId, long trackId, String trackTitle, String trackType,
-                            String title, String notePath) {}
+                            String title, String notePath, String reason) {}
 
     /** {@code overBudget}: Normal mode's must-priority deadline tracks alone exceeded
      *  today's capacity and got pro-rata trimmed anyway (not a silent drop) — the signal
      *  the frontend uses to show a "you're behind — switch to Lock-in?" banner. Never set
      *  in Lock-in mode (there's no capacity ceiling to overflow). */
-    public record TodayPlan(List<TodayItem> items, String mode, boolean overBudget) {}
+    public record TodayPlan(List<TodayItem> items, String mode, boolean overBudget,
+                            int planned, int capacity) {}
+
+    private static String dueLabel(LocalDate date, LocalDate deadline) {
+        if (deadline.isBefore(date)) return "Overdue";
+        if (deadline.equals(date)) return "Due today";
+        return "Due " + deadline.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.ENGLISH);
+    }
 
     public String getMode() {
         return settingsRepo.getOrDefault(MODE_KEY, MODE_NORMAL);
@@ -92,8 +101,9 @@ public class TodayPlanService {
         if (MODE_LOCKIN.equals(mode) && !deadlineTracks.isEmpty()) {
             Track chosen = pickLockInTrack(deadlineTracks, pace);
             List<TodayItem> items = toTodayItems(chosen,
-                trackRepo.nextPendingItems(chosen.id(), remaining.get(chosen.id())));
-            return new TodayPlan(items, mode, false);
+                trackRepo.nextPendingItems(chosen.id(), remaining.get(chosen.id())),
+                "Focus: most urgent deadline · " + dueLabel(date, chosen.deadline()));
+            return new TodayPlan(items, mode, false, items.size(), (int) Math.round(todayCap));
         }
 
         // Normal mode (also the Lock-in fallback when nothing is on a deadline — nothing
@@ -109,7 +119,12 @@ public class TodayPlanService {
         for (Track t : deadlineTracks) {
             long take = Math.min(remaining.get(t.id()), Math.round(reserved.getOrDefault(t.id(), 0.0)));
             if (take <= 0) continue;
-            items.addAll(toTodayItems(t, trackRepo.nextPendingItems(t.id(), (int) take)));
+            String due = dueLabel(date, t.deadline());
+            boolean trimmed = overBudget && "must".equals(t.priority());
+            String reason = trimmed
+                ? due + " · trimmed: must deadlines exceed today's capacity"
+                : due + " · ~" + take + "/day to finish";
+            items.addAll(toTodayItems(t, trackRepo.nextPendingItems(t.id(), (int) take), reason));
             used += take;
         }
 
@@ -119,11 +134,12 @@ public class TodayPlanService {
             if (budget == null || budget <= 0) continue;
             long take = Math.min(budget, Math.round(remainingCap));
             if (take <= 0) continue;
-            items.addAll(toTodayItems(t, trackRepo.nextPendingItems(t.id(), (int) take)));
+            items.addAll(toTodayItems(t, trackRepo.nextPendingItems(t.id(), (int) take),
+                "Fills leftover capacity"));
             remainingCap -= take;
         }
 
-        return new TodayPlan(items, mode, overBudget);
+        return new TodayPlan(items, mode, overBudget, items.size(), (int) Math.round(todayCap));
     }
 
     /** Single-track focus, auto-picked — no manual rotation/recency state needed: a
@@ -210,9 +226,9 @@ public class TodayPlanService {
         return date.getDayOfWeek().getValue() - 1;
     }
 
-    private List<TodayItem> toTodayItems(Track track, List<TrackItem> items) {
+    private List<TodayItem> toTodayItems(Track track, List<TrackItem> items, String reason) {
         return items.stream()
-            .map(i -> new TodayItem(i.id(), track.id(), track.title(), track.type(), i.title(), i.notePath()))
+            .map(i -> new TodayItem(i.id(), track.id(), track.title(), track.type(), i.title(), i.notePath(), reason))
             .toList();
     }
 }
