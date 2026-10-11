@@ -5,7 +5,6 @@ components/molecules/NavItem.module.css
 components/molecules/ReviewRating.module.css
 components/molecules/SearchBar.module.css
 components/organisms/EditorErrorBoundary.module.css
-components/organisms/FeedView.module.css
 components/organisms/FlashcardSession.module.css
 components/organisms/FolderPicker.module.css
 components/organisms/FolderTree.module.css
@@ -24,7 +23,6 @@ components/organisms/TrackAddBox.module.css
 components/templates/SplitLayout.module.css
 pages/DashboardPage.module.css
 pages/GetAppPage.module.css
-pages/LearnPage.module.css
 pages/SettingsPage.module.css
 pages/TracksPage.module.css
 pwa/BottomNav.module.css

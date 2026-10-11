@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import useStore from '../../store/useStore';
+import Button from '../atoms/Button';
+import Skeleton from '../atoms/Skeleton';
+import SegmentedTabs from '../molecules/SegmentedTabs';
+import EmptyState from '../molecules/EmptyState';
+import ListRow from '../molecules/ListRow';
+import { swipe, fadeRiseReduced } from '../motion/presets';
 import FeedSources from './FeedSources';
 import styles from './FeedView.module.css';
 
@@ -22,7 +29,8 @@ function fmtDate(iso) {
 }
 
 // One card, swipeable with plain pointer events. dx drives a transform; release past
-// SWIPE_PX commits (right = accept, left = bin), otherwise springs back.
+// SWIPE_PX commits (right = accept, left = bin), otherwise springs back. The exit/enter
+// animation lives on the wrapping motion.div (see Stack) so the two transforms never fight.
 function FeedCard({ item, onDecide }) {
   const start = useRef(null);
   const [dx, setDx] = useState(0);
@@ -54,11 +62,11 @@ function FeedCard({ item, onDecide }) {
           {[item.sourceTitle, fmtDate(item.publishedAt), fmtDuration(item.durationS)].filter(Boolean).join(' · ')}
         </p>
         {isYouTubeUrl(item.itemUrl) && (
-          <button
-            className={styles.subscribeChannelBtn}
+          <Button
+            variant="ghost" size="sm"
             onPointerDown={e => e.stopPropagation()}
             onClick={e => { e.stopPropagation(); subscribeToChannel(item.itemUrl); }}
-          >🔔 Subscribe to this channel</button>
+          >🔔 Subscribe to this channel</Button>
         )}
       </div>
     </div>
@@ -70,19 +78,25 @@ function BinList() {
   const fetchFeedBin = useStore(s => s.fetchFeedBin);
   const ingest = useStore(s => s.ingestFeedItem);
   const restore = useStore(s => s.restoreFeedItem);
-  useEffect(() => { fetchFeedBin(); }, [fetchFeedBin]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { Promise.resolve(fetchFeedBin()).finally(() => setLoaded(true)); }, [fetchFeedBin]);
 
+  if (!loaded && !binned.length) return <Skeleton lines={4} height={44} />;
   if (!binned.length) return <p className={styles.empty}>Bin is empty.</p>;
   return (
     <ul className={styles.list}>
       {binned.map(item => (
-        <li key={item.id} className={styles.row}>
-          <div className={styles.rowText}>
-            <span className={styles.rowTitle}>{item.title}</span>
-            <span className={styles.cardMeta}>{item.sourceTitle}</span>
-          </div>
-          <button className={styles.btn} onClick={() => ingest(item)}>Ingest anyway</button>
-          <button className={styles.btn} onClick={() => restore(item)}>Restore</button>
+        <li key={item.id}>
+          <ListRow
+            title={item.title}
+            meta={item.sourceTitle}
+            trailing={
+              <span className={styles.rowActions}>
+                <Button size="sm" onClick={() => ingest(item)}>Ingest anyway</Button>
+                <Button size="sm" variant="ghost" onClick={() => restore(item)}>Restore</Button>
+              </span>
+            }
+          />
         </li>
       ))}
     </ul>
@@ -91,8 +105,15 @@ function BinList() {
 
 function Stack() {
   const pending = useStore(s => s.feedPending);
+  const loaded = useStore(s => s.feedLoaded);
   const decide = useStore(s => s.decideFeed);
+  const undo = useStore(s => s.undoFeed);
+  const last = useStore(s => s.feedLastDecision);
+  const setLearnView = useStore(s => s.setLearnView);
+  const reduced = useReducedMotion();
   const item = pending[0];
+  // Exit direction = the decision that just removed the card (right = accept, left = bin).
+  const dir = last?.kind === 'bin' ? -1 : 1;
 
   useEffect(() => {
     function onKey(e) {
@@ -105,53 +126,66 @@ function Stack() {
     return () => window.removeEventListener('keydown', onKey);
   }, [decide]);
 
+  // Never claim "all caught up" before the first fetch resolved.
+  if (!item && !loaded) {
+    return <div className={styles.stage}><Skeleton height={260} className={styles.cardSkeleton} /></div>;
+  }
   if (!item) {
-    return <p className={styles.empty}>You're all caught up. Add sources in the Sources tab.</p>;
+    return (
+      <EmptyState
+        icon="check"
+        title="You're all caught up"
+        description="New videos and posts from your sources land here. Add sources in the Sources tab."
+        action={{ label: 'Open Inbox', onClick: () => setLearnView('inbox') }}
+      />
+    );
   }
   return (
     <>
       <div className={styles.stage}>
-        <FeedCard key={item.id} item={item} onDecide={decide} />
+        <AnimatePresence custom={dir} initial={false}>
+          <motion.div
+            key={item.id}
+            className={styles.motionCard}
+            custom={dir}
+            variants={reduced ? fadeRiseReduced : swipe}
+            initial="initial" animate="animate" exit={reduced ? { opacity: 0 } : 'exit'}
+          >
+            <FeedCard item={item} onDecide={decide} />
+          </motion.div>
+        </AnimatePresence>
       </div>
       <div className={styles.actions}>
-        <button className={`${styles.btn} ${styles.binBtn}`} onClick={() => decide('bin')} aria-label="Bin">← Bin</button>
-        <span className={styles.count}>{pending.length} left</span>
-        <button className={`${styles.btn} ${styles.acceptBtn}`} onClick={() => decide('accept')} aria-label="Accept">Accept →</button>
+        <Button variant="danger" onClick={() => decide('bin')} aria-label="Bin">← Bin</Button>
+        <span className={styles.center}>
+          <span className={styles.count}>{pending.length} left</span>
+          {last && <Button variant="ghost" size="sm" onClick={undo}>Undo</Button>}
+        </span>
+        <Button variant="primary" onClick={() => decide('accept')} aria-label="Accept">Accept →</Button>
       </div>
     </>
   );
 }
 
+const TABS = [
+  { id: 'stack', label: 'Swipe' },
+  { id: 'bin', label: 'Bin' },
+  { id: 'sources', label: 'Sources' },
+];
+
 export default function FeedView() {
   const [tab, setTab] = useState('stack');
-  const notice = useStore(s => s.feedNotice);
-  const clearNotice = useStore(s => s.clearFeedNotice);
-  const undo = useStore(s => s.undoFeed);
-  const lastDecision = useStore(s => s.feedLastDecision);
 
   return (
     <div className={styles.wrap}>
-      <div className={styles.tabs} role="tablist">
-        {[['stack', 'Swipe'], ['bin', 'Bin'], ['sources', 'Sources']].map(([k, label]) => (
-          <button
-            key={k} role="tab" aria-selected={tab === k}
-            className={`${styles.tab} ${tab === k ? styles.tabActive : ''}`}
-            onClick={() => setTab(k)}
-          >{label}</button>
-        ))}
+      <div className={styles.tabs}>
+        <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} aria-label="Feed sections" />
       </div>
       <div className={styles.body}>
         {tab === 'stack' && <Stack />}
         {tab === 'bin' && <BinList />}
-        {tab === 'sources' && <FeedSources />}
+        {tab === 'sources' && <FeedSources onSubscribed={() => setTab('stack')} />}
       </div>
-      {notice && (
-        <div className={styles.notice} role="status">
-          <span>{notice.message}</span>
-          {notice.undo && lastDecision && <button className={styles.noticeBtn} onClick={undo}>Undo</button>}
-          <button className={styles.noticeBtn} onClick={clearNotice} aria-label="Dismiss">×</button>
-        </div>
-      )}
     </div>
   );
 }

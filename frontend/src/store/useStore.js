@@ -24,7 +24,7 @@ import {
 import {
   fetchFeedSources as apiFetchFeedSources, addFeedSource as apiAddFeedSource,
   patchFeedSource as apiPatchFeedSource, deleteFeedSource as apiDeleteFeedSource,
-  pollFeedSource as apiPollFeedSource,
+  pollFeedSource as apiPollFeedSource, resolveFeedSource as apiResolveFeedSource,
   // items/sources go through the offline-aware wrappers below (fetchFeed/decideFeed/
   // restoreFeedItem) — see pwa/offlineApi.js. Bin tab list stays direct/online-only
   // (not exported for offline — feed/FLOWS_feed.md §4/P2).
@@ -218,7 +218,8 @@ const initialDataState = () => ({
   feedBinned: [],           // Bin tab
   feedSources: [],
   feedLastDecision: null,   // { item, kind: 'accept'|'bin' } — undo covers ONLY this one
-  feedNotice: null,         // { message, undo? } — local toast (PWA shell mounts no global <Toast/>)
+  feedLoaded: false,        // true once the first fetchFeed resolved — gates empty states + Learn's default tab
+  learnView: null,          // 'feed' | 'inbox' | null — Learn's active tab; set by LearnPage / toast "View"
 
   // Toast notification: null | { message, action?: {label, onClick}, tone?: 'neutral'|'success'|'error', id }
   toast: null,
@@ -234,6 +235,7 @@ const initialDataState = () => ({
 });
 
 let toastSeq = 0;
+const DELETE_UNDO_MS = 7000;
 
 const useStore = create((set, get) => ({
   ...initialDataState(),
@@ -1039,12 +1041,16 @@ const useStore = create((set, get) => ({
   // failure puts it back at the front + sets feedNotice. Undo = `restore` of the LAST
   // decision only (no server undo stack).
 
-  setFeedNotice: (message, undo = false) => {
-    const notice = { message, undo };
-    set({ feedNotice: notice });
-    setTimeout(() => set(s => s.feedNotice === notice ? { feedNotice: null } : {}), 5000);
+  setLearnView: (learnView) => set({ learnView }),
+
+  // Feedback goes through the ONE global Toast. action: null | 'undo' (undoFeed) | 'view'
+  // (jump to Learn > Inbox). Messages starting "Couldn't" are errors.
+  setFeedNotice: (message, action = null) => {
+    const act = action === 'undo' || action === true
+      ? { label: 'Undo', onClick: () => get().undoFeed() }
+      : action === 'view' ? { label: 'View', onClick: () => get().setLearnView('inbox') } : null;
+    get().showToast({ message, action: act, tone: /^Couldn't/.test(message) ? 'error' : 'neutral' });
   },
-  clearFeedNotice: () => set({ feedNotice: null }),
 
   // fetchFeed/decideFeed/restoreFeedItem go through the offline-aware wrappers (pwa/offlineApi.js)
   // so the swipe stack + Undo work with the laptop off (feed/FLOWS_feed.md §4/P2) — online
@@ -1053,8 +1059,9 @@ const useStore = create((set, get) => ({
   fetchFeed: async () => {
     try {
       const feedPending = await fetchFeedOffline();
-      set({ feedPending });
+      set({ feedPending, feedLoaded: true });
     } catch (e) {
+      set({ feedLoaded: true });
       if (!(e instanceof ApiError && e.status === 401)) get().setFeedNotice("Couldn't load the feed.");
     }
   },
@@ -1073,12 +1080,11 @@ const useStore = create((set, get) => ({
     set(s => ({
       feedPending: s.feedPending.slice(1),
       feedLastDecision: { item, kind },
-      feedNotice: null,
     }));
     try {
       if (kind === 'accept') await acceptFeedOffline(item.id);
       else await binFeedOffline(item.id);
-      get().setFeedNotice(kind === 'accept' ? 'Sent to Inbox.' : 'Binned.', true);
+      get().setFeedNotice(kind === 'accept' ? 'Sent to Inbox' : 'Binned.', kind === 'accept' ? 'view' : 'undo');
     } catch {
       set(s => ({
         feedPending: s.feedPending.some(i => i.id === item.id) ? s.feedPending : [item, ...s.feedPending],
@@ -1093,7 +1099,6 @@ const useStore = create((set, get) => ({
     set(s => ({
       feedPending: [item, ...s.feedPending.filter(i => i.id !== item.id)],
       feedBinned: s.feedBinned.filter(i => i.id !== item.id),
-      feedNotice: null,
     }));
     try {
       await restoreFeedOffline(item);
@@ -1120,7 +1125,7 @@ const useStore = create((set, get) => ({
     set(s => ({ feedBinned: s.feedBinned.filter(i => i.id !== item.id) }));
     try {
       await acceptFeedOffline(item.id);
-      get().setFeedNotice('Sent to Inbox.');
+      get().setFeedNotice('Sent to Inbox', 'view');
     } catch {
       set(s => ({ feedBinned: [item, ...s.feedBinned] }));
       get().setFeedNotice("Couldn't ingest — try again.");
@@ -1168,16 +1173,40 @@ const useStore = create((set, get) => ({
     }
   },
 
-  deleteFeedSource: async (id) => {
-    try {
-      await apiDeleteFeedSource(id);
-      set(s => ({
-        feedSources: s.feedSources.filter(x => x.id !== id),
-        feedPending: s.feedPending.filter(i => i.sourceId !== id),
-        feedBinned: s.feedBinned.filter(i => i.sourceId !== id),
-      }));
-    } catch {
-      get().setFeedNotice("Couldn't delete source.");
+  // Optimistic + Undo: the row (and its pending/binned items) leaves the UI at once; the
+  // DELETE is held DELETE_UNDO_MS so Undo can cancel it. Closing the tab inside that window
+  // keeps the source (nothing was sent yet).
+  deleteFeedSource: (id) => {
+    const snap = { src: get().feedSources.find(x => x.id === id), pending: get().feedPending, binned: get().feedBinned };
+    if (!snap.src) return;
+    set(s => ({
+      feedSources: s.feedSources.filter(x => x.id !== id),
+      feedPending: s.feedPending.filter(i => i.sourceId !== id),
+      feedBinned: s.feedBinned.filter(i => i.sourceId !== id),
+    }));
+    const restore = () => set(s => ({
+      feedSources: [snap.src, ...s.feedSources.filter(x => x.id !== id)],
+      feedPending: snap.pending.length ? snap.pending : s.feedPending,
+      feedBinned: snap.binned.length ? snap.binned : s.feedBinned,
+    }));
+    const timer = setTimeout(async () => {
+      try { await apiDeleteFeedSource(id); }
+      catch { restore(); get().setFeedNotice("Couldn't delete source."); }
+    }, DELETE_UNDO_MS);
+    get().showToast({
+      message: `Deleted ${snap.src.title || 'source'}`,
+      action: { label: 'Undo', onClick: () => { clearTimeout(timer); restore(); } },
+      duration: DELETE_UNDO_MS,
+    });
+  },
+
+  // Subscribe step 1: nothing persisted. -> { kind, feedUrl, title, preview:[{title,...}] } | null (+ error toast)
+  resolveFeedSource: async (url) => {
+    try { return await apiResolveFeedSource(url); }
+    catch (e) {
+      get().setFeedNotice(e instanceof ApiError && e.status >= 400 && e.status < 500
+        ? "Couldn't read a feed from that URL." : "Couldn't check that URL — try again.");
+      return null;
     }
   },
 

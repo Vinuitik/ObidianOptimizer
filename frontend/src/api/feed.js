@@ -51,6 +51,15 @@ export async function addFeedSource(url, extra = {}) {
   return res.json();
 }
 
+// Preview only, nothing persisted. 422 = no feed readable from the URL.
+// -> { kind, feedUrl, title, preview: [{ title, itemUrl, publishedAt, thumbUrl, durationS }] }
+export async function resolveFeedSource(url) {
+  const res = await req(`${BASE}/feed/sources/resolve`, {
+    method: 'POST', headers: JSON_HDR, body: JSON.stringify({ url }),
+  });
+  return res.json();
+}
+
 // patch: any of { autoAccept (true|false|null=inherit), targetTrackId, status, title }
 export async function patchFeedSource(id, patch) {
   const res = await req(`${BASE}/feed/sources/${id}`, {
