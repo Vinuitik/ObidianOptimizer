@@ -8,6 +8,7 @@ const state = {
   tracks: [{ id: 5, title: 'Existing', type: 'book', status: 'active', deadline: null, includeInProgress: false }],
   trackItems: {}, trackSchedules: {}, trackCapacity: {}, trackProgress: [],
   todayItems: [], todayMode: 'normal', todayOverBudget: false,
+  trackPending: [], addTrackPending: vi.fn(), updateSchedule: vi.fn(),
   showToast: vi.fn(),
   createTrack: vi.fn(), updateTrack: vi.fn(), addTrackItem: vi.fn(),
   fetchTracks: fn(), fetchTrackItems: fn(), fetchTrackCapacity: fn(),
@@ -35,6 +36,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.createTrack.mockResolvedValue({ id: 9, title: 'T' });
   state.updateTrack.mockResolvedValue({});
+  state.updateSchedule.mockResolvedValue({});
   state.addTrackItem.mockResolvedValue({});
   mockCapture.mockResolvedValue({ ok: true });
 });
@@ -47,6 +49,21 @@ describe('NewTrackForm (Manage tab)', () => {
     await waitFor(() => expect(state.createTrack).toHaveBeenCalledWith('Rust', 'book'));
     expect(mockCapture).not.toHaveBeenCalled();
     expect(state.updateTrack).not.toHaveBeenCalled();
+    // no deadline -> default schedule 1/day, all 7 days
+    expect(state.updateSchedule).toHaveBeenCalledWith(9, { 0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 });
+  });
+
+  it('create with 3 links -> captures, queues processing rows, switches to Today', async () => {
+    openManage();
+    fireEvent.change(screen.getByLabelText('Track title'), { target: { value: 'Rust' } });
+    fireEvent.change(screen.getByLabelText('Links or items'), { target: { value: 'https://a.com\nhttps://b.com\nhttps://c.com' } });
+    fireEvent.click(screen.getByText('+ New track'));
+    await waitFor(() => expect(mockCapture).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(state.addTrackPending).toHaveBeenCalled());
+    expect(state.addTrackPending.mock.calls[0][0]).toHaveLength(3);
+    expect(state.updateSchedule).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByLabelText('Track title')).toBeNull());
+    expect(state.fetchTodayPlan).toHaveBeenCalled();
   });
 
   it('title required', () => {
@@ -63,6 +80,7 @@ describe('NewTrackForm (Manage tab)', () => {
     await waitFor(() => expect(mockCapture).toHaveBeenCalledTimes(2));
     expect(mockCapture).toHaveBeenCalledWith('https://a.com', 9);
     expect(state.updateTrack).toHaveBeenCalledWith(9, { deadline: '2026-12-01' });
+    expect(state.updateSchedule).not.toHaveBeenCalled();
   });
 
   it('plain text lines become plain items', async () => {
@@ -79,11 +97,12 @@ describe('Track detail Advanced disclosure', () => {
   it('is collapsed by default and holds the secondary settings', () => {
     openManage();
     fireEvent.click(screen.getByText('Existing'));
-    const adv = screen.getAllByText('Advanced').map(e => e.closest('details')).find(d => d.className.includes('card'));
-    expect(adv).toBeTruthy();
-    expect(adv.open).toBe(false);
-    expect(adv.textContent).toContain('Show on Progress tab');
-    expect(adv.textContent).toContain('Generate a course');
-    expect(adv.textContent).toContain('Weekly schedule');
+    const btn = screen.getAllByText('Advanced')[1].closest('button');
+    expect(btn.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('Show on Progress tab')).toBeNull();
+    fireEvent.click(btn);
+    expect(screen.getByText('Show on Progress tab')).toBeTruthy();
+    expect(screen.getByText('Generate a course')).toBeTruthy();
+    expect(screen.getByText('Weekly schedule')).toBeTruthy();
   });
 });

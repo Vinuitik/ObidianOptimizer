@@ -208,6 +208,7 @@ const initialDataState = () => ({
   trackItems: {},
   trackSchedules: {},
   trackCapacity: {}, // weekday(0=Mon..6=Sun) -> items/day ceiling (Phase 1c)
+  trackPending: [], // [{ trackId, trackTitle, label }] — captures still ingesting; shown as "processing" rows on Today
   trackProgress: [], // Phase 1d — [{ id, title, type, itemsDone, itemsTotal, deadline, onTrack }]
 
   // Settings (loaded from backend on startup)
@@ -473,6 +474,10 @@ const useStore = create((set, get) => ({
       if (!(e instanceof ApiError && e.status === 401)) throw e;
     }
   },
+
+  addTrackPending: (entries) => set(s => ({ trackPending: [...s.trackPending, ...entries] })),
+  shiftTrackPending: (n) => set(s => ({ trackPending: s.trackPending.slice(n) })),
+  clearTrackPending: () => set({ trackPending: [] }),
 
   createTrack: async (title, type, extra = {}) => {
     const track = await apiCreateTrack(title, type, extra);

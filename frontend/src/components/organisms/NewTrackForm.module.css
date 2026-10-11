@@ -1,5 +1,1 @@
-.form { display: flex; flex-direction: column; gap: 6px; }
-.input { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; }
-.deadline { display: flex; flex-direction: column; gap: 2px; font-size: 0.85em; opacity: 0.8; }
-.primary { padding: 7px 10px; cursor: pointer; font: inherit; }
-.primary:disabled { opacity: 0.5; cursor: default; }
+.form { display: flex; flex-direction: column; gap: var(--sp-3); }
