@@ -96,6 +96,17 @@ Add it to the **claude.ai** website as a custom connector with **No authenticati
 Route transitions: `AnimatePresence mode="wait"` + Framer Motion 180ms opacity fade.  
 To add a route: `App.jsx <Routes>` + `NavBar.jsx NAV_ITEMS`
 
+## Tracks — add to track
+Files: TrackAddBox.jsx, TracksPage.jsx (TrackItemsEditor), api/capture.js
+- One box: `classifyInput()` → urls → `captureResource(url, trackId)` each | text → debounced `searchNotes` → pick = `addTrackItem(trackId, title, notePath)`, or "plain item" row = `addTrackItem(trackId, text, null)` | file drop/picker → `captureFile(file, trackId)` (`POST /capture/file`).
+- Captured link/file shows link|file + "processing…" placeholder; `fetchTrackItems` polled every 5s (6x) until item count grows. To change: `TrackAddBox` POLL_MS/POLL_MAX.
+- Persisted item chip = `itemKind()`: note (has notePath) | plain. link/file not derivable after ingest (no backend field). [NOT IMPLEMENTED]
+
+| Change | Where |
+|---|---|
+| URL/text detection | `classifyInput()` |
+| Item chip | `itemKind()`, `ItemTypeChip` |
+
 ## Testing Quick Reference
 
 ```powershell
