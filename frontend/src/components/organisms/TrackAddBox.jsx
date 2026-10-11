@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import useStore from '../../store/useStore';
 import { captureResource, captureFile } from '../../api/capture';
 import { searchNotes } from '../../api/notes';
+import Badge from '../atoms/Badge';
+import Button from '../atoms/Button';
+import Textarea from '../atoms/Textarea';
 import styles from './TrackAddBox.module.css';
 
 const URL_RE = /^https?:\/\/\S+$/i;
@@ -24,7 +27,8 @@ export function itemKind(item) {
 }
 
 export function ItemTypeChip({ kind }) {
-  return <span className={`${styles.chip} ${styles['chip_' + kind]}`}>{kind === 'processing' ? 'processing…' : kind}</span>;
+  const tone = { link: 'accent', note: 'success', file: 'ember', processing: 'accent' }[kind] ?? 'neutral';
+  return <Badge tone={tone}>{kind === 'processing' ? 'processing…' : kind}</Badge>;
 }
 
 const POLL_MS = 5000;
@@ -148,8 +152,8 @@ export default function TrackAddBox({ trackId }) {
       data-testid="track-add-box"
     >
       <form onSubmit={onSubmit}>
-        <textarea
-          className={styles.input}
+        <Textarea
+          aria-label="Add an item"
           rows={text.includes('\n') ? 4 : 1}
           placeholder="Paste a link, search a note, or type an item — or drop a file"
           value={text}
@@ -157,7 +161,7 @@ export default function TrackAddBox({ trackId }) {
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSubmit(e); } }}
         />
         <div className={styles.actions}>
-          <button type="button" className={styles.secondary} onClick={() => fileRef.current?.click()}>Attach file</button>
+          <Button size="sm" onClick={() => fileRef.current?.click()}>Attach file</Button>
           <input
             ref={fileRef}
             type="file"
@@ -166,9 +170,9 @@ export default function TrackAddBox({ trackId }) {
             data-testid="track-add-file"
             onChange={e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) submitFiles(f); }}
           />
-          <button type="submit" className={styles.primary} disabled={busy || cls.kind === 'empty'}>
+          <Button type="submit" variant="primary" size="sm" loading={busy} disabled={cls.kind === 'empty'}>
             {cls.kind === 'urls' ? `Capture ${cls.urls.length} link${cls.urls.length > 1 ? 's' : ''}` : 'Add'}
-          </button>
+          </Button>
         </div>
       </form>
 

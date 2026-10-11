@@ -104,7 +104,7 @@ Files: TrackAddBox.jsx, TracksPage.jsx (TrackItemsEditor), api/capture.js
 
 ## Tracks — one-step create + Advanced
 Files: NewTrackForm.jsx, TracksPage.jsx (ManageTab, TrackDetail), TracksPage.manage.test.jsx
-- Create: `NewTrackForm.onSubmit()` → `createTrack(title,'book')` → deadline? `updateTrack({deadline})` → `classifyInput(paste)`: urls → `captureResource(url, id)` each | text → `addTrackItem(id, line, null)` per line. Type defaults to book; change under detail Advanced.
+- Create: `NewTrackForm.onSubmit()` → `createTrack(title,'book')` → deadline? `updateTrack({deadline})` : else `updateSchedule(id, DEFAULT_SCHEDULE)` (1/day, Mon-Sun; To change: `NewTrackForm.DEFAULT_SCHEDULE`) → `classifyInput(paste)`: urls → `captureResource(url, id)` each | text → `addTrackItem(id, line, null)` per line. Type defaults to book; change under detail Advanced.
 - Detail: primary = Deadline + Items. One collapsed `<details>` "Advanced" = Type, Status, Show on Progress tab, Priority, Weekly schedule, Generate a course. List column has a second "Advanced" = Daily capacity + Import from spreadsheet.
 - Label-only renames (API unchanged): Mini-course → Generate a course; Include in Progress → Show on Progress tab; Review import → Import preview.
 
@@ -135,3 +135,4 @@ Test files sit next to the component or util they cover: `ComponentName.test.jsx
 ## Tracks — Today explains itself
 Files: TracksPage.jsx (TodayTab), useStore.js (todayPlanned/todayCapacity), TracksPage.today.test.jsx
 GET /tracks/today → fetchTodayPlan() → TodayTab: header "N of M for today", `item.reason` under each item; empty + no tracks → "Create your first track" → onCreateTrack (TracksPage sets tab='manage'). Labels: lockin="Focus on one track", normal="Balanced". No offline Today implementation exists.
+- W3 (UI redesign): after create, `NewTrackForm` pushes captured URLs to store `trackPending` (`addTrackPending`), calls `fetchTodayPlan()`, then `onCreated` → `TracksPage` switches to Today. `TodayTab` shows `trackPending` as "processing" rows and polls `fetchTodayPlan()` every 5s (max 6) — each new item retires one row (`shiftTrackPending`). Mark done → `completeTrackItem()` → row exits via `listItem` variant + toast "Done". "Add to spaced review" persists per track in localStorage `tracks:addToReview:<trackId>`. Empty-state CTA → Manage with title autofocused (`NewTrackForm autoFocus`). Mode hint line: `TodayTab` (`modeHint`). Tabs = `SegmentedTabs`; Advanced = `Disclosure`; all controls are primitives, `TracksPage.module.css` is layout-only. Before first fetch resolves Today shows a Skeleton (`loaded`).
