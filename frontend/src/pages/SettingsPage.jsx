@@ -9,212 +9,145 @@ import {
   triggerFullBackup, triggerDbRestore,
 } from '../api/sync';
 import FolderPicker from '../components/organisms/FolderPicker';
+import Button from '../components/atoms/Button';
+import Badge from '../components/atoms/Badge';
+import Input from '../components/atoms/Input';
+import Select from '../components/atoms/Select';
+import Spinner from '../components/atoms/Spinner';
+import Card from '../components/molecules/Card';
+import Field from '../components/molecules/Field';
+import PageHeader from '../components/molecules/PageHeader';
+import useAutosaveSettings from './useAutosaveSettings';
 import styles from './SettingsPage.module.css';
 
 const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
 const dirName  = p => p.replace(/[/\\]+$/, '').replace(/[/\\][^/\\]*$/, '');
 
-// ── Section config ────────────────────────────────────────────────────────────
-// To add a new setting: add an entry to the relevant section's `fields` array,
-// or add a new section object. The rest of the UI is data-driven.
+// ── Field config ──────────────────────────────────────────────────────────────
+// To add a setting: add a field to the right group. Simple fields autosave
+// (selects on change, text/number on blur/Enter) via useAutosaveSettings.
+// Groups render in order: Vault · Learning · Feed · Sync · Advanced.
 
-const SECTIONS = [
-  {
-    id: 'paths',
-    title: 'Resources',
-    description: 'Where attachments live inside your vault. Browse to pick a folder instead of typing the path.',
-    fields: [
-      {
-        key: 'resourcePath',
-        label: 'Resources folder',
-        type: 'path',
-        browse: 'vault',
-        placeholder: '/vault/resources/images',
-        hint: 'Where images and other attachments are stored.',
-      },
-    ],
+const F = {
+  resourcePath: {
+    key: 'resourcePath', label: 'Resources folder', type: 'path', browse: 'vault',
+    placeholder: '/vault/resources/images',
+    hint: 'Where images and other attachments are stored inside your vault.',
   },
-  {
-    id: 'review',
-    title: 'Review',
-    description: 'Controls how the spaced-repetition review queue behaves.',
-    fields: [
-      {
-        key: 'reviewPageSize',
-        label: 'Page size',
-        type: 'number',
-        min: 1,
-        max: 500,
-        hint: 'How many notes are loaded per review session.',
-      },
-      {
-        key: 'flashcardsEnabled',
-        label: 'Review system',
-        type: 'select',
-        options: [
-          { value: true,  label: 'Hybrid — a few flashcard tests + the rest read & self-rate' },
-          { value: false, label: 'Read only — read & self-rate every note, no flashcards' },
-        ],
-        hint: 'Hybrid: each day up to "Max flashcards per day" of your due card-bearing notes '
-          + '(oldest first) run as auto-graded tests; every other due note is read-and-self-rate. '
-          + 'Read only: no note is ever tested as flashcards (existing cards are kept, never '
-          + 'deleted, and no new ones are generated). Either grade feeds the same FSRS scheduler.',
-      },
-      {
-        key: 'maxDailyFlashcards',
-        label: 'Max flashcards per day',
-        type: 'number',
-        min: 0,
-        hint: 'Hard daily ceiling on flashcard tests (only card-bearing notes count, oldest-due '
-          + 'first). Remaining due notes are read-and-self-rate. Unfinished ones stay due and are '
-          + 'offered again first tomorrow. 0 = no flashcards. Must not exceed "Max reviews per day".',
-      },
-    ],
+  reviewPageSize: {
+    key: 'reviewPageSize', label: 'Notes loaded per review', type: 'number', min: 1, max: 500,
+    hint: 'How many due notes are fetched at a time.',
   },
-  {
-    id: 'tracks',
-    title: 'Learning Tracks',
-    description: 'Structured curricula (books, courses, article series) with a daily schedule — separate from FSRS review.',
-    fields: [
-      {
-        key: 'tracksEnabled',
-        label: 'Tracks tab',
-        type: 'select',
-        options: [
-          { value: true,  label: 'On — show the Tracks tab in the nav' },
-          { value: false, label: 'Off — hide it (existing tracks/schedules are kept, not deleted)' },
-        ],
-        hint: 'Purely a nav-visibility toggle. Turning this off does not stop capture-time track '
-          + 'tagging or delete any track data — it only hides the tab.',
-      },
-    ],
+  maxDailyReviews: {
+    key: 'maxDailyReviews', label: 'Max reviews per day', type: 'number', min: 1,
+    hint: 'The nightly job spreads notes out so no day goes over this.',
   },
-  {
-    id: 'feed',
-    title: 'Feed',
-    description: 'Subscribed sources (Learn ▸ Feed) — swipe to accept or bin new items.',
-    fields: [
-      {
-        key: 'feedAutoAccept',
-        label: 'Auto-accept new feed items',
-        type: 'select',
-        options: [
-          { value: false, label: 'Off — swipe each item (default)' },
-          { value: true,  label: 'On — new items go straight to the Inbox' },
-        ],
-        hint: 'Global default; each source can override it (inherit / on / off). A source\'s first '
-          + 'poll (backlog) is never auto-accepted.',
-      },
+  flashcardsEnabled: {
+    key: 'flashcardsEnabled', label: 'Review style', type: 'select',
+    options: [
+      { value: true,  label: 'Mixed — some flashcard tests, the rest read & rate' },
+      { value: false, label: 'Read only — read and rate every note' },
     ],
+    hint: 'Mixed tests your oldest due card-bearing notes as flashcards each day; everything else is read and self-rated. Existing cards are kept either way.',
   },
-  {
-    id: 'advanced',
-    title: 'Advanced',
-    description: 'Performance and startup behaviour.',
-    fields: [
-      {
-        key: 'startupSyncMode',
-        label: 'Startup sync',
-        type: 'select',
-        options: [
-          { value: 'blocking', label: 'Blocking (default) — app waits for index sync before accepting requests' },
-          { value: 'async',    label: 'Async — app starts immediately, sync runs in background' },
-        ],
-        hint: 'How the note index is synchronised with disk on startup.',
-      },
+  maxDailyFlashcards: {
+    key: 'maxDailyFlashcards', label: 'Max flashcard tests per day', type: 'number', min: 0,
+    hint: '0 turns flashcard tests off. Can’t be higher than max reviews per day.',
+  },
+  tracksEnabled: {
+    key: 'tracksEnabled', label: 'Tracks tab', type: 'select',
+    options: [
+      { value: true,  label: 'Shown in the nav' },
+      { value: false, label: 'Hidden (tracks are kept)' },
     ],
+    hint: 'Only hides the tab — your tracks and schedules are never deleted.',
   },
-  {
-    id: 'ml',
-    title: 'ML / Search',
-    description: 'Embedding model used for semantic search. Changing this requires re-indexing all notes (restart the backend after saving).',
-    fields: [
-      {
-        key: 'embedModel',
-        label: 'Embedding model',
-        type: 'text',
-        placeholder: 'mxbai-embed-large',
-        hint: 'HuggingFace model ID used by the embedder service. Display only — actual model is set via EMBED_MODEL env var in docker-compose and requires a container restart to change.',
-      },
+  chronicNeglectDays: {
+    key: 'chronicNeglectDays', label: 'Chronic neglect (days)', type: 'number', min: 1,
+    hint: 'A note overdue this long is reset overnight, even if the bankruptcy limit isn’t hit.',
+  },
+  bankruptcyLimit: {
+    key: 'bankruptcyLimit', label: 'Bankruptcy limit', type: 'number', min: 1,
+    hint: 'If this many notes are overdue, all of them are reset and rescheduled in one sweep.',
+  },
+  feedAutoAccept: {
+    key: 'feedAutoAccept', label: 'New feed items', type: 'select',
+    options: [
+      { value: false, label: 'Swipe each one (default)' },
+      { value: true,  label: 'Send straight to the Inbox' },
     ],
+    hint: 'Each source can override this. A source’s first fetch (its backlog) is never auto-accepted.',
   },
-  {
-    id: 'chrono',
-    title: 'Daily Jobs',
-    description: 'Hyperparameters for the automatic daily maintenance jobs (FileMover, BankruptcyCheck, SpreadCheck).',
-    fields: [
-      {
-        key: 'maxDailyReviews',
-        label: 'Max reviews per day',
-        type: 'number',
-        min: 1,
-        hint: 'SpreadCheck redistributes notes so no single day exceeds this count.',
-      },
-      {
-        key: 'chronicNeglectDays',
-        label: 'Chronic neglect (days)',
-        type: 'number',
-        min: 1,
-        hint: 'A note overdue by more than this many days is lapsed individually each night (FSRS forget), even if the bankruptcy limit is not reached.',
-      },
-      {
-        key: 'bankruptcyLimit',
-        label: 'Bankruptcy limit',
-        type: 'number',
-        min: 1,
-        hint: 'If the total overdue count reaches this, every overdue note is lapsed (FSRS forget) and rescheduled in one sweep.',
-      },
+  startupSyncMode: {
+    key: 'startupSyncMode', label: 'On startup', type: 'select',
+    options: [
+      { value: 'blocking', label: 'Wait for the note index to sync (default)' },
+      { value: 'async',    label: 'Open immediately, sync in the background' },
     ],
+    hint: 'How the note index catches up with your files when the app starts.',
   },
-];
+};
 
-// ── Component ─────────────────────────────────────────────────────────────────
+const ALL_FIELDS = Object.values(F);
+
+// ── Small shared bits ─────────────────────────────────────────────────────────
+
+function SavedMark({ status }) {
+  return (
+    <span className={styles.saveMark} role="status" aria-live="polite">
+      {status === 'saving' && <span className={styles.saving}>Saving…</span>}
+      {status === 'saved' && <span className={styles.saved}>Saved ✓</span>}
+    </span>
+  );
+}
+
+function CopyButton({ text, label = 'Copy' }) {
+  const showToast = useStore(s => s.showToast);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast?.('Copied');
+    } catch {
+      showToast?.({ message: 'Couldn’t copy — select it and copy by hand.', tone: 'error' });
+    }
+  }
+  return <Button size="sm" variant="ghost" onClick={copy} disabled={!text}>{label}</Button>;
+}
+
+function Group({ title, description, children }) {
+  return (
+    <Card as="section" className={styles.group} aria-label={title}>
+      <Card.Header title={title} subtitle={description} />
+      <div className={styles.fields}>{children}</div>
+    </Card>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const settings       = useStore(s => s.settings);
-  const applySettings  = useStore(s => s.applySettings);
+  const settings        = useStore(s => s.settings);
+  const applySettings   = useStore(s => s.applySettings);
   const isAuthenticated = useStore(s => s.isAuthenticated);
 
-  // Local draft state: one object per section id
-  const [drafts, setDrafts]     = useState({});
-  const [status, setStatus]     = useState({}); // { [sectionId]: 'idle' | 'saving' | 'saved' | 'error' }
-  const [errors, setErrors]     = useState({}); // { [sectionId]: string }
+  const { draft, status, errors, setDraft, commit } =
+    useAutosaveSettings(settings, applySettings, ALL_FIELDS);
 
-  // Chrono status
   const [chronoStatus,  setChronoStatus]  = useState(null);
   const [chronoRunning, setChronoRunning] = useState(false);
   const [chronoResult,  setChronoResult]  = useState(null);
   const [chronoError,   setChronoError]   = useState(null);
 
-  // Folder picker + vault-switch (host filesystem)
-  const [picker, setPicker]         = useState(null); // props passed straight to <FolderPicker>
-  const [vaultRoot, setVaultRoot]   = useState(null); // container root, caps the in-vault picker
-  const [hostPath, setHostPath]     = useState(null); // HOST_VAULT_PATH from .env
+  const [picker, setPicker]         = useState(null);
+  const [vaultRoot, setVaultRoot]   = useState(null);
+  const [hostPath, setHostPath]     = useState(null);
   const [hostError, setHostError]   = useState(false);
   const [recreating, setRecreating] = useState(false);
 
-  // Initialise drafts from store once settings load
   useEffect(() => {
-    if (!settings.vaultPath) return;
-    const initial = {};
-    for (const section of SECTIONS) {
-      const draft = {};
-      for (const field of section.fields) {
-        draft[field.key] = String(settings[field.key] ?? '');
-      }
-      initial[section.id] = draft;
-    }
-    setDrafts(initial);
-  }, [settings.vaultPath]);
-
-  // Fetch chrono status on mount
-  useEffect(() => {
-    fetchChronoStatus()
-      .then(setChronoStatus)
-      .catch(() => {});
+    fetchChronoStatus().then(setChronoStatus).catch(() => {});
   }, []);
 
-  // Learn the vault root (caps the in-vault picker) and the real host path.
   useEffect(() => {
     fetchChildren(null).then(r => setVaultRoot(r.parentPath)).catch(() => {});
     fetchVaultHostPath()
@@ -222,10 +155,7 @@ export default function SettingsPage() {
       .catch(e => { if (e?.status !== 401 && e?.status !== 403) setHostError(true); });
   }, []);
 
-  // ── Folder pickers ──────────────────────────────────────────────────────────
-
-  // Browse inside the mounted vault (for the resources folder). Never climbs
-  // above the vault root.
+  // Browse inside the mounted vault (resources folder). Never climbs above the vault root.
   const loadVaultDir = useCallback(async (path) => {
     const r = await fetchChildren(path);
     const current = r.parentPath;
@@ -233,18 +163,18 @@ export default function SettingsPage() {
     return { current, parent, dirs: r.folderPaths.map(p => ({ path: p, name: baseName(p) })) };
   }, [vaultRoot]);
 
-  // Browse the real host filesystem (for the vault root) via the host-wrapper.
+  // Browse the real host filesystem (vault root) via the host helper.
   const loadHostDir = useCallback(async (path) => {
     const r = await fetchHostChildren(path);
     return { current: r.path, parent: r.parent ?? null, dirs: r.dirs };
   }, []);
 
-  function openResourcePicker(sectionId, key, value) {
+  function openResourcePicker(field) {
     setPicker({
       title: 'Select resources folder',
       loadPath: loadVaultDir,
-      initialPath: value || null,
-      onSelect: (p) => { setField(sectionId, key, p); setPicker(null); },
+      initialPath: draft[field.key] || null,
+      onSelect: (p) => { setDraft(field.key, p); commit(field, p); setPicker(null); },
       onClose: () => setPicker(null),
     });
   }
@@ -268,65 +198,8 @@ export default function SettingsPage() {
       await saveVaultHostPath(path);
       setHostPath(path);
     } catch {
-      // The recreate may tear the backend down before it answers — that's fine,
-      // the overlay polls health and reloads once it returns.
+      // The recreate may tear the backend down before it answers — the overlay polls health and reloads.
     }
-  }
-
-  function setField(sectionId, key, value) {
-    setDrafts(prev => ({
-      ...prev,
-      [sectionId]: { ...prev[sectionId], [key]: value },
-    }));
-    // Clear any previous status when user edits
-    setStatus(prev => ({ ...prev, [sectionId]: 'idle' }));
-    setErrors(prev => ({ ...prev, [sectionId]: undefined }));
-  }
-
-  async function saveSection(section) {
-    const draft = drafts[section.id] ?? {};
-    const patch = {};
-
-    for (const field of section.fields) {
-      const raw = draft[field.key];
-      if (field.type === 'number') {
-        const n = parseInt(raw, 10);
-        const belowMin = isNaN(n) || n < (field.min ?? 1);
-        const aboveMax = field.max != null && n > field.max;
-        if (belowMin || aboveMax) {
-          const msg = field.max != null
-            ? `${field.label} must be between ${field.min ?? 1} and ${field.max}.`
-            : `${field.label} must be a positive integer.`;
-          setErrors(prev => ({ ...prev, [section.id]: msg }));
-          return;
-        }
-        patch[field.key] = n;
-      } else {
-        if (!raw || !raw.trim()) {
-          setErrors(prev => ({ ...prev, [section.id]: `${field.label} cannot be empty.` }));
-          return;
-        }
-        patch[field.key] = raw.trim();
-      }
-    }
-
-    setStatus(prev => ({ ...prev, [section.id]: 'saving' }));
-    setErrors(prev => ({ ...prev, [section.id]: undefined }));
-
-    try {
-      await applySettings(patch);
-      setStatus(prev => ({ ...prev, [section.id]: 'saved' }));
-      setTimeout(() => setStatus(prev => ({ ...prev, [section.id]: 'idle' })), 2500);
-    } catch (e) {
-      setErrors(prev => ({ ...prev, [section.id]: e.message ?? 'Failed to save.' }));
-      setStatus(prev => ({ ...prev, [section.id]: 'error' }));
-    }
-  }
-
-  function isDirty(section) {
-    const draft = drafts[section.id];
-    if (!draft) return false;
-    return section.fields.some(f => String(settings[f.key] ?? '') !== draft[f.key]);
   }
 
   async function handleChronoRun() {
@@ -337,8 +210,8 @@ export default function SettingsPage() {
       const result = await runChronoNow();
       setChronoResult(result);
       setChronoStatus({ lastRunDate: result.date });
-    } catch (e) {
-      setChronoError('Run failed — check server logs.');
+    } catch {
+      setChronoError('The nightly jobs didn’t finish — check the server logs.');
     } finally {
       setChronoRunning(false);
     }
@@ -346,150 +219,142 @@ export default function SettingsPage() {
 
   const loaded = Boolean(settings.vaultPath);
 
+  // One autosaving control. Selects commit on change; text/number on blur or Enter.
+  function renderField(field) {
+    const id = `set-${field.key}`;
+    const label = <>{field.label}<SavedMark status={status[field.key]} /></>;
+    const err = errors[field.key];
+    const value = draft[field.key] ?? '';
+    let control;
+
+    if (field.type === 'select') {
+      control = (
+        <Select
+          id={id} value={value} disabled={!loaded}
+          options={field.options.map(o => ({ value: String(o.value), label: o.label }))}
+          onChange={e => { setDraft(field.key, e.target.value); commit(field, e.target.value); }}
+        />
+      );
+    } else if (field.type === 'number') {
+      control = (
+        <Input
+          id={id} type="number" inputMode="numeric" min={field.min} max={field.max}
+          className={styles.numInput} value={value} disabled={!loaded}
+          onChange={e => setDraft(field.key, e.target.value)}
+          onBlur={() => commit(field)}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        />
+      );
+    } else {
+      control = (
+        <Input
+          id={id} className={styles.mono} value={value} placeholder={field.placeholder ?? ''} disabled={!loaded}
+          onChange={e => setDraft(field.key, e.target.value)}
+          onBlur={() => commit(field)}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+        />
+      );
+    }
+
+    if (field.browse) {
+      return (
+        <div key={field.key} className={styles.fieldRow}>
+          <Field label={label} hint={field.hint} error={err}>
+            <Input
+              id={id} className={styles.mono} value={value} placeholder={field.placeholder ?? ''} disabled={!loaded}
+              onChange={e => setDraft(field.key, e.target.value)}
+              onBlur={() => commit(field)}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            />
+          </Field>
+          <div className={styles.pathActions}>
+            <Button size="sm" disabled={!loaded} onClick={() => openResourcePicker(field)}>Browse…</Button>
+            <CopyButton text={value} />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div key={field.key} className={styles.fieldRow}>
+        <Field label={label} hint={field.hint} error={err}>{control}</Field>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Settings</h1>
-        <p className={styles.subtitle}>Configure your vault and preferences.</p>
-      </div>
+      <PageHeader title="Settings" subtitle="Changes save automatically." />
 
-      <div className={styles.sections}>
-        {/* Vault root — lives in .env / the Docker mount, switched via the host
-            picker which recreates the backend. Not a normal saveable field. */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <h2 className={styles.sectionTitle}>Vault</h2>
-            <p className={styles.sectionDesc}>
-              The folder on your computer the app reads and writes. Switching it remounts and
-              restarts the backend automatically.
-            </p>
-          </div>
-          <div className={styles.fields}>
-            <div className={styles.field}>
-              <div className={styles.fieldMeta}>
-                <label className={styles.label}>Vault folder</label>
-                <span className={styles.hint}>
-                  {hostError
-                    ? 'Folder picker unavailable — the host helper is not running.'
-                    : 'The location on your machine mounted into the app.'}
-                </span>
-              </div>
-              <div className={styles.pathRow}>
-                <input
-                  className={`${styles.input} ${styles.inputPath}`}
-                  value={hostPath ?? ''}
-                  readOnly
-                  placeholder={hostError ? 'unavailable' : 'Loading…'}
-                />
-                <button
-                  type="button"
-                  className={styles.browseBtn}
-                  disabled={hostError || hostPath == null}
-                  onClick={openVaultPicker}
-                >
-                  Browse…
-                </button>
-              </div>
+      <div className={styles.groups}>
+        <Group title="Vault" description="Where your notes live.">
+          <div className={styles.fieldRow}>
+            <Field
+              label="Vault folder"
+              hint={hostError
+                ? 'Changing the vault from here needs the helper app running on your computer, and it isn’t right now. You can still point to another folder by editing HOST_VAULT_PATH in .env and restarting.'
+                : 'The folder on your computer that the app reads and writes. Switching it restarts the backend for a few seconds.'}
+            >
+              <Input
+                className={styles.mono} readOnly value={hostPath ?? ''}
+                placeholder={hostError ? 'Unavailable' : 'Loading…'}
+              />
+            </Field>
+            <div className={styles.pathActions}>
+              <Button size="sm" disabled={hostError || hostPath == null} onClick={openVaultPicker}>Change…</Button>
+              <CopyButton text={hostPath ?? ''} />
             </div>
           </div>
-        </div>
+          {renderField(F.resourcePath)}
+        </Group>
 
-        {SECTIONS.map(section => {
+        <Group title="Learning" description="Reviews, flashcards, tracks and the nightly clean-up.">
+          {renderField(F.flashcardsEnabled)}
+          {renderField(F.maxDailyReviews)}
+          {renderField(F.maxDailyFlashcards)}
+          {renderField(F.reviewPageSize)}
+          {renderField(F.tracksEnabled)}
+          {renderField(F.chronicNeglectDays)}
+          {renderField(F.bankruptcyLimit)}
+        </Group>
 
-          const st   = status[section.id] ?? 'idle';
-          const err  = errors[section.id];
-          const dirty = isDirty(section);
+        <Group title="Feed" description="Subscribed sources in Learn ▸ Feed.">
+          {renderField(F.feedAutoAccept)}
+        </Group>
 
-          return (
-            <div key={section.id} className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <h2 className={styles.sectionTitle}>{section.title}</h2>
-                <p className={styles.sectionDesc}>{section.description}</p>
-              </div>
-
-              <div className={styles.fields}>
-                {section.fields.map(field => (
-                  <div key={field.key} className={styles.field}>
-                    <div className={styles.fieldMeta}>
-                      <label className={styles.label} htmlFor={`${section.id}-${field.key}`}>
-                        {field.label}
-                      </label>
-                      {field.hint && <span className={styles.hint}>{field.hint}</span>}
-                    </div>
-                    <FieldInput
-                      id={`${section.id}-${field.key}`}
-                      field={field}
-                      value={drafts[section.id]?.[field.key] ?? ''}
-                      disabled={!loaded}
-                      onChange={val => setField(section.id, field.key, val)}
-                      onEnter={() => saveSection(section)}
-                      onBrowse={() => openResourcePicker(section.id, field.key, drafts[section.id]?.[field.key] ?? '')}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className={styles.sectionFooter}>
-                {err && <span className={styles.errorMsg}>{err}</span>}
-                {st === 'saved' && !err && (
-                  <span className={styles.savedMsg}>Saved.</span>
-                )}
-                <button
-                  className={styles.saveBtn}
-                  disabled={!loaded || st === 'saving' || !dirty}
-                  onClick={() => saveSection(section)}
-                >
-                  {st === 'saving' ? 'Saving…' : 'Save'}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Google Drive sync — sign in, passphrase, enable, manual triggers */}
         <DriveSyncPanel loaded={loaded} isAuthenticated={isAuthenticated} />
 
-        {/* Chrono status — read-only panel with manual trigger */}
-        <div className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <h2 className={styles.sectionTitle}>Chrono Status</h2>
-            <p className={styles.sectionDesc}>
-              Daily jobs run automatically at 2am and on startup. FileMover → BankruptcyCheck → SpreadCheck.
-            </p>
-          </div>
-
-          <div className={styles.fields}>
-            <div className={styles.field}>
-              <div className={styles.fieldMeta}>
-                <label className={styles.label}>Last run</label>
-              </div>
-              <span className={styles.hint}>
-                {chronoStatus?.lastRunDate || 'Never'}
-              </span>
-            </div>
-          </div>
-
-          {chronoResult && (
-            <p className={styles.hint} style={{ marginTop: '8px' }}>
-              Moved {chronoResult.filesMoved} file(s) · Overdue {chronoResult.bankruptcy.overdueCount} ·
-              Neglect-lapsed {chronoResult.bankruptcy.chronicNeglected} note(s)
-              {chronoResult.bankruptcy.declared ? ' (bankruptcy declared)' : ''} ·
-              Shifted {chronoResult.spread.moved} note(s)
-            </p>
-          )}
-          {chronoError && <span className={styles.errorMsg}>{chronoError}</span>}
-
-          <div className={styles.sectionFooter}>
-            <button
-              className={styles.saveBtn}
-              disabled={chronoRunning || !isAuthenticated}
-              onClick={handleChronoRun}
+        <Group title="Advanced" description="Startup behaviour and background jobs.">
+          {renderField(F.startupSyncMode)}
+          <div className={styles.fieldRow}>
+            <Field
+              label="Search model"
+              hint="Set by the server (EMBED_MODEL in docker-compose), so it can’t be changed here. Changing it means restarting and re-indexing every note."
             >
-              {chronoRunning ? 'Running…' : 'Run now'}
-            </button>
+              <Input className={styles.mono} readOnly value={settings.embedModel ?? ''} placeholder="Not reported" />
+            </Field>
           </div>
-        </div>
-
+          <div className={styles.fieldRow}>
+            <Field
+              label="Nightly jobs"
+              hint="Move files, reset badly overdue notes and spread out the review load. Runs at 2am and on startup."
+            >
+              <div className={styles.inline}>
+                <span className={styles.value}>Last run: {chronoStatus?.lastRunDate || 'never'}</span>
+                <Button size="sm" loading={chronoRunning} disabled={!isAuthenticated} onClick={handleChronoRun}>Run now</Button>
+              </div>
+            </Field>
+            {chronoResult && (
+              <p className={styles.note} role="status">
+                Moved {chronoResult.filesMoved} file(s) · {chronoResult.bankruptcy.overdueCount} overdue ·
+                {' '}{chronoResult.bankruptcy.chronicNeglected} neglected note(s) reset
+                {chronoResult.bankruptcy.declared ? ' (bankruptcy declared)' : ''} ·
+                {' '}{chronoResult.spread.moved} note(s) rescheduled
+              </p>
+            )}
+            {chronoError && <p className={styles.error} role="alert">{chronoError}</p>}
+          </div>
+        </Group>
       </div>
 
       {picker && <FolderPicker {...picker} />}
@@ -498,25 +363,26 @@ export default function SettingsPage() {
   );
 }
 
-// ── Google Drive sync panel ─────────────────────────────────────────────────────
+// ── Google Drive sync (group "Sync") ───────────────────────────────────────────
 // Sign in with Google (OAuth, drive.file scope — synced files land in YOUR Drive),
 // set the encryption passphrase, toggle auto-sync, and trigger upload/download.
 // Secrets are write-only: the backend only reports whether they are saved.
+// Credentials keep an explicit Save button; the auto-sync toggle autosaves.
 
 function DriveSyncPanel({ loaded, isAuthenticated }) {
   const settings      = useStore(s => s.settings);
   const applySettings = useStore(s => s.applySettings);
 
-  const [sync, setSync]         = useState(null);   // /sync/status payload
+  const [sync, setSync]         = useState(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [passphrase, setPassphrase]     = useState('');
-  const [busy, setBusy]         = useState(null);   // 'save' | 'connect' | 'disconnect' | 'upload' | 'download' | 'janitor'
+  const [busy, setBusy]         = useState(null);
   const [error, setError]       = useState(null);
   const [notice, setNotice]     = useState(null);
-  const [editCreds, setEditCreds]     = useState(false); // un-hide saved fields to fix a typo
+  const [editCreds, setEditCreds]     = useState(false);
+  const [autoSaved, setAutoSaved]     = useState(false);
 
-  // Fields are hidden once satisfied (from .env seed or a previous save).
   const clientIdSet   = Boolean(settings.syncClientId);
   const secretSet     = Boolean(settings.syncClientSecretSet);
   const passSet       = Boolean(settings.syncPassphraseSet);
@@ -529,7 +395,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
 
   useEffect(() => { if (isAuthenticated) refreshStatus(); }, [isAuthenticated, refreshStatus]);
 
-  // While an upload drain / DB backup / DB restore runs, poll status so progress ticks.
+  // While an upload / DB backup / restore runs, poll status so progress ticks.
   const inFlight = Boolean(sync?.uploading || sync?.dbBackupRunning || sync?.dbRestoring);
   useEffect(() => {
     if (!inFlight) return undefined;
@@ -537,7 +403,6 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
     return () => clearInterval(id);
   }, [inFlight, refreshStatus]);
 
-  // Prefill the client id from saved settings once they load.
   useEffect(() => { setClientId(settings.syncClientId ?? ''); }, [settings.syncClientId]);
 
   // Returning from Google: /settings?drive=connected|error&reason=…
@@ -546,7 +411,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
     const drive = params.get('drive');
     if (!drive) return;
     if (drive === 'connected') setNotice('Google Drive connected.');
-    else setError(`Connect failed: ${params.get('reason') || 'unknown error'}`);
+    else setError(`Couldn’t connect Google Drive: ${params.get('reason') || 'unknown error'}`);
     window.history.replaceState(null, '', window.location.pathname);
   }, []);
 
@@ -558,7 +423,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
       await fn();
       refreshStatus();
     } catch (e) {
-      setError(e.message ?? 'Request failed.');
+      setError(e?.message && !/^\d+$/.test(e.message) ? e.message : 'That didn’t work — try again.');
     } finally {
       setBusy(null);
     }
@@ -576,7 +441,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
       setClientSecret('');
       setPassphrase('');
       setEditCreds(false);
-      setNotice('Saved.');
+      setNotice('Credentials saved.');
     });
   }
 
@@ -584,6 +449,17 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
     return run('connect', async () => {
       window.location.href = await fetchOAuthUrl();
     });
+  }
+
+  async function toggleAuto(value) {
+    setError(null);
+    try {
+      await applySettings({ syncEnabled: value === 'true' });
+      setAutoSaved(true);
+      setTimeout(() => setAutoSaved(false), 2000);
+    } catch (e) {
+      setError(e?.message && !/^\d+$/.test(e.message) ? e.message : 'Couldn’t save — try again.');
+    }
   }
 
   function restoreDb() {
@@ -597,208 +473,185 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
 
   const connected = Boolean(sync?.connected);
   const queueLine = sync
-    ? `${sync.pendingCount ?? 0} pending · ${sync.doneCount ?? 0} synced · ${sync.failedCount ?? 0} failed`
+    ? `${sync.pendingCount ?? 0} waiting · ${sync.doneCount ?? 0} synced · ${sync.failedCount ?? 0} failed`
       + (sync.uploading ? ` · uploading ${sync.uploadDone ?? 0}/${sync.uploadTotal ?? 0}…` : '')
-    : '—';
+    : '';
+  const redirectUri = `${window.location.origin}/api/sync/oauth/callback`;
+  const working = busy != null || sync?.uploading || sync?.dbBackupRunning || sync?.dbRestoring;
 
   return (
-    <div className={styles.section}>
-      <div className={styles.sectionHeader}>
-        <h2 className={styles.sectionTitle}>Google Drive Sync</h2>
-        <p className={styles.sectionDesc}>
-          Encrypted per-file backup of the vault to your Google Drive (gzip + AES-256, Google
-          never sees plaintext). Credentials come from <code>.env</code>{' '}
-          (<code>GOOGLE_OAUTH_CLIENT_ID/SECRET</code>, <code>SYNC_PASSPHRASE</code>) or the
-          fields below — once set, the fields hide.
-          {!credsComplete && (
-            <> Missing: create an OAuth client (type “Web application”) in Google Cloud Console
-            with redirect URI <code>{window.location.origin}/api/sync/oauth/callback</code>,
-            then fill the fields and Save.</>
-          )}
-        </p>
+    <Group
+      title="Sync"
+      description="Encrypted backup of your vault to your own Google Drive. Google never sees plaintext."
+    >
+      <div className={styles.fieldRow}>
+        <Field label="Status">
+          <div className={styles.inline}>
+            {!sync
+              ? <span className={styles.value}>Unavailable — sign in first.</span>
+              : <>
+                  <Badge tone={connected ? 'success' : 'neutral'}>{connected ? 'Connected' : 'Not connected'}</Badge>
+                  <span className={styles.value}>
+                    {connected && `${sync.accountEmail || 'Google account'} · `}{queueLine}
+                    {sync.quota?.usedBytes != null &&
+                      ` · Drive ${fmtBytes(sync.quota.usedBytes)} of ${sync.quota.limitBytes ? fmtBytes(sync.quota.limitBytes) : '∞'} used`}
+                    {!sync.encryptionConfigured && ' · passphrase not set'}
+                  </span>
+                </>}
+          </div>
+        </Field>
       </div>
 
-      <div className={styles.fields}>
-        <div className={styles.field}>
-          <div className={styles.fieldMeta}>
-            <label className={styles.label}>Status</label>
-          </div>
-          <span className={styles.hint}>
-            {!sync ? 'Unavailable — sign in first.'
-              : connected
-                ? `Connected as ${sync.accountEmail || 'Google account'} · ${queueLine}`
-                : `Not connected · ${queueLine}`}
-            {sync?.quota?.usedBytes != null &&
-              ` · Drive ${fmtBytes(sync.quota.usedBytes)} of ${sync.quota.limitBytes ? fmtBytes(sync.quota.limitBytes) : '∞'} used`}
-            {sync && !sync.encryptionConfigured ? ' · ⚠ passphrase not set' : ''}
-          </span>
-        </div>
-
-        {credsComplete && !editCreds && (
-          <div className={styles.field}>
-            <div className={styles.fieldMeta}>
-              <label className={styles.label}>Credentials</label>
+      {credsComplete && !editCreds && (
+        <div className={styles.fieldRow}>
+          <Field label="Credentials">
+            <div className={styles.inline}>
+              <span className={styles.value}>OAuth client and passphrase are set ✓</span>
+              <Button size="sm" variant="ghost" onClick={() => setEditCreds(true)}>Edit</Button>
             </div>
-            <span className={styles.hint}>
-              OAuth client + passphrase configured ✓{' '}
-              <button
-                type="button" className={styles.browseBtn}
-                onClick={() => setEditCreds(true)}
-              >
-                edit
-              </button>
-            </span>
-          </div>
-        )}
-
-        {showFields && (!clientIdSet || editCreds) && (
-          <div className={styles.field}>
-            <div className={styles.fieldMeta}>
-              <label className={styles.label} htmlFor="sync-client-id">OAuth client ID</label>
-            </div>
-            <input
-              id="sync-client-id" type="text"
-              className={`${styles.input} ${styles.inputPath}`}
-              value={clientId} disabled={!loaded}
-              placeholder="…apps.googleusercontent.com"
-              onChange={e => setClientId(e.target.value)}
-            />
-          </div>
-        )}
-
-        {showFields && (!secretSet || editCreds) && (
-          <div className={styles.field}>
-            <div className={styles.fieldMeta}>
-              <label className={styles.label} htmlFor="sync-client-secret">OAuth client secret</label>
-            </div>
-            <input
-              id="sync-client-secret" type="password"
-              className={styles.input}
-              value={clientSecret} disabled={!loaded}
-              placeholder={secretSet ? '•••••• (saved — type to replace)' : ''}
-              onChange={e => setClientSecret(e.target.value)}
-            />
-          </div>
-        )}
-
-        {showFields && (!passSet || editCreds) && (
-          <div className={styles.field}>
-            <div className={styles.fieldMeta}>
-              <label className={styles.label} htmlFor="sync-passphrase">Encryption passphrase</label>
-              <span className={styles.hint}>
-                Same passphrase on every device. Changing it makes files already on Drive
-                unreadable until re-uploaded.
-              </span>
-            </div>
-            <input
-              id="sync-passphrase" type="password"
-              className={styles.input}
-              value={passphrase} disabled={!loaded}
-              placeholder={passSet ? '•••••• (saved — type to replace)' : ''}
-              onChange={e => setPassphrase(e.target.value)}
-            />
-          </div>
-        )}
-
-        <div className={styles.field}>
-          <div className={styles.fieldMeta}>
-            <label className={styles.label} htmlFor="sync-enabled">Automatic sync</label>
-            <span className={styles.hint}>Uploads pending changes on a schedule (default every 6h).</span>
-          </div>
-          <select
-            id="sync-enabled"
-            className={styles.input}
-            value={String(settings.syncEnabled ?? false)}
-            disabled={!loaded || busy != null}
-            onChange={e => run('save', () => applySettings({ syncEnabled: e.target.value === 'true' }))}
-          >
-            <option value="false">Off</option>
-            <option value="true">On — scheduled background uploads</option>
-          </select>
-        </div>
-      </div>
-
-      {error  && <span className={styles.errorMsg}>{error}</span>}
-      {notice && !error && <span className={styles.savedMsg}>{notice}</span>}
-
-      {/* Setup actions (Save creds / Connect) — only before the account is linked. */}
-      {(!connected || showFields) && (
-        <div className={styles.sectionFooter}>
-          {!connected && !(clientIdSet && secretSet) && (
-            <span className={styles.hint}>
-              Connect needs the OAuth client id + secret saved (fields above or .env).
-            </span>
-          )}
-          {showFields && (
-            <button
-              className={styles.saveBtn}
-              disabled={!loaded || busy != null || !credsDirty}
-              onClick={saveCreds}
-            >
-              {busy === 'save' ? 'Saving…' : 'Save'}
-            </button>
-          )}
-          {!connected && (
-            <button
-              className={styles.saveBtn}
-              disabled={!loaded || busy != null || !(clientIdSet && secretSet)}
-              onClick={connect}
-            >
-              {busy === 'connect' ? 'Redirecting…' : 'Connect Google Drive'}
-            </button>
-          )}
+          </Field>
         </div>
       )}
 
-      {/* Connected: 3 full-width buttons — Full Backup, Restore, Disconnect. */}
+      {showFields && (
+        <>
+          <div className={styles.fieldRow}>
+            <p className={styles.note}>
+              Credentials come from <code>.env</code> (<code>GOOGLE_OAUTH_CLIENT_ID/SECRET</code>,{' '}
+              <code>SYNC_PASSPHRASE</code>) or the fields below. In Google Cloud Console create an OAuth
+              client (type “Web application”) with this redirect URI:
+            </p>
+            <div className={styles.uriRow}>
+              <code className={styles.uri}>{redirectUri}</code>
+              <CopyButton text={redirectUri} />
+            </div>
+          </div>
+          {(!clientIdSet || editCreds) && (
+            <div className={styles.fieldRow}>
+              <Field label="OAuth client ID">
+                <Input
+                  className={styles.mono} value={clientId} disabled={!loaded}
+                  placeholder="…apps.googleusercontent.com"
+                  onChange={e => setClientId(e.target.value)}
+                />
+              </Field>
+            </div>
+          )}
+          {(!secretSet || editCreds) && (
+            <div className={styles.fieldRow}>
+              <Field label="OAuth client secret">
+                <Input
+                  type="password" value={clientSecret} disabled={!loaded}
+                  placeholder={secretSet ? '•••••• (saved — type to replace)' : ''}
+                  onChange={e => setClientSecret(e.target.value)}
+                />
+              </Field>
+            </div>
+          )}
+          {(!passSet || editCreds) && (
+            <div className={styles.fieldRow}>
+              <Field
+                label="Encryption passphrase"
+                hint="Use the same passphrase on every device. Changing it makes files already on Drive unreadable until they’re re-uploaded."
+              >
+                <Input
+                  type="password" value={passphrase} disabled={!loaded}
+                  placeholder={passSet ? '•••••• (saved — type to replace)' : ''}
+                  onChange={e => setPassphrase(e.target.value)}
+                />
+              </Field>
+            </div>
+          )}
+          <div className={styles.fieldRow}>
+            <div className={styles.actions}>
+              <Button variant="primary" loading={busy === 'save'} disabled={!loaded || busy != null || !credsDirty} onClick={saveCreds}>
+                Save credentials
+              </Button>
+              {!connected && (
+                <Button
+                  loading={busy === 'connect'}
+                  disabled={!loaded || busy != null || !(clientIdSet && secretSet)}
+                  onClick={connect}
+                >
+                  Connect Google Drive
+                </Button>
+              )}
+            </div>
+            {!connected && !(clientIdSet && secretSet) && (
+              <p className={styles.note}>Connecting needs the client ID and secret saved first.</p>
+            )}
+          </div>
+        </>
+      )}
+
+      {credsComplete && !editCreds && !connected && (
+        <div className={styles.fieldRow}>
+          <Button
+            variant="primary" loading={busy === 'connect'}
+            disabled={!loaded || busy != null} onClick={connect}
+          >
+            Connect Google Drive
+          </Button>
+        </div>
+      )}
+
+      <div className={styles.fieldRow}>
+        <Field
+          label={<>Automatic sync{autoSaved && <span className={styles.saveMark}><span className={styles.saved}>Saved ✓</span></span>}</>}
+          hint="Uploads changes on a schedule (every 6 hours by default)."
+        >
+          <Select
+            value={String(settings.syncEnabled ?? false)}
+            disabled={!loaded || busy != null}
+            onChange={e => toggleAuto(e.target.value)}
+            options={[
+              { value: 'false', label: 'Off' },
+              { value: 'true', label: 'On — scheduled background uploads' },
+            ]}
+          />
+        </Field>
+      </div>
+
+      {error  && <div className={styles.fieldRow}><p className={styles.error} role="alert">{error}</p></div>}
+      {notice && !error && <div className={styles.fieldRow}><p className={styles.saved} role="status">{notice}</p></div>}
+
       {connected && (
-        <div className={styles.actionGroups}>
-          <div className={styles.actionGroup}>
-            <button
-              className={styles.saveBtn}
-              disabled={busy != null || sync?.uploading || sync?.dbBackupRunning || sync?.dbRestoring}
+        <div className={styles.fieldRow}>
+          <div className={styles.actions}>
+            <Button
+              variant="primary"
+              disabled={working}
               onClick={() => run('backup', triggerFullBackup)}
-              title="Upload all vault files to Drive, then dump the database (embeddings, cards, OCR, review state) — encrypted."
+              title="Upload all vault files to Drive, then dump the database (embeddings, cards, review state) — encrypted."
             >
               {sync?.uploading
                 ? `Uploading ${sync.uploadDone ?? 0}/${sync.uploadTotal ?? 0}…`
-                : sync?.dbBackupRunning
-                  ? 'Backing up database…'
-                  : (busy === 'backup' ? 'Starting…' : 'Full Backup')}
-            </button>
-            <button
-              className={styles.saveBtn}
-              disabled={busy != null || sync?.dbRestoring || sync?.dbBackupRunning || sync?.uploading || !sync?.dbBackup?.exists}
+                : sync?.dbBackupRunning ? 'Backing up database…'
+                : busy === 'backup' ? 'Starting…' : 'Full backup'}
+            </Button>
+            <Button
+              disabled={working || !sync?.dbBackup?.exists}
               onClick={restoreDb}
-              title="Restore the database and all vault files from Drive (no reprocessing). For moving to a new device."
+              title="Restore the database and all vault files from Drive. For moving to a new device."
             >
-              {sync?.dbRestoring
-                ? `Restoring… ${sync.dbRestorePhase || ''}`
-                : (busy === 'restore' ? 'Starting…' : 'Restore')}
-            </button>
-            <button
-              className={styles.saveBtn}
-              disabled={busy != null}
-              onClick={() => run('disconnect', disconnectDrive)}
-            >
+              {sync?.dbRestoring ? `Restoring… ${sync.dbRestorePhase || ''}` : busy === 'restore' ? 'Starting…' : 'Restore'}
+            </Button>
+            <Button variant="ghost" disabled={busy != null} onClick={() => run('disconnect', disconnectDrive)}>
               {busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
-            </button>
+            </Button>
           </div>
+          <p className={styles.note}>
+            {sync?.dbBackup?.exists
+              ? `Last database backup: ${dbAgo(sync.dbBackup.lastBackupAt)}`
+                + (sync.dbBackup.sizeBytes ? ` · ${fmtBytes(sync.dbBackup.sizeBytes)}` : '')
+                + ` · ${sync.dbBackup.count} kept`
+              : 'No database backup yet — Full backup saves embeddings, cards and review state to Drive.'}
+            {sync?.dbEmpty && sync?.dbBackup?.exists &&
+              ' This database looks empty — Restore will rebuild it from Drive.'}
+          </p>
         </div>
       )}
-
-      {connected && (
-        <p className={styles.hint} style={{ marginTop: '8px' }}>
-          {sync?.dbBackup?.exists
-            ? `Last DB backup: ${dbAgo(sync.dbBackup.lastBackupAt)}`
-              + (sync.dbBackup.sizeBytes ? ` · ${fmtBytes(sync.dbBackup.sizeBytes)}` : '')
-              + ` · ${sync.dbBackup.count} kept`
-            : 'No DB backup yet — “Back up DB now” saves embeddings, cards & review state to Drive.'}
-          {sync?.dbEmpty && sync?.dbBackup?.exists &&
-            ' · This DB looks empty — “Restore from Drive” will rebuild it.'}
-        </p>
-      )}
-    </div>
+    </Group>
   );
 }
 
@@ -822,8 +675,7 @@ function dbAgo(ts) {
 
 // ── Vault recreation overlay ────────────────────────────────────────────────────
 // Blocks the UI while `docker compose up -d` recreates the backend, polling until
-// it returns, then reloads. Falls back to reloading after a grace period in case
-// the down-window was missed (or no recreate was needed).
+// it returns, then reloads. Falls back to reloading after a grace period.
 
 function RecreatingOverlay() {
   useEffect(() => {
@@ -841,83 +693,14 @@ function RecreatingOverlay() {
   }, []);
 
   return (
-    <div className={styles.recreateOverlay}>
+    <div className={styles.recreateOverlay} role="alert">
       <div className={styles.recreateBox}>
-        <div className={styles.spinner} />
+        <Spinner size={34} label="Restarting" />
         <p className={styles.recreateText}>Switching vault &amp; restarting…</p>
         <p className={styles.recreateSub}>
           Reconnecting once the backend is back. This page reloads automatically.
         </p>
       </div>
-    </div>
-  );
-}
-
-// ── Field input ───────────────────────────────────────────────────────────────
-
-function FieldInput({ id, field, value, disabled, onChange, onEnter, onBrowse }) {
-  function handleKey(e) {
-    if (e.key === 'Enter') onEnter();
-  }
-
-  if (field.type === 'select') {
-    return (
-      <select
-        id={id}
-        className={styles.input}
-        value={value}
-        disabled={disabled}
-        onChange={e => onChange(e.target.value)}
-      >
-        {field.options.map(opt => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
-    );
-  }
-
-  if (field.type === 'number') {
-    return (
-      <input
-        id={id}
-        type="number"
-        className={styles.input}
-        value={value}
-        min={field.min}
-        max={field.max}
-        disabled={disabled}
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={handleKey}
-      />
-    );
-  }
-
-  const input = (
-    <input
-      id={id}
-      type="text"
-      className={`${styles.input} ${styles.inputPath}`}
-      value={value}
-      placeholder={field.placeholder ?? ''}
-      disabled={disabled}
-      onChange={e => onChange(e.target.value)}
-      onKeyDown={handleKey}
-    />
-  );
-
-  if (!field.browse) return input;
-
-  return (
-    <div className={styles.pathRow}>
-      {input}
-      <button
-        type="button"
-        className={styles.browseBtn}
-        disabled={disabled}
-        onClick={onBrowse}
-      >
-        Browse…
-      </button>
     </div>
   );
 }
