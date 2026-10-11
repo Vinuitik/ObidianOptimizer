@@ -2,77 +2,113 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <header class="head">
-    <span class="logo">◆</span>
-    <span class="title">Send to Learn</span>
-    <button id="tab-settings-btn" class="gear" title="Settings">⚙</button>
+    <span class="logo" aria-hidden="true">◆</span>
+    <h1 class="title">Send to Learn</h1>
+    <button id="tab-settings-btn" class="gear" type="button" aria-label="Settings" title="Settings">⚙</button>
   </header>
 
   <!-- Capture --------------------------------------------------------------- -->
   <section class="panel active" data-panel="capture">
-    <!-- One-click smart capture of the current tab -->
-    <button id="cap-page" class="btn">📄 Capture this page</button>
-    <p id="cap-page-hint" class="hint">Grabs this tab: scrape an article, download a YouTube video or PDF — the agent takes over if that fails.</p>
+    <!-- Signed-out card: shown instead of the capture controls -->
+    <form id="signin-card" class="card" hidden>
+      <h2 class="card-title">Sign in to start capturing</h2>
+      <label class="lbl" for="si-user">Username</label>
+      <input id="si-user" class="in" type="text" autocomplete="username" />
+      <label class="lbl" for="si-pass">Password</label>
+      <input id="si-pass" class="in" type="password" autocomplete="current-password" />
+      <label class="remember"><input id="si-remember" type="checkbox" checked /> Stay signed in</label>
+      <button id="si-btn" class="btn" type="submit">Sign in</button>
+      <p id="si-status" class="status" role="status" aria-live="polite"></p>
+    </form>
 
-    <button id="subscribe-page" class="btn ghost small">🔔 Subscribe to this page (Feed)</button>
-    <div id="subscribe-form" hidden>
-      <input id="sub-url" class="in" type="text" placeholder="Source URL" />
-      <button id="sub-preview-btn" class="btn small">Preview</button>
-      <button id="sub-cancel" class="btn ghost small">Cancel</button>
+    <div id="capture-main">
+      <button id="cap-page" class="btn" type="button">Capture this page</button>
+      <p id="cap-page-hint" class="hint">Grabs this tab: article, YouTube video or PDF. The agent steps in if that fails.</p>
+      <p id="cap-status" class="status" role="status" aria-live="polite"></p>
+      <p id="cap-links" class="links" hidden>
+        <a id="cap-open-learn" href="#" target="_blank" rel="noopener">Open Learn</a>
+      </p>
+
+      <label class="lbl" for="cap-track">Track (optional)</label>
+      <select id="cap-track" class="in">
+        <option value="">Just capture</option>
+        <option value="__new__">+ New track…</option>
+      </select>
+      <input id="cap-track-title" class="in" type="text" aria-label="New track title" placeholder="New track title" hidden />
+
+      <details id="paste-disc" class="disc">
+        <summary>Paste text, a link, or drop a file</summary>
+        <label class="lbl" for="cap-input">Content</label>
+        <textarea id="cap-input" class="in area" rows="4"
+          placeholder="Paste notes, an article link, a YouTube video, a PDF link… or drop a PDF / audio / video file here."></textarea>
+        <p id="cap-hint" class="hint"></p>
+        <button id="cap-send" class="btn ghost" type="button">Add to Learn queue</button>
+      </details>
+
+      <div class="linkrow">
+        <button id="subscribe-page" class="linkbtn" type="button" aria-expanded="false" aria-controls="subscribe-form">Subscribe to this page's feed</button>
+      </div>
+      <div id="subscribe-form" class="subbox" hidden>
+        <label class="lbl" for="sub-url">Source URL</label>
+        <input id="sub-url" class="in" type="text" placeholder="https://…" />
+        <div class="row">
+          <button id="sub-preview-btn" class="btn small" type="button">Preview</button>
+          <button id="sub-cancel" class="btn ghost small" type="button">Cancel</button>
+        </div>
+      </div>
+      <div id="sub-preview" class="subbox" hidden>
+        <p id="sub-preview-title" class="hint"></p>
+        <ul id="sub-preview-items" class="hint"></ul>
+        <div class="row">
+          <button id="sub-confirm" class="btn small" type="button">Confirm subscribe</button>
+          <button id="sub-back" class="btn ghost small" type="button">Back</button>
+        </div>
+      </div>
+      <p id="sub-status" class="status" role="status" aria-live="polite"></p>
+
+      <!-- Agent activity: what the escalation agent is doing when an extraction fails -->
+      <details id="agent-panel" class="agent" hidden>
+        <summary>Agent activity <span id="agent-badge" class="agent-badge"></span></summary>
+        <ul id="agent-feed" class="agent-feed" aria-live="polite"></ul>
+      </details>
     </div>
-    <div id="sub-preview" hidden>
-      <p id="sub-preview-title" class="hint"></p>
-      <ul id="sub-preview-items" class="hint"></ul>
-      <button id="sub-confirm" class="btn small">Confirm subscribe</button>
-      <button id="sub-back" class="btn ghost small">Back</button>
-    </div>
-    <p id="sub-status" class="status"></p>
-
-    <div class="or"><span>or</span></div>
-
-    <label class="lbl" for="cap-input">Paste text / a link, or drop a file</label>
-    <textarea id="cap-input" class="in area" rows="5"
-      placeholder="Paste anything — notes, an article link, a YouTube video, a PDF link… or drop a PDF / audio / video file here."></textarea>
-    <p id="cap-hint" class="hint"></p>
-
-    <label class="lbl" for="cap-track">Track (optional)</label>
-    <select id="cap-track" class="in">
-      <option value="">Just capture</option>
-      <option value="__new__">+ New track…</option>
-    </select>
-    <input id="cap-track-title" class="in" type="text" placeholder="New track title" hidden />
-
-    <button id="cap-send" class="btn ghost">Add to Learn queue</button>
-    <p id="cap-status" class="status"></p>
-
-    <!-- Agent activity: what the escalation agent is doing when an extraction fails -->
-    <details id="agent-panel" class="agent" hidden>
-      <summary>🤖 Agent activity <span id="agent-badge" class="agent-badge"></span></summary>
-      <ul id="agent-feed" class="agent-feed"></ul>
-    </details>
   </section>
 
   <!-- Settings -------------------------------------------------------------- -->
   <section class="panel" data-panel="settings">
-    <label class="lbl">ObsidianOptimizer API base</label>
-    <input id="cfg-obsidian" class="in" type="text" placeholder="https://obsidianoptimizer.uk/api" />
-    <label class="lbl">Agent WS token (optional — enables the escalation agent)</label>
-    <input id="cfg-agent-token" class="in" type="password" placeholder="AGENT_WS_TOKEN" autocomplete="off" />
-    <button id="cfg-save" class="btn ghost">Save settings</button>
+    <form id="login-form" class="card">
+      <h2 class="card-title" id="auth-line">Sign in</h2>
+      <div id="auth-user-row" class="userrow" hidden>
+        <span>Signed in as <strong id="auth-user"></strong></span>
+        <button id="signout-btn" class="linkbtn" type="button">Sign out</button>
+      </div>
+      <div id="login-fields">
+        <label class="lbl" for="login-user">Username</label>
+        <input id="login-user" class="in" type="text" autocomplete="username" />
+        <label class="lbl" for="login-pass">Password</label>
+        <input id="login-pass" class="in" type="password" autocomplete="current-password" />
+        <label class="remember"><input id="login-remember" type="checkbox" checked /> Stay signed in</label>
+        <button id="login-btn" class="btn" type="submit">Sign in</button>
+      </div>
+      <p id="settings-status" class="status" role="status" aria-live="polite"></p>
+    </form>
 
-    <hr class="sep" />
+    <details class="disc">
+      <summary>Advanced</summary>
+      <label class="lbl" for="cfg-obsidian">API base</label>
+      <input id="cfg-obsidian" class="in" type="text" placeholder="https://obsidianoptimizer.uk/api" />
+      <label class="lbl" for="cfg-agent-token">Agent WS token (optional, enables the escalation agent)</label>
+      <input id="cfg-agent-token" class="in" type="password" placeholder="AGENT_WS_TOKEN" autocomplete="off" />
+      <button id="cfg-save" class="btn ghost" type="button">Save settings</button>
+      <p id="cfg-status" class="status" role="status" aria-live="polite"></p>
+    </details>
 
-    <p class="lbl" id="auth-line">Sign in to ObsidianOptimizer</p>
-    <input id="login-user" class="in" type="text" placeholder="Username" autocomplete="username" />
-    <input id="login-pass" class="in" type="password" placeholder="Password" autocomplete="current-password" />
-    <label class="remember"><input id="login-remember" type="checkbox" checked /> Remember me (stay signed in)</label>
-    <button id="login-btn" class="btn">Sign in</button>
-    <p id="settings-status" class="status"></p>
-
-    <button id="back-btn" class="btn ghost">← Back to capture</button>
+    <button id="back-btn" class="btn ghost" type="button">Back to capture</button>
   </section>
 
   <script type="module" src="popup.js"></script>
