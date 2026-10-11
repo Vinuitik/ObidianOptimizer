@@ -1,6 +1,6 @@
 # PWA / Mobile — FLOWS
-Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, SyncPage.jsx, CapturePage.jsx, quitNotify.js, ../api/capture.js, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, reviewPlan.js, drivePull.js, registerSW.js, vite-pwa.config.js, installPrompt.js, ../../public/sw.js, ../../public/manifest.webmanifest, ../components/atoms/RefreshButton.jsx, ../App.jsx
-> Unused (dropped from the narrow PWA, kept in-tree): MobileNotesPage.jsx, MobileSearchPage.jsx.
+Files: ResponsiveApp.jsx, MobileApp.jsx, MobileLayout.jsx, BottomNav.jsx, TopBar.jsx, UpdateBanner.jsx, syncStatus.js, useDueCount.js, MobileNotesPage.jsx, MobileSearchPage.jsx, SyncPage.jsx, CapturePage.jsx, MobilePages.module.css, shell.test.jsx, quitNotify.js, ../api/capture.js, useMediaQuery.js (re-exports ../utils/useMediaQuery), useOffline.js, connectivity.js, db.js, outbox.js, syncOffline.js, offlineApi.js, reviewPlan.js, drivePull.js, registerSW.js, vite-pwa.config.js, installPrompt.js, ../../public/sw.js, ../../public/manifest.webmanifest, ../components/atoms/RefreshButton.jsx, ../App.jsx
+> Notes (`/notes`, read-only) and Search (`/search`, linked from Notes) are routed again as of the 2026-10-11 UI redesign (W6).
 
 > The installed PWA is a **narrow, offline-capable app** — three jobs: **Review**
 > (flashcards), **Learn** (ingest triage), **Capture** (share-sheet → ingest) + a
@@ -28,7 +28,7 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
 `ResponsiveApp` → `PwaApp` = `BrowserRouter` → `MobileLayout` (shell + offline banner +
 `BottomNav` + `LoginModal`) → route → leaf page:
 - `/` → redirect `/review`; `/review` → `ReviewPage`; `/learn` → `LearnPage`;
-  `/capture` → `CapturePage`; `/settings` → `SyncPage`.
+  `/capture` → `CapturePage`; `/tracks` → `TracksPage`; `/notes` → `MobileNotesPage`; `/search` → `MobileSearchPage`; `/sync` → `SyncPage` (`/settings` redirects to `/sync` for old links).
 - `ReviewPage`/`LearnPage` are the **same** desktop components (reused). `LearnPage`'s
   `InboxReview` renders its **mobile single-view** ([Source | Note] toggle) automatically
   (`LearnLayout` branches on `useIsMobile`) — see components/FLOWS.md.
@@ -52,6 +52,16 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
   (re-checked on window focus). Offline it's skipped — `/login` is unreachable and the
   downloaded set still works. Dismissible (Cancel/overlay); reappears on next focus if
   still signed out. To change: `MobileLayout.jsx` `gate()` effect.
+
+## Flow — PWA shell chrome (W6, UI redesign 2026-10-11)
+`MobileLayout` → `TopBar` (page title from `TopBar.TITLES[pathname]`, sync chip, `RefreshButton`, sign in/out) → `UpdateBanner` → routed page → `BottomNav`.
+- **Tabs:** Review · Learn · Capture · Tracks · Notes (`BottomNav.TABS`). Sync is NOT a tab. To change: `BottomNav.TABS` + `MobileApp` `<Route>`.
+- **Sync chip:** `TopBar` → `syncStatus.useSyncStatus()` → `deriveSyncStatus({online, stage, failedCount, lastSync})` → Badge linking to `/sync`. Priority offline > syncing > failed > synced Xh ago > not synced. `online` = `useOffline`; `stage` = store `syncStage`; `lastSync` = IndexedDB meta (re-read when `stage` changes, ticks every 60s); `failedCount` = `api/capture.fetchFailedCaptures()` polled every `OUTBOX_RETRY_MS` (signed-in + online only). To change wording/priority: `deriveSyncStatus`.
+- **Due badge:** `BottomNav` → `useDueCount()` = store `reviewNotes.length` (same list ReviewPage shows); primed once after sign-in through `initReviewSession()` (no new endpoint). Shows 0 until the queue loads; caps at 99+.
+- **Update banner:** `registerSW.onUpdateAvailable` / `isUpdateReady()` → `UpdateBanner` (persistent, "Reload" → `applyUpdate()`). `main.jsx` still also fires a one-off toast (outside this folder).
+- **Capture result:** `CapturePage` modes Link / Note / File / Subscribe; every outcome shows where it went + link (sent → `/learn` [+ `/tracks` if tagged]; queued → `/sync`). File = `api/capture.captureFile` (online only, not queued).
+- **SyncPage:** one status card ("Offline ready: N cards · synced Xh ago" — N = `db.getAllReviewNotes().length`) + Download button; Failed captures / Account / Drive link / Backup / Notifications are `Disclosure`s (`storageKey` `pwa.sync.*`).
+- Styling: all pwa CSS is layout-only tokens (`MobilePages.module.css`); controls come from atoms/molecules. Allowlist entries for pwa/* removed.
 
 ## Flow — install + offline shell (P1)
 `registerServiceWorker()` → `navigator.serviceWorker.register('/sw.js')` → `requestPersistentStorage()`
@@ -375,6 +385,12 @@ field: `OfflineExportService.exportFeed()` (server) must carry it first.
 | Review-track routing | `ReviewPage.startSession()` (`track==='flashcard'` → `FlashcardSession`, else `InlineNoteReview`) |
 | App vs full-site seam | `ResponsiveApp.jsx` → `matchMedia('(display-mode: standalone)')` (+ `?pwa=` override) |
 | App tabs / scope | `BottomNav.jsx` `TABS` + `MobileApp.jsx` `<Route>` |
+| Page title in TopBar | `TopBar.jsx` `TITLES` |
+| Sync chip states / wording | `syncStatus.js` `deriveSyncStatus()` |
+| Review tab due badge | `useDueCount.js` |
+| Update banner | `UpdateBanner.jsx`; `registerSW.js` `isUpdateReady()` |
+| Capture destinations / links | `CapturePage.jsx` `SHARED_MSG`, `resultMsg()` |
+| Manifest colours | `public/manifest.webmanifest` `theme_color` / `background_color` (= tokens `--bg`); `index.html` theme-color meta still `#0f1115` |
 | PWA activation (live) | `src/main.jsx` (`ResponsiveApp` + `registerServiceWorker()`) |
 | Download-for-offline / sync UI | `SyncPage.jsx` (`syncForOffline`, `flushOutbox`) |
 | Download progress phase labels | `SyncPage.jsx` `STAGE_LABELS` / `stageText()` / `mediaSummary()`; emitted by `drivePull.pullReviewFromDrive`/`refreshAndPull` (`onStage`) + `warmMedia.warmReviewMedia` (`onProgress.phase`) |

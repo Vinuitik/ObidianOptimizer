@@ -27,4 +27,3 @@ pages/GetAppPage.module.css
 pages/LearnPage.module.css
 pages/SettingsPage.module.css
 pages/TracksPage.module.css
-pwa/MobilePages.module.css

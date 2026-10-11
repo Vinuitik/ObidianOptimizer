@@ -15,7 +15,6 @@ export default function MobileSearchPage() {
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.pageTitle}>Search</h1>
       <SearchBar value={query} onChange={setQuery} />
       <p className={styles.hint}>Type to search across your vault. Results open in the Notes tab.</p>
     </div>

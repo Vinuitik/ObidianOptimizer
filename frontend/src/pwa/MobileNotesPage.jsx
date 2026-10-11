@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import useStore from '../store/useStore';
+import Button from '../components/atoms/Button';
 import FolderTree from '../components/organisms/FolderTree';
 import { renderMarkdown } from '../utils/markdown';
 import styles from './MobilePages.module.css';
 
-// Notes tab: full-width FolderTree → tap a note → full-screen read-only render.
+// Notes tab (page title comes from TopBar): full-width FolderTree → tap a note → full-screen read-only render.
 // Mobile v1 is view-only (no Milkdown editing on a phone — deliberate scope cut),
 // so we render currentNoteRaw with the shared renderMarkdown() instead of the
 // desktop WYSIWYG editor. Wiki-links and ![[image]] embeds reuse the same markup.
@@ -48,7 +50,7 @@ export default function MobileNotesPage() {
     return (
       <div className={styles.reader}>
         <header className={styles.readerBar}>
-          <button className={styles.back} onClick={() => setViewing(false)}>← Notes</button>
+          <Button variant="ghost" size="sm" onClick={() => setViewing(false)}>← Notes</Button>
           <span className={styles.readerTitle}>{title}</span>
         </header>
         <article
@@ -62,7 +64,7 @@ export default function MobileNotesPage() {
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.pageTitle}>Notes</h1>
+      <Link to="/search" className={styles.searchLink}>Search notes</Link>
       <div className={styles.tree}>
         <FolderTree />
       </div>

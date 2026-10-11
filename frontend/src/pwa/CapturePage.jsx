@@ -1,31 +1,46 @@
-import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { captureUrl, captureText } from './offlineApi';
 import { fetchTracks } from '../api/tracks';
 import { addFeedSource } from '../api/feed';
+import { captureFile } from '../api/capture';
 import { ApiError } from '../api/notes';
 import { getMeta, setMeta } from './db';
 import useOffline from './useOffline';
+import Button from '../components/atoms/Button';
+import Input from '../components/atoms/Input';
+import Textarea from '../components/atoms/Textarea';
+import Select from '../components/atoms/Select';
+import SegmentedTabs from '../components/molecules/SegmentedTabs';
 import styles from './MobilePages.module.css';
 
-// Capture tab — two ways in, both landing in the Learn inbox via the ingest pipeline:
-//   • Link — paste/share a URL (the share-sheet path is handled in public/sw.js).
-//   • Note — type a rough note (brain dump); the text becomes its own source and is
-//            ingested into the inbox so you're guaranteed to come back to it once.
-// Sharing a PDF/video/audio FILE is handled by the share-sheet (sw.js → /api/capture/file);
-// there's no manual file picker here by design (the app stays narrow).
-// Precise about WHAT happened and WHERE the thing is right now — "sent to the server"
-// (accepted, synthesis pipeline picks it up next) is as far as any of these states can
-// honestly claim; a note being fully processed, or later backed up to Drive, are separate
-// server-side events this page has no live signal for yet.
-const SHARED_MSG = {
-  ok:          { text: 'Sent to server — now processing into a note.',                  tone: 'ok' },
-  offline:     { text: "You're offline — queued locally on this device. Will send once you're back online.", tone: 'warn' },
-  unreachable: { text: "Server unreachable — queued locally on this device. Will retry automatically.",      tone: 'warn' },
-  auth:        { text: 'Sign in, then it will be sent (queued locally for now).',        tone: 'warn' },
-  err:         { text: "Couldn't read what was shared.",                                 tone: 'err' },
+// Capture tab - four ways in, all landing in the Learn inbox via the ingest pipeline:
+//   Link      - paste a URL (the share-sheet path is handled in public/sw.js).
+//   Note      - a rough brain dump; becomes its own source in the inbox.
+//   File      - pick a PDF/audio/video (online only: api/capture.captureFile, no outbox).
+//   Subscribe - add a feed source.
+// Every outcome says WHERE it went and links there (LEARN / TRACKS / SYNC below).
+const LEARN  = { to: '/learn',  label: 'Open Learn inbox' };
+const SYNC   = { to: '/sync',   label: 'View sync status' };
+const TRACKS = { to: '/tracks', label: 'Open Tracks' };
+
+// Precise about WHAT happened and WHERE the thing is right now - "sent to the server"
+// (accepted, synthesis pipeline picks it up next) is as far as any state can honestly claim.
+export const SHARED_MSG = {
+  ok:          { text: 'Sent to server - now processing into your Learn inbox.', tone: 'ok', links: [LEARN] },
+  offline:     { text: "You're offline - queued on this device. It sends when you're back online.", tone: 'warn', links: [SYNC] },
+  unreachable: { text: 'Server unreachable - queued on this device. Will retry automatically.', tone: 'warn', links: [SYNC] },
+  auth:        { text: 'Sign in, then it sends (queued on this device for now).', tone: 'warn', links: [SYNC] },
+  err:         { text: "Couldn't read what was shared.", tone: 'err', links: [] },
 };
+
+const MODES = [
+  { id: 'link', label: 'Link' },
+  { id: 'note', label: 'Note' },
+  { id: 'file', label: 'File' },
+  { id: 'subscribe', label: 'Subscribe' },
+];
 
 export default function CapturePage() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
@@ -34,28 +49,22 @@ export default function CapturePage() {
 
   const online = useOffline();
 
-  const [mode, setMode] = useState('link'); // 'link' | 'note' | 'subscribe'
+  const [mode, setMode] = useState('link');
   const [url, setUrl] = useState('');
   const [noteText, setNoteText] = useState('');
   const [noteTitle, setNoteTitle] = useState('');
-  const [status, setStatus] = useState(null); // { text, tone }
+  const [file, setFile] = useState(null);
+  const fileRef = useRef(null);
+  const [status, setStatus] = useState(null); // { text, tone, links }
   const [busy, setBusy] = useState(false);
-
-  // Subscribe → POST /feed/sources (tracks/FLOWS_feed.md) — deliberate, infrequent action,
-  // unlike Link/Note which go through the offline outbox. No queueing here by design.
   const [subUrl, setSubUrl] = useState('');
 
-  // Track picker (tracks/FLOWS.md Phase 1b) — this manual capture form is already a
-  // deliberate multi-field form (not fire-and-forget like the share-target), so it gets
-  // the same "tag it at capture time" seam as the extension. '' = Just capture (default,
-  // today's exact behavior), '__new__' reveals the new-track title field, else a track id.
+  // Track picker: '' = Just capture, '__new__' reveals the new-track title field, else a
+  // track id. Fetch result is cached to meta so offline falls back to the last-known list.
   const [tracks, setTracks] = useState([]);
   const [trackChoice, setTrackChoice] = useState('');
   const [newTrackTitle, setNewTrackTitle] = useState('');
 
-  // Fetch tracks, caching a successful result to meta so an offline fetch failure can
-  // fall back to the last-known list instead of leaving the picker blank with no
-  // explanation (stale is fine — same cached-state-beats-no-state stance as Drive sync).
   async function loadTracks() {
     try {
       const list = (await fetchTracks() || []).filter(t => t.status === 'active');
@@ -72,6 +81,8 @@ export default function CapturePage() {
     loadTracks();
   }, [isAuthenticated]);
 
+  const tagged = trackChoice !== '';
+
   function trackOpts() {
     if (trackChoice === '__new__') {
       const title = newTrackTitle.trim();
@@ -81,17 +92,21 @@ export default function CapturePage() {
   }
 
   function resetTrackPicker() {
-    if (trackChoice === '__new__') {
-      loadTracks();
-    }
+    if (trackChoice === '__new__') loadTracks();
     setTrackChoice('');
     setNewTrackTitle('');
   }
 
-  function resultMsg(res) {
-    if (!res.queued) return SHARED_MSG.ok;
+  // Where it went: sent -> Learn inbox (+ Tracks when tagged); queued -> Sync.
+  function resultMsg(res, wasTagged) {
+    if (!res.queued) {
+      const links = wasTagged ? [LEARN, TRACKS] : [LEARN];
+      return { ...SHARED_MSG.ok, links };
+    }
     return SHARED_MSG[res.reason] || SHARED_MSG.unreachable;
   }
+
+  const failMsg = (e) => ({ text: `Failed: ${e.message ?? e}`, tone: 'err', links: [] });
 
   async function submitLink(e) {
     e.preventDefault();
@@ -99,11 +114,11 @@ export default function CapturePage() {
     if (!link) return;
     setBusy(true);
     try {
-      setStatus(resultMsg(await captureUrl(link, trackOpts())));
+      setStatus(resultMsg(await captureUrl(link, trackOpts()), tagged));
       setUrl('');
       resetTrackPicker();
-    } catch (e) {
-      setStatus({ text: `Failed: ${e.message ?? e}`, tone: 'err' });
+    } catch (err) {
+      setStatus(failMsg(err));
     } finally {
       setBusy(false);
     }
@@ -115,12 +130,40 @@ export default function CapturePage() {
     if (!text) return;
     setBusy(true);
     try {
-      setStatus(resultMsg(await captureText(text, noteTitle.trim() || null, trackOpts())));
+      setStatus(resultMsg(await captureText(text, noteTitle.trim() || null, trackOpts()), tagged));
       setNoteText('');
       setNoteTitle('');
       resetTrackPicker();
-    } catch (e) {
-      setStatus({ text: `Failed: ${e.message ?? e}`, tone: 'err' });
+    } catch (err) {
+      setStatus(failMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitFile(e) {
+    e.preventDefault();
+    if (!file) return;
+    if (!online) {
+      setStatus({ text: "You're offline - pick the file again once connected (files aren't queued).", tone: 'warn', links: [] });
+      return;
+    }
+    setBusy(true);
+    try {
+      const trackId = trackChoice && trackChoice !== '__new__' ? Number(trackChoice) : null;
+      const res = await captureFile(file, trackId);
+      if (!res.ok) {
+        setStatus({ text: `Failed: ${res.error}`, tone: 'err', links: [] });
+      } else {
+        setStatus(res.duplicate
+          ? { text: 'Already captured - it is in the pipeline.', tone: 'warn', links: [LEARN] }
+          : { text: `Uploaded ${file.name} - now processing into your Learn inbox.`, tone: 'ok', links: trackId ? [LEARN, TRACKS] : [LEARN] });
+        setFile(null);
+        if (fileRef.current) fileRef.current.value = '';
+        resetTrackPicker();
+      }
+    } catch (err) {
+      setStatus(failMsg(err));
     } finally {
       setBusy(false);
     }
@@ -131,69 +174,48 @@ export default function CapturePage() {
     const link = subUrl.trim();
     if (!link) return;
     if (!online) {
-      setStatus({ text: "You're offline — try again once connected.", tone: 'warn' });
+      setStatus({ text: "You're offline - try again once connected.", tone: 'warn', links: [] });
       return;
     }
     setBusy(true);
     try {
       await addFeedSource(link);
-      setStatus({ text: 'Subscribed — new items will show up in Learn ▸ Feed.', tone: 'ok' });
+      setStatus({ text: 'Subscribed - new items show up in Learn > Feed.', tone: 'ok', links: [{ to: '/learn', label: 'Open Learn' }] });
       setSubUrl('');
-    } catch (e) {
-      const clean4xx = e instanceof ApiError && e.status >= 400 && e.status < 500;
+    } catch (err) {
+      const clean4xx = err instanceof ApiError && err.status >= 400 && err.status < 500;
       setStatus(clean4xx
-        ? { text: `Failed: ${e.message}`, tone: 'err' }
-        : { text: "You're offline — try again once connected.", tone: 'warn' });
+        ? failMsg(err)
+        : { text: "You're offline - try again once connected.", tone: 'warn', links: [] });
     } finally {
       setBusy(false);
     }
   }
 
+  const sharedMsg = shared && SHARED_MSG[shared];
+  const shown = status || sharedMsg || null;
+
   return (
     <div className={styles.page}>
-      <h1 className={styles.pageTitle}>Capture</h1>
-
-      {shared && SHARED_MSG[shared] && (
-        <p className={`${styles.hint} ${styles[SHARED_MSG[shared].tone] || ''}`}>
-          {SHARED_MSG[shared].text}
-        </p>
-      )}
-
-      <div className={styles.modeToggle} role="tablist">
-        <button
-          type="button" role="tab" aria-selected={mode === 'link'}
-          className={`${styles.modeBtn} ${mode === 'link' ? styles.modeBtnActive : ''}`}
-          onClick={() => { setMode('link'); setStatus(null); }}
-        >Link</button>
-        <button
-          type="button" role="tab" aria-selected={mode === 'note'}
-          className={`${styles.modeBtn} ${mode === 'note' ? styles.modeBtnActive : ''}`}
-          onClick={() => { setMode('note'); setStatus(null); }}
-        >Note</button>
-        <button
-          type="button" role="tab" aria-selected={mode === 'subscribe'}
-          className={`${styles.modeBtn} ${mode === 'subscribe' ? styles.modeBtnActive : ''}`}
-          onClick={() => { setMode('subscribe'); setStatus(null); }}
-        >Subscribe</button>
-      </div>
+      <SegmentedTabs
+        aria-label="Capture type"
+        tabs={MODES}
+        value={mode}
+        onChange={id => { setMode(id); setStatus(null); }}
+      />
 
       {isAuthenticated && mode !== 'subscribe' && (
-        <div className={styles.captureFormCol}>
-          <select
-            className={styles.captureInput}
-            value={trackChoice}
-            onChange={e => setTrackChoice(e.target.value)}
-            aria-label="Track"
-          >
+        <div className={styles.form}>
+          <Select value={trackChoice} onChange={e => setTrackChoice(e.target.value)} aria-label="Track">
             <option value="">Just capture</option>
             {tracks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
-            <option value="__new__">+ New track…</option>
-          </select>
+            {mode !== 'file' && <option value="__new__">+ New track...</option>}
+          </Select>
           {trackChoice === '__new__' && (
-            <input
-              className={styles.captureInput}
+            <Input
               type="text"
               placeholder="New track title"
+              aria-label="New track title"
               value={newTrackTitle}
               onChange={e => setNewTrackTitle(e.target.value)}
             />
@@ -201,72 +223,90 @@ export default function CapturePage() {
         </div>
       )}
 
-      {mode === 'link' ? (
-        <form onSubmit={submitLink} className={styles.captureForm}>
-          <input
-            className={styles.captureInput}
+      {mode === 'link' && (
+        <form onSubmit={submitLink} className={styles.form}>
+          <Input
             type="url"
             inputMode="url"
             placeholder="Paste a link to capture"
+            aria-label="Link"
             value={url}
             onChange={e => setUrl(e.target.value)}
           />
-          <button className={styles.captureBtn} type="submit" disabled={busy || !url.trim()}>
-            {busy ? 'Sending…' : 'Capture'}
-          </button>
+          <Button type="submit" variant="primary" loading={busy} disabled={!url.trim()}>Capture</Button>
         </form>
-      ) : mode === 'note' ? (
-        <form onSubmit={submitNote} className={styles.captureFormCol}>
-          <input
-            className={styles.captureInput}
+      )}
+
+      {mode === 'note' && (
+        <form onSubmit={submitNote} className={styles.form}>
+          <Input
             type="text"
             placeholder="Title (optional)"
+            aria-label="Title"
             value={noteTitle}
             onChange={e => setNoteTitle(e.target.value)}
           />
-          <textarea
-            className={styles.captureTextarea}
-            placeholder="Dump a rough note — it becomes a source and lands in your Learn inbox."
+          <Textarea
+            className={styles.textarea}
+            placeholder="Dump a rough note - it becomes a source and lands in your Learn inbox."
+            aria-label="Note"
             value={noteText}
             onChange={e => setNoteText(e.target.value)}
           />
-          <button className={styles.captureBtn} type="submit" disabled={busy || !noteText.trim()}>
-            {busy ? 'Sending…' : 'Send to inbox'}
-          </button>
+          <Button type="submit" variant="primary" loading={busy} disabled={!noteText.trim()}>Send to inbox</Button>
         </form>
-      ) : (
-        <form onSubmit={submitSubscribe} className={styles.captureFormCol}>
-          <input
-            className={styles.captureInput}
+      )}
+
+      {mode === 'file' && (
+        <form onSubmit={submitFile} className={styles.form}>
+          <Input
+            ref={fileRef}
+            type="file"
+            accept="application/pdf,.pdf,audio/*,video/*"
+            aria-label="File"
+            onChange={e => setFile(e.target.files?.[0] ?? null)}
+          />
+          <Button type="submit" variant="primary" loading={busy} disabled={!file}>Upload</Button>
+        </form>
+      )}
+
+      {mode === 'subscribe' && (
+        <form onSubmit={submitSubscribe} className={styles.form}>
+          <Input
             type="url"
             inputMode="url"
             placeholder="Channel, feed or page URL"
+            aria-label="Source URL"
             value={subUrl}
             onChange={e => setSubUrl(e.target.value)}
           />
-          <button
-            className={styles.captureBtn} type="submit"
-            disabled={busy || !subUrl.trim()}
-          >
-            {busy ? 'Subscribing…' : 'Subscribe'}
-          </button>
+          <Button type="submit" variant="primary" loading={busy} disabled={!subUrl.trim()}>Subscribe</Button>
         </form>
       )}
 
-      {status && (
-        <p className={`${styles.hint} ${styles[status.tone] || ''}`}>{status.text}</p>
+      {shown && (
+        <div className={styles.result} role="status" aria-live="polite">
+          <span className={styles[shown.tone] || ''}>{shown.text}</span>
+          {shown.links?.length > 0 && (
+            <span className={styles.resultLinks}>
+              {shown.links.map(l => <Link key={l.to} to={l.to}>{l.label}</Link>)}
+            </span>
+          )}
+        </div>
       )}
 
       {!isAuthenticated && mode !== 'subscribe' && (
-        <p className={styles.hint}>You're signed out — captures will queue until you sign in.</p>
+        <p className={styles.hint}>You're signed out - captures queue until you sign in.</p>
       )}
 
       <p className={styles.hint}>
         {mode === 'link'
-          ? 'Tip: once installed, share any link — or a PDF/video/audio file — from another app and pick “Obsidian Optimizer”.'
+          ? 'Tip: once installed, share any link or file from another app and pick "Obsidian Optimizer".'
           : mode === 'note'
-          ? 'Rough notes you’d never revisit? Dump them here — the inbox guarantees you triage each one at least once.'
-          : 'Browsing a YouTube channel or blog? Subscribe here and new items will show up in Learn ▸ Feed for you to swipe.'}
+          ? "Rough notes you'd never revisit? Dump them here - the inbox makes you triage each one once."
+          : mode === 'file'
+          ? 'PDF, audio or video. Needs a connection - files are not queued offline.'
+          : 'Browsing a YouTube channel or blog? Subscribe and new items show up in Learn > Feed to swipe.'}
       </p>
     </div>
   );

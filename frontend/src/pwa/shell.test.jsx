@@ -85,6 +85,16 @@ describe('deriveSyncStatus', () => {
   });
 });
 
+describe('pwa pages compile', () => {
+  it('imports every routed page', async () => {
+    const mods = await Promise.all([
+      import('./MobileApp'), import('./CapturePage'), import('./SyncPage'),
+      import('./MobileNotesPage'), import('./MobileSearchPage'),
+    ]);
+    mods.forEach(m => expect(typeof m.default).toBe('function'));
+  }, 60000);
+});
+
 describe('update banner', () => {
   it('is hidden until an update is waiting, then persists with Reload', () => {
     render(<UpdateBanner />);
