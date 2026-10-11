@@ -1,43 +1,64 @@
 .toast {
   position: fixed;
-  bottom: var(--sp-5);
+  bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 9999;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  background: var(--color-surface-2, #2a2438);
-  border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-md2);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  max-width: 480px;
-  animation: slideUp 0.18s ease;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  background: var(--overlay);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--glass), var(--shadow-2);
+  max-width: min(480px, calc(100vw - var(--sp-5)));
+  animation: toastIn var(--dur-2) var(--ease-out);
 }
+.success { border-color: var(--success); }
+.error   { border-color: var(--danger-line); }
 
 .message {
-  font-size: var(--text-sm, 13px);
-  color: var(--color-text);
-  line-height: 1.4;
+  font-size: var(--fs-14);
+  color: var(--text);
+  line-height: var(--lh-ui);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
+
+.action {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  background: transparent;
+  border: none;
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.action:hover:not(:disabled) { background: var(--accent-tint); }
 
 .close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
   background: none;
   border: none;
-  color: var(--color-text-muted, #888);
-  cursor: pointer;
-  font-size: 18px;
+  color: var(--text-3);
+  font-size: var(--fs-18);
   line-height: 1;
-  padding: 0 2px;
-  flex-shrink: 0;
 }
+.close:hover:not(:disabled) { color: var(--text); background: none; }
 
-.close:hover {
-  color: var(--color-text);
-}
-
-@keyframes slideUp {
+@keyframes toastIn {
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Phone: clear the bottom tab bar (56px + safe area). */
+@media (max-width: 768px) {
+  .toast { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
 }

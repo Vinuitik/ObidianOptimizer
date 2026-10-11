@@ -1,0 +1,11 @@
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--control-h);
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--fs-14);
+}
+.box { flex-shrink: 0; }
+.label { line-height: var(--lh-ui); }

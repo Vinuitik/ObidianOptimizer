@@ -1,0 +1,33 @@
+.root {
+  display: inline-flex;
+  max-width: 100%;
+  overflow-x: auto;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  min-height: calc(var(--control-h) - 8px);
+  padding: 0 var(--sp-4);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-weight: 500;
+  white-space: nowrap;
+}
+@media (max-width: 768px) { .tab { min-height: var(--control-h); } }
+.tab:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.active, .active:hover:not(:disabled) { background: var(--accent-tint); color: var(--accent-text); }
+.badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+}
+.active .badge { color: var(--accent-text); }
