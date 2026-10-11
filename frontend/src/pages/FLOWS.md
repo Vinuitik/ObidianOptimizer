@@ -19,70 +19,59 @@ To change startup data-fetch order: `MainPage useEffect`
 
 ---
 
-## SettingsPage — Settings Form
+## SettingsPage — autosaving, grouped (`/settings`)
 
-`SECTIONS` config array drives all setting rows. Add new settings by adding entries there.
+Files: SettingsPage.jsx, useAutosaveSettings.js, SettingsPage.module.css
 
-On mount: local draft state initialised from `store.settings` (set by `loadSettings()` at startup).  
-Each section has its own "Save" button — active only when draft differs from `store.settings`.
+Groups (Card each): Vault · Learning · Feed · Sync (`DriveSyncPanel`) · Advanced. Fields are
+the `F` map at the top of `SettingsPage.jsx`; render via `renderField(F.x)` inside a `Group`.
 
-Save → `applySettings(patch)` → `PUT /api/settings` → `store.settings` updated → review queue re-fetched if `reviewPageSize` changed.
+Edit a simple field → `useAutosaveSettings.setDraft()` → select: `commit()` at once; text/number: `commit()` on blur/Enter
+→ `parseField()` validates (inline error, no request) → unchanged value = no-op → `applySettings(patch)` → `PUT /api/settings`
+→ `store.settings` updated → inline "Saved ✓" (2s; `SAVED_MS`). Failure → inline "Couldn't save" under the field.
+To change validation: `parseField()` · save delay/UX: `useAutosaveSettings.js`.
+
+Explicit buttons only: **Vault folder → Change…** (host picker → `saveVaultHostPath` → `RecreatingOverlay` polls health → reload)
+and Drive **credentials** (`DriveSyncPanel.saveCreds()`). Resources folder: Browse… autosaves on pick.
+Long paths/URIs wrap (`.mono`, `.uri`) with a `CopyButton`. Host-only items (vault picker, embedding model) carry a one-sentence reason.
 
 `vaultPath` change: backend re-indexes (TRUNCATE + full BFS) — may be slow on large vaults.
 
-Number field validation: `field.max` present → `[min, max]`; absent → `>= min` only.
-
 To add a new setting:
-1. Entry in `SettingsPage.SECTIONS[].fields` (`key`, `label`, `type`, optional `hint`, optional `max`)
+1. Field in `SettingsPage.F` + `renderField(F.x)` in the right group
 2. `SettingsRepository.java` typed getter + default
 3. `SettingsController.SettingsResponse` + `UpdateSettingsRequest` records
 4. `SettingsController.updateSettings()` handler
+
+### Google Drive Sync group
+
+`DriveSyncPanel`: status from `GET /api/sync/status` (`api/sync.js`), OAuth client id/secret + passphrase
+(write-only; hidden once set, "Edit" reveals), auto-sync select (autosaves), **Connect Google Drive**
+(redirect from `/api/sync/oauth/url`), Full backup / Restore / Disconnect. Returning from Google lands on
+`/settings?drive=connected|error` — the panel reads and strips the param. Backend: `sync/FLOWS.md`.
+
+### Nightly jobs (Advanced)
+
+`chronoStatus` (`GET /api/chrono/status`), "Run now" → `POST /api/chrono/run` → result line.
 
 ---
 
 ## PipelineFailuresPage — `/failures` (top-level nav)
 
-Read-only debugging ledger over the shared `pipeline_failures` table
-(`architecture_plans/QUEUE_UNIFICATION_PLAN.md`) — every backend pipeline dead-letter
-(capture retry-ladder exhausted, ingest stage failures, the browser extension's own
-client-side dead-ends) lands here instead of vanishing silently. No generic retry button —
-payload shapes differ per source/stage, so replay is source-specific (e.g. capture's own
-`/capture/{id}/retry` on the `SyncPage` failed-list, a *different*, narrower view scoped to
-just the `capture` table's retryable rows).
+Files: PipelineFailuresPage.jsx, ../api/capture.js, ../api/pipelineFailures.js
 
-Mount → `fetchPipelineFailures({onlyOpen})` (`api/pipelineFailures.js`) → `GET
-/pipeline-failures`. Row click expands the full `input_payload` JSON
-(`JSON.parse`/pretty-print client-side — the column is JSONB text over the wire). "Mark
-resolved" → `POST /pipeline-failures/{id}/resolve`, removes it from the (default) open view.
-Filters: open-only toggle, source dropdown (populated from whatever's actually loaded, not
-a hardcoded list).
+Two independently-loaded sections (each Skeleton → list | EmptyState | `ErrorState`+Retry; an error never shows a "clean" message):
+- **Failed captures**: mount → `fetchFailedCaptures()` → `GET /capture/failed`. Row **Retry** → `retryCapture(id)` (`POST /capture/{id}/retry`),
+  **Dismiss** → `dismissCapture(id)`; row leaves the list + toast. Handler: `handleCaptureAction()`.
+- **Pipeline failures**: `fetchPipelineFailures({onlyOpen})` → `GET /pipeline-failures` (shared `pipeline_failures` ledger,
+  `QUEUE_UNIFICATION_PLAN.md`). "Show details" expands the payload JSON; "Mark resolved" → `resolvePipelineFailure(id)`.
+  **Resolve all older than 7 days** → `resolveOlder()` loops the per-row resolve (`WEEK_MS`); partial failures stay listed + toast.
 
-To change what's captured here: the WRITE side lives per-pipeline, not on this page —
-`common/PipelineFailureRepository.record()` (Java) / `embedder/failures.py
-record_failure()` (Python) / the extension's `background.js reportFailure()` (client-side
-dead-ends only, see `extension/FLOWS.md`). To change: `PipelineFailuresPage.jsx`
-(`summarize()` for the collapsed-row heuristic), `api/pipelineFailures.js`.
+Nav badge: `store.failuresCount` (open pipeline failures + failed captures) ← `store.loadFailuresCount()`, called on NavBar mount
+(authenticated) and after every retry/dismiss/resolve. Shown on the Failures link in `NavBar.jsx` only (desktop; phone tab bar has none).
 
-### Google Drive Sync panel
-
-`DriveSyncPanel` (custom section, not in `SECTIONS`): status from `GET /api/sync/status`
-(`api/sync.js`), OAuth client id/secret + passphrase fields (secrets write-only —
-placeholder shows "saved"), auto-sync toggle, **Connect Google Drive** (redirects to the
-consent URL from `/api/sync/oauth/url`), Disconnect, Sync now / Pull from Drive.
-Returning from Google lands on `/settings?drive=connected|error` — the panel reads and
-strips the param. Backend flow: `sync/FLOWS.md` → "Auth & configuration".
-
-### Chrono Status Panel
-
-Rendered below the `SECTIONS` loop — not a form field, so not in the array.
-
-State: `chronoStatus` (from `GET /api/chrono/status` on mount), `chronoRunning`, `chronoResult`, `chronoError`.  
-"Run now" → `POST /api/chrono/run` → updates result + status.  
-Button disabled when `!isAuthenticated` or `chronoRunning`.
-
-Result fields: `filesMoved`, `bankruptcy` (`overdueCount`, `chronicNeglected`, `declared`, `rescheduled`), `spread.moved`.
-
-To add more result fields: `ChronoService.ChronoResult` record + update display here.
+WRITE side lives per pipeline: `common/PipelineFailureRepository.record()` (Java) / `embedder/failures.py record_failure()` /
+extension `background.js reportFailure()`. To change summary heuristic: `summarize()`; labels: `humanize()`.
 
 ---
 
@@ -215,7 +204,7 @@ and the dev-facing `FLOWS.md`, keeps `README.md`).
 `LearnPage` mode state (default `inbox`) → `fetchFeed()` on auth → Feed tab badge = `feedPending.length`
 → mode `feed` → `organisms/FeedView` (Swipe | Bin | Sources) → decisions via store (`store/FLOWS.md` "Feed").
 To change default mode: `LearnPage.jsx` `useState('inbox')`.
-Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` SECTIONS `feed`) → `PUT /settings` (global default; per-source override in Sources tab).
+Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAccept`) → `PUT /settings` (global default; per-source override in Sources tab).
 TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `subscription`; legacy ones stay editable).
 
 ---
@@ -226,8 +215,11 @@ TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `su
 |---|---|
 | Startup data-fetch order | `MainPage.jsx useEffect` |
 | Page routes | `App.jsx <Routes>` + `NavBar.jsx NAV_ITEMS` |
-| Settings sections / fields | `SettingsPage.jsx SECTIONS` array |
-| Chrono result display | `SettingsPage.jsx` chrono status section |
+| Settings groups / fields | `SettingsPage.jsx` `F` map + `Group` blocks |
+| Settings autosave / validation | `useAutosaveSettings.js` (`commit`, `parseField`) |
+| Failures badge count | `store.loadFailuresCount()` |
+| Failed-capture retry/dismiss | `PipelineFailuresPage.handleCaptureAction()` |
+| Chrono result display | `SettingsPage.jsx` Advanced group |
 | Learn split orientation | `LearnPage.jsx` orientation ternary (video orient via `ResourcePanel` Viewer) |
 | Learn Feed/Inbox toggle | `LearnPage.jsx` `mode` state |
 | Inbox triage UI | `organisms/InboxReview.jsx` + `api/inbox.js` (backend `inbox/InboxController`) |
@@ -238,5 +230,5 @@ TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `su
 | Get-app / get-extension CTAs | `GetAppPage.jsx` (device detection via `pwa/installPrompt.js`) |
 | Chrome extension download zip | `linux_scripts/build-chrome-extension-zip.sh` → `ext-dist/obsidian-optimizer-chrome.zip` |
 | Feed tab badge | `LearnPage.jsx` `pendingCount` |
-| `feedAutoAccept` setting | `SettingsPage.jsx` SECTIONS `feed` |
+| `feedAutoAccept` setting | `SettingsPage.jsx` `F.feedAutoAccept` |
 | Legacy subscription tracks UI | `TracksPage.jsx` `NEW_TRACK_TYPES` |
