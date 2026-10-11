@@ -168,12 +168,13 @@ To add a field that must be wiped on logout: put it in `initialDataState()`.
 ## Feed (Learn ▸ Feed)
 Files: useStore.js (feed* slice), api/feed.js
 `decideFeed('accept'|'bin')` → pop `feedPending[0]` (card gone instantly) + set `feedLastDecision` → `POST /feed/items/{id}/accept|bin`
-→ ok: `setFeedNotice(..., undo)` ‖ fail: card back at front + toast ("Couldn't accept — try again.").
+→ ok: `setFeedNotice('Sent to Inbox','view')` / `('Binned.','undo')` (global Toast; View → `setLearnView('inbox')`) ‖ fail: card back at front + error toast ("Couldn't accept — try again.").
 `undoFeed()` → `restoreFeedItem(lastDecision.item)` → `POST .../restore` → 409: "Already ingesting — discard it in Inbox."
 Bin tab: `fetchFeedBin()`; `restoreFeedItem(item)` (Restore), `ingestFeedItem(item)` (= accept).
 Sources: `fetchFeedSources / addFeedSource(url) → POST /feed/sources / setFeedSourceAutoAccept(id, true|false|null) / deleteFeedSource / checkFeedSource (poll, 202)`.
-Toast: `feedNotice` (local to FeedView, 5 s) — the PWA shell mounts no global `<Toast/>`.
-To change toast timing: `setFeedNotice()`. To change swipe threshold: `FeedView.jsx SWIPE_PX`.
+Toast: `setFeedNotice(message, 'undo'|'view'|null)` → global `showToast` (`feedNotice` state is gone). `feedLoaded` = first fetch settled (gates skeleton vs empty); `learnView` ('feed'|'inbox'|null) = Learn's tab, decided once per visit by LearnPage.
+`deleteFeedSource(id)` is optimistic + 7 s Undo toast (`DELETE_UNDO_MS`; the DELETE is only sent after the window). `resolveFeedSource(url)` = subscribe preview (`POST /feed/sources/resolve`, nothing persisted).
+To change toast timing: `showToast` duration / `DELETE_UNDO_MS`. To change swipe threshold: `FeedView.jsx SWIPE_PX`.
 
 ---
 

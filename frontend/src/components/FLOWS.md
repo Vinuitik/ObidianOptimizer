@@ -242,18 +242,16 @@ the full flow (SW update signal, `registerSW.js`, desktop shell). Mounted in
 `organisms/NavBar.jsx` and `pwa/MobileLayout.jsx`.
 
 ## FeedView / FeedSources (organisms)
-`FeedView` tabs Swipe | Bin | Sources. `FeedCard` pointer events (`onPointerDown/Move/Up`) → dx → transform; release past `SWIPE_PX` (80) → accept (right) / bin (left), else spring back.
-Desktop: `window keydown` ←/→ (ignored in INPUT/TEXTAREA/SELECT) + buttons. All decisions → store `decideFeed()`.
-Mobile width: card `width: min(100%, 420px)`, rows wrap (`FeedView.module.css`); `touch-action: pan-y` keeps vertical scroll.
+`FeedView` SegmentedTabs Swipe | Bin | Sources. `Stack`: `AnimatePresence` + `motion/presets.swipe` — exit flies out in the decision direction (`feedLastDecision.kind`), next card scales in. `FeedCard` pointer events → dx → transform on the inner div; release past `SWIPE_PX` (80) → accept/bin. Keys ←/→ (ignored in INPUT/TEXTAREA/SELECT). Undo button in the action bar (`undoFeed`); toasts: accept "Sent to Inbox · View", bin "Binned. · Undo".
+Loading: `!item && !feedLoaded` → Skeleton card (never "all caught up" before the first fetch); empty → `EmptyState` + "Open Inbox".
+`FeedSources` subscribe = URL → **Preview** (`resolveFeedSource`, nothing persisted; Card with human kind label + 3 items) → **Subscribe** (`addFeedSource`) → `onSubscribed()` → FeedView switches to Swipe. Delete → store `deleteFeedSource` (optimistic, Undo toast). Kind labels: `FeedSources.kindLabel`.
+`LearnPage`: tab = store `learnView`; decided once after first `fetchFeed` (Feed if pending>0 else Inbox), reset on unmount. To change: `LearnPage.jsx` effect.
 To change threshold: `FeedView.jsx SWIPE_PX`. Auto-accept tri-state: `FeedSources.jsx toVal/fromVal`.
-`decideFeed`/`restoreFeedItem`/`ingestFeedItem` (store) now route through `pwa/offlineApi.js`
-(P2) so the swipe stack + Undo keep working with the laptop off — see `pwa/FLOWS.md` "offline
-Passive Feed". Bin tab / Sources stay online-only.
-`FeedCard` shows a "🔔 Subscribe to this channel" button (P3) when `item.itemUrl` is a youtube.com/
-youtu.be host, regardless of the card's own source kind — lets a video surfaced via `page_watch`
-or RSS one-click into its own recurring channel subscription. `onClick` → `stopPropagation()` (so
-it doesn't also register as a swipe start) → store `subscribeToChannel(url)` → `addFeedSource`
-(same idempotent `POST /feed/sources` the Sources tab uses).
+Offline: `decideFeed`/`restoreFeedItem`/`ingestFeedItem` route through `pwa/offlineApi.js`; Bin tab / Sources stay online-only.
+`FeedCard` "Subscribe to this channel" (youtube.com/youtu.be items) → `subscribeToChannel(url)` → `addFeedSource` (direct, no preview).
+## InboxReview (organism)
+`load({preferGroup})` after file/discard: next note in the same group, else the first note of the next group (no dead stop). Enter = Save & file (Save & acknowledge for in-place): window listener, skipped while typing / on focused non-row buttons / picker open; Ctrl/Cmd+Enter works inside the editor. Preview strips a leading `# Title` equal to the note title (`stripLeadingTitle`, display only). Queue row: folder chip shrinks first (`.rowTag`), title `min-width: 12ch`. `loading` starts true (Skeleton, not the empty message). `SourceSplicePanel` text sources default to Read, RSVP secondary.
+Tests: `__tests__/InboxFlow.test.jsx`, `FeedFlow.test.jsx`, `LearnPage.test.jsx`.
 Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so events are synthesized).
 
 ---
@@ -294,6 +292,8 @@ Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so ev
 | Media URL encoding | `SourceSplicePanel.mediaUrl()` — per-segment `encodeURIComponent` (spaces/fullwidth-colon in yt-dlp names) |
 | Inbox order within a source | `utils/sourceColor.groupBySource()` → `sourcePosition()` (min page / clip start), NOT captureSeq — reading order |
 | Source footer parse (pages/clip/bbox) | `utils/inboxParse.parseSourceRegion()` (`pages`, `startSeconds`/`endSeconds`, `local`, `bboxes`) |
+| Learn default tab | `pages/LearnPage.jsx` (store `learnView`) |
+| Inbox Enter-to-file / next-group | `organisms/InboxReview.jsx` `enterRef` effect / `load()` |
 | Swipe threshold / keys | `organisms/FeedView.jsx SWIPE_PX` / `Stack` keydown effect |
 | Feed sources panel | `organisms/FeedSources.jsx` |
 | "Subscribe to this channel" card button | `organisms/FeedView.jsx isYouTubeUrl` + `FeedCard` → `store/useStore.js subscribeToChannel()` |
