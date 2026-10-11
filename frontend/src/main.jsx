@@ -15,9 +15,12 @@ registerServiceWorker();
 
 // When the auto-check finds a new deploy, nudge the user with a toast (the RefreshButton's
 // persistent "Update" label lights up too, so they can act whenever). Reload gets the new code.
-onUpdateAvailable(() =>
-  useStore.getState().showToast('New version available — tap the refresh button to update.')
-);
+// The installed PWA shows its own persistent "Update ready" banner instead (pwa/MobileLayout).
+onUpdateAvailable(() => {
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches
+    || new URLSearchParams(location.search).has('pwa');
+  if (!standalone) useStore.getState().showToast('New version available — tap the refresh button to update.');
+});
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
