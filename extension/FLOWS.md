@@ -1,5 +1,5 @@
 # Browser Extension — FLOWS
-Files: manifest.json, manifest.firefox.overlay.json, background.js, popup.html, popup.css, popup.js, config.js, onboarding.html, ../linux_scripts/build-firefox-extension.sh
+Files: manifest.json, manifest.firefox.overlay.json, background.js, popup.html, popup.css, popup.js, config.js, onboarding.html, onboarding.js, ../linux_scripts/build-firefox-extension.sh
 
 > One job: **capture anything worth reviewing into the Learn queue** without opening
 > the app. Paste text/markdown/a URL, drop a file, or right-click a selection/link/page.
@@ -14,7 +14,7 @@ Files: manifest.json, manifest.firefox.overlay.json, background.js, popup.html, 
   → **Load Temporary Add-on** → `extension-firefox/manifest.json` (FF 121+).
 
 On first install a welcome tab (`onboarding.html`) opens explaining how to pin the
-icon + sign in. Then open the popup → ⚙ Settings → sign in.
+icon + sign in inline (`onboarding.js` → existing `login` message). The popup also shows a sign-in card itself when signed out.
 
 ## Cross-browser (Chromium + Firefox) — single source of truth
 There is exactly **one** manifest you hand-edit for shared fields: `manifest.json`
@@ -233,11 +233,11 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | Touch this | Where |
 |---|---|
 | Default endpoint | `config.js` `DEFAULTS.obsidianApi` |
-| Remembered creds / auto-relogin | `config.getCreds/setCreds/clearCreds`; `background.obsidian()` 401 self-heal (`reloginFromStored`); popup `#login-remember` + `doLogin` (Enter submits) |
+| Remembered creds / auto-relogin | `config.getCreds/setCreds/clearCreds`; `background.obsidian()` 401 self-heal (`reloginFromStored`); popup `#login-remember` + `doLogin()` (`<form>` submit) |
 | Google Drive file capture | `background.captureDriveFile()` (fetch via user's session → upload → ingest); `driveFileId` / `DRIVE_FILE_RE` |
 | Agent WS client / browser tools | `background.connectAgentWs()` + `AGENT_TOOLS` (`agentGetDom/agentGetNetwork/agentBrowserFetch`); token = ⚙ Settings `#cfg-agent-token` → `config.agentWsToken` |
 | Agent activity feed (popup) | `background.recordAgentEvent` → `chrome.storage.agentLog`; popup `renderAgentFeed()` / `#agent-panel` |
-| Duplicate-capture warning | `background.capture()` 409 → `{duplicate}`; `popup.handleResult` (⚠️) |
+| Duplicate-capture warning | `background.capture()` 409 → `{duplicate}`; `popup.handleResult` (ember `.status.warn` + Open Learn link) |
 | Friendly error / network-vs-real-failure split | `background.js classifyFailure()` |
 | Failure reporting to the shared ledger | `background.js reportFailure()` / `handleFailure()`; review UI at frontend `/failures` (`pages/FLOWS.md`) |
 | Text-payload size cap sent to the ledger | `background.js REPORT_TEXT_CAP` |
@@ -256,3 +256,11 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | Permissions / hosts | `manifest.json` `permissions` + `host_permissions` (shared, both browsers) |
 | Look & feel | `popup.css` (tokens mirrored from `frontend/src/styles/tokens.css`) |
 | Subscribe button (Chrome + Firefox share this popup) | `popup.js #sub-preview-btn` → `background.resolveSource()` (preview) → `#sub-confirm` → `background.subscribeSource()` → `POST /feed/sources {url}` |
+
+## Popup UI (Obsidian Glass redesign, W7)
+- `popup.js applyAuth()` (on open + after login/401) → `checkAuth` → signed out shows `#signin-card`, hides `#capture-main`. A network failure also reads as signed out (checkAuth can't tell them apart). To change: `applyAuth()`.
+- `#cap-page` is the single solid primary; paste/drop lives in `<details id="paste-disc">` (no URL prefill); subscribe is the quiet `#subscribe-page` link → auto-runs Preview for the tab URL → Confirm (2 clicks).
+- Results: `handleResult()` — ok (kind label via `KIND_LABEL` + "Open Learn" link built by `learnUrl()` = API base minus `/api` + `/learn`), duplicate (ember), offline (`isOffline()`), 401 → back to sign-in card.
+- Settings: sign-in first (`#login-form`, shows user + `#signout-btn`), API base / agent token under "Advanced". Sign out = `popup.js` POSTs `/logout` directly + `clearCreds()` (no background handler; deliberate deviation from "popup never fetches").
+- Styling: `popup.css` palette block is a hand copy of `frontend/src/styles/tokens.css` (source of truth); system font stack; `[hidden]{display:none!important}`.
+- Technology Notes: popup is not themed automatically — token drift is manual. `window.close`-less popup loses state on every close (sign-in card re-evaluated each open, costs one `/me` call). Hardcoded: Learn link assumes the site serves `/learn` at the API base's origin.

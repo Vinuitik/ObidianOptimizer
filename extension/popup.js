@@ -10,13 +10,36 @@ function setStatus(el, msg, kind = 'info') {
   el.className = `status ${kind}`;
 }
 
+// Human labels for background.js result kinds.
+const KIND_LABEL = { text: 'page text', video: 'video', media: 'file', page: 'web page' };
+const isOffline = (res) => res && !res.ok && (res.status === 0 || /unreachable/i.test(res.error || ''));
+
+// Learn page lives at the site root next to the API base (…/api → …/learn).
+async function learnUrl() {
+  const { obsidianApi } = await getConfig();
+  return `${obsidianApi.replace(/\/api\/?$/, '')}/learn`;
+}
+
+// ── Auth gate: signed out → sign-in card instead of capture controls ─────────────
+let signedIn = true;
+async function applyAuth() {
+  const res = await send('checkAuth');
+  signedIn = !!res?.ok;
+  $('signin-card').hidden = signedIn;
+  $('capture-main').hidden = !signedIn;
+  if (!signedIn) {
+    const { authUser } = await getCreds();
+    if (authUser && !$('si-user').value) $('si-user').value = authUser;
+  }
+}
+
 // ── Panels (capture / settings) ─────────────────────────────────────────────────
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p =>
     p.classList.toggle('active', p.dataset.panel === name));
 }
 $('tab-settings-btn').addEventListener('click', () => { showPanel('settings'); loadSettings(); });
-$('back-btn').addEventListener('click', () => showPanel('capture'));
+$('back-btn').addEventListener('click', () => { showPanel('capture'); applyAuth(); });
 
 // ── Live detection hint ──────────────────────────────────────────────────────────
 const URL_RE = /^https?:\/\/\S+$/i;
@@ -26,12 +49,12 @@ const MEDIA_EXT_RE = /\.(pdf|mp4|mov|mkv|webm|avi|mp3|m4a|wav|ogg|flac)(?:[?#]|$
 function detectLabel(text) {
   const t = (text || '').trim();
   if (!t) return '';
-  if (!URL_RE.test(t)) return '📝 Plain text → notes synthesized for review';
+  if (!URL_RE.test(t)) return 'Plain text → notes synthesized for review';
   let host = '';
-  try { host = new URL(t).host; } catch { return '📝 Text → notes synthesized'; }
-  if (VIDEO_HOST_RE.test(host)) return '🎬 Video → downloaded to watch + notes generated';
-  if (MEDIA_EXT_RE.test(t)) return '📎 File link → saved to workspace + notes generated';
-  return '🔗 Web page → notes generated from it';
+  try { host = new URL(t).host; } catch { return 'Text → notes synthesized'; }
+  if (VIDEO_HOST_RE.test(host)) return 'Video → downloaded to watch + notes generated';
+  if (MEDIA_EXT_RE.test(t)) return 'File link → saved to workspace + notes generated';
+  return 'Web page → notes generated from it';
 }
 
 $('cap-input').addEventListener('input', (e) => {
@@ -69,17 +92,6 @@ function trackSelection() {
   return { trackId: Number(v) };
 }
 
-// ── Prefill from the active tab ────────────────────────────────────────────────
-async function prefill() {
-  try {
-    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
-    if (tab?.url && /^https?:/i.test(tab.url) && !$('cap-input').value) {
-      $('cap-input').value = tab.url;
-      $('cap-hint').textContent = detectLabel(tab.url);
-    }
-  } catch { /* no tab access — leave blank */ }
-}
-
 // ── Smart one-click: capture the active tab ─────────────────────────────────────
 $('cap-page').addEventListener('click', capturePage);
 
@@ -90,6 +102,7 @@ async function capturePage() {
   if (!tab?.url || !/^https?:/i.test(tab.url)) {
     return setStatus($('cap-status'), 'This page can’t be captured — open a normal web page.', 'err');
   }
+  $('cap-links').hidden = true;
   $('cap-page').disabled = true;
   $('cap-send').disabled = true;
   setStatus($('cap-status'), 'Capturing this page…', 'info');
@@ -104,18 +117,25 @@ async function capturePage() {
 let pendingSubscribeUrl = null;
 
 $('subscribe-page').addEventListener('click', async () => {
-  $('subscribe-form').hidden = !$('subscribe-form').hidden;
+  const open = $('subscribe-form').hidden && $('sub-preview').hidden;
+  $('subscribe-form').hidden = !open;
   $('sub-preview').hidden = true;
-  if ($('subscribe-form').hidden) return;
+  $('subscribe-page').setAttribute('aria-expanded', String(open));
+  setStatus($('sub-status'), '', 'info');
+  if (!open) return;
   try {
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
-    if (tab?.url) $('sub-url').value = tab.url;
+    if (tab?.url && /^https?:/i.test(tab.url)) {
+      $('sub-url').value = tab.url;
+      previewSource();   // one click → preview straight away; Confirm is the 2nd click
+    }
   } catch { /* no tab access — leave field blank */ }
 });
 
 $('sub-cancel').addEventListener('click', () => {
   $('subscribe-form').hidden = true;
   $('sub-preview').hidden = true;
+  $('subscribe-page').setAttribute('aria-expanded', 'false');
   setStatus($('sub-status'), '', 'info');
 });
 
@@ -125,7 +145,9 @@ $('sub-back').addEventListener('click', () => {
   setStatus($('sub-status'), '', 'info');
 });
 
-$('sub-preview-btn').addEventListener('click', async () => {
+$('sub-preview-btn').addEventListener('click', previewSource);
+
+async function previewSource() {
   const url = $('sub-url').value.trim();
   if (!url) return setStatus($('sub-status'), 'Enter a URL.', 'err');
 
@@ -134,8 +156,9 @@ $('sub-preview-btn').addEventListener('click', async () => {
   const res = await send('resolveSource', { url });
   $('sub-preview-btn').disabled = false;
   if (!res?.ok) {
-    setStatus($('sub-status'), res?.status === 401
-      ? 'Not signed in — open Settings ⚙ to sign in.'
+    if (res?.status === 401) { applyAuth(); return; }
+    setStatus($('sub-status'), isOffline(res)
+      ? 'You appear to be offline. Check your connection and try again.'
       : `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
     return;
   }
@@ -156,7 +179,7 @@ $('sub-preview-btn').addEventListener('click', async () => {
   $('subscribe-form').hidden = true;
   $('sub-preview').hidden = false;
   setStatus($('sub-status'), '', 'info');
-});
+}
 
 $('sub-confirm').addEventListener('click', async () => {
   const url = pendingSubscribeUrl;
@@ -167,12 +190,15 @@ $('sub-confirm').addEventListener('click', async () => {
   const res = await send('subscribeSource', { url });
   $('sub-confirm').disabled = false;
   if (res?.ok) {
-    setStatus($('sub-status'), 'Subscribed ✓ — see Learn ▸ Feed', 'ok');
+    setStatus($('sub-status'), 'Subscribed. New items will appear in Learn > Feed.', 'ok');
+    $('subscribe-page').setAttribute('aria-expanded', 'false');
     $('sub-url').value = '';
     pendingSubscribeUrl = null;
     $('sub-preview').hidden = true;
   } else if (res?.status === 401) {
-    setStatus($('sub-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
+    applyAuth();
+  } else if (isOffline(res)) {
+    setStatus($('sub-status'), 'You appear to be offline. Check your connection and try again.', 'err');
   } else {
     setStatus($('sub-status'), `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
   }
@@ -223,10 +249,18 @@ function fileToB64(file) {
   });
 }
 
+async function showLearnLink(show) {
+  $('cap-links').hidden = !show;
+  if (show) $('cap-open-learn').href = await learnUrl();
+}
+
 function handleResult(res) {
   $('cap-send').disabled = false;
+  showLearnLink(false);
   if (res?.ok) {
-    setStatus($('cap-status'), `${res.detail || 'Queued'} ✓`, 'ok');
+    const label = KIND_LABEL[res.kind];
+    setStatus($('cap-status'), `${res.detail || (label ? `Queued as ${label}` : 'Queued')}.`, 'ok');
+    showLearnLink(true);
     $('cap-input').value = '';
     $('cap-hint').textContent = '';
     if ($('cap-track').value === '__new__') loadTracks();   // the new track now exists — refresh + reset
@@ -234,10 +268,13 @@ function handleResult(res) {
     $('cap-track-title').value = '';
     $('cap-track-title').hidden = true;
   } else if (res?.duplicate) {
-    // Loud: you already captured this — a misclick / re-share, not an error to hide.
-    setStatus($('cap-status'), `⚠️ ${res.detail || 'Already in your inbox!'}`, 'err');
+    // Distinct (ember) from errors: you already captured this — a re-share, not a failure.
+    setStatus($('cap-status'), res.detail || 'Already in your inbox.', 'warn');
+    showLearnLink(true);
   } else if (res?.status === 401) {
-    setStatus($('cap-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
+    applyAuth();
+  } else if (isOffline(res)) {
+    setStatus($('cap-status'), 'You appear to be offline or the server is unreachable. Check your connection and try again.', 'err');
   } else {
     setStatus($('cap-status'), `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
   }
@@ -262,46 +299,76 @@ $('cfg-save').addEventListener('click', async () => {
     obsidianApi: $('cfg-obsidian').value.trim(),
     agentWsToken: $('cfg-agent-token').value.trim(),
   });
-  setStatus($('settings-status'), 'Settings saved.', 'ok');
+  setStatus($('cfg-status'), 'Settings saved.', 'ok');
 });
 
-async function doLogin() {
-  const username = $('login-user').value.trim();
-  const password = $('login-pass').value;
-  if (!username || !password) return setStatus($('settings-status'), 'Enter username and password.', 'err');
-  setStatus($('settings-status'), 'Signing in…', 'info');
+// One login routine for both the capture-panel card and the settings form.
+async function doLogin(userEl, passEl, rememberEl, statusEl) {
+  const username = userEl.value.trim();
+  const password = passEl.value;
+  if (!username || !password) return setStatus(statusEl, 'Enter username and password.', 'err');
+  setStatus(statusEl, 'Signing in…', 'info');
   const res = await send('login', { username, password });
   if (res?.ok) {
     // Remember (or forget) so background.js can silently re-login on a lapsed session.
-    if ($('login-remember').checked) await setCreds(username, password);
+    if (rememberEl.checked) await setCreds(username, password);
     else await clearCreds();
-    setStatus($('settings-status'), 'Signed in ✓', 'ok');
+    passEl.value = '';
+    setStatus(statusEl, 'Signed in.', 'ok');
+    await applyAuth();
     refreshAuthLine();
+  } else if (res?.status === 401) {
+    setStatus(statusEl, 'Wrong username or password.', 'err');
+  } else if (isOffline(res) || res?.status === 0 || res?.error) {
+    setStatus(statusEl, 'Can’t reach the server. Check your connection and try again.', 'err');
   } else {
-    setStatus($('settings-status'), `Sign-in failed (${res?.status || res?.error || 'check endpoint'}).`, 'err');
+    setStatus(statusEl, `Sign-in failed (${res?.status || 'unknown'}).`, 'err');
   }
 }
 
-$('login-btn').addEventListener('click', doLogin);
-// Enter in either field submits (native form submit doesn't fire without a <form>).
-['login-user', 'login-pass'].forEach(id =>
-  $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doLogin(); } }));
+// <form> submit covers the button and Enter in either field.
+$('login-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  doLogin($('login-user'), $('login-pass'), $('login-remember'), $('settings-status'));
+});
+$('signin-card').addEventListener('submit', (e) => {
+  e.preventDefault();
+  doLogin($('si-user'), $('si-pass'), $('si-remember'), $('si-status'));
+});
+
+$('signout-btn').addEventListener('click', async () => {
+  await clearCreds();   // also stops background.js silently re-logging in
+  // Deviation from "popup never calls the network": background.js has no logout handler
+  // and is out of scope for the UI redesign. Extension pages hold host_permissions, so this works.
+  let ok = false;
+  try {
+    const { obsidianApi } = await getConfig();
+    ok = (await fetch(`${obsidianApi}/logout`, { method: 'POST', credentials: 'include' })).ok;
+  } catch { /* offline */ }
+  await applyAuth();
+  setStatus($('settings-status'), ok ? 'Signed out.' : 'Could not reach the server to end the session; saved sign-in was forgotten.', ok ? 'info' : 'err');
+  refreshAuthLine();
+});
 
 async function refreshAuthLine() {
   const res = await send('checkAuth');
-  $('auth-line').textContent = res?.ok
-    ? 'Signed in to ObsidianOptimizer ✓' : 'Sign in to ObsidianOptimizer';
+  const on = !!res?.ok;
+  const { authUser } = await getCreds();
+  $('auth-line').textContent = on ? 'Account' : 'Sign in';
+  $('auth-user').textContent = authUser || 'your account';
+  $('auth-user-row').hidden = !on;
+  $('login-fields').hidden = on;
 }
 
 // ── Agent activity feed ─────────────────────────────────────────────────────────
 function short(u) { try { return new URL(u).host; } catch { return (u || '').slice(0, 40); } }
 function agentEventLabel(e) {
-  if (e.event === 'start') return `▶ escalating ${short(e.ref)} — ${e.error || 'failed'}`;
-  if (e.event === 'tool')  return `🔧 ${e.tool}${e.arg ? ' · ' + short(e.arg) : ''}`;
+  if (e.event === 'start') return `escalating ${short(e.ref)} — ${e.error || 'failed'}`;
+  if (e.event === 'tool')  return `tool: ${e.tool}${e.arg ? ' · ' + short(e.arg) : ''}`;
   if (e.event === 'done') {
-    if (e.status === 'recovered') return `✅ recovered → ${e.detail || ''}`;
-    if (e.status === 'gave_up')   return `🚫 gave up — ${e.detail || ''}`;
-    return `⌛ exhausted — ${e.detail || ''}`;
+    if (e.status === 'recovered') return `recovered → ${e.detail || ''}`;
+    if (e.status === 'gave_up')   return `gave up — ${e.detail || ''}`;
+    return `exhausted — ${e.detail || ''}`;
   }
   return JSON.stringify(e);
 }
@@ -328,6 +395,6 @@ api.storage.onChanged.addListener((changes, area) => {
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-prefill();
+applyAuth();
 renderAgentFeed();
 loadTracks();
