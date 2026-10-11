@@ -72,9 +72,9 @@ class OfflineExportServiceTest {
         Instant published = Instant.parse("2026-09-01T10:00:00Z");
         when(feedRepo.list("pending", 200)).thenReturn(List.of(
             new FeedItem(1L, 10L, "Some Channel", "https://www.youtube.com/watch?v=abc", "A Video",
-                "https://i/thumb.jpg", 120, published, "pending", null, null),
+                "https://i/thumb.jpg", 120, published, "pending", null, null, null),
             new FeedItem(2L, 10L, "Some Channel", "https://www.youtube.com/watch?v=def", "Another Video",
-                "https://i/thumb2.jpg", 90, null, "pending", null, null)));
+                "https://i/thumb2.jpg", 90, null, "pending", null, null, null)));
 
         int count = service.exportFeed();
 
