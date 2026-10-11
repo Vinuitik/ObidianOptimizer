@@ -67,6 +67,6 @@ describe('DashboardPage', () => {
     vi.spyOn(statsApi, 'fetchStats').mockRejectedValue(new Error('HTTP 500'));
     render(<DashboardPage />);
     await waitFor(() =>
-      expect(screen.getByText(/Failed to load stats/)).toBeInTheDocument());
+      expect(screen.getByText(/load stats/)).toBeInTheDocument());
   });
 });

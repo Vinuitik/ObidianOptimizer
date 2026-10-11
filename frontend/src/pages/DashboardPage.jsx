@@ -2,15 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { fetchStats } from '../api/stats';
 import useStore from '../store/useStore';
+import Card from '../components/molecules/Card';
+import PageHeader from '../components/molecules/PageHeader';
+import ErrorState from '../components/molecules/ErrorState';
+import Skeleton from '../components/atoms/Skeleton';
 import styles from './DashboardPage.module.css';
 
 const POLL_MS = 3000;
 
 const COLORS = {
-  done:    'var(--color-success)',
-  pending: 'var(--color-accent)',
-  skipped: 'var(--color-amber)',
-  rest:    'rgba(255, 255, 255, 0.08)',
+  done:    'var(--success)',
+  pending: 'var(--accent)',
+  skipped: 'var(--ember)',
+  rest:    'var(--line-strong)',
 };
 
 function Donut({ slices, centerLabel, centerSub }) {
@@ -18,13 +22,13 @@ function Donut({ slices, centerLabel, centerSub }) {
   const empty = data.length === 0;
   return (
     <div className={styles.donutWrap}>
-      <ResponsiveContainer width="100%" height={180}>
+      <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
             data={empty ? [{ name: 'empty', value: 1 }] : data}
             dataKey="value"
-            innerRadius={58}
-            outerRadius={80}
+            innerRadius="72%"
+            outerRadius="100%"
             startAngle={90}
             endAngle={-270}
             stroke="none"
@@ -68,6 +72,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
   const [updatedAt, setUpdatedAt] = useState(null);
+  const [retryKey, setRetryKey] = useState(0);
   const timerRef = useRef(null);
 
   useEffect(() => {
@@ -93,12 +98,12 @@ export default function DashboardPage() {
       cancelled = true;
       clearTimeout(timerRef.current);
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, retryKey]);
 
   if (!isAuthenticated) {
     return (
       <div className={styles.page}>
-        <h1 className={styles.title}>Processing Dashboard</h1>
+        <PageHeader title="Processing" />
         <p className={styles.muted}>Sign in to view the dashboard.</p>
       </div>
     );
@@ -107,8 +112,16 @@ export default function DashboardPage() {
   if (!stats) {
     return (
       <div className={styles.page}>
-        <h1 className={styles.title}>Processing Dashboard</h1>
-        <p className={styles.muted}>{error ? `Failed to load stats: ${error}` : 'Loading…'}</p>
+        <PageHeader title="Processing" />
+        {error ? (
+          <ErrorState message="Couldn’t load stats" detail={error} onRetry={() => setRetryKey(k => k + 1)} />
+        ) : (
+          <div className={styles.grid}>
+            {[0, 1, 2, 3].map(i => (
+              <Card key={i} className={styles.card}><Skeleton height={140} /></Card>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -123,19 +136,21 @@ export default function DashboardPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Processing Dashboard</h1>
-        <span className={styles.live}>
-          <span className={error ? styles.liveDotStale : styles.liveDot} />
-          {error
-            ? `stale — ${error}`
-            : updatedAt ? `live · updated ${updatedAt.toLocaleTimeString()}` : 'live'}
-        </span>
-      </div>
+      <PageHeader
+        title="Processing"
+        actions={
+          <span className={styles.live} role="status">
+            <span className={error ? styles.liveDotStale : styles.liveDot} />
+            {error
+              ? 'Stale — can’t reach the server'
+              : updatedAt ? `Live · ${updatedAt.toLocaleTimeString()}` : 'Live'}
+          </span>
+        }
+      />
 
       <div className={styles.grid}>
         {/* 1. Vector embedding progress */}
-        <section className={styles.card}>
+        <Card as="section" className={styles.card}>
           <h2 className={styles.cardTitle}>Note Embedding</h2>
           <Donut
             slices={[
@@ -150,10 +165,10 @@ export default function DashboardPage() {
             { label: 'Remaining', value: notesRemaining, color: COLORS.rest },
             { label: 'Total chunks', value: embedding.chunksTotal, color: 'transparent' },
           ]} />
-        </section>
+        </Card>
 
         {/* 2. Image pipeline queue */}
-        <section className={styles.card}>
+        <Card as="section" className={styles.card}>
           <h2 className={styles.cardTitle}>Image Processing</h2>
           <Donut
             slices={[
@@ -169,10 +184,10 @@ export default function DashboardPage() {
             { label: 'In queue', value: images.pending, color: COLORS.pending },
             { label: 'Skipped (daily retry)', value: images.skipped, color: COLORS.skipped },
           ]} />
-        </section>
+        </Card>
 
         {/* 3. Flashcard coverage */}
-        <section className={styles.card}>
+        <Card as="section" className={styles.card}>
           <h2 className={styles.cardTitle}>Flashcard Coverage</h2>
           <div className={styles.bigStat}>
             {flashcards.notesWithCards}
@@ -185,10 +200,10 @@ export default function DashboardPage() {
             { label: 'Active cards', value: flashcards.activeCards, color: COLORS.done },
             { label: 'Archived cards', value: flashcards.archivedCards, color: COLORS.rest },
           ]} />
-        </section>
+        </Card>
 
         {/* 4. LLM provider health (host-wrapper router) */}
-        <section className={styles.card}>
+        <Card as="section" className={styles.card}>
           <h2 className={styles.cardTitle}>LLM Providers</h2>
           {!wrapper?.up && (
             <p className={styles.warn}>Host wrapper offline — image processing paused.</p>
@@ -215,10 +230,10 @@ export default function DashboardPage() {
               </tbody>
             </table>
           )}
-        </section>
+        </Card>
 
         {/* 5. External resource queue — ingest agent jobs (embedder /ingest) */}
-        <section className={stats.resources?.up ? styles.card : `${styles.card} ${styles.cardDisabled}`}>
+        <Card as="section" className={stats.resources?.up ? styles.card : `${styles.card} ${styles.cardDisabled}`}>
           <h2 className={styles.cardTitle}>Video &amp; Resource Queue</h2>
           {!stats.resources?.up ? (
             <p className={styles.muted}>Ingest agent offline (embedder unreachable).</p>
@@ -226,7 +241,7 @@ export default function DashboardPage() {
             <>
               <p>
                 {['QUEUED', 'RUNNING', 'DONE', 'FAILED'].map((s) => (
-                  <span key={s} style={{ marginRight: 12 }}>
+                  <span key={s} className={styles.queueStat}>
                     {s.toLowerCase()}: <strong>{stats.resources.counts?.[s] ?? 0}</strong>
                   </span>
                 ))}
@@ -239,7 +254,7 @@ export default function DashboardPage() {
               ))}
             </>
           )}
-        </section>
+        </Card>
       </div>
     </div>
   );

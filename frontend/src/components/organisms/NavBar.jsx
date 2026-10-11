@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import ObsidianMark from '../atoms/ObsidianMark';
 import Button from '../atoms/Button';
+import Badge from '../atoms/Badge';
 import RefreshButton from '../atoms/RefreshButton';
 import QuickCapture from '../molecules/QuickCapture';
 import useNavItems from './useNavItems';
@@ -12,6 +14,9 @@ export default function NavBar() {
   const logout = useStore(s => s.logout);
   const setShowLogin = useStore(s => s.setShowLogin);
   const items = useNavItems();
+  const failuresCount = useStore(s => s.failuresCount);
+  const loadFailuresCount = useStore(s => s.loadFailuresCount);
+  useEffect(() => { if (isAuthenticated) loadFailuresCount(); }, [isAuthenticated, loadFailuresCount]);
 
   return (
     <nav className={styles.nav}>
@@ -33,6 +38,7 @@ export default function NavBar() {
             }
           >
             {label}
+            {to === '/failures' && failuresCount > 0 && <span style={{ marginLeft: 6 }}><Badge tone="danger">{failuresCount}</Badge></span>}
           </NavLink>
         ))}
       </div>

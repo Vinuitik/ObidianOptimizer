@@ -10,6 +10,8 @@ import {
   fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings,
   uploadFile as apiUploadFile,
 } from '../api/notes';
+import { fetchPipelineFailures as apiFetchPipelineFailures } from '../api/pipelineFailures';
+import { fetchFailedCaptures as apiFetchFailedCaptures } from '../api/capture';
 import {
   fetchTracks as apiFetchTracks, createTrack as apiCreateTrack, updateTrack as apiUpdateTrack,
   deleteTrack as apiDeleteTrack, fetchTrackItems as apiFetchTrackItems,
@@ -210,6 +212,9 @@ const initialDataState = () => ({
   trackCapacity: {}, // weekday(0=Mon..6=Sun) -> items/day ceiling (Phase 1c)
   trackPending: [], // [{ trackId, trackTitle, label }] — captures still ingesting; shown as "processing" rows on Today
   trackProgress: [], // Phase 1d — [{ id, title, type, itemsDone, itemsTotal, deadline, onTrack }]
+
+  // Failures slice: open pipeline failures + failed captures (null = not loaded yet). Drives the nav badge.
+  failuresCount: null,
 
   // Settings (loaded from backend on startup)
   settings: { vaultPath: '', resourcePath: '', reviewPageSize: 20, startupSyncMode: 'blocking', flashcardsEnabled: true, tracksEnabled: true, feedAutoAccept: false, maxDailyReviews: 50, maxDailyFlashcards: 20 },
@@ -1214,6 +1219,22 @@ const useStore = create((set, get) => ({
       await get().fetchReviewNotes(0);
     }
     return updated;
+  },
+
+  // ── Failures count (nav badge) ────────────────────────────────────────────
+
+  setFailuresCount: (n) => set({ failuresCount: n }),
+
+  loadFailuresCount: async () => {
+    try {
+      const [pipeline, captures] = await Promise.all([
+        apiFetchPipelineFailures({ onlyOpen: true, limit: 200 }),
+        apiFetchFailedCaptures(),
+      ]);
+      set({ failuresCount: pipeline.length + captures.length });
+    } catch {
+      // Non-fatal — badge simply stays as-is
+    }
   },
 }));
 
