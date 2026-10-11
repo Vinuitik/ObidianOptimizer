@@ -2,7 +2,7 @@
 
 Files (shipped, to be reworked): tracks/SubscriptionPollWorker.java, tracks/TrackAgentClient.java, tracks/TrackRepository.java, capture/CaptureRepository.java, frontend/src/pages/TracksPage.jsx, extension popup Subscribe, pwa/CapturePage.jsx Subscribe
 Files (planned): feed/SourceRepository.java `[NEW]`, feed/FeedRepository.java `[NEW]`, feed/FeedController.java `[NEW]`, feed/SourcePollWorker.java `[MOVED from tracks/SubscriptionPollWorker]`, pwa/OfflineExportService.exportFeed `[NEW]`, pwa/MailboxConsumeService feed kinds `[NEW]`, frontend FeedView.jsx `[NEW]`, frontend pwa/mailbox.js + drivePull.js feed kinds `[NEW]`
-Files (P3, done): embedder/subscriptions/discover.py `discover_page_watch`/`discover_youtube_posts`, feed/FeedController.java `resolve()`/`resolveSource()`, capture/CaptureController.java `enqueueTextCapture()`, frontend FeedView.jsx (subscribe-to-channel), extension/popup.js + background.js (resolve preview)
+Files (P3, done): embedder/subscriptions/discover.py `discover_page_watch`/`discover_youtube_posts`, feed/FeedController.java `resolve()`/`resolveSource()`, feed/FeedService.java `storePostText()`, frontend FeedView.jsx (subscribe-to-channel), extension/popup.js + background.js (resolve preview)
 Related: tracks/FLOWS.md (scheduler), inbox/FLOWS.md (Learn triage), sync/FLOWS.md (backup + encryption), pwa/FLOWS.md + frontend/src/pwa/FLOWS.md (offline), capture/FLOWS.md (ingest queue)
 
 > **Goal:** stop hunting for content. Subscribe once to a channel/feed/page → new items
@@ -207,7 +207,7 @@ while a sibling agent is committing.
   poll `/@handle/posts`, parse the embedded `ytInitialData` JSON (a `CONSENT=YES+1` cookie is
   required to avoid an EU consent-redirect — see feed/FLOWS.md Technology Notes), diff post IDs via
   the existing `feed_items.item_url UNIQUE` dedup (same mechanism as everything else, not a new
-  diffing path); text posts ingest as text notes via `CaptureController.enqueueTextCapture()`.
+  diffing path); text posts ingest as text notes via `FeedService.storePostText()` + `captureRepo.enqueue("text")` (capture queue).
   **Spiked live 2026-10-05 before building** (fetched a real channel's `/posts` page with a plain
   `httpx.get` + the consent cookie — worked, no JS rendering, no login). Goal = maximum breadth
   (user 2026-10-10).

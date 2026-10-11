@@ -1,6 +1,6 @@
 # Passive Feed — Backend (P1a + P3, IMPLEMENTED)
 
-Files: SourceRepository.java, FeedRepository.java, FeedService.java, FeedController.java, SourcePollWorker.java, CaptureController.java (`enqueueTextCapture`)
+Files: SourceRepository.java, FeedRepository.java, FeedService.java, FeedController.java, SourcePollWorker.java
 Tests: SourceRepositoryIT.java, FeedRepositoryIT.java, FeedAcceptRestoreIT.java, SourcePollWorkerTest.java, FeedControllerTest.java
 Embedder: embedder/subscriptions/discover.py (`youtube_feed_url`, `discover_feed`, `discover_page_watch`, `discover_youtube_posts`, `discover`)
 Plan: FLOWS_feed.md (design doc — §0 P0 findings, §2 data model, §3 subscribe flow, "### P1a"/"### P3" scope/contract)
@@ -117,9 +117,10 @@ JS) and parses the embedded `ytInitialData` JSON for `backstagePostRenderer` blo
 mode). Each post becomes a candidate with `item_url = youtube.com/post/<postId>` and a `body`
 field (the post's full text) — the only candidate kind that carries one.
 `FeedRepository.insertIfNew(..., body)` / `feed_items.body` persist it; `FeedService.accept()`
-branches on `item.body() != null` and calls `CaptureController.enqueueTextCapture()` (a text
-capture — stores the body as a markdown resource, no URL fetch) instead of the normal
-`classifyUrl(itemUrl)` + `captureRepo.enqueue()` path.
+branches on `item.body() != null` and calls `FeedService.storePostText()` (writes
+`resources/files/<captureId>.md` under the vault) then `captureRepo.enqueue(id, "text", title, path, title)`
+— the same durable queue + row shape as pasted text; `CaptureIngestWorker.submit()` reads the file
+back for `source_type='text'`. No URL fetch, no feed → CaptureController call for text.
 
 ## URL normalization (dedup key)
 
@@ -260,5 +261,5 @@ updating the frontend in the same change.
 | "Subscribe to this channel" on a card | `FeedView.jsx FeedCard` → `useStore.subscribeToChannel()` (P3) |
 | Extension Subscribe preview | `extension/popup.js` `#sub-preview-btn` → `background.js resolveSource()` (P3) |
 | page_watch link-diff discovery | embedder `discover.py` `discover_page_watch()` (P3) |
-| youtube_posts discovery + text ingest | embedder `discover.py` `discover_youtube_posts()`; `FeedService.accept()` → `CaptureController.enqueueTextCapture()` (P3) |
+| youtube_posts discovery + text ingest | embedder `discover.py` `discover_youtube_posts()`; `FeedService.accept()` → `storePostText()` + `captureRepo.enqueue("text")` (P3); vault path from `SettingsRepository.getVaultPath()` |
 | Offline export/swipe | `[NOT IMPLEMENTED]` — P2 |

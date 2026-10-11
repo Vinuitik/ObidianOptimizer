@@ -406,17 +406,6 @@ public class CaptureController {
         return "web_dom";
     }
 
-    /** Same text-capture path as {@link #enqueueCapture}'s {@code hasText} branch (store the
-     *  body as a markdown resource + durable-queue publish), but for a captureId the caller
-     *  already generated and claimed elsewhere — used by {@code FeedService.accept()} for
-     *  youtube_posts items, where the id must match what's already stamped on the
-     *  feed_items row (feed/FLOWS.md). Does NOT call {@code ingestWorker.nudge()} or set a
-     *  track — the caller owns that, same as it does for the URL branch. */
-    public void enqueueTextCapture(String captureId, String title, String text) throws java.io.IOException {
-        String sourcePath = storeTextResource(captureId, title, text);
-        enqueueAndPublish(captureId, "text", title, sourcePath, title);
-    }
-
     /** Write captured text as a markdown resource under resources/files/ (served by
      *  MediaController like any other resource). Returns the vault-relative path. */
     private String storeTextResource(String captureId, String title, String text) throws java.io.IOException {

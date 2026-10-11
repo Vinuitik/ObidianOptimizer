@@ -5,9 +5,13 @@ import com.obsidian.obsidian.capture.CaptureIngestWorker;
 import com.obsidian.obsidian.capture.CaptureRepository;
 import com.obsidian.obsidian.feed.FeedRepository.FeedItem;
 import com.obsidian.obsidian.feed.SourceRepository.Source;
+import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.tracks.TrackRepository;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.UUID;
 
 /**
@@ -28,17 +32,17 @@ public class FeedService {
     private final CaptureRepository captureRepo;
     private final CaptureIngestWorker ingestWorker;
     private final TrackRepository trackRepo;
-    private final CaptureController captureController;
+    private final SettingsRepository settingsRepo;
 
     public FeedService(FeedRepository feedRepo, SourceRepository sourceRepo, CaptureRepository captureRepo,
                        CaptureIngestWorker ingestWorker, TrackRepository trackRepo,
-                       CaptureController captureController) {
+                       SettingsRepository settingsRepo) {
         this.feedRepo = feedRepo;
         this.sourceRepo = sourceRepo;
         this.captureRepo = captureRepo;
         this.ingestWorker = ingestWorker;
         this.trackRepo = trackRepo;
-        this.captureController = captureController;
+        this.settingsRepo = settingsRepo;
     }
 
     /** pending/binned → accepted + exactly one capture tagged with the target track.
@@ -58,12 +62,9 @@ public class FeedService {
             String title = (item.title() == null || item.title().isBlank()) ? item.itemUrl() : item.title();
             if (item.body() != null && !item.body().isBlank()) {
                 // youtube_posts: the full text is already in hand (see feed/FLOWS.md) — a
-                // text capture, not a URL fetch.
-                try {
-                    captureController.enqueueTextCapture(captureId, title, item.body());
-                } catch (java.io.IOException e) {
-                    throw new RuntimeException("could not store post text for capture " + captureId, e);
-                }
+                // text capture (body kept under resources/files/<id>.md, which the ingest
+                // worker reads back for source_type 'text'), not a URL fetch.
+                captureRepo.enqueue(captureId, "text", title, storePostText(captureId, title, item.body()), title);
             } else {
                 captureRepo.enqueue(captureId, CaptureController.classifyUrl(item.itemUrl()),
                     item.itemUrl(), null, title);
@@ -92,5 +93,17 @@ public class FeedService {
             throw new CaptureStartedException("capture already started");
         }
         feedRepo.markPending(itemId);
+    }
+
+    private String storePostText(String captureId, String title, String text) {
+        try {
+            Path dir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve("files");
+            Files.createDirectories(dir);
+            String name = captureId + ".md";
+            Files.writeString(dir.resolve(name), "# " + title.replace("\n", " ").trim() + "\n\n" + text.trim() + "\n");
+            return "resources/files/" + name;
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("could not store post text for capture " + captureId, e);
+        }
     }
 }
