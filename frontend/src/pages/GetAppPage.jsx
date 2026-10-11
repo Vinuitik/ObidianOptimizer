@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import Button from '../components/atoms/Button';
+import Badge from '../components/atoms/Badge';
+import Card from '../components/molecules/Card';
+import PageHeader from '../components/molecules/PageHeader';
 import btnStyles from '../components/atoms/Button.module.css';
 import { onInstallChange, promptInstall, isIOS, isWindows, isFirefox } from '../pwa/installPrompt';
 import styles from './GetAppPage.module.css';
@@ -20,6 +23,10 @@ const WIN_INSTALLER = '/download/ObsidianOptimizer-Setup.exe';
 // "Load unpacked" steps instead — same file linux_scripts/build-chrome-extension-zip.sh
 // produces. Both live at nginx's existing /ext/ alias.
 const CHROME_EXT_ZIP = '/ext/obsidian-optimizer-chrome.zip';
+
+// chrome://extensions only exists in Chromium browsers (Chrome/Edge/Brave/Opera...).
+// Safari and friends get an honest "not supported" line instead of unusable steps.
+const isChromium = () => typeof navigator !== 'undefined' && /Chrome\/|Chromium\/|CriOS\//.test(navigator.userAgent);
 
 export default function GetAppPage() {
   const [{ canInstall, installed }, setInstall] = useState({ canInstall: false, installed: false });
@@ -52,14 +59,13 @@ export default function GetAppPage() {
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.title}>Get the app</h1>
-      <p className={styles.lede}>
-        Run Obsidian Optimizer in its own window — no browser chrome, offline-capable, and with the
-        “Are you a quitter?” close-guard.
-      </p>
+      <PageHeader
+        title="Get the app"
+        subtitle="Run Obsidian Optimizer in its own window — no browser chrome, offline-capable, and with the “Are you a quitter?” close-guard."
+      />
 
-      <section className={styles.card}>
-        <span className={styles.badge}>{isWindows() ? 'Windows' : 'This device'}</span>
+      <Card as="section" className={styles.card}>
+        <Badge tone="accent">{isWindows() ? 'Windows' : 'This device'}</Badge>
         <h2 className={styles.cardTitle}>Install as app</h2>
         <p className={styles.cardBody}>
           Adds Obsidian Optimizer to your home screen / taskbar as a standalone app.
@@ -86,10 +92,10 @@ export default function GetAppPage() {
           </>
         )}
         {msg && <p className={styles.msg}>{msg}</p>}
-      </section>
+      </Card>
 
-      <section className={styles.card}>
-        <span className={styles.badge}>{isFirefox() ? 'Firefox' : 'Chrome / Edge / Brave'}</span>
+      <Card as="section" className={styles.card}>
+        <Badge tone="accent">{isFirefox() ? 'Firefox' : isChromium() ? 'Chrome / Edge / Brave' : 'This browser'}</Badge>
         <h2 className={styles.cardTitle}>Browser extension</h2>
         <p className={styles.cardBody}>
           Capture a page, link, or file into your Learn queue without opening the app.
@@ -106,6 +112,10 @@ export default function GetAppPage() {
           ) : (
             <p className={styles.hint}>Couldn’t reach the extension file — try reloading this page.</p>
           )
+        ) : !isChromium() ? (
+          <p className={styles.hint}>
+            This browser can’t install the extension. Open this page in Firefox, Chrome or Edge to add it.
+          </p>
         ) : (
           <>
             <a className={`${btnStyles.btn} ${btnStyles.primary}`} href={CHROME_EXT_ZIP} download>
@@ -119,7 +129,7 @@ export default function GetAppPage() {
             </ol>
           </>
         )}
-      </section>
+      </Card>
     </div>
   );
 }

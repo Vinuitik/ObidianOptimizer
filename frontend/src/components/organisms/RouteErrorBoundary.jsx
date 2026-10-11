@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import Button from '../atoms/Button';
 import styles from './RouteErrorBoundary.module.css';
 
 // App-level boundary. Without one, a throw in ANY routed leaf (e.g. Learn) unmounts the
@@ -25,12 +26,8 @@ class Boundary extends Component {
           <div className={styles.actions}>
             {/* Real escape, not just a reload-into-the-same-crash: go back to the review
                 list (fresh route → boundary remounts clean). */}
-            <button className={styles.reload} onClick={() => this.props.onLeave?.()}>
-              Back to Review
-            </button>
-            <button className={styles.ghost} onClick={() => window.location.reload()}>
-              Reload
-            </button>
+            <Button variant="primary" onClick={() => this.props.onLeave?.()}>Back to Review</Button>
+            <Button variant="secondary" onClick={() => window.location.reload()}>Reload</Button>
           </div>
         </div>
       );

@@ -2,30 +2,15 @@
   max-width: 900px;
   margin: 0 auto;
   padding: var(--sp-6) var(--sp-4);
-}
-
-.title {
-  font-family: var(--font-heading);
-  font-size: var(--text-2xl);
-  font-weight: 700;
-  letter-spacing: var(--tracking-tight);
-  color: var(--color-text);
-  margin-bottom: var(--sp-2);
-}
-
-.lede {
-  font-size: var(--text-base);
-  color: var(--color-text-2);
-  margin-bottom: var(--sp-6);
-  max-width: 60ch;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
 }
 
 .card {
+  width: 100%;
   max-width: 420px;
   margin: 0 auto;
-  background: var(--color-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
   padding: var(--sp-5);
   display: flex;
   flex-direction: column;
@@ -34,58 +19,50 @@
   gap: var(--sp-3);
 }
 
-.badge {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--color-accent);
-  background: var(--color-accent-dim);
-  border-radius: var(--radius-sm);
-  padding: 2px var(--sp-2);
-}
-
 .cardTitle {
-  font-family: var(--font-heading);
-  font-size: var(--text-lg);
+  font-family: var(--font-display);
+  font-size: var(--fs-18);
   font-weight: 600;
-  color: var(--color-text);
+  color: var(--text);
 }
 
 .cardBody {
-  font-size: var(--text-sm);
-  color: var(--color-text-2);
+  font-size: var(--fs-14);
+  color: var(--text-2);
 }
 
 .hint {
-  font-size: var(--text-xs);
-  color: var(--color-muted);
-  line-height: var(--leading-normal);
+  font-size: var(--fs-13);
+  color: var(--text-3);
+  line-height: var(--lh-ui);
   max-width: 36ch;
 }
 
-.hint strong { color: var(--color-text-2); }
+.hint strong { color: var(--text-2); }
 
 .msg {
-  font-size: var(--text-sm);
-  color: var(--color-accent);
+  font-size: var(--fs-14);
+  color: var(--accent-text);
 }
 
 .installed {
-  font-size: var(--text-sm);
+  font-size: var(--fs-14);
   font-weight: 600;
-  color: var(--color-success, #4caf50);
+  color: var(--success);
 }
 
 .steps {
   align-self: stretch;
   text-align: left;
-  font-size: var(--text-xs);
-  color: var(--color-text-2);
-  line-height: var(--leading-normal);
+  font-size: var(--fs-13);
+  color: var(--text-2);
+  line-height: var(--lh-ui);
   padding-left: var(--sp-5);
 }
 
 .steps li + li { margin-top: var(--sp-1); }
-.steps strong { color: var(--color-text); }
+.steps strong { color: var(--text); }
 
+@media (max-width: 768px) {
+  .card { max-width: none; }
+}
