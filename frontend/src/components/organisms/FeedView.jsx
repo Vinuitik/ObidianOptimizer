@@ -4,6 +4,11 @@ import FeedSources from './FeedSources';
 import styles from './FeedView.module.css';
 
 const SWIPE_PX = 80;
+const YT_HOST_RE = /(^|\.)youtube\.com$|^youtu\.be$/i;
+
+function isYouTubeUrl(url) {
+  try { return YT_HOST_RE.test(new URL(url).hostname); } catch { return false; }
+}
 
 function fmtDuration(s) {
   if (!s) return '';
@@ -21,6 +26,7 @@ function fmtDate(iso) {
 function FeedCard({ item, onDecide }) {
   const start = useRef(null);
   const [dx, setDx] = useState(0);
+  const subscribeToChannel = useStore(s => s.subscribeToChannel);
 
   function down(e) { start.current = e.clientX; }
   function move(e) { if (start.current != null) setDx(e.clientX - start.current); }
@@ -47,6 +53,13 @@ function FeedCard({ item, onDecide }) {
         <p className={styles.cardMeta}>
           {[item.sourceTitle, fmtDate(item.publishedAt), fmtDuration(item.durationS)].filter(Boolean).join(' · ')}
         </p>
+        {isYouTubeUrl(item.itemUrl) && (
+          <button
+            className={styles.subscribeChannelBtn}
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); subscribeToChannel(item.itemUrl); }}
+          >🔔 Subscribe to this channel</button>
+        )}
       </div>
     </div>
   );

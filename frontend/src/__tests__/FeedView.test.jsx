@@ -126,6 +126,24 @@ describe('FeedView', () => {
     expect(screen.getByText('Bin is empty.')).toBeTruthy();
   });
 
+  it('shows "Subscribe to this channel" only for YouTube items, and subscribes on click', async () => {
+    feed.addFeedSource.mockResolvedValue({ id: 9, kind: 'youtube', url: 'https://y/1', title: 'Chan' });
+    useStore.setState({
+      feedPending: [item(1, { itemUrl: 'https://www.youtube.com/watch?v=abc' }), item(2)],
+    });
+    render(<FeedView />);
+    expect(screen.getByText('🔔 Subscribe to this channel')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('🔔 Subscribe to this channel'));
+    await waitFor(() => expect(feed.addFeedSource).toHaveBeenCalledWith('https://www.youtube.com/watch?v=abc'));
+    await screen.findByText('Subscribed to this channel.');
+  });
+
+  it('does not show "Subscribe to this channel" for a non-YouTube item', () => {
+    render(<FeedView />);   // item(1) itemUrl is https://y/1
+    expect(screen.queryByText('🔔 Subscribe to this channel')).toBeNull();
+  });
+
   it('Sources tab: add by URL posts and lists the source', async () => {
     feed.addFeedSource.mockResolvedValue({ id: 9, kind: 'youtube', url: 'u', title: 'New Chan', autoAccept: null, pendingCount: 3 });
     render(<FeedView />);

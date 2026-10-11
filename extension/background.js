@@ -203,6 +203,18 @@ async function subscribeSource({ url }) {
   return { ok: true };
 }
 
+// Preview-only: what subscribing to this URL would resolve to (kind/title + up to 3
+// latest items), without persisting a source. Shown before the popup's real Subscribe
+// call (feed/FLOWS_feed.md §3) so a misdetected/broken URL doesn't silently create a
+// dead source.
+async function resolveSource({ url }) {
+  const res = await json('/feed/sources/resolve', 'POST', { url });
+  if (res.status === 401) return { ok: false, status: 401 };
+  if (!res.ok) return handleFailure(res, 'resolve_source', { url });
+  const { kind, title, preview } = await res.json();
+  return { ok: true, kind, title, preview };
+}
+
 // Google Drive "view" links wrap the file in a JS viewer — no bytes in the HTML, so a
 // server-side scrape fails. But the EXTENSION has the user's Google session, so it can pull
 // the file straight from Drive's download endpoint (works for private files too), then hand
@@ -406,6 +418,7 @@ const HANDLERS = {
   uploadFile,
   listTracks: () => listTracks(),
   subscribeSource,
+  resolveSource,
   getConfig: () => getConfig(),
   setConfig: (patch) => setConfig(patch).then(() => { connectAgentWs(); return { ok: true }; }),
 };

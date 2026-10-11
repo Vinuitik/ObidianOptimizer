@@ -1,6 +1,7 @@
 """Subscriptions discovery tests (subscriptions/discover.py) — Step 5 of the
 Subscriptions feature. No real network: list_playlist_entries, httpx.get/head, and
 feedparser.parse are all mocked."""
+import json
 import types
 
 import pytest
@@ -57,7 +58,7 @@ def test_discover_youtube_channel_default_limit(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _fake_httpx_get(html, status_code=200):
-    def fake_get(url, timeout=None, follow_redirects=None):
+    def fake_get(url, timeout=None, follow_redirects=None, headers=None, cookies=None):
         return types.SimpleNamespace(text=html, status_code=status_code, headers={})
     return fake_get
 
@@ -264,6 +265,143 @@ def test_discover_youtube_handle_uses_rss_and_keeps_shorts(monkeypatch):
 def test_discover_unknown_source_type_raises():
     with pytest.raises(ValueError, match="unknown source_type"):
         discover.discover("https://example.com/", "carrier_pigeon")
+
+
+# ---------------------------------------------------------------------------
+# discover_page_watch
+# ---------------------------------------------------------------------------
+
+_PAGE_WATCH_HTML = """
+<html><body>
+<a href="/list/cs.LG/2026-10">New papers</a>
+<a href="https://example.com/list/cs.LG/2026-09">Older papers</a>
+<a href="https://other.com/ad">Sponsored</a>
+<a href="#top">Back to top</a>
+<a href="mailto:x@example.com">Email us</a>
+<a href="javascript:void(0)">Noop</a>
+<a href="/list/cs.LG/2026-10">New papers (dup)</a>
+</body></html>
+"""
+
+
+def test_discover_page_watch_keeps_same_site_dedups_and_drops_junk(monkeypatch):
+    monkeypatch.setattr(discover.httpx, "get", _fake_httpx_get(_PAGE_WATCH_HTML))
+    out = discover.discover_page_watch("https://example.com/list/cs.LG")
+    assert out == [
+        {"item_url": "https://example.com/list/cs.LG/2026-10", "title": "New papers",
+         "published_at": None, "thumb_url": None, "duration_s": None},
+        {"item_url": "https://example.com/list/cs.LG/2026-09", "title": "Older papers",
+         "published_at": None, "thumb_url": None, "duration_s": None},
+    ]
+
+
+def test_discover_page_watch_www_normalizes_same_site():
+    assert discover._same_site("www.example.com", "example.com")
+    assert discover._same_site("example.com", "www.example.com")
+    assert not discover._same_site("example.com", "other.com")
+
+
+def test_discover_page_watch_second_poll_of_unchanged_page_returns_same_items(monkeypatch):
+    monkeypatch.setattr(discover.httpx, "get", _fake_httpx_get(_PAGE_WATCH_HTML))
+    first = discover.discover_page_watch("https://example.com/list/cs.LG")
+    second = discover.discover_page_watch("https://example.com/list/cs.LG")
+    assert first == second   # the Java-side item_url dedup is what makes this "0 new"
+
+
+def test_discover_page_watch_no_links_is_ok_not_an_error(monkeypatch):
+    monkeypatch.setattr(discover.httpx, "get", _fake_httpx_get("<html><body>no links here</body></html>"))
+    assert discover.discover_page_watch("https://example.com/") == []
+
+
+def test_discover_page_watch_raises_on_fetch_failure(monkeypatch):
+    def boom(url, headers=None, timeout=None, follow_redirects=None):
+        raise ConnectionError("dns failure")
+    monkeypatch.setattr(discover.httpx, "get", boom)
+    with pytest.raises(ValueError, match="could not fetch page"):
+        discover.discover_page_watch("https://example.com/")
+
+
+def test_discover_dispatches_page_watch(monkeypatch):
+    monkeypatch.setattr(discover, "discover_page_watch",
+                        lambda url, limit=50: [{"item_url": "u", "title": "t", "published_at": None,
+                                                "thumb_url": None, "duration_s": None}])
+    candidates, resolved = discover.discover("https://example.com/", "page_watch")
+    assert candidates == [{"item_url": "u", "title": "t", "published_at": None,
+                           "thumb_url": None, "duration_s": None}]
+    assert resolved is None
+
+
+# ---------------------------------------------------------------------------
+# discover_youtube_posts
+# ---------------------------------------------------------------------------
+
+def _yt_initial_data_html(posts):
+    data = {"contents": {"twoColumnBrowseResultsRenderer": {"tabs": [
+        {"tabRenderer": {"content": {"sectionListRenderer": {"contents": [
+            {"itemSectionRenderer": {"contents": [
+                {"backstagePostThreadRenderer": {"post": {"backstagePostRenderer": p}}}
+                for p in posts
+            ]}},
+        ]}}}},
+    ]}}}
+    return f'<html><head></head><body><script>var ytInitialData = {json.dumps(data)};</script></body></html>'
+
+
+def _post(post_id, text):
+    return {"postId": post_id, "contentText": {"runs": [{"text": text}]},
+            "publishedTimeText": {"runs": [{"text": "3 days ago"}]}}
+
+
+def test_discover_youtube_posts_extracts_id_title_and_body(monkeypatch):
+    html_text = _yt_initial_data_html([_post("Ugkx1", "Line one\nLine two of the post")])
+    monkeypatch.setattr(discover.httpx, "get",
+                        lambda url, headers=None, cookies=None, timeout=None, follow_redirects=None:
+                            types.SimpleNamespace(text=html_text))
+    out = discover.discover_youtube_posts("https://www.youtube.com/@x/posts")
+    assert out == [{
+        "item_url": "https://www.youtube.com/post/Ugkx1",
+        "title": "Line one",
+        "published_at": None,
+        "thumb_url": None,
+        "duration_s": None,
+        "body": "Line one\nLine two of the post",
+    }]
+
+
+def test_discover_youtube_posts_multiple_posts_respects_limit(monkeypatch):
+    html_text = _yt_initial_data_html([_post(f"Ug{i}", f"post {i}") for i in range(5)])
+    monkeypatch.setattr(discover.httpx, "get",
+                        lambda url, headers=None, cookies=None, timeout=None, follow_redirects=None:
+                            types.SimpleNamespace(text=html_text))
+    out = discover.discover_youtube_posts("https://www.youtube.com/@x/posts", limit=2)
+    assert len(out) == 2
+    assert [p["item_url"] for p in out] == ["https://www.youtube.com/post/Ug0", "https://www.youtube.com/post/Ug1"]
+
+
+def test_discover_youtube_posts_raises_when_no_ytinitialdata(monkeypatch):
+    monkeypatch.setattr(discover.httpx, "get",
+                        lambda url, headers=None, cookies=None, timeout=None, follow_redirects=None:
+                            types.SimpleNamespace(text="<html>blocked / consent wall</html>"))
+    with pytest.raises(ValueError, match="no ytInitialData found"):
+        discover.discover_youtube_posts("https://www.youtube.com/@x/posts")
+
+
+def test_discover_youtube_posts_raises_on_fetch_failure(monkeypatch):
+    def boom(url, headers=None, cookies=None, timeout=None, follow_redirects=None):
+        raise ConnectionError("timeout")
+    monkeypatch.setattr(discover.httpx, "get", boom)
+    with pytest.raises(ValueError, match="could not fetch"):
+        discover.discover_youtube_posts("https://www.youtube.com/@x/posts")
+
+
+def test_discover_dispatches_youtube_posts(monkeypatch):
+    monkeypatch.setattr(discover, "discover_youtube_posts",
+                        lambda url, limit=20: [{"item_url": "u", "title": "t", "published_at": None,
+                                                "thumb_url": None, "duration_s": None, "body": "b"}])
+    candidates, resolved = discover.discover("https://www.youtube.com/@x/posts", "youtube_posts")
+    assert candidates == [{"item_url": "u", "title": "t", "published_at": None,
+                           "thumb_url": None, "duration_s": None, "body": "b"}]
+    assert resolved is None
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 Files (shipped, to be reworked): tracks/SubscriptionPollWorker.java, tracks/TrackAgentClient.java, tracks/TrackRepository.java, capture/CaptureRepository.java, frontend/src/pages/TracksPage.jsx, extension popup Subscribe, pwa/CapturePage.jsx Subscribe
 Files (planned): feed/SourceRepository.java `[NEW]`, feed/FeedRepository.java `[NEW]`, feed/FeedController.java `[NEW]`, feed/SourcePollWorker.java `[MOVED from tracks/SubscriptionPollWorker]`, pwa/OfflineExportService.exportFeed `[NEW]`, pwa/MailboxConsumeService feed kinds `[NEW]`, frontend FeedView.jsx `[NEW]`, frontend pwa/mailbox.js + drivePull.js feed kinds `[NEW]`
+Files (P3, done): embedder/subscriptions/discover.py `discover_page_watch`/`discover_youtube_posts`, feed/FeedController.java `resolve()`/`resolveSource()`, feed/FeedService.java `storePostText()`, frontend FeedView.jsx (subscribe-to-channel), extension/popup.js + background.js (resolve preview)
 Related: tracks/FLOWS.md (scheduler), inbox/FLOWS.md (Learn triage), sync/FLOWS.md (backup + encryption), pwa/FLOWS.md + frontend/src/pwa/FLOWS.md (offline), capture/FLOWS.md (ingest queue)
 
 > **Goal:** stop hunting for content. Subscribe once to a channel/feed/page → new items
@@ -40,11 +41,11 @@ enqueued). `source_type` is NOT detected server-side — the UI pre-picks it by 
 | `lilianweng.github.io/` | feed | ok | 53 (whole archive) | Y | Y | Y | – | – | resolved → `/index.xml` |
 | `kaggle.com/learn-guide/5-day-genai` | feed | 422 | – | | | | | | Kaggle = JS SPA shell, no feed; whitepapers live at `kaggle.com/whitepaper-<slug>` (e.g. `whitepaper-agents`, also 422); no listing page found (`/whitepapers` is an unrelated profile) |
 
-Implications:
-- **P3 must normalise YouTube URLs** (`@handle`/`/channel/UC…` → `/videos` tab, or → `feeds/videos.xml?channel_id=`); today the natural URL a user pastes subscribes to two tab URLs that then get enqueued for ingest.
-- **P1a card fields**: `thumbnail` and `duration` are never returned by any branch; `publishedAt` is null for every yt-dlp YouTube candidate (only RSS has it). P1a needs either the YouTube RSS path or a flat-entry field passthrough (yt-dlp flat entries carry `duration`/`thumbnails`) — `TrackAgentClient.Candidate` also drops anything beyond 3 fields.
-- **An empty feed must not be an error** (arXiv weekends): `discover()` treats 0 entries as "not a feed" and 422s; P1a should return `[]`.
-- **Backlog on first subscribe is unbounded for feeds** (53 for one blog, 20/15 for YouTube) → P1a's "pending, not auto-ingested" default is essential; arXiv listing + Kaggle need `page_watch` (P3), Kaggle likely needs JS rendering.
+Implications (status as of P3, 2026-10-10):
+- **P3 must normalise YouTube URLs** (`@handle`/`/channel/UC…` → `/videos` tab, or → `feeds/videos.xml?channel_id=`); today the natural URL a user pastes subscribes to two tab URLs that then get enqueued for ingest. DONE in P1a (`youtube_feed_url`), confirmed still correct by P3.
+- **P1a card fields**: `thumbnail` and `duration` are never returned by any branch; `publishedAt` is null for every yt-dlp YouTube candidate (only RSS has it). P1a needs either the YouTube RSS path or a flat-entry field passthrough (yt-dlp flat entries carry `duration`/`thumbnails`) — `TrackAgentClient.Candidate` also drops anything beyond 3 fields. DONE in P1a; P3 adds a 6th field (`body`, youtube_posts only).
+- **An empty feed must not be an error** (arXiv weekends): `discover()` treats 0 entries as "not a feed" and 422s; P1a should return `[]`. DONE in P1a.
+- **Backlog on first subscribe is unbounded for feeds** (53 for one blog, 20/15 for YouTube) → P1a's "pending, not auto-ingested" default is essential; arXiv listing + Kaggle need `page_watch` (P3), Kaggle likely needs JS rendering. `page_watch` DONE in P3 (arXiv listing now resolves via same-site link diffing); Kaggle deliberately left as a near-empty `page_watch` source rather than adding JS rendering (user decision, see "### P3" below).
 
 ## 1. Target pipeline
 
@@ -76,7 +77,7 @@ feed_items  (id, source_id → sources ON DELETE CASCADE, item_url UNIQUE, title
 - Migration: drop `tracks.type='subscription'` + `source_*` columns (0 live rows → no data move).
 - Default `target_track_id` = an auto-created "Passive" track (no deadline, priority `could`).
 
-## 3. Subscribe flow (simplified) `[NOT IMPLEMENTED]`
+## 3. Subscribe flow (simplified) (IMPLEMENTED — P3, see feed/FLOWS.md "Resolve (P3)")
 
 ```
 any URL (Feed "+" box | extension Subscribe | PWA Capture Subscribe | card "subscribe to channel")
@@ -199,14 +200,27 @@ while a sibling agent is committing.
   `drivePull.test.js` (+feed cases) + new `mailbox.test.js`. `test.sh java-unit java-it frontend` green.
 - Context: this doc §4 + P2, pwa/FLOWS.md (backend), frontend/src/pwa/FLOWS.md, sync/FLOWS.md "Encryption Detail".
 
-### P3 — subscribe from any URL
+### P3 — subscribe from any URL (DONE 2026-10-10)
 - Scope: `POST /feed/sources/resolve {url}` → `{kind, feedUrl, title, preview[3]}` (no row);
   RSS `<link rel=alternate>` autodiscovery; `page_watch` kind (snapshot same-site links, new ones
   = items); "subscribe to this channel" on a card; extension Subscribe shows the preview.
-- Metrics: every row of the P0 matrix resolves; page_watch second poll of an unchanged page → 0 new items.
-- YouTube **Posts** (channel community/text posts) as a source kind: no RSS exists → build our own: poll `/@handle/posts`, parse the embedded `ytInitialData` JSON, diff post IDs (spike first)
-  (yt-dlp / page fetch); text posts ingest as text notes. Goal = maximum breadth (user 2026-10-10).
-- Kaggle: OUT — treated as a manually managed opportunity (user 2026-10-10).
+- Metrics: page_watch second poll of an unchanged page → 0 new items (verified via
+  `discover_page_watch` unit tests: identical HTML in → identical candidate list out, and the
+  existing `feed_items.item_url UNIQUE` dedup — unchanged from P1a — is what turns "same list" into
+  "0 new rows" at the Java layer). RSS/page_watch/youtube/youtube_posts branches each unit-tested in
+  `FeedControllerTest` + embedder `test_discover.py`; Kaggle intentionally excluded from the "every
+  row resolves" bar (see below).
+- YouTube **Posts** (channel community/text posts) as a source kind: no RSS exists → built our own:
+  poll `/@handle/posts`, parse the embedded `ytInitialData` JSON (a `CONSENT=YES+1` cookie is
+  required to avoid an EU consent-redirect — see feed/FLOWS.md Technology Notes), diff post IDs via
+  the existing `feed_items.item_url UNIQUE` dedup (same mechanism as everything else, not a new
+  diffing path); text posts ingest as text notes via `FeedService.storePostText()` + `captureRepo.enqueue("text")` (capture queue).
+  **Spiked live 2026-10-05 before building** (fetched a real channel's `/posts` page with a plain
+  `httpx.get` + the consent cookie — worked, no JS rendering, no login). Goal = maximum breadth
+  (user 2026-10-10).
+- Kaggle: OUT — treated as a manually managed opportunity (user 2026-10-10). Not special-cased in
+  code: a Kaggle URL still falls through to `page_watch` (its JS-shell HTML just yields few/no
+  same-site links), rather than being hard-blocked or given special handling.
 - Context: this doc §3 + P0 matrix, embedder discover module, extension/FLOWS.md.
 
 ### P4 — Today inside Learn

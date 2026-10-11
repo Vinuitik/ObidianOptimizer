@@ -20,8 +20,14 @@
     <button id="subscribe-page" class="btn ghost small">🔔 Subscribe to this page (Feed)</button>
     <div id="subscribe-form" hidden>
       <input id="sub-url" class="in" type="text" placeholder="Source URL" />
-      <button id="sub-confirm" class="btn small">Subscribe</button>
+      <button id="sub-preview-btn" class="btn small">Preview</button>
       <button id="sub-cancel" class="btn ghost small">Cancel</button>
+    </div>
+    <div id="sub-preview" hidden>
+      <p id="sub-preview-title" class="hint"></p>
+      <ul id="sub-preview-items" class="hint"></ul>
+      <button id="sub-confirm" class="btn small">Confirm subscribe</button>
+      <button id="sub-back" class="btn ghost small">Back</button>
     </div>
     <p id="sub-status" class="status"></p>
 

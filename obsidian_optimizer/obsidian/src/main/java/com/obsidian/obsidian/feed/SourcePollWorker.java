@@ -104,7 +104,8 @@ public class SourcePollWorker {
             String url = normalizeUrl(c.itemUrl());
             if (url == null) continue;
             String title = (c.title() == null || c.title().isBlank()) ? url : c.title();
-            Long id = feedRepo.insertIfNew(s.id(), url, title, c.thumbUrl(), c.durationS(), parseDate(c.publishedAt()));
+            Long id = feedRepo.insertIfNew(s.id(), url, title, c.thumbUrl(), c.durationS(),
+                parseDate(c.publishedAt()), c.body());
             if (id == null) continue;
             inserted++;
             if (auto) feedService.accept(id);
@@ -121,9 +122,12 @@ public class SourcePollWorker {
         return inserted;
     }
 
-    /** Embedder discover type: playlists keep the yt-dlp path; everything else (incl. the resolved
-     *  YouTube channel RSS) goes through the feed path. */
+    /** Embedder discover type: page_watch/youtube_posts are self-contained kinds; playlists
+     *  keep the yt-dlp path; everything else (incl. the resolved YouTube channel RSS) goes
+     *  through the feed path. */
     static String discoverType(Source s) {
+        if ("page_watch".equals(s.kind())) return "page_watch";
+        if ("youtube_posts".equals(s.kind())) return "youtube_posts";
         boolean ytRss = s.feedUrl() != null && s.feedUrl().contains("/feeds/videos.xml");
         return "youtube".equals(s.kind()) && !ytRss ? "youtube_channel" : "feed";
     }

@@ -26,7 +26,7 @@ public class FeedRepository {
 
     public record FeedItem(long id, long sourceId, String sourceTitle, String itemUrl, String title,
                            String thumbUrl, Integer durationS, Instant publishedAt, String status,
-                           Instant decidedAt, String captureId) {}
+                           Instant decidedAt, String captureId, String body) {}
 
     @PostConstruct
     public void initSchema() {
@@ -47,22 +47,32 @@ public class FeedRepository {
             """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_feed_items_status ON feed_items(status, published_at DESC)");
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_feed_items_source ON feed_items(source_id)");
+        // body: full text of a YouTube Community post (P3 youtube_posts kind) — null for
+        // every other item kind. Added by migration (existing rows predate the column).
+        jdbc.execute("ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS body TEXT");
     }
 
     private static final String SELECT = """
         SELECT fi.*, s.title AS source_title FROM feed_items fi JOIN sources s ON s.id = fi.source_id
         """;
 
-    /** Insert a pending item; returns its id, or null if {@code item_url} already exists
-     *  (dedup — whatever its status). */
+    /** Insert a pending item with no body (every kind except youtube_posts). */
     public Long insertIfNew(long sourceId, String itemUrl, String title, String thumbUrl,
                             Integer durationS, Instant publishedAt) {
+        return insertIfNew(sourceId, itemUrl, title, thumbUrl, durationS, publishedAt, null);
+    }
+
+    /** Insert a pending item; returns its id, or null if {@code item_url} already exists
+     *  (dedup — whatever its status). {@code body} is only non-null for youtube_posts items
+     *  (the post's full text, read back by {@link FeedService#accept}). */
+    public Long insertIfNew(long sourceId, String itemUrl, String title, String thumbUrl,
+                            Integer durationS, Instant publishedAt, String body) {
         List<Long> ids = jdbc.queryForList("""
-            INSERT INTO feed_items(source_id, item_url, title, thumb_url, duration_s, published_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO feed_items(source_id, item_url, title, thumb_url, duration_s, published_at, body)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (item_url) DO NOTHING RETURNING id
             """, Long.class, sourceId, itemUrl, title, thumbUrl, durationS,
-            publishedAt == null ? null : Timestamp.from(publishedAt));
+            publishedAt == null ? null : Timestamp.from(publishedAt), body);
         return ids.isEmpty() ? null : ids.get(0);
     }
 
@@ -106,6 +116,7 @@ public class FeedRepository {
         return new FeedItem(rs.getLong("id"), rs.getLong("source_id"), rs.getString("source_title"),
             rs.getString("item_url"), rs.getString("title"), rs.getString("thumb_url"),
             (Integer) rs.getObject("duration_s"), pub == null ? null : pub.toInstant(),
-            rs.getString("status"), dec == null ? null : dec.toInstant(), rs.getString("capture_id"));
+            rs.getString("status"), dec == null ? null : dec.toInstant(), rs.getString("capture_id"),
+            rs.getString("body"));
     }
 }

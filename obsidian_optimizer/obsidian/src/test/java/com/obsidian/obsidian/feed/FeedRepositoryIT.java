@@ -115,4 +115,13 @@ class FeedRepositoryIT {
         repo.initSchema();
         repo.initSchema();
     }
+
+    @Test
+    void insertIfNew_withBody_roundTrips_sixArgOverloadLeavesItNull() {
+        Long withBody = repo.insertIfNew(sid, "https://a/post1", "Post", null, null, null, "full post text");
+        assertThat(repo.get(withBody).body()).isEqualTo("full post text");
+
+        Long withoutBody = repo.insertIfNew(sid, "https://a/vid1", "Vid", null, null, null);
+        assertThat(repo.get(withoutBody).body()).isNull();
+    }
 }

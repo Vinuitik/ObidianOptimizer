@@ -1,9 +1,9 @@
-# Passive Feed — Backend (P1a/P2, IMPLEMENTED)
+# Passive Feed — Backend (P1a/P2/P3, IMPLEMENTED)
 
 Files: SourceRepository.java, FeedRepository.java, FeedService.java, FeedController.java, SourcePollWorker.java
-Tests: SourceRepositoryIT.java, FeedRepositoryIT.java, FeedAcceptRestoreIT.java, SourcePollWorkerTest.java
-Embedder: embedder/subscriptions/discover.py (`youtube_feed_url`, `discover_feed`, `discover`)
-Plan: FLOWS_feed.md (design doc — §0 P0 findings, §2 data model, "### P1a"/"### P2" scope/contract)
+Tests: SourceRepositoryIT.java, FeedRepositoryIT.java, FeedAcceptRestoreIT.java, SourcePollWorkerTest.java, FeedControllerTest.java
+Embedder: embedder/subscriptions/discover.py (`youtube_feed_url`, `discover_feed`, `discover_page_watch`, `discover_youtube_posts`, `discover`)
+Plan: FLOWS_feed.md (design doc — §0 P0 findings, §2 data model, §3 subscribe flow, "### P1a"/"### P3" scope/contract)
 Related: tracks/FLOWS.md (Passive track via `TrackRepository.getOrCreatePassive()`, Phase 1b tagging),
 capture/FLOWS.md (`CaptureRepository.enqueue`/`cancelQueued`), settings/FLOWS.md (`feedAutoAccept`),
 pwa/FLOWS.md (backend offline export/mailbox — P2), frontend/src/pwa/FLOWS.md (phone offline feed — P2)
@@ -67,13 +67,13 @@ Undo is client-side `restore` of the last decision — no server undo stack (per
 ```
 POST /feed/sources {url, title?, autoAccept?, targetTrackId?}  → FeedController.createSource()
   existing source for this exact url → return it (idempotent)
-  else: isYoutube(url) picks the probe type ("youtube_channel" | "feed")
-        TrackAgentClient.discover(url, type) → !ok → 422 "could not read a feed from that URL"
-        kind = youtube (either the url or the resolved feedUrl is a youtube.com/youtu.be host) else rss
+  else: FeedController.resolve(url) — see "Resolve (P3)" below
+        !ok → 422 "could not read a feed from that URL"
         SourceRepository.create(...) then SourcePollWorker.ingestCandidates(s, candidates, backlog=true)
              -- the current feed contents become the pending backlog, never auto-accepted here
 
 GET    /feed/sources                → SourceRepository.list()  (includes live pendingCount per source)
+POST   /feed/sources/resolve {url}  → FeedController.resolveSource()  -- preview only, see below
 PATCH  /feed/sources/{id} {autoAccept?, targetTrackId?, status?, title?}
   -- explicit JSON null for autoAccept/targetTrackId clears to "inherit global" / "inherit Passive track"
 DELETE /feed/sources/{id}           → ON DELETE CASCADE drops its feed_items; already-ingested notes untouched
@@ -111,6 +111,53 @@ failing kind (pwa/FLOWS.md Technology Notes) — no special-casing added for fee
 To change the export cap: `OfflineExportService.FEED_ITEM_LIMIT` (200).
 To add an offline feed field: `OfflineExportService.exportFeed()` (server) + whatever reads
 `meta.feedItems` client-side (offlineApi.js `pulledFeed()`).
+
+## Resolve (P3) — subscribe from any URL
+
+```
+FeedController.resolve(url) — shared by createSource() (persists) and resolveSource() (preview only):
+  isYoutube(url) && url contains "/posts" → discover(url, "youtube_posts")
+       ok → kind="youtube_posts", feedUrl=null   (Community tab, no RSS — see below)
+  else isYoutube(url) → discover(url, "youtube_channel")
+       ok → kind="youtube", feedUrl=resolvedFeedUrl ?? url
+       !ok → 422 (a broken YouTube URL does NOT fall back to page_watch)
+  else → discover(url, "feed")   -- includes <link rel=alternate> autodiscovery, see P1a section below
+       ok → kind="rss" (or "youtube" if the resolved feed itself turns out to be a youtube.com host)
+       !ok → discover(url, "page_watch")
+            ok → kind="page_watch", feedUrl=null
+            !ok → 422 (page itself unreachable — true failure, e.g. Kaggle's JS shell often
+                  resolves here with an empty/near-empty preview rather than a hard 422)
+
+POST /feed/sources/resolve {url} → FeedController.resolveSource()
+  → resolve(url) + defaultTitle(url); preview = first 3 candidates (title/itemUrl/publishedAt/
+    thumbUrl/durationS); NOTHING is persisted (no Source row, no backlog, no polling kicked off)
+  → used by: extension popup Subscribe (preview before confirm), any future preview UI
+```
+To change the resolution order: `FeedController.resolve()`. To change preview size: `resolveSource()`
+`.limit(3)`.
+
+### page_watch (same-site link diff)
+
+No feed, no RSS — embedder `discover_page_watch()` regex-extracts every same-site `<a href>` on
+the page (same low-dependency convention as RSS autodiscovery, no JS rendering) and returns the
+full current snapshot every time. There's no separate "diff" step: `FeedRepository.insertIfNew`'s
+existing `item_url UNIQUE` dedup IS the diff — poll #1 inserts every link as backlog, poll #2 of
+an unchanged page re-offers the same URLs, all already present → 0 new rows. Junk links (nav/
+footer) ride along; swipe absorbs it (see Technology Notes).
+
+### youtube_posts (YouTube Community tab)
+
+A YouTube channel's `/posts` tab has no RSS. Embedder `discover_youtube_posts()` fetches the tab's
+static HTML with a `CONSENT=YES+1` cookie (bypasses YouTube's EU consent-redirect — no login, no
+JS) and parses the embedded `ytInitialData` JSON for `backstagePostRenderer` blocks (spiked
+2026-10-05 against a live channel before building this — see Technology Notes for the failure
+mode). Each post becomes a candidate with `item_url = youtube.com/post/<postId>` and a `body`
+field (the post's full text) — the only candidate kind that carries one.
+`FeedRepository.insertIfNew(..., body)` / `feed_items.body` persist it; `FeedService.accept()`
+branches on `item.body() != null` and calls `FeedService.storePostText()` (writes
+`resources/files/<captureId>.md` under the vault) then `captureRepo.enqueue(id, "text", title, path, title)`
+— the same durable queue + row shape as pasted text; `CaptureIngestWorker.submit()` reads the file
+back for `source_type='text'`. No URL fetch, no feed → CaptureController call for text.
 
 ## URL normalization (dedup key)
 
@@ -151,8 +198,11 @@ itemUrl, title, publishedAt, thumbUrl, durationS).
 ```sql
 sources     (id, kind, url UNIQUE, feed_url, title, auto_accept BOOLEAN NULL /*null=inherit global*/,
              target_track_id, last_checked_at, created_at, status 'active'|'paused')
+             -- kind: 'youtube' | 'rss' | 'page_watch' | 'youtube_posts' (P3; free text, not an enum/CHECK)
 feed_items  (id, source_id → sources ON DELETE CASCADE, item_url UNIQUE, title, thumb_url, duration_s,
-             published_at, status 'pending'|'binned'|'accepted', decided_at, capture_id, created_at)
+             published_at, status 'pending'|'binned'|'accepted', decided_at, capture_id, created_at,
+             body  -- [P3] full text of a youtube_posts item; NULL for every other kind
+            )
 ```
 Both tables init via `@PostConstruct initSchema()` (`CREATE TABLE IF NOT EXISTS`), same convention as
 `TrackRepository`/`CaptureRepository`. `tracks.source_url`/`source_type`/`type='subscription'` columns from
@@ -168,6 +218,7 @@ POST   /feed/items/{id}/bin      → 204                     (idempotent)
 POST   /feed/items/{id}/restore  → 204 → pending; 409 if the capture already left QUEUED
 GET    /feed/sources             → [{id, kind, url, feedUrl, title, autoAccept|null, targetTrackId, status, lastCheckedAt, pendingCount}]
 POST   /feed/sources {url, autoAccept?, targetTrackId?} → Source
+POST   /feed/sources/resolve {url} → {kind, feedUrl, title, preview:[{title,itemUrl,publishedAt,thumbUrl,durationS}]}  [P3, preview only]
 PATCH  /feed/sources/{id} {autoAccept?, targetTrackId?, status?, title?}
 DELETE /feed/sources/{id}
 POST   /feed/sources/{id}/poll   → 202
@@ -205,6 +256,27 @@ updating the frontend in the same change.
   online-only. `[NOT IMPLEMENTED: offline bin/sources]`
 - **Offline export is text-only** — no `thumbUrl`/`durationS` (no offline thumb cache yet).
   `[NOT IMPLEMENTED: offline thumbnail cache]`
+- **Mailbox/offline hooks don't exist yet** — `OfflineExportService.exportFeed()` and offline swipe
+  mailbox kinds are P2 scope. `[NOT IMPLEMENTED]`
+- **`CONSENT=YES+1` is an unofficial YouTube cookie trick** (P3, `discover_youtube_posts`) — bypasses
+  the EU consent-redirect that otherwise 302s a cookie-less GET away from `ytInitialData` entirely.
+  Confirmed live 2026-10-05 against a real channel before building on it (not blocked, no login
+  needed). If YouTube changes this page's shape or starts blocking it outright, `discover_youtube_posts`
+  raises ValueError ("no ytInitialData found") → `discover` not `ok` → same silent-retry-forever/
+  no-alert failure mode as YouTube RSS above. **Do not "fix" a persistent failure here by adding a
+  JS-rendering dependency** (Selenium/Playwright) — report it instead, per the P3 plan's own
+  constraint. `[NOT IMPLEMENTED: alerting]`
+- **youtube_posts dates are unusable.** `publishedTimeText` in `ytInitialData` is relative ("3 days
+  ago"), not an ISO/RFC timestamp — `discover_youtube_posts` always returns `published_at: None`.
+  Cards sort by insertion order (published_at NULLS LAST), not true recency.
+- **page_watch catches ALL same-site links, including nav/footer chrome** — there's no content-vs-
+  navigation heuristic. A page with a large shared nav can backlog dozens of irrelevant cards on
+  first subscribe; swipe absorbs it (per plan), but auto-accept on a page_watch source is risky
+  (also called out in FLOWS_feed.md's own Technology Notes).
+- **Kaggle is explicitly out of scope** (user decision 2026-10-10) but not special-cased: a Kaggle
+  URL still falls through to `page_watch` rather than hard-failing, since its JS-shell HTML simply
+  yields few/no same-site links in the static response — an empty-ish source, not an error. No
+  Selenium/Playwright was added to do better, by design.
 
 ## Change Index
 
@@ -221,15 +293,19 @@ updating the frontend in the same change.
 | Bin / restore / 409 | `FeedService.bin()`/`restore()` / `CaptureStartedException` |
 | Restore cancels an unclaimed capture | `CaptureRepository.cancelQueued()` |
 | REST surface | `FeedController` (items/sources endpoints) |
-| Source create / resolve kind | `FeedController.createSource()` / `isYoutube()` |
+| Source create / resolve kind | `FeedController.createSource()` / `resolve()` / `isYoutube()` |
+| Subscribe-preview endpoint | `FeedController.resolveSource()` (`POST /feed/sources/resolve`) |
 | YouTube → channel RSS resolution | embedder `discover.py` `youtube_feed_url()` |
 | Empty-feed-is-ok | embedder `discover.py` `discover_feed()` |
-| Candidate thumb/duration fields | embedder `discover.py` dicts → `TrackAgentClient.Candidate` |
-| Schema | `SourceRepository.initSchema()` / `FeedRepository.initSchema()` |
-| Frontend (Feed tab, swipe UI) | `frontend/src/components/organisms/FeedView.jsx` (P1b) |
+| Candidate thumb/duration/body fields | embedder `discover.py` dicts → `TrackAgentClient.Candidate` |
+| Schema | `SourceRepository.initSchema()` / `FeedRepository.initSchema()` (`feed_items.body`) |
+| Frontend (Feed tab, swipe UI) | `frontend/src/components/organisms/FeedView.jsx` + `FeedSources.jsx` (P1b) |
+| "Subscribe to this channel" on a card | `FeedView.jsx FeedCard` → `useStore.subscribeToChannel()` (P3) |
+| Extension Subscribe preview | `extension/popup.js` `#sub-preview-btn` → `background.js resolveSource()` (P3) |
+| page_watch link-diff discovery | embedder `discover.py` `discover_page_watch()` (P3) |
+| youtube_posts discovery + text ingest | embedder `discover.py` `discover_youtube_posts()`; `FeedService.accept()` → `storePostText()` + `captureRepo.enqueue("text")` (P3); vault path from `SettingsRepository.getVaultPath()` |
 | Offline export (pending, text-only, cap 200) | `OfflineExportService.exportFeed()` (P2) |
 | Offline export trigger | `SourcePollWorker.ingestCandidates()` (`inserted > 0`) |
 | Offline swipe mailbox kinds | `MailboxConsumeService.consumeFile` (`feed_accept`/`feed_bin`/`feed_restore`) |
 | Offline swipe outbox kinds | `pwa/outbox.js` `enqueueFeedAccept`/`enqueueFeedBin`/`enqueueFeedRestore` + `flush()` |
 | Offline swipe cache (phone) | `pwa/offlineApi.js` `pulledFeed()`/`dropFromFeed()` → IDB meta `feedItems` |
-| Subscribe-from-any-URL resolve preview, page_watch | `[NOT IMPLEMENTED]` — P3 |

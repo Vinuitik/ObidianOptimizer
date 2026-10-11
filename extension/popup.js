@@ -99,8 +99,13 @@ async function capturePage() {
 }
 
 // ── Subscribe to this page → POST /feed/sources (new items land in Learn ▸ Feed) ─────
+// Two-step: Preview (resolveSource, nothing persisted) shows what you'd get, THEN
+// Confirm subscribe actually creates the source (feed/FLOWS_feed.md §3).
+let pendingSubscribeUrl = null;
+
 $('subscribe-page').addEventListener('click', async () => {
   $('subscribe-form').hidden = !$('subscribe-form').hidden;
+  $('sub-preview').hidden = true;
   if ($('subscribe-form').hidden) return;
   try {
     const [tab] = await api.tabs.query({ active: true, currentWindow: true });
@@ -110,12 +115,52 @@ $('subscribe-page').addEventListener('click', async () => {
 
 $('sub-cancel').addEventListener('click', () => {
   $('subscribe-form').hidden = true;
+  $('sub-preview').hidden = true;
+  setStatus($('sub-status'), '', 'info');
+});
+
+$('sub-back').addEventListener('click', () => {
+  $('sub-preview').hidden = true;
+  $('subscribe-form').hidden = false;
+  setStatus($('sub-status'), '', 'info');
+});
+
+$('sub-preview-btn').addEventListener('click', async () => {
+  const url = $('sub-url').value.trim();
+  if (!url) return setStatus($('sub-status'), 'Enter a URL.', 'err');
+
+  $('sub-preview-btn').disabled = true;
+  setStatus($('sub-status'), 'Checking…', 'info');
+  const res = await send('resolveSource', { url });
+  $('sub-preview-btn').disabled = false;
+  if (!res?.ok) {
+    setStatus($('sub-status'), res?.status === 401
+      ? 'Not signed in — open Settings ⚙ to sign in.'
+      : `Failed: ${res?.error || res?.status || 'unknown'}`, 'err');
+    return;
+  }
+
+  pendingSubscribeUrl = url;
+  $('sub-preview-title').textContent = `${res.title || url} (${res.kind})`;
+  $('sub-preview-items').innerHTML = '';
+  (res.preview || []).forEach(item => {
+    const li = document.createElement('li');
+    li.textContent = item.title || item.itemUrl;
+    $('sub-preview-items').appendChild(li);
+  });
+  if (!res.preview?.length) {
+    const li = document.createElement('li');
+    li.textContent = '(no items yet — you\'ll still get future ones)';
+    $('sub-preview-items').appendChild(li);
+  }
+  $('subscribe-form').hidden = true;
+  $('sub-preview').hidden = false;
   setStatus($('sub-status'), '', 'info');
 });
 
 $('sub-confirm').addEventListener('click', async () => {
-  const url = $('sub-url').value.trim();
-  if (!url) return setStatus($('sub-status'), 'Enter a URL.', 'err');
+  const url = pendingSubscribeUrl;
+  if (!url) return;
 
   $('sub-confirm').disabled = true;
   setStatus($('sub-status'), 'Subscribing…', 'info');
@@ -124,7 +169,8 @@ $('sub-confirm').addEventListener('click', async () => {
   if (res?.ok) {
     setStatus($('sub-status'), 'Subscribed ✓ — see Learn ▸ Feed', 'ok');
     $('sub-url').value = '';
-    $('subscribe-form').hidden = true;
+    pendingSubscribeUrl = null;
+    $('sub-preview').hidden = true;
   } else if (res?.status === 401) {
     setStatus($('sub-status'), 'Not signed in — open Settings ⚙ to sign in.', 'err');
   } else {

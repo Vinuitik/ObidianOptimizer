@@ -249,6 +249,11 @@ To change threshold: `FeedView.jsx SWIPE_PX`. Auto-accept tri-state: `FeedSource
 `decideFeed`/`restoreFeedItem`/`ingestFeedItem` (store) now route through `pwa/offlineApi.js`
 (P2) so the swipe stack + Undo keep working with the laptop off — see `pwa/FLOWS.md` "offline
 Passive Feed". Bin tab / Sources stay online-only.
+`FeedCard` shows a "🔔 Subscribe to this channel" button (P3) when `item.itemUrl` is a youtube.com/
+youtu.be host, regardless of the card's own source kind — lets a video surfaced via `page_watch`
+or RSS one-click into its own recurring channel subscription. `onClick` → `stopPropagation()` (so
+it doesn't also register as a swipe start) → store `subscribeToChannel(url)` → `addFeedSource`
+(same idempotent `POST /feed/sources` the Sources tab uses).
 Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so events are synthesized).
 
 ---
@@ -291,3 +296,4 @@ Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so ev
 | Source footer parse (pages/clip/bbox) | `utils/inboxParse.parseSourceRegion()` (`pages`, `startSeconds`/`endSeconds`, `local`, `bboxes`) |
 | Swipe threshold / keys | `organisms/FeedView.jsx SWIPE_PX` / `Stack` keydown effect |
 | Feed sources panel | `organisms/FeedSources.jsx` |
+| "Subscribe to this channel" card button | `organisms/FeedView.jsx isYouTubeUrl` + `FeedCard` → `store/useStore.js subscribeToChannel()` |
