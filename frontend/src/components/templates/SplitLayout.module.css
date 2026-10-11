@@ -73,7 +73,7 @@
 }
 
 .centerTitle {
-  font-family: var(--font-heading);
+  font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
@@ -96,7 +96,7 @@
 }
 
 .headerTitleInput {
-  font-family: var(--font-heading);
+  font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
@@ -275,7 +275,7 @@
     position: absolute;
     inset: 0;
     z-index: 40;                 /* under the drawer (50), over the editor */
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--scrim);
     animation: scrimIn 160ms ease;
   }
 }

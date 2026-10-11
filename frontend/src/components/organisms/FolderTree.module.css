@@ -40,8 +40,8 @@
 }
 
 .newRootBtn:hover {
-  background: rgba(124, 92, 255, 0.22);
-  border-color: rgba(124, 92, 255, 0.5);
+  background: var(--accent-tint);
+  border-color: var(--accent-text);
 }
 
 .loadingRow {
