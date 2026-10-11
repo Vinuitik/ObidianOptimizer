@@ -102,8 +102,16 @@ Files: TrackAddBox.jsx, TracksPage.jsx (TrackItemsEditor), api/capture.js
 - Captured link/file shows link|file + "processing…" placeholder; `fetchTrackItems` polled every 5s (6x) until item count grows. To change: `TrackAddBox` POLL_MS/POLL_MAX.
 - Persisted item chip = `itemKind()`: note (has notePath) | plain. link/file not derivable after ingest (no backend field). [NOT IMPLEMENTED]
 
+## Tracks — one-step create + Advanced
+Files: NewTrackForm.jsx, TracksPage.jsx (ManageTab, TrackDetail), TracksPage.manage.test.jsx
+- Create: `NewTrackForm.onSubmit()` → `createTrack(title,'book')` → deadline? `updateTrack({deadline})` → `classifyInput(paste)`: urls → `captureResource(url, id)` each | text → `addTrackItem(id, line, null)` per line. Type defaults to book; change under detail Advanced.
+- Detail: primary = Deadline + Items. One collapsed `<details>` "Advanced" = Type, Status, Show on Progress tab, Priority, Weekly schedule, Generate a course. List column has a second "Advanced" = Daily capacity + Import from spreadsheet.
+- Label-only renames (API unchanged): Mini-course → Generate a course; Include in Progress → Show on Progress tab; Review import → Import preview.
+
 | Change | Where |
 |---|---|
+| New-track form | `NewTrackForm` |
+| Advanced contents | `TrackDetail` `<details>`; `ManageTab` `<details>` |
 | URL/text detection | `classifyInput()` |
 | Item chip | `itemKind()`, `ItemTypeChip` |
 
