@@ -171,6 +171,13 @@ Center panel routing (from store `centerMode`):
 To change default panel width: `SplitLayout.jsx DEFAULT_WIDTH`  
 To change center panel routing: `SplitLayout.jsx` center panel conditional
 
+### Save / Cancel (edit mode)
+Cmd/Ctrl+S (window keydown, only while `isMutable`) or Save → `SplitLayout.handleSave()` → `store.syncNote()`; throw → `showToast({tone:'error'})` + "Save failed" label.
+Save state label (`saveLabel`): Saving… / Save failed / Unsaved changes / No changes / Saved (2.5s after success). Dirty = `selectDirty()` (pendingRaw differs from currentNoteRaw, title changed, or pendingFiles).
+Cancel when dirty → inline "Discard unsaved changes?" (`confirmDiscard`) → Discard = `store.cancelEdit()`. Clean Cancel exits at once.
+No note open → header title blank; the single "Select a note" message is `MilkdownEditor`'s empty pane. Mobile: collapsed-Files opener is a full-width 44px row (`.filesBtn`).
+To change: `SplitLayout.jsx handleSave / handleCancel / selectDirty`
+
 ---
 
 ## NavBar
@@ -181,7 +188,22 @@ Auth state from `isAuthenticated` → "Sign in" / "Sign out".
 
 Mobile (≤768px): CSS-only two-row wrap — brand + auth on row 1 (auth always on-screen), links on row 2, horizontally scrollable, ≥44px touch targets. See `NavBar.module.css` `@media` block.
 
+`QuickCapture` (molecule, authed only) sits left of RefreshButton - see next section.
+
 Streak display: hardcoded "12-day streak" — wire to `streakDays` in store when backend supports it.
+
+---
+
+## QuickCapture (molecule, in NavBar)
+
+Files: QuickCapture.jsx, QuickCapture.module.css
+"+ Capture" button or `c` key (not while typing in input/textarea/contenteditable; Esc/outside click closes) → popover → `classifyInput()` (from `TrackAddBox`):
+- urls → `api/capture.captureResource(url)` per line (no track)
+- file (Attach / drop) → `api/capture.captureFile(file)`
+- text → `api/notes.createNote(<vaultRoot>/_inbox, noteNameFromText())` + `updateNote(path, text)`
+
+Success → `showToast({tone:'success', action:'View in Inbox' → navigate('/learn')})`; all-failed → inline error, popover stays open.
+Technology note: text notes assume `<vaultRoot>/_inbox` exists and that createNote accepts it as `folder`; the Inbox tab lives on `/learn`, so if Learn stops defaulting to Inbox the toast link lands on Feed.
 
 ---
 
