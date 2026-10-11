@@ -3,6 +3,7 @@ import useStore from '../../store/useStore';
 import ObsidianMark from '../atoms/ObsidianMark';
 import Button from '../atoms/Button';
 import RefreshButton from '../atoms/RefreshButton';
+import QuickCapture from '../molecules/QuickCapture';
 import useNavItems from './useNavItems';
 import styles from './NavBar.module.css';
 
@@ -37,6 +38,7 @@ export default function NavBar() {
       </div>
 
       <div className={styles.right}>
+        {isAuthenticated && <QuickCapture />}
         <RefreshButton />
         <span className={styles.avatar}>V</span>
         {isAuthenticated ? (
