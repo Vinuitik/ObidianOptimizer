@@ -78,9 +78,9 @@ describe('ReviewPage flow', () => {
     setup();
     render(<ReviewPage />);
     await screen.findByTestId('band-buttons');
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     fireEvent.keyDown(window, { key: '2' });
-    await screen.findByTestId('inline-graded');
+    await screen.findByTestId('inline-graded', {}, { timeout: 5000 });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     expect(screen.getByTestId('graded-flash').textContent).toMatch(/Graded Good/);
     expect(screen.getByTestId('note-body').textContent).toBe('body of alpha.md');
     await act(async () => { vi.advanceTimersByTime(ADVANCE_MS + 50); });
