@@ -108,6 +108,14 @@ surfaced directly on `TracksPage`: the mode toggle + overflow banner on the Toda
 a collapsible "Daily capacity" 7-input panel at the top of the Manage tab's track sidebar
 (`CapacityPanel`) — tracks-specific, so it lives here rather than generic Settings.
 
+
+### Today reasons (M3, computed, not stored)
+`TodayItem.reason` + `TodayPlan.planned`/`capacity` (additive JSON). Per track, same branch that chose the items:
+deadline → `Due Fri · ~N/day to finish` (`Due today`/`Overdue` when deadline <= today); trimmed musts →
+`Due Fri · trimmed: must deadlines exceed today's capacity`; manual → `Fills leftover capacity`;
+lock-in → `Focus: most urgent deadline · Due Fri`. `planned` = items returned, `capacity` = today's `daily_capacity`.
+UI labels only: lockin = "Focus on one track", normal = "Balanced" (API values unchanged).
+
 ## Progress Flow (Phase 1d, IMPLEMENTED)
 
 ```
@@ -308,6 +316,7 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 | **Lock-in track picker (urgency)** | `TodayPlanService.pickLockInTrack()` / `priorityWeight()` |
 | **MoSCoW trim (could→should→must pro-rata)** | `TodayPlanService.trimByPriority()` — return value is the `overBudget` signal |
 | **Deadline-track pace** | `TodayPlanService.capacityBetween()` (Σ daily_capacity over `[today, deadline)`) |
+| Today reason strings / planned / capacity | `TodayPlanService.today()` (`dueLabel()`, reason args to `toTodayItems()`) |
 | Mode toggle + overflow banner UI | `TracksPage.jsx` `TodayTab` (`modeRow`, `overBudgetBanner`) |
 | Capacity settings UI | `TracksPage.jsx` `CapacityPanel` (Manage tab sidebar, collapsible) |
 | Item reorder semantics | `TrackRepository.reorderItem()` |

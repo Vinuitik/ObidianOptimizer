@@ -131,3 +131,7 @@ Test files sit next to the component or util they cover: `ComponentName.test.jsx
 - Trash UI (list + restore from `_trash/`)
 - Math node inline editing
 - Tab persistence across page refresh
+
+## Tracks — Today explains itself
+Files: TracksPage.jsx (TodayTab), useStore.js (todayPlanned/todayCapacity), TracksPage.today.test.jsx
+GET /tracks/today → fetchTodayPlan() → TodayTab: header "N of M for today", `item.reason` under each item; empty + no tracks → "Create your first track" → onCreateTrack (TracksPage sets tab='manage'). Labels: lockin="Focus on one track", normal="Balanced". No offline Today implementation exists.

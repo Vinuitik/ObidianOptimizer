@@ -860,3 +860,7 @@
   .todayItem { flex-direction: column; align-items: flex-start; }
   .todayItemActions { width: 100%; justify-content: space-between; }
 }
+
+.todayHeader { font-size: var(--text-sm); font-weight: 600; color: var(--color-muted); }
+.todayTextCol { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.todayReason { font-size: var(--text-xs, 12px); color: var(--color-muted); }
