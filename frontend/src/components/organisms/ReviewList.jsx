@@ -1,5 +1,8 @@
 import useStore from '../../store/useStore';
 import ReviewRating from '../molecules/ReviewRating';
+import Button from '../atoms/Button';
+import Card from '../molecules/Card';
+import EmptyState from '../molecules/EmptyState';
 import styles from './ReviewList.module.css';
 
 export default function ReviewList() {
@@ -12,34 +15,32 @@ export default function ReviewList() {
   const allDone = reviewNotes.length === 0;
 
   if (allDone && !reviewHasMore) {
-    return <p className={styles.empty}>No notes due for review.</p>;
+    return <EmptyState icon="check" title="All caught up" description="No notes are due for review." />;
   }
 
   return (
     <div className={styles.list}>
       {!allDone && (
-        <div className={styles.summaryCard}>
-          <div>
-            <div className={styles.summaryTitle}>Today's review</div>
-            <div className={styles.summaryCount}>{reviewNotes.length} notes due</div>
-          </div>
-        </div>
+        <Card className={styles.summaryCard}>
+          <div className={styles.summaryTitle}>Today's review</div>
+          <div className={styles.summaryCount}>{reviewNotes.length} notes due</div>
+        </Card>
       )}
 
       {reviewNotes.map(({ shortName, fullPath }) => (
-        <div key={fullPath} className={styles.item} onClick={() => openTab(fullPath)}>
+        <Card key={fullPath} interactive className={styles.item} onClick={() => openTab(fullPath)}>
           <span className={styles.dot} />
           <span className={styles.label}>{shortName}</span>
           <ReviewRating fullPath={fullPath} />
-        </div>
+        </Card>
       ))}
 
       {allDone && reviewHasMore && (
         <div className={styles.allDone}>
           <p className={styles.allDoneText}>Batch complete!</p>
-          <button className={styles.loadMore} onClick={loadMoreReview}>
+          <Button variant="primary" onClick={loadMoreReview}>
             Load next {pageSize} →
-          </button>
+          </Button>
         </div>
       )}
     </div>

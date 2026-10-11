@@ -1,315 +1,75 @@
-.page {
-  display: flex;
-  height: 100%;
-  overflow: hidden;
-  background: var(--color-page);
-}
+/* Layout only — controls/surfaces come from atoms/ + molecules/. */
+.page { display: flex; height: 100%; overflow: hidden; background: var(--bg); }
 
-/* ── Left: note list ─────────────────────────────────────────────────────── */
-
+/* Left: note list */
 .noteList {
-  width: 260px;
+  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--color-surface);
-  border-right: 1px solid var(--color-border);
+  background: var(--surface);
+  border-right: 1px solid var(--line);
   overflow: hidden;
 }
+.listHeader { padding: var(--sp-4); flex-shrink: 0; }
+.listItems { flex: 1; overflow-y: auto; padding: 0 var(--sp-2) var(--sp-2); }
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.row { margin: 0; }
+.loadMore { flex-shrink: 0; margin: var(--sp-2) var(--sp-4) var(--sp-3); }
 
-.listHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-4) var(--sp-4) var(--sp-3);
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
+.divider { width: 1px; background: var(--line); flex-shrink: 0; }
 
-.listTitle {
-  font-family: var(--font-heading);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text);
-  letter-spacing: var(--tracking-tight);
-}
+/* Right: session pane */
+.sessionPane { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.emptySession { flex: 1; display: flex; align-items: center; justify-content: center; padding: var(--sp-7); }
 
-.listCount {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--color-accent-soft);
-  background: var(--color-accent-dim);
-  border-radius: 999px;
-  padding: 1px 8px;
-}
-
-.listItems {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--sp-2) 0;
-}
-
-.emptyMsg {
-  font-size: var(--text-sm);
-  color: var(--color-muted);
-  padding: var(--sp-5) var(--sp-4);
-  text-align: center;
-}
-
-.listSplit {
-  font-size: var(--text-xs);
-  color: var(--color-muted);
-  padding: 0 var(--sp-4) var(--sp-2);
-}
-
-.noteItem {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  width: 100%;
-  text-align: left;
-  padding: var(--sp-2) var(--sp-4);
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  color: var(--color-text-2);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: background var(--ease-fast), color var(--ease-fast);
-}
-
-.noteItemName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Track tag: which lane this note is in today — flashcard test vs read-and-self-rate. */
-.trackBadge {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-radius: 999px;
-  padding: 1px 7px;
-  color: var(--color-muted);
-  background: var(--color-card);
-}
-
-.trackBadge[data-track="flashcard"] {
-  color: var(--color-accent-soft);
-  background: var(--color-accent-dim);
-}
-
-.noteItem:hover { background: var(--color-card); color: var(--color-text); }
-
-.noteItemActive {
-  background: var(--color-accent-dim);
-  color: var(--color-accent-soft);
-}
-
-.noteItemActive:hover { background: var(--color-accent-dim); }
-
-.loadMore {
-  flex-shrink: 0;
-  margin: var(--sp-2) var(--sp-4) var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  font-size: var(--text-xs);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-2);
-  cursor: pointer;
-  transition: border-color var(--ease-fast), color var(--ease-fast);
-}
-
-.loadMore:hover { border-color: var(--color-border-hover); color: var(--color-text); }
-
-/* ── Divider ─────────────────────────────────────────────────────────────── */
-
-.divider {
-  width: 1px;
-  background: var(--color-border);
-  flex-shrink: 0;
-}
-
-/* ── Right: session pane ─────────────────────────────────────────────────── */
-
-.sessionPane {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.emptySession {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--sp-7);
-}
-
-.emptySessionText {
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  color: var(--color-muted);
-  text-align: center;
-  max-width: 320px;
-  line-height: var(--leading-normal);
-}
-
-/* ── Inline note view ────────────────────────────────────────────────────── */
-
-.inlineNote {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
-
+/* Inline note view */
+.inlineNote { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .inlineNoteHeader {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-5);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
-
-.inlineNoteBack {
-  background: none;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 3px 10px;
-  font-size: var(--text-sm);
-  color: var(--color-muted);
-  cursor: pointer;
-  transition: color var(--ease-fast), border-color var(--ease-fast);
-}
-
-.inlineNoteBack:hover {
-  color: var(--color-text);
-  border-color: var(--color-border-hover);
-}
-
-.inlineNoteTitle {
-  font-family: var(--font-heading);
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--color-text);
-}
-
+.inlineNoteTitle { font-family: var(--font-display); font-size: var(--fs-18); font-weight: 600; color: var(--text); }
 .inlineNoteBody {
   flex: 1;
   overflow-y: auto;
   padding: var(--sp-5) var(--sp-6);
-  /* Holds rendered markdown (MarkdownContent → .markdown-body) — no pre-wrap/monospace
-     overrides so the shared renderer's own styles apply, same as the main note view. */
+  font-family: var(--font-reading);
+  line-height: var(--lh-reading);
 }
+.inlineNoteBody > * { max-width: var(--reading-width); }
 
-/* Grade bar pinned to the bottom of the direct-note review pane. */
+/* Grade bar pinned to the bottom */
 .inlineGrade {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-5);
-  border-top: 1px solid var(--color-border);
-  background: var(--color-page);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
 }
+.inlineGradePrompt { font-size: var(--fs-13); color: var(--text-3); }
+.inlineGradeBtns { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.inlineGradeBtn { flex: 1 1 auto; min-width: 88px; }
+.kbd { font-family: var(--font-mono); font-size: var(--fs-12); opacity: 0.7; }
+.inlineGraded { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); font-size: var(--fs-14); color: var(--text); }
 
-.inlineGradePrompt {
-  font-size: var(--text-sm);
-  color: var(--color-muted);
-}
-
-.inlineGradeBtns {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-
-.inlineGradeBtn {
-  flex: 1 1 auto;
-  min-width: 88px;
-  padding: 8px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-  transition: background var(--ease-fast), border-color var(--ease-fast);
-}
-
-.inlineGradeBtn:hover {
-  background: var(--color-accent-dim);
-  border-color: var(--color-accent-soft);
-}
-
-.inlineGraded {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  font-size: var(--text-sm);
-  color: var(--color-text);
-}
-
-/* ── Responsive: one pane at a time on mobile ──────────────────────────────
-   No session → the due list gets the whole screen. Session active (.hasSession,
-   set by ReviewPage.jsx) → the list hides and the flashcard/inline view gets
-   the whole screen; its Close/Back buttons return to the list. */
+/* Mobile: one pane at a time. Session active (.hasSession) → list hides, session gets the screen. */
 @media (max-width: 768px) {
-  .page {
-    flex-direction: column;
-  }
-
-  .noteList {
-    width: 100%;
-    flex: 1;
-    border-right: none;
-  }
-
-  .divider {
-    display: none;
-  }
-
-  .sessionPane {
-    display: none;
-  }
-
-  .hasSession .noteList {
-    display: none;
-  }
-
-  .hasSession .sessionPane {
-    display: flex;
-  }
-
-  .noteItem {
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-  }
+  .page { flex-direction: column; }
+  .noteList { width: 100%; flex: 1; border-right: none; }
+  .divider { display: none; }
+  .sessionPane { display: none; }
+  .hasSession .noteList { display: none; }
+  .hasSession .sessionPane { display: flex; }
+  .inlineNoteBody { padding: var(--sp-4); }
+  .inlineGraded { flex-direction: column; align-items: stretch; }
 }
 
-/* ── Auth gate ───────────────────────────────────────────────────────────── */
-
-.gate {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-}
-
-.gateText {
-  font-family: var(--font-body);
-  font-size: var(--text-base);
-  color: var(--color-muted);
-}
+/* Full-page states (auth gate, error, all caught up) */
+.gate { display: flex; align-items: center; justify-content: center; height: 100%; padding: var(--sp-5); }

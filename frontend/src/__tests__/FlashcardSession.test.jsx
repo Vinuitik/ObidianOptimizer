@@ -230,3 +230,18 @@ describe('FlashcardSession — exercise cards', () => {
     await waitFor(() => expect(api.submitAttempt).toHaveBeenCalledWith('a1', 'e1', '10'));
   });
 });
+
+describe('FlashcardSession — result: continue', () => {
+  it('"Next note" is the primary, auto-focused action and calls onClose', async () => {
+    const onClose = vi.fn();
+    await renderSession({ onClose });
+    fireEvent.click(screen.getByTestId('option-0'));
+    fireEvent.click(screen.getByTestId('next-btn'));
+    fireEvent.click(screen.getByTestId('next-btn')); // Finish
+    await waitFor(() => expect(screen.getByTestId('flashcard-result')).toBeTruthy());
+    const btn = screen.getByTestId('next-note-btn');
+    expect(document.activeElement).toBe(btn);
+    fireEvent.click(btn);
+    expect(onClose).toHaveBeenCalled();
+  });
+});
