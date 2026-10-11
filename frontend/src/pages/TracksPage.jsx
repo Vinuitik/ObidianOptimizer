@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import Ring from '../components/atoms/Ring';
 import { generateMinicourse, fetchMinicourseJob, approveMinicourse, importCsv, commitImport } from '../api/tracks';
+import NewTrackForm from '../components/organisms/NewTrackForm';
 import TrackAddBox, { ItemTypeChip, itemKind } from '../components/organisms/TrackAddBox';
 import styles from './TracksPage.module.css';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const TRACK_TYPES = ['book', 'course', 'article', 'custom', 'subscription'];
 // Subscriptions are created via Learn ▸ Feed ▸ Sources now; legacy ones stay editable.
-const NEW_TRACK_TYPES = TRACK_TYPES.filter(t => t !== 'subscription');
 
 // Pure rendering transform — items stay a flat array from the API/store. Items sharing a
 // groupId came from one source-ingestion event (e.g. a long video split into several notes);
@@ -164,58 +164,28 @@ function TodayTab() {
 function ManageTab() {
   const tracks       = useStore(s => s.tracks);
   const fetchTracks  = useStore(s => s.fetchTracks);
-  const createTrack  = useStore(s => s.createTrack);
-  const showToast    = useStore(s => s.showToast);
   const [selectedId, setSelectedId] = useState(null);
-  const [newTitle, setNewTitle] = useState('');
-  const [newType, setNewType] = useState('book');
-  const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
 
   useEffect(() => { fetchTracks(); }, [fetchTracks]);
-
-  async function handleCreate(e) {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
-    setCreating(true);
-    try {
-      const track = await createTrack(newTitle.trim(), newType);
-      setNewTitle('');
-      setSelectedId(track.id);
-    } catch (e) {
-      showToast(`Couldn't create track: ${e.message ?? e}`);
-    } finally {
-      setCreating(false);
-    }
-  }
 
   const selected = tracks.find(t => t.id === selectedId) ?? null;
 
   return (
     <div className={styles.manage}>
       <div className={styles.trackList}>
-        <CapacityPanel />
-        <form className={styles.newTrackForm} onSubmit={handleCreate}>
-          <input
-            className={styles.textInput}
-            placeholder="New track title…"
-            value={newTitle}
-            onChange={e => setNewTitle(e.target.value)}
-          />
-          <select className={styles.select} value={newType} onChange={e => setNewType(e.target.value)}>
-            {NEW_TRACK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <button className={styles.primaryBtn} type="submit" disabled={creating || !newTitle.trim()}>
-            + New track
-          </button>
-        </form>
+        <NewTrackForm onCreated={t => setSelectedId(t.id)} />
 
-        <button
-          className={`${styles.secondaryBtn} ${styles.importTriggerBtn}`}
-          onClick={() => { setImporting(true); setSelectedId(null); }}
-        >
-          Import from spreadsheet…
-        </button>
+        <details>
+          <summary>Advanced</summary>
+          <CapacityPanel />
+          <button
+            className={`${styles.secondaryBtn} ${styles.importTriggerBtn}`}
+            onClick={() => { setImporting(true); setSelectedId(null); }}
+          >
+            Import from spreadsheet…
+          </button>
+        </details>
 
         <div className={styles.trackItems}>
           {tracks.length === 0 && <p className={styles.emptyMsg}>No tracks yet.</p>}
@@ -333,7 +303,7 @@ function ImportPanel({ onClose }) {
   if (previewTracks) {
     return (
       <div className={styles.importPanel}>
-        <h3 className={styles.sectionTitle}>Review import</h3>
+        <h3 className={styles.sectionTitle}>Import preview</h3>
         {previewTracks.map((t, i) => (
           <div key={i} className={styles.importTrackGroup}>
             <div className={styles.importTrackHeader}>
@@ -513,6 +483,25 @@ function TrackDetail({ track, onDeleted }) {
 
       <div className={styles.card}>
         <div className={styles.fieldRow}>
+          <label className={styles.fieldLabel}>Deadline</label>
+          <input
+            type="date"
+            className={styles.dateInput}
+            value={deadline}
+            onChange={e => setDeadline(e.target.value)}
+            onBlur={() => {
+              if (deadline) saveField({ deadline });
+              else if (track.deadline) saveField({ clearDeadline: true });
+            }}
+          />
+        </div>
+      </div>
+      <div className={styles.card}>
+        <TrackItemsEditor trackId={track.id} />
+      </div>
+      <details className={styles.card}>
+        <summary>Advanced</summary>
+        <div className={styles.fieldRow}>
           <label className={styles.fieldLabel}>Type</label>
           <select
             className={styles.select}
@@ -532,20 +521,16 @@ function TrackDetail({ track, onDeleted }) {
           </select>
         </div>
 
-        <div className={styles.fieldRow}>
-          <label className={styles.fieldLabel}>Deadline</label>
+        <label className={styles.checkRow} style={{ marginBottom: 0 }}>
           <input
-            type="date"
-            className={styles.dateInput}
-            value={deadline}
-            onChange={e => setDeadline(e.target.value)}
-            onBlur={() => {
-              if (deadline) saveField({ deadline });
-              else if (track.deadline) saveField({ clearDeadline: true });
-            }}
+            type="checkbox"
+            checked={includeInProgress}
+            onChange={e => { setIncludeInProgress(e.target.checked); saveField({ includeInProgress: e.target.checked }); }}
           />
-          {deadline && (
-            <>
+          Show on Progress tab
+        </label>
+        {deadline && (
+          <div className={styles.fieldRow}>
               <label className={styles.fieldLabel}>Priority</label>
               <select
                 className={styles.select}
@@ -554,29 +539,16 @@ function TrackDetail({ track, onDeleted }) {
               >
                 {['must', 'should', 'could'].map(p => <option key={p} value={p}>{p}</option>)}
               </select>
-            </>
-          )}
-        </div>
+          </div>
+        )}
 
-        <label className={styles.checkRow} style={{ marginBottom: 0 }}>
-          <input
-            type="checkbox"
-            checked={includeInProgress}
-            onChange={e => { setIncludeInProgress(e.target.checked); saveField({ includeInProgress: e.target.checked }); }}
-          />
-          Include in Progress tab
-        </label>
-      </div>
-
-      <div className={styles.card}>
-        <TrackItemsEditor trackId={track.id} />
-      </div>
       <div className={styles.card}>
         <TrackScheduleEditor trackId={track.id} />
       </div>
       <div className={styles.card}>
         <MinicoursePanel trackId={track.id} />
       </div>
+      </details>
     </div>
   );
 }
@@ -642,7 +614,7 @@ function MinicoursePanel({ trackId }) {
 
   return (
     <div className={styles.minicoursePanel}>
-      <h3 className={styles.sectionTitle}>Mini-course</h3>
+      <h3 className={styles.sectionTitle}>Generate a course</h3>
 
       {(!job || job.status === 'FAILED') && (
         <button
@@ -842,7 +814,7 @@ function ProgressTab() {
   if (trackProgress.length === 0) {
     return (
       <div className={styles.emptySession}>
-        <p className={styles.emptySessionText}>No tracks to show progress for yet — mark "Include in Progress" on a track under "Manage tracks".</p>
+        <p className={styles.emptySessionText}>No tracks to show progress for yet — turn on "Show on Progress tab" for a track under "Manage tracks".</p>
       </div>
     );
   }
