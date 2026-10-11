@@ -5,6 +5,10 @@ import SyncPage from './SyncPage';
 import ReviewPage from '../pages/ReviewPage';
 import LearnPage from '../pages/LearnPage';
 import TracksPage from '../pages/TracksPage';
+import PageTransition from '../components/motion/PageTransition';
+
+// Enter-only fadeRise per route (each route element remounts on navigation).
+const page = el => <PageTransition>{el}</PageTransition>;
 
 // The installed PWA — deliberately NARROW (not the whole website). Jobs:
 //   • Review   — do flashcards (offline once the offline seam lands), grades sync back.
@@ -25,11 +29,11 @@ export default function PwaApp() {
       <Routes>
         <Route element={<MobileLayout />}>
           <Route path="/" element={<Navigate to="/review" replace />} />
-          <Route path="/review" element={<ReviewPage />} />
-          <Route path="/learn" element={<LearnPage />} />
-          <Route path="/capture" element={<CapturePage />} />
-          <Route path="/tracks" element={<TracksPage />} />
-          <Route path="/settings" element={<SyncPage />} />
+          <Route path="/review" element={page(<ReviewPage />)} />
+          <Route path="/learn" element={page(<LearnPage />)} />
+          <Route path="/capture" element={page(<CapturePage />)} />
+          <Route path="/tracks" element={page(<TracksPage />)} />
+          <Route path="/settings" element={page(<SyncPage />)} />
           <Route path="*" element={<Navigate to="/review" replace />} />
         </Route>
       </Routes>

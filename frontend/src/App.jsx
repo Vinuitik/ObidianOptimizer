@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import MainPage from './pages/MainPage';
 import SettingsPage from './pages/SettingsPage';
 import ReviewPage from './pages/ReviewPage';
@@ -16,6 +15,8 @@ import LoginModal from './components/organisms/LoginModal';
 import SyncBanner from './components/organisms/SyncBanner';
 import QuitGuard from './components/organisms/QuitGuard';
 import Toast from './components/atoms/Toast';
+import PageTransition from './components/motion/PageTransition';
+import StyleguidePage from './pages/StyleguidePage';
 import useStore from './store/useStore';
 import { flushOutbox, OUTBOX_RETRY_MS } from './pwa/offlineApi';
 import { pushMailbox } from './pwa/mailbox';
@@ -24,24 +25,11 @@ import { onConnectivityChange } from './pwa/connectivity';
 import { showLocalNotification } from './pwa/quitNotify';
 import styles from './App.module.css';
 
-const pageVariants = {
-  initial: { opacity: 0 },
-  animate: { opacity: 1, transition: { duration: 0.18, ease: 'easeOut' } },
-  exit:    { opacity: 0, transition: { duration: 0.18, ease: 'easeIn' } },
-};
-
 function AnimatedRoutes() {
   const location = useLocation();
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={location.pathname}
-        className={styles.pageWrapper}
-        variants={pageVariants}
-        initial="initial"
-        animate="animate"
-        exit="exit"
-      >
+    // Enter-only transition (no exit wait) — remounts per pathname via key.
+    <PageTransition key={location.pathname} className={styles.pageWrapper}>
         <Routes location={location}>
           <Route path="/" element={<MainPage />} />
           <Route path="/learn" element={<LearnPage />} />
@@ -51,9 +39,9 @@ function AnimatedRoutes() {
           <Route path="/failures" element={<PipelineFailuresPage />} />
           <Route path="/get-app" element={<GetAppPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/styleguide" element={<StyleguidePage />} />
         </Routes>
-      </motion.div>
-    </AnimatePresence>
+    </PageTransition>
   );
 }
 

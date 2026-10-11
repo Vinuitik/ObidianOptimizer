@@ -1,8 +1,9 @@
 .bar {
   display: flex;
   flex-shrink: 0;
-  background: var(--color-surface);
-  border-top: 1px solid var(--color-border);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--sheen);
   padding-bottom: env(safe-area-inset-bottom);
   position: relative;
   z-index: 60;
@@ -20,23 +21,25 @@
   padding: 6px 2px;
   background: none;
   border: none;
-  color: var(--color-muted);
-  font-family: var(--font-body);
-  font-size: 11px;
+  border-radius: 0;
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: var(--fs-12);
   font-weight: 500;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: color var(--dur-1) var(--ease-out);
 }
+.tab:hover:not(:disabled) { background: none; color: var(--text-2); text-decoration: none; }
 
-.tabActive {
-  color: var(--color-accent-soft);
-}
+.tabActive,
+.tabActive:hover:not(:disabled) { color: var(--accent-text); }
 
 .moreDots {
   height: 22px;
   display: flex;
   align-items: center;
-  font-size: 13px;
+  font-size: var(--fs-13);
   letter-spacing: 1px;
 }
 
@@ -44,7 +47,7 @@
   position: fixed;
   inset: 0;
   z-index: 55;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim);
 }
 
 /* Sits directly above the bar (bar = 56px + safe-area). */
@@ -56,10 +59,10 @@
   z-index: 58;
   display: flex;
   flex-direction: column;
-  background: var(--color-card);
-  border: 1px solid var(--color-border-hover);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-modal);
+  background: var(--overlay);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--glass), var(--shadow-2);
   overflow: hidden;
 }
 
@@ -70,19 +73,17 @@
   padding: 0 var(--sp-4);
   background: none;
   border: none;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-2);
-  font-family: var(--font-body);
-  font-size: var(--text-base);
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--fs-16);
   text-align: left;
   cursor: pointer;
 }
+.sheetItem:hover:not(:disabled) { background: var(--raised); color: var(--text); text-decoration: none; }
 
-.sheetItem:last-child {
-  border-bottom: none;
-}
+.sheetItem:last-child { border-bottom: none; }
 
-.sheetItemActive {
-  color: var(--color-text);
-  background: var(--color-accent-dim);
-}
+.sheetItemActive,
+.sheetItemActive:hover:not(:disabled) { color: var(--accent-text); background: var(--accent-tint); }
