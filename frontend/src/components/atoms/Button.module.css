@@ -3,66 +3,36 @@
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
+  min-height: var(--control-h);
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-md);
+  font-family: var(--font-ui);
+  font-size: var(--fs-14);
   font-weight: 500;
   line-height: 1;
-  cursor: pointer;
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-2);
-  padding: 6px var(--sp-3);
-  user-select: none;
-  transition: background var(--ease-fast), color var(--ease-fast), border-color var(--ease-fast);
   white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--text);
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out),
+              color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
 }
+.btn:hover:not(:disabled) { background: var(--overlay); }
+.btn:active:not(:disabled) { transform: scale(0.98); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.btn:hover {
-  background: var(--color-card);
-  color: var(--color-text);
-  border-color: var(--color-border-hover);
-}
+.sm { min-height: 28px; padding: 0 var(--sp-3); font-size: var(--fs-13); }
+@media (max-width: 768px) { .sm { min-height: var(--control-h); } }
 
-.btn:active {
-  transform: scale(0.97);
-  transition: transform 100ms ease, background var(--ease-fast), color var(--ease-fast);
-}
+.secondary { border-color: var(--line-strong); }
 
-/* Primary — accent filled */
-.primary {
-  background: var(--color-accent-dim);
-  border-color: var(--color-accent-border);
-  color: var(--color-accent);
-}
+.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-.primary:hover {
-  background: rgba(108, 134, 245, 0.25);
-  border-color: var(--color-accent);
-  color: var(--color-text);
-}
+.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.ghost:hover:not(:disabled) { background: var(--raised); color: var(--text); }
 
-/* Ghost — no border until hover */
-.ghost {
-  border-color: transparent;
-  color: var(--color-muted);
-}
-
-.ghost:hover {
-  border-color: var(--color-border);
-  color: var(--color-text);
-  background: var(--color-card);
-}
-
-/* Danger */
-.danger {
-  color: var(--color-danger);
-  border-color: rgba(224, 92, 92, 0.3);
-  background: transparent;
-}
-
-.danger:hover {
-  background: rgba(224, 92, 92, 0.1);
-  border-color: rgba(224, 92, 92, 0.5);
-  color: var(--color-danger);
-}
+.danger { background: transparent; border-color: var(--danger-line); color: var(--danger); }
+.danger:hover:not(:disabled) { background: var(--danger-tint); }

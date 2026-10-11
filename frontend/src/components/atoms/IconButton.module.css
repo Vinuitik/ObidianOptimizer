@@ -1,0 +1,23 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  min-height: 0;
+  padding: 0;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.btn:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.sm { width: 28px; height: 28px; }
+@media (max-width: 768px) { .sm { width: var(--control-h); height: var(--control-h); } }
+.ghost { color: var(--text-2); }
+.secondary { border-color: var(--line-strong); background: var(--raised); }
+.danger { color: var(--danger); }
+.danger:hover:not(:disabled) { background: var(--danger-tint); color: var(--danger); }

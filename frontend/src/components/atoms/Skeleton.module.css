@@ -1,0 +1,12 @@
+.stack { display: flex; flex-direction: column; gap: var(--sp-2); }
+.bar {
+  display: block;
+  border-radius: var(--r-sm);
+  background: linear-gradient(90deg, var(--raised) 0%, var(--overlay) 50%, var(--raised) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s var(--ease-in-out) infinite;
+}
+@keyframes shimmer {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}

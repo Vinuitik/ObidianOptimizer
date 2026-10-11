@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import useStore from '../../store/useStore';
 import ObsidianMark from '../atoms/ObsidianMark';
+import Button from '../atoms/Button';
 import RefreshButton from '../atoms/RefreshButton';
 import useNavItems from './useNavItems';
 import styles from './NavBar.module.css';
@@ -39,9 +40,9 @@ export default function NavBar() {
         <RefreshButton />
         <span className={styles.avatar}>V</span>
         {isAuthenticated ? (
-          <button className={`${styles.authBtn} ${styles.authOut}`} onClick={logout}>Sign out</button>
+          <Button variant="ghost" size="sm" className={styles.authOut} onClick={logout}>Sign out</Button>
         ) : (
-          <button className={styles.authBtn} onClick={() => setShowLogin(true)}>Sign in</button>
+          <Button variant="secondary" size="sm" onClick={() => setShowLogin(true)}>Sign in</Button>
         )}
       </div>
     </nav>

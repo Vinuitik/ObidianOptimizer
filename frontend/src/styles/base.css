@@ -1,0 +1,116 @@
+/*
+  Base layer — element defaults. Every selector is wrapped in :where() so it has
+  ZERO specificity: any component class (CSS Modules) overrides it without a fight.
+  Goal: a raw unstyled <input>/<select>/<button> anywhere looks on-brand.
+*/
+:root { color-scheme: dark; }
+
+@media (max-width: 768px) {
+  :root { --control-h: 44px; }
+}
+
+html { background: var(--bg); }
+
+:where(h1, h2, h3, h4) {
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-display);
+  color: var(--text);
+}
+:where(h1) { font-size: var(--fs-28); }
+:where(h2) { font-size: var(--fs-22); }
+:where(h3) { font-size: var(--fs-18); }
+:where(h4) { font-size: var(--fs-16); }
+
+:where(a) {
+  color: var(--accent-text);
+  text-decoration: none;
+  transition: color var(--dur-1) var(--ease-out);
+}
+:where(a:hover) { color: var(--accent-hover); text-decoration: underline; }
+
+::selection { background: var(--accent-line); color: var(--text); }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+:where(button) {
+  font-family: var(--font-ui);
+  font-size: var(--fs-14);
+  font-weight: 500;
+  min-height: var(--control-h);
+  padding: 0 var(--sp-3);
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out),
+              color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:where(button:hover:not(:disabled)) { background: var(--overlay); }
+:where(button:active:not(:disabled)) { transform: scale(0.98); }
+:where(button:disabled) { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Text-like inputs, select, textarea ──────────────────────────────────── */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"], [type="hidden"], [type="submit"], [type="button"]),
+       select, textarea) {
+  font-family: var(--font-ui);
+  font-size: var(--fs-14);
+  line-height: var(--lh-ui);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 0 var(--sp-3);
+  min-height: var(--control-h);
+  max-width: 100%;
+  color-scheme: dark;
+  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+:where(textarea) { padding: var(--sp-2) var(--sp-3); min-height: 80px; resize: vertical; }
+:where(select) {
+  appearance: none;
+  padding-right: var(--sp-6);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23a6a1ba' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--sp-3) center;
+}
+:where(input, select, textarea)::placeholder { color: var(--text-3); opacity: 1; }
+:where(input, select, textarea):where(:hover:not(:disabled)) { border-color: var(--accent-line); }
+:where(input, select, textarea):where(:focus) { border-color: var(--accent-text); outline: none; }
+:where(input, select, textarea):where(:disabled) { opacity: 0.45; cursor: not-allowed; }
+:where(input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"]) {
+  border-color: var(--danger-line);
+}
+:where(option) { background: var(--raised); color: var(--text); }
+
+/* Date/time pickers: dark calendar glyph */
+:where(input[type="date"], input[type="time"], input[type="datetime-local"], input[type="month"], input[type="week"]) {
+  min-width: 10.5em;
+}
+::-webkit-calendar-picker-indicator { filter: invert(0.75); cursor: pointer; }
+
+/* ── Checkbox / radio ────────────────────────────────────────────────────── */
+:where(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--accent);
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+/* ── Focus ───────────────────────────────────────────────────────────────── */
+:where(:focus-visible) { outline: none; box-shadow: var(--focus-ring); }
+:where(input, select, textarea):where(:focus-visible) { box-shadow: var(--focus-ring); }
+
+/* ── Scrollbars ──────────────────────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

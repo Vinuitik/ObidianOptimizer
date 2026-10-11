@@ -1,0 +1,18 @@
+.root { border-bottom: 1px solid var(--line); }
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-weight: 500;
+  text-align: left;
+}
+.head:hover:not(:disabled) { background: transparent; color: var(--text); }
+.chev { display: inline-flex; transition: transform var(--dur-2) var(--ease-out); }
+.open { transform: rotate(90deg); }
+.body { }
+.inner { padding: var(--sp-2) 0 var(--sp-4); }

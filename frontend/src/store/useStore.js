@@ -220,7 +220,7 @@ const initialDataState = () => ({
   feedLastDecision: null,   // { item, kind: 'accept'|'bin' } — undo covers ONLY this one
   feedNotice: null,         // { message, undo? } — local toast (PWA shell mounts no global <Toast/>)
 
-  // Toast notification: null | { message: string }
+  // Toast notification: null | { message, action?: {label, onClick}, tone?: 'neutral'|'success'|'error', id }
   toast: null,
 
   // Files pasted but not yet uploaded: { [filename]: { file: File, blobURL: string } }
@@ -232,6 +232,8 @@ const initialDataState = () => ({
   tabs: [],
   activeTabIndex: -1,
 });
+
+let toastSeq = 0;
 
 const useStore = create((set, get) => ({
   ...initialDataState(),
@@ -280,9 +282,14 @@ const useStore = create((set, get) => ({
 
   // ── Toast ─────────────────────────────────────────────────────────────────
 
-  showToast: (message) => {
-    set({ toast: { message } });
-    setTimeout(() => set(s => s.toast?.message === message ? { toast: null } : {}), 4000);
+  // showToast('text')  or  showToast({ message, action: { label, onClick }, tone, duration })
+  // Toasts with an action stay longer (7s) so the user can reach it.
+  showToast: (arg) => {
+    const opts = typeof arg === 'string' ? { message: arg } : (arg ?? {});
+    const id = ++toastSeq;
+    const { message, action = null, tone = 'neutral', duration = action ? 7000 : 4000 } = opts;
+    set({ toast: { message, action, tone, id } });
+    setTimeout(() => set(s => s.toast?.id === id ? { toast: null } : {}), duration);
   },
 
   clearToast: () => set({ toast: null }),

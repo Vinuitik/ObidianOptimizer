@@ -1,0 +1,16 @@
+.card {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--glass);
+  padding: var(--sp-4);
+  min-width: 0;
+}
+.interactive { cursor: pointer; transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out); }
+.interactive:hover { border-color: var(--line-strong); background: var(--overlay); }
+
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.headText { min-width: 0; }
+.title { font-size: var(--fs-18); font-weight: 500; }
+.subtitle { margin-top: 2px; font-size: var(--fs-13); color: var(--text-2); line-height: var(--lh-ui); }
+.actions { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }

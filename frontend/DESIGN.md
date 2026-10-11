@@ -1,55 +1,71 @@
-# Frontend Design Reference
+# Frontend Design Reference — Obsidian Glass
 
-Files: styles/tokens.css, styles/reset.css, styles/globals.css, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Button.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, store/useStore.js, utils/frontmatter.js, utils/markdownCleanup.js
+Files: styles/tokens.css, styles/base.css, styles/reset.css, styles/globals.css, atoms/*.jsx (Button, IconButton, Input, Textarea, Select, Checkbox, Badge, Skeleton, Spinner, Toast, Icon, Chip, Ring, ObsidianMark), molecules/*.jsx (Field, Card, Disclosure, SegmentedTabs, EmptyState, ErrorState, PageHeader, ListRow, TabBar, SearchBar, PanelHeader, NavItem, ReviewRating), motion/presets.js, motion/PageTransition.jsx, pages/StyleguidePage.jsx, store/useStore.js, __tests__/styleGuard.test.js
 
----
-
-## Design Tokens
-
-`styles/tokens.css` — all CSS custom properties (colors, spacing, radii, fonts, transitions)  
-`styles/reset.css` — box-sizing, base font, scrollbar  
-`styles/globals.css` — imports tokens + reset, stagger-in keyframe, markdown body styles  
-Fonts (Google Fonts in `index.html`): Space Grotesk (headings) / DM Sans (body) / DM Mono (code/labels)
-
-### Colors
-
-| Token | Value | Use |
-|---|---|---|
-| `--color-accent` | `#7c5cff` | Primary amethyst |
-| `--color-accent-soft` | `#a68dff` | Text on dark bg |
-| `--color-accent-dim` | `rgba(124,92,255,0.14)` | Tinted backgrounds |
-| `--color-accent-border` | `rgba(124,92,255,0.34)` | Bordered highlights |
-| `--color-amber` | `#e0a458` | Streak display |
-| `--color-success` | `#4cc38a` | Positive states |
-
-To change accent: update all four `--color-accent*` vars in `tokens.css` together.  
-To change any color/spacing/font: `tokens.css` only — never edit component CSS directly for tokens.
-
-### Radii
-
-`--radius-xs: 8px` / `--radius-sm2: 9px` / `--radius-md2: 11px` / `--radius-lg2: 12px`
-
-### Spacing
-
-`--sp-1: 4px` through `--sp-10: 96px` (4 → 8 → 12 → 16 → 24 → 32 → 48 → 64 → 80 → 96)
+Identity: a quiet scholar's study cut from volcanic glass. Near-black with a violet cast, one amethyst glint for "act here", ember for "now / due / streak". Serif for thinking (Newsreader), grotesk for doing (Geist). Plan + rationale: `architecture_plans/UI_REDESIGN_PLAN.md`. Visual test bed: `/styleguide` (logged in, not in nav).
 
 ---
 
-## Atoms
+## Layering (each layer may only use the ones above)
 
-`atoms/Icon.jsx` — SVG glyph set via `name` prop. Available: `folder, file, chevron, search, plus, sparkle, clock, flame, dot, check, link, settings`. `paths` lookup at module scope — no per-render alloc. Props: `name`, `size`, `color`, `strokeWidth`
+```
+styles/tokens.css   palette + semantic tokens — the ONLY place a hex / rgba / font-family literal lives
+styles/base.css     zero-specificity (:where) element defaults: button, input (all types), select, textarea,
+                    checkbox, :focus-visible, a, h1-h4, ::selection, scrollbar, reduced-motion
+atoms/ molecules/   primitives — the only place control APPEARANCE is defined
+pages / organisms   *.module.css = LAYOUT ONLY (grid/flex/gap/size/position); colours via var(--…)
+```
 
-`atoms/ObsidianMark.jsx` — pure-CSS faceted obsidian shard mark. Facet data at module scope. Props: `size` (default 120), `glow` (default true). Use `glow=false` in NavBar (no drop-shadow).
+**Rule: pages are layout-only.** Do not restyle native elements or re-implement buttons/inputs/cards per page — use the primitives. `__tests__/styleGuard.test.js` fails on any `*.module.css` outside `styles/` with a hex/rgb(a)/hsl(a) literal or a literal `font-family` (`font-family: var(--font-…)` is allowed), except files in `styleGuard.allowlist.txt` (legacy; shrinks to empty by F-final).
 
-`atoms/Chip.jsx` — inline action chip. Renders as `<span>` (static) or `<button>` (if `onClick` passed). Props: `children`, `onClick`, `className`
+## Tokens (`styles/tokens.css`)
 
-`atoms/Ring.jsx` — SVG progress ring. Props: `pct` (0–100), `size` (default 44), `strokeWidth` (default 4)
+| Group | Tokens |
+|---|---|
+| Ground | `--bg #0A0A0F` `--surface #111118` `--raised #181822` `--overlay #20202C` `--scrim` |
+| Text | `--text` `--text-2` `--text-3` (muted, ≥4.5:1 on bg) `--on-accent` |
+| Lines | `--line` `--line-strong` `--sheen` (1px top highlight) |
+| Amethyst | `--accent` `--accent-hover` `--accent-text` `--accent-tint` `--accent-line` |
+| Ember | `--ember` `--ember-tint` (now / due / streak / warning) |
+| Status | `--success` `--danger` (+ `-tint`, `--danger-line`) |
+| Focus | `--focus-ring` (2px bg gap + 2px accent-text) |
+| Type | `--font-display`/`--font-reading` Newsreader · `--font-ui` Geist · `--font-mono` Geist Mono; `--fs-12/13/14/16/18/22/28/36`; `--lh-tight/ui/reading`; `--reading-width 68ch`; `--content-max 1200px` |
+| Space | `--sp-1..10` (4px scale) |
+| Shape | `--r-sm 6` `--r-md 10` `--r-lg 14` `--r-pill`; `--control-h` 36px (44px ≤768px, set in base.css) |
+| Motion | `--dur-1 120ms` `--dur-2 200ms` `--dur-3 320ms` `--ease-out` `--ease-in-out` |
+| Elevation | `--shadow-1` `--shadow-2` `--glass` (= inset sheen + shadow-1) |
 
-## Molecules
+Legacy names (`--color-*`, `--font-body/heading`, `--text-xs…`, `--radius-*`, `--ease-fast…`) are aliases at the bottom of tokens.css (`LEGACY ALIASES — removed in F-final`). Don't use them in new code.
 
-`molecules/SearchBar.jsx` — controlled search input with search Icon, ⌘K / Ctrl+K focus shortcut (global keydown listener), clear button when query non-empty. Props: `value`, `onChange`
+## Primitives (props)
 
-`molecules/TabBar.jsx` — browser-style tab strip. Each tab shows note title, dirty indicator (•), and close button. Reads `tabs`, `activeTabIndex` from store. Calls `switchTab(i)` / `closeTab(i)`.
+Atoms
+- `Button` — `variant` primary|secondary|ghost|danger (`'default'` = secondary, legacy), `size` sm|md, `loading`, `icon` (Icon name), plus any native button prop. Primary = solid accent, white text; one per view.
+- `IconButton` — `icon`, **`aria-label` required** (throws), `variant` ghost|secondary|danger, `size`.
+- `Input` / `Textarea` / `Select` (`options=[{value,label}]` or children) — `invalid`; forwardRef. Looks come from base.css.
+- `Checkbox` — `label`, native props. `Badge` — `tone` neutral|accent|ember|success|danger. `Skeleton` — `lines` or `width`/`height`. `Spinner` — `size`, `label`.
+- `Toast` — mounted in App AND pwa/MobileLayout. Store: `showToast('text')` or `showToast({message, action:{label,onClick}, tone:'neutral'|'success'|'error', duration})`.
+
+Molecules
+- `Field` — `label`, `hint`, `error`, one child control; wires `id`, `aria-describedby`, `aria-invalid`.
+- `Card` (+ `Card.Header title subtitle actions`), `interactive`. `PageHeader` — `title subtitle actions`. `ListRow` — `leading title meta trailing onClick active`.
+- `Disclosure` — `title`, `storageKey` (remembers open state in localStorage), `defaultOpen`.
+- `SegmentedTabs` — `tabs=[{id,label,badge}]`, `value`, `onChange`; arrow/Home/End keys.
+- `EmptyState` — `icon title description action={{label,onClick}}` (ONE action). `ErrorState` — `message detail onRetry`.
+
+Motion (`components/motion`)
+- `presets.js`: `fadeRise`, `listItem` (exit collapses height+opacity), `collapse`, `swipe` (+ `…Reduced` opacity-only).
+- `PageTransition` — enter-only wrapper, used by App's `AnimatedRoutes` (keyed by pathname) and pwa/MobileApp. No `mode="wait"`.
+
+## Rules
+
+- Hierarchy: one solid-accent primary per view; everything else secondary/ghost.
+- States: design loading (Skeleton, not "Loading…"), empty (why + 1 action), error (message + Retry), success for every data view. Never show an empty message before the first fetch resolves.
+- Motion: every state change is animated or instant — never a blank flash. Pages fade-rise 4px (dur-3); completed items collapse out (dur-2) and the next moves up; skeletons not spinners for >300ms. Reduced-motion: opacity only (base.css kills CSS durations; framer variants use `…Reduced` / `useReducedMotion`). Optimistic UI + Undo toast instead of confirm dialogs.
+- Touch: controls 36px desktop, 44px at ≤768px (`--control-h`). Visible focus ring everywhere. Labelled inputs; `aria-live` for async status.
+- Surfaces: cards use `--glass` (1px top sheen). No gradients behind text; no glow except focus.
+- Breakpoint: `@media (max-width: 768px)`.
+- Voice: plain, second person, short. Errors say what happened + what to do ("Couldn't load failures — Retry"). No raw HTTP codes or backend enums ("youtube_channel" → "YouTube channel"). Empty states: one line why + one button.
 
 ---
 
@@ -135,14 +151,16 @@ To change visual style: `.pm-active-mark::before/::after` in `MilkdownEditor.mod
 
 ## Technology Notes
 
-- **Framer Motion**: page-level route transitions (`AnimatePresence` in `App.jsx`). Purely visual — no state tied to animation.
-- **Zustand**: in-memory only. No persistence — state lost on page refresh. `editorResetKey` is also in-memory (resets to 0 on reload).
-- **Google Fonts**: CDN link in `index.html`. Requires internet at load time; falls back to system sans-serif offline. To bundle: add to `public/fonts/` and use `@font-face` in `tokens.css`.
+- **Google Fonts (CDN)**: Newsreader/Geist/Geist Mono load from `fonts.googleapis.com` in `index.html` (`display=swap`). Offline or blocked → the PWA silently falls back to the system stacks in `--font-*` (Georgia/system-ui/ui-monospace): layout holds, identity softens. The service worker does not precache the font files. To self-host: put woff2 in `public/fonts/` + `@font-face` in `tokens.css`.
+- **CSS variables can't be used in `@media`**: breakpoints (`768px`) are hard-coded literals; `--control-h` switches via a media query in `base.css`. Changing the breakpoint means editing every module that has one.
+- **base.css uses `:where()`** so it has zero specificity and any component class wins. Side effect: a raw element is styled only if nothing more specific (including old per-page CSS) overrides it — legacy page CSS still wins until migrated.
+- **Framer Motion** (`framer-motion`): ~tens of KB gzipped in the main bundle; used by PageTransition and Disclosure. Purely visual; honour `useReducedMotion`. Route transition is enter-only, so the outgoing page unmounts instantly (no exit animation).
+- **styleGuard is a regex, not a CSS parser**: it misses colour names (`red`, `white`), `color-mix()`, colours in `@import`ed/global CSS, inline `style={{…}}` in JSX, and literals inside `url()` (stripped on purpose). It does not check `styles/` (the allowed home). `font-family: var(--…)` passes. Stale allowlist entries fail the test.
+- **Disclosure state** is `localStorage` (per device, wrapped in try/catch; private mode → default open state each load).
+- **Toast** is a single global slot in Zustand (in-memory): a new toast replaces the current one; lost on reload; auto-dismiss 4s (7s with an action). Z-index 9999.
+- **Zustand**: in-memory only. State lost on page refresh. `editorResetKey` also resets to 0.
 - **CSS Modules**: class names scoped by Vite. Never use global class names inside `.module.css` files.
-- **KaTeX**: bundled client-side via `katex` npm package. Math is rendered synchronously in `toDOM`. KaTeX CSS loaded in `main.jsx`. Math nodes are `contenteditable="false"` atoms — no inline editing. To change math rendering: `utils/mathPlugin.js`.
-- **@milkdown/preset-commonmark + @milkdown/preset-gfm**: must be used together. `gfm` is NOT a self-contained superset — it only ships 48 GFM-specific plugins (tables, strikethrough, task lists) and depends on `commonmark`'s 125 base plugins for the ProseMirror schema root (`doc`) and all standard nodes. Using `.use(gfm)` alone throws `Schema is missing its top node type ('doc')` at schema compile time.
-- **Custom `$node` plugins** (`mathPlugin`, `wikiLinkPlugin`, etc.): `$remark()` returns `MilkdownPlugin[]` and must be spread into the plugin array (`[...hashtagRemark$, hashtagNode$]`). `$node()` returns a single plugin — no spreading. `parseMarkdown.runner` receives `(state, node, type)` — use `type` directly, not `state.type(name)`.
-- **MilkdownProvider key**: the `key` prop must be on `MilkdownProvider` (not on the inner component). Keying the inner component only lets the provider's schema context persist across remounts, which causes schema corruption on the second editor init.
+- **KaTeX / Milkdown**: unchanged — see Markdown Rendering above. `@milkdown/preset-commonmark` + `preset-gfm` must be used together; `MilkdownProvider` takes the `key`.
 
 ---
 
@@ -150,20 +168,23 @@ To change visual style: `.pm-active-mark::before/::after` in `MilkdownEditor.mod
 
 | Thing to change | Where |
 |---|---|
-| All design tokens (colors, fonts, spacing) | `styles/tokens.css` |
-| Accent color | `styles/tokens.css` — all four `--color-accent*` vars |
-| Logo mark size/glow | `atoms/ObsidianMark.jsx` |
-| Icon glyphs | `atoms/Icon.jsx` `paths` object |
-| Markdown rendering pipeline | `utils/wikiLinkPlugin.js`, `utils/obsidianImagePlugin.js`, `utils/markdownCleanup.js` |
-| Math rendering | `utils/mathPlugin.js` |
-| Math block/inline styles | `organisms/MilkdownEditor.module.css` `.math-block` / `.math-inline` |
-| Frontmatter split/join | `utils/frontmatter.js` |
-| Frontmatter table style | `molecules/FrontmatterTable.module.css` |
-| Wiki-link / image style | `organisms/MilkdownEditor.module.css` (scoped to `.ProseMirror`) |
-| Milkdown height chain / editor CSS | `organisms/MilkdownEditor.module.css` |
+| Any colour, font, radius, spacing, motion value | `styles/tokens.css` |
+| Brand accent | `styles/tokens.css` — all five `--accent*` vars together |
+| Element defaults (inputs, focus ring, selects, a, headings) | `styles/base.css` |
+| Fonts | `index.html` font link + `tokens.css` `--font-*` |
+| Control height (36/44px) | `tokens.css` `--control-h` + `base.css` mobile override |
+| Button look / variants | `atoms/Button.module.css` |
+| Toast API / look | `atoms/Toast.jsx`, `store/useStore.js` `showToast` |
+| Page transition | `motion/PageTransition.jsx`, `motion/presets.js` `fadeRise` |
+| Add a primitive | `atoms/` or `molecules/` + a section in `pages/StyleguidePage.jsx` + a test in `__tests__/primitives.test.jsx` |
+| Colour-literal rule / exceptions | `__tests__/styleGuard.lib.js`, `styleGuard.allowlist.txt` |
+| Nav items | `organisms/useNavItems.js` |
+| NavBar / phone tab bar look | `organisms/NavBar.module.css`, `MobileTabBar.module.css` |
+| Logo mark | `atoms/ObsidianMark.jsx` |
+| Icon glyphs | `atoms/Icon.jsx` `paths` |
+| Markdown pipeline | `utils/wikiLinkPlugin.js`, `utils/obsidianImagePlugin.js`, `utils/markdownCleanup.js`, `utils/mathPlugin.js` |
+| Editor CSS (wiki-link, math, live preview, height chain) | `organisms/MilkdownEditor.module.css` |
 | Live preview syntax chars | `utils/livePreviewPlugin.js` `MARK_SYNTAX` |
-| Live preview CSS style | `organisms/MilkdownEditor.module.css` `.pm-active-mark::before/::after` |
-| Google Fonts | `index.html` font link + `tokens.css` `--font-*` vars |
+| Frontmatter split/join | `utils/frontmatter.js` |
 | Zustand store shape | `store/useStore.js` |
-| Atom props/behavior | individual file in `atoms/` |
 | Tab bar UI | `molecules/TabBar.jsx` + `TabBar.module.css` |

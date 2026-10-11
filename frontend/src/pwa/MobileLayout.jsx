@@ -10,6 +10,7 @@ import { armQuitNotify, showLocalNotification } from './quitNotify';
 import { stageText } from './syncStageLabel';
 import LoginModal from '../components/organisms/LoginModal';
 import RouteErrorBoundary from '../components/organisms/RouteErrorBoundary';
+import Toast from '../components/atoms/Toast';
 import BottomNav from './BottomNav';
 import TopBar from './TopBar';
 import styles from './MobileLayout.module.css';
@@ -134,6 +135,7 @@ export default function MobileLayout() {
       </main>
       <BottomNav />
       {showLogin && <LoginModal />}
+      <Toast />
     </div>
   );
 }
