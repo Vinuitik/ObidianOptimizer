@@ -3,13 +3,18 @@ import useStore from '../store/useStore';
 import useOffline from './useOffline';
 import { syncForOffline } from './syncOffline';
 import { flushOutbox, OUTBOX_RETRY_MS } from './offlineApi';
-import { getMeta, setMeta } from './db';
+import { getMeta, setMeta, getAllReviewNotes } from './db';
 import { linkDevice, hasCreds, unlinkDevice, proofReadNote } from './setup';
 import { refreshAndPull, pullReviewFromDrive } from './drivePull';
 import { pushMailbox } from './mailbox';
 import { notificationsSupported, notificationPermission, requestNotificationPermission, showLocalNotification } from './quitNotify';
 import { fetchFailedCaptures, retryCapture, dismissCapture } from '../api/capture';
 import { stageText } from './syncStageLabel';
+import Button from '../components/atoms/Button';
+import Select from '../components/atoms/Select';
+import Checkbox from '../components/atoms/Checkbox';
+import Card from '../components/molecules/Card';
+import Disclosure from '../components/molecules/Disclosure';
 import styles from './MobilePages.module.css';
 
 // Baseline for "did the failed-capture count grow since last time we checked", persisted
@@ -55,6 +60,7 @@ export default function SyncPage() {
   const setStage        = useStore(s => s.setSyncStage);
 
   const [lastSync, setLastSync] = useState(null);
+  const [offlineCount, setOfflineCount] = useState(null); // cards in the downloaded set
   const [busy, setBusy]         = useState(false);
   const [status, setStatus]     = useState(null);  // { text, tone }
   const [linked, setLinked]     = useState(false);
@@ -76,6 +82,11 @@ export default function SyncPage() {
     hasCreds().then(setLinked).catch(() => {});
     getMeta('notifyCaptureSent').then(v => setNotifyCaptureSent(v !== false)).catch(() => {});
   }, []);
+
+  // Count of review notes sitting in IndexedDB; re-read whenever a sync lands.
+  useEffect(() => {
+    getAllReviewNotes().then(l => setOfflineCount(Array.isArray(l) ? l.length : 0)).catch(() => {});
+  }, [lastSync]);
 
   async function toggleCaptureSentNotify(on) {
     setNotifyCaptureSent(on); // optimistic — this is a local preference, not a server call
@@ -270,195 +281,142 @@ export default function SyncPage() {
   }
 
   const stale = lastSync && Date.now() - lastSync > 12 * 60 * 60 * 1000;
+  const downloading = busy || Boolean(stage);
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.pageTitle}>Sync</h1>
-
-      {/* ── Account ─────────────────────────────────────────────── */}
-      {/* Always-reachable sign in / sign out. Without this, dismissing the auto-login
-          modal left no way back in (and no way to sign out) from the installed PWA. */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-        marginBottom: 18, paddingBottom: 16, borderBottom: '1px solid var(--color-border, #262a35)',
-      }}>
-        <span className={styles.hint} style={{ margin: 0 }}>
-          {isAuthenticated ? '✓ Signed in' : 'Not signed in'}
-        </span>
-        {isAuthenticated ? (
-          <button className={styles.captureBtn} onClick={logout}
-                  style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--color-border, #262a35)', color: 'var(--color-muted, #8a90a0)' }}>
-            Sign out
-          </button>
-        ) : (
-          <button className={styles.captureBtn} onClick={() => setShowLogin(true)}
-                  style={{ padding: '8px 16px' }}>
-            Sign in
-          </button>
-        )}
-      </div>
-
-      <p className={styles.hint}>
-        {online ? 'Online.' : 'Offline — working from your downloaded set.'}{' '}
-        Last downloaded: {ago(lastSync)}.
-      </p>
-      {stale && (
-        <p className={`${styles.hint} ${styles.warn}`}>
-          Your offline set is over 12 h old — download again for fresh cards.
+      {/* ── One status card: what's offline-ready and how fresh ─────────────── */}
+      <Card className={styles.statusCard}>
+        <p className={styles.statusLine}>
+          {online ? '' : 'Offline - '}
+          {offlineCount == null ? 'Offline set' : `Offline ready: ${offlineCount} card${offlineCount === 1 ? '' : 's'}`}
+          {' '}&middot; {lastSync ? `synced ${ago(lastSync)}` : 'never synced'}
         </p>
-      )}
-
-      {isAuthenticated ? (
-        // stage (store-backed) reflects a sync in flight even if THIS mount of the page
-        // didn't start it — e.g. the background auto-sync, or a manual download begun
-        // before navigating away and still running now that you're back.
-        <button className={styles.captureBtn} onClick={download} disabled={busy || Boolean(stage) || !online}
-                style={{ marginTop: 14, width: '100%', padding: '12px 16px' }}>
-          {stage ? stageText(stage) : (busy ? 'Working…' : 'Download for offline')}
-        </button>
-      ) : (
-        <button className={styles.captureBtn} onClick={() => setShowLogin(true)}
-                style={{ marginTop: 14, width: '100%', padding: '12px 16px' }}>
-          Sign in to sync
-        </button>
-      )}
-
-      {status && <p className={`${styles.hint} ${styles[status.tone] || ''}`}>{status.text}</p>}
-
-      <p className={styles.hint}>
-        Tip: install this app and open it over the tunnel domain once on wifi, then hit
-        Download — after that Review works with no connection.
-      </p>
-
-      {/* ── Quit-guard notifications ─────────────────────────────────────────── */}
-      {notificationsSupported() && (
-        <>
-          <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>Notifications</h2>
-          <p className={styles.hint}>
-            Get a nudge the moment you switch away with today's duty unfinished. On iOS this
-            only works if the app is installed to your home screen (iOS 16.4+) — there's no
-            fallback otherwise.
+        {stale && (
+          <p className={`${styles.hint} ${styles.warn}`}>
+            Your offline set is over 12 h old - download again for fresh cards.
           </p>
-          {notifPerm === 'granted' ? (
-            <>
-              <p className={styles.hint}>✓ Enabled</p>
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                gap: 12, marginTop: 10,
-              }}>
-                <label htmlFor="notify-capture-sent" className={styles.hint} style={{ margin: 0 }}>
-                  Notify when a queued capture sends
-                </label>
-                <input
-                  id="notify-capture-sent" type="checkbox"
-                  checked={notifyCaptureSent}
-                  onChange={e => toggleCaptureSentNotify(e.target.checked)}
-                />
-              </div>
-            </>
-          ) : notifPerm === 'denied' ? (
-            <p className={`${styles.hint} ${styles.warn}`}>
-              Blocked — re-enable in your browser/OS notification settings for this app.
-            </p>
-          ) : (
-            <button className={styles.captureBtn} onClick={enableNotifications}
-                    style={{ marginTop: 4, width: '100%', padding: '12px 16px' }}>
-              Enable "are you a quitter?" nudges
-            </button>
-          )}
-        </>
-      )}
+        )}
+        {isAuthenticated ? (
+          // stage (store-backed) reflects a sync in flight even if THIS mount of the page
+          // didn't start it - the background auto-sync, or a download begun before
+          // navigating away and still running.
+          <Button variant="primary" onClick={download} loading={downloading} disabled={!online}>
+            {stage ? stageText(stage) : 'Download for offline'}
+          </Button>
+        ) : (
+          <Button variant="primary" onClick={() => setShowLogin(true)}>Sign in to sync</Button>
+        )}
+        {status && (
+          <p className={`${styles.hint} ${styles[status.tone] || ''}`} role="status" aria-live="polite">{status.text}</p>
+        )}
+        <p className={styles.hint}>
+          Install this app and open it over the tunnel domain once on wifi, then Download -
+          after that Review works with no connection.
+        </p>
+      </Card>
 
-      {/* ── Failed captures ───────────────────────────────────────────────── */}
+      {/* ── Failed captures (surfaced, not buried) ──────────────────────────── */}
       {isAuthenticated && failed.length > 0 && (
-        <>
-          <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>
-            Failed captures ({failed.length})
-          </h2>
+        <Disclosure title={`Failed captures (${failed.length})`} storageKey="pwa.sync.failed" defaultOpen>
           <p className={styles.hint}>
-            These keep auto-retrying every 6h on their own — retry now or give up on one below.
+            These auto-retry every 6h on their own - retry now or give up on one below.
           </p>
           {failed.map(c => (
-            <div key={c.id} style={{
-              marginTop: 10, padding: '10px 12px',
-              border: '1px solid var(--color-border, #262a35)', borderRadius: 8,
-            }}>
-              <div style={{ fontWeight: 600, wordBreak: 'break-word' }}>
-                {c.title || c.sourceRef}
-              </div>
-              <p className={`${styles.hint} ${styles.err}`} style={{ margin: '4px 0' }}>
-                {c.lastError || 'Unknown error'}
+            <div key={c.id} className={styles.failedItem}>
+              <div className={styles.failedTitle}>{c.title || c.sourceRef}</div>
+              <p className={`${styles.hint} ${styles.err}`}>{c.lastError || 'Unknown error'}</p>
+              <p className={styles.hint}>
+                {c.sourceType} &middot; {c.retryCount} attempt{c.retryCount === 1 ? '' : 's'}
               </p>
-              <p className={styles.hint} style={{ margin: '0 0 8px' }}>
-                {c.sourceType} · {c.retryCount} attempt{c.retryCount === 1 ? '' : 's'}
-              </p>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className={styles.captureBtn} onClick={() => handleRetry(c.id)}
-                        disabled={failedBusyId === c.id || !online}
-                        style={{ flex: 1, padding: '8px 14px' }}>
-                  Retry
-                </button>
-                <button className={styles.captureBtn} onClick={() => handleDismiss(c.id)}
-                        disabled={failedBusyId === c.id}
-                        style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--color-border, #262a35)', color: 'var(--color-muted, #8a90a0)' }}>
-                  Dismiss
-                </button>
+              <div className={styles.rowActions}>
+                <Button onClick={() => handleRetry(c.id)} disabled={failedBusyId === c.id || !online}>Retry</Button>
+                <Button variant="ghost" onClick={() => handleDismiss(c.id)} disabled={failedBusyId === c.id}>Dismiss</Button>
               </div>
             </div>
           ))}
-        </>
+        </Disclosure>
       )}
+
+      {/* ── Account ───────────────────────────────────────────────────────────── */}
+      {/* Always-reachable sign in / sign out. Without this, dismissing the auto-login
+          modal left no way back in (and no way to sign out) from the installed PWA. */}
+      <Disclosure title="Account" storageKey="pwa.sync.account">
+        <div className={styles.row}>
+          <span className={styles.hint}>{isAuthenticated ? 'Signed in' : 'Not signed in'}</span>
+          {isAuthenticated
+            ? <Button variant="ghost" onClick={logout}>Sign out</Button>
+            : <Button variant="primary" onClick={() => setShowLogin(true)}>Sign in</Button>}
+        </div>
+      </Disclosure>
 
       {/* ── Drive link (server-independent offline) ─────────────────────────── */}
-      <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>Drive link</h2>
-      <p className={styles.hint}>
-        Link once to read your vault straight from Google Drive — then the phone works
-        even when the laptop is off.
-      </p>
-
-      {!linked ? (
-        <button className={styles.captureBtn} onClick={link} disabled={busy || !online || !isAuthenticated}
-                style={{ marginTop: 12, width: '100%', padding: '12px 16px' }}>
-          {isAuthenticated ? 'Link this device' : 'Sign in to link'}
-        </button>
-      ) : (
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <button className={styles.captureBtn} onClick={testDrive} disabled={busy}
-                  style={{ flex: 1, padding: '12px 16px' }}>
-            Test: read a note from Drive
-          </button>
-          <button className={styles.captureBtn} onClick={unlink} disabled={busy}
-                  style={{ padding: '12px 14px', background: 'transparent', border: '1px solid var(--color-border, #262a35)', color: 'var(--color-muted, #8a90a0)' }}>
-            Unlink
-          </button>
+      <Disclosure title="Drive link" storageKey="pwa.sync.drive">
+        <div className={styles.section}>
+          <p className={styles.hint}>
+            Link once to read your vault straight from Google Drive - then the phone works
+            even when the laptop is off.
+          </p>
+          {!linked ? (
+            <Button onClick={link} loading={busy} disabled={!online || !isAuthenticated}>
+              {isAuthenticated ? 'Link this device' : 'Sign in to link'}
+            </Button>
+          ) : (
+            <div className={styles.rowActions}>
+              <Button onClick={testDrive} disabled={busy}>Test: read a note from Drive</Button>
+              <Button variant="ghost" onClick={unlink} disabled={busy}>Unlink</Button>
+            </div>
+          )}
+          {driveMsg && <p className={`${styles.hint} ${styles[driveMsg.tone] || ''}`}>{driveMsg.text}</p>}
         </div>
+      </Disclosure>
+
+      {/* ── Automatic backup (server-side upload cron - different from the device-local
+          "Drive link" above, which lets this phone read Drive directly) ─────────── */}
+      {isAuthenticated && (
+        <Disclosure title="Automatic backup" storageKey="pwa.sync.backup">
+          <div className={styles.section}>
+            <p className={styles.hint}>
+              Uploads your vault to Drive on a schedule (every 6h), independent of the
+              device link. Runs on the server, so it works with this phone closed.
+            </p>
+            <Select
+              aria-label="Automatic backup"
+              value={String(settings.syncEnabled ?? true)}
+              disabled={backupBusy}
+              onChange={toggleAutoBackup}
+              options={[
+                { value: 'false', label: 'Off' },
+                { value: 'true', label: 'On - scheduled background uploads' },
+              ]}
+            />
+          </div>
+        </Disclosure>
       )}
 
-      {driveMsg && <p className={`${styles.hint} ${styles[driveMsg.tone] || ''}`}>{driveMsg.text}</p>}
-
-      {/* ── Automatic backup (server-side upload cron — different from the device-local
-          "Drive link" above, which lets this phone read Drive directly) ──────────── */}
-      {isAuthenticated && (
-        <>
-          <h2 className={styles.pageTitle} style={{ fontSize: 17, marginTop: 26 }}>Automatic backup</h2>
-          <p className={styles.hint}>
-            Uploads your vault to Drive on a schedule (every 6h), independent of the
-            device link above. Runs on the server, so it works even with this phone closed.
-          </p>
-          <select
-            value={String(settings.syncEnabled ?? true)}
-            disabled={backupBusy}
-            onChange={toggleAutoBackup}
-            style={{
-              marginTop: 8, width: '100%', padding: '12px 16px', borderRadius: 8,
-              border: '1px solid var(--color-border, #262a35)',
-              background: 'var(--color-bg, #12141a)', color: 'inherit', fontSize: 15,
-            }}
-          >
-            <option value="false">Off</option>
-            <option value="true">On — scheduled background uploads</option>
-          </select>
-        </>
+      {/* ── Quit-guard notifications ─────────────────────────────────────────── */}
+      {notificationsSupported() && (
+        <Disclosure title="Notifications" storageKey="pwa.sync.notif">
+          <div className={styles.section}>
+            <p className={styles.hint}>
+              Get a nudge the moment you switch away with today's duty unfinished. On iOS this
+              only works if the app is installed to your home screen (iOS 16.4+).
+            </p>
+            {notifPerm === 'granted' ? (
+              <Checkbox
+                label="Notify when a queued capture sends"
+                checked={notifyCaptureSent}
+                onChange={e => toggleCaptureSentNotify(e.target.checked)}
+              />
+            ) : notifPerm === 'denied' ? (
+              <p className={`${styles.hint} ${styles.warn}`}>
+                Blocked - re-enable in your browser/OS notification settings for this app.
+              </p>
+            ) : (
+              <Button onClick={enableNotifications}>Enable "are you a quitter?" nudges</Button>
+            )}
+          </div>
+        </Disclosure>
       )}
     </div>
   );

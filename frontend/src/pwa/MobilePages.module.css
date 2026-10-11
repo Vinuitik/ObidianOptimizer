@@ -1,110 +1,106 @@
+/* Layout only - control appearance comes from base.css + atoms/molecules. */
 .page {
-  padding: 16px 14px;
-}
-
-.pageTitle {
-  font-family: var(--font-display, 'Space Grotesk', sans-serif);
-  font-size: 22px;
-  margin: 4px 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-3);
 }
 
 .gate {
-  padding: 48px 20px;
+  padding: var(--sp-10) var(--sp-5);
   text-align: center;
-  color: var(--color-muted, #8a90a0);
+  color: var(--text-3);
 }
 
 .hint {
-  margin-top: 14px;
-  font-size: 13px;
-  color: var(--color-muted, #8a90a0);
+  margin: 0;
+  font-size: var(--fs-13);
+  color: var(--text-3);
 }
 
-.tree {
-  margin: 0 -6px;
-}
+.ok   { color: var(--success); }
+.warn { color: var(--ember); }
+.err  { color: var(--danger); }
 
-/* ── Capture ────────────────────────────────────────────────────────────── */
-.captureForm {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
+.tree { margin: 0 calc(var(--sp-1) * -1); }
 
-.captureInput {
-  flex: 1;
-  min-width: 0;
-  padding: 12px 12px;
-  font-size: 16px; /* >=16px stops iOS/Android zoom-on-focus */
-  border-radius: 10px;
-  border: 1px solid var(--color-border, #262a35);
-  background: var(--color-surface, #161922);
-  color: var(--color-text, #e6e8ee);
-}
+.searchLink { align-self: flex-start; }
 
-.captureBtn {
-  min-height: 46px;            /* was padding:0 → button collapsed to text height */
-  padding: 12px 16px;
-  border-radius: 10px;
-  border: none;
-  background: var(--color-accent, #7c5cff);
-  color: #fff;
-  font-weight: 600;
-}
-
-.captureBtn:disabled {
-  opacity: 0.5;
-}
-
-.ok   { color: #7ee0a0; }
-.warn { color: #ffd27a; }
-.err  { color: #ff8a8a; }
-
-/* Link | Note segmented toggle on the Capture tab */
-.modeToggle {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.modeBtn {
-  flex: 1;
-  padding: 8px 0;
-  border-radius: 10px;
-  border: 1px solid var(--color-border, #262a35);
-  background: var(--color-surface, #161922);
-  color: var(--color-text-muted, #9aa0ad);
-  font-weight: 600;
-}
-
-.modeBtnActive {
-  background: var(--color-accent, #7c5cff);
-  border-color: var(--color-accent, #7c5cff);
-  color: #fff;
-}
-
-/* Note mode stacks: title + textarea + button */
-.captureFormCol {
+/* ── Capture ───────────────────────────────────────────────────────────── */
+.form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--sp-2);
 }
 
-.captureTextarea {
-  min-height: 160px;
-  resize: vertical;
-  padding: 12px;
-  font-size: 16px; /* >=16px stops iOS/Android zoom-on-focus */
-  line-height: 1.4;
-  border-radius: 10px;
-  border: 1px solid var(--color-border, #262a35);
-  background: var(--color-surface, #161922);
-  color: var(--color-text, #e6e8ee);
-  font-family: inherit;
+.textarea { min-height: 160px; resize: vertical; }
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-14);
 }
 
-/* ── Reader ─────────────────────────────────────────────────────────────── */
+.resultLinks {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.resultLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* ── Sync ──────────────────────────────────────────────────────────────── */
+.statusCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.statusLine {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-18);
+  color: var(--text);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.rowActions > :first-child { flex: 1; }
+
+.failedItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  margin-top: var(--sp-2);
+}
+
+.failedTitle { font-weight: 600; word-break: break-word; }
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* ── Reader ────────────────────────────────────────────────────────────── */
 .reader {
   display: flex;
   flex-direction: column;
@@ -113,35 +109,26 @@
 
 .readerBar {
   position: sticky;
-  top: 0;
+  top: 52px; /* below TopBar */
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  background: var(--color-bg, #0f1115);
-  border-bottom: 1px solid var(--color-border, #262a35);
-}
-
-.back {
-  background: none;
-  border: none;
-  color: var(--color-accent, #7c5cff);
-  font-size: 15px;
-  padding: 4px 2px;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
 }
 
 .readerTitle {
   font-weight: 600;
-  font-size: 15px;
+  font-size: var(--fs-14);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .readerBody {
-  padding: 14px 16px 40px;
-  line-height: 1.6;
+  padding: var(--sp-4) var(--sp-4) var(--sp-10);
   word-wrap: break-word;
 }
 
