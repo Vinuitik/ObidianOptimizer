@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Button from '../atoms/Button';
+import IconButton from '../atoms/IconButton';
+import Skeleton from '../atoms/Skeleton';
 import styles from './FolderPicker.module.css';
 
 /**
@@ -53,26 +55,26 @@ export default function FolderPicker({
       <div className={styles.modal} onClick={e => e.stopPropagation()}>
         <div className={styles.head}>
           <span className={styles.title}>{title}</span>
-          <button className={styles.close} onClick={onClose} aria-label="Close">×</button>
+          <IconButton icon="x" variant="ghost" onClick={onClose} aria-label="Close" />
         </div>
 
         {note && <div className={styles.note}>{note}</div>}
 
         <div className={styles.crumb}>
-          <button
-            className={styles.up}
+          <Button
+            size="sm" variant="secondary"
             disabled={!view || view.parent == null || loading}
             onClick={() => go(view.parent)}
           >
             ↑ Up
-          </button>
+          </Button>
           <span className={styles.current} title={view?.current ?? ''}>
             {view?.current || (loading ? 'Loading…' : '')}
           </span>
         </div>
 
         <div className={styles.list}>
-          {loading && <div className={styles.empty}>Loading…</div>}
+          {loading && <Skeleton lines={4} height={32} />}
           {error && <div className={styles.error}>{error}</div>}
           {!loading && !error && view?.dirs.length === 0 && (
             <div className={styles.empty}>No sub-folders here.</div>
@@ -89,8 +91,9 @@ export default function FolderPicker({
         <div className={styles.actions}>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
+            variant="primary"
             onClick={() => view?.current && onSelect(view.current)}
-            className={!view?.current ? styles.disabled : ''}
+            disabled={!view?.current}
           >
             {confirmLabel}
           </Button>

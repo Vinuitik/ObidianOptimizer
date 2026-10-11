@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   fetchInboxOffline as fetchInbox,
   fileInboxOffline as fileInboxNote,
@@ -17,6 +17,12 @@ import LearnLayout from '../templates/LearnLayout';
 import NoteRenderer from '../molecules/NoteRenderer';
 import SourceSplicePanel from './SourceSplicePanel';
 import FolderPicker from './FolderPicker';
+import Button from '../atoms/Button';
+import Checkbox from '../atoms/Checkbox';
+import Skeleton from '../atoms/Skeleton';
+import SegmentedTabs from '../molecules/SegmentedTabs';
+import EmptyState from '../molecules/EmptyState';
+import ErrorState from '../molecules/ErrorState';
 import styles from './InboxReview.module.css';
 
 const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
@@ -25,10 +31,19 @@ const dirName  = p => p.replace(/[/\\]+$/, '').replace(/[/\\][^/\\]*$/, '');
 // After acting on a note, the next one to review WITHIN its source group: the first remaining
 // group member in review order (groupBySource). The acted note is already gone from `list`, so
 // what's left flows in reading order. null → the group is exhausted (caller then auto-picks
-// nothing, per the "don't jump to an unrelated source" rule). Uses the same inboxGroupKey as
+// into the next group). Uses the same inboxGroupKey as
 // color banding/the folder tree (sourceColor.js) — a local captureId-or-path-only copy of this
 // used to live here and silently broke auto-advance for inboxFolder-grouped (non-captured)
 // notes, since a note with neither captureId nor a shared folder falls through to its own path.
+// The preview shows the body only: a leading "# Title" that just repeats the note's own title
+// (already in the queue row and the panel header) is dropped. Display-only; the draft is untouched.
+const normTitle = t => (t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+export function stripLeadingTitle(content, title) {
+  const m = /^(\s*---\r?\n[\s\S]*?\r?\n---\r?\n)?(\s*)#\s+([^\r\n]+)\r?\n?/.exec(content || '');
+  if (!m || normTitle(m[3]) !== normTitle(title)) return content;
+  return (m[1] || '') + content.slice(m[0].length).replace(/^\s*\n/, '');
+}
+
 function nextInGroup(list, groupKey) {
   const inGroup = groupBySource(list).filter(i => inboxGroupKey(i) === groupKey);
   return inGroup[0] || null;
@@ -53,7 +68,7 @@ export default function InboxReview({ onCount }) {
   const [orient,   setOrient]   = useState(null);     // 'portrait' | 'landscape' | null
   const [picker,   setPicker]   = useState(null);
   const [vaultRoot, setVaultRoot] = useState(null);
-  const [loading,  setLoading]  = useState(false);
+  const [loading,  setLoading]  = useState(true);   // true until the first fetch settles (no premature empty state)
   const [busy,     setBusy]     = useState(false);
   const [error,    setError]    = useState(null);
   const [status,   setStatus]   = useState('');
@@ -114,9 +129,8 @@ export default function InboxReview({ onCount }) {
         if (!list.length) { setSelected(null); setDraft(''); setDest(''); return; }
         if (list.some(i => i.path === selected)) return;   // current still present → keep it
         if (opts?.preferGroup !== undefined) {
-          const next = nextInGroup(list, opts.preferGroup);
-          if (next) select(next);
-          else { setSelected(null); setDraft(''); setDest(''); }
+          // Same group first; once exhausted continue into the next group (first in review order).
+          select(nextInGroup(list, opts.preferGroup) || groupBySource(list)[0] || list[0]);
           return;
         }
         select(list[0]);   // initial load / generic refresh
@@ -225,6 +239,31 @@ export default function InboxReview({ onCount }) {
     catch (e) { setStatus(`Failed: ${e.message || e}`); }
     finally { setBusy(false); }
   }
+
+  // Enter = Save & file (Save & acknowledge for in-place notes). Ignored while typing in a field,
+  // on a focused button/link (Enter already activates it), with a modal open, or mid-action.
+  // Ctrl/Cmd+Enter works from inside the editor too. Latest closure kept in a ref so the
+  // window listener is bound once.
+  const enterRef = useRef(null);
+  enterRef.current = () => {
+    if (!current || busy || picker) return;
+    if (current.inPlace) acknowledge(); else file();
+  };
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.isComposing) return;
+      const t = e.target;
+      const tag = t?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable;
+      if (typing && !(e.ctrlKey || e.metaKey)) return;
+      // Queue-row buttons keep focus after a click, so Enter there must still file.
+      if (!typing && (tag === 'BUTTON' || tag === 'A') && !t.closest('[data-queue-row]')) return;
+      e.preventDefault();
+      enterRef.current?.();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   async function acknowledge() {
     if (!current) return;
@@ -335,13 +374,13 @@ export default function InboxReview({ onCount }) {
            onDragStart={drag ? (e => { setDragPath(it.path); e.dataTransfer.effectAllowed = 'move'; }) : undefined}
            onDragEnd={drag ? (() => { setDragPath(null); setDropKey(null); }) : undefined}>
         {!it.inPlace && (
-          <input type="checkbox" className={styles.rowCheck}
-                 checked={checked.has(it.path)} onChange={() => toggleOne(it.path)}
-                 aria-label={`Select ${it.title} for delete`} />
+          <Checkbox className={styles.rowCheck}
+                    checked={checked.has(it.path)} onChange={() => toggleOne(it.path)}
+                    aria-label={`Select ${it.title} for delete`} />
         )}
         <button
           className={`${styles.row} ${selected === it.path ? styles.rowActive : ''}`}
-          onClick={() => select(it)} title={it.title}>
+          onClick={() => select(it)} title={it.title} data-queue-row>
           {color && <span className={styles.srcDot} aria-hidden="true" />}
           <span className={styles.rowTitle}>{it.title}</span>
           {it.inPlace
@@ -415,14 +454,18 @@ export default function InboxReview({ onCount }) {
   const notePanel = (
     <div className={styles.notePanel}>
       <div className={styles.noteHead}>
-        <span className={styles.noteTag}>New note {current?.inPlace ? '· in place' : '· editable'}</span>
-        <div className={styles.tabs}>
-          <button className={`${styles.tab} ${!preview ? styles.tabOn : ''}`} onClick={() => setPreview(false)}>Edit</button>
-          <button className={`${styles.tab} ${preview ? styles.tabOn : ''}`} onClick={() => setPreview(true)}>Preview</button>
-        </div>
+        <span className={styles.noteTitle} title={current?.title}>{current?.title || 'New note'}</span>
+        <SegmentedTabs
+          aria-label="Note view"
+          tabs={[{ id: 'edit', label: 'Edit' }, { id: 'preview', label: 'Preview' }]}
+          value={preview ? 'preview' : 'edit'}
+          onChange={id => setPreview(id === 'preview')}
+        />
       </div>
       {preview
-        ? <div className={styles.previewBox}><NoteRenderer content={draft} resetKey={selected} /></div>
+        ? <div className={styles.previewBox}>
+            <NoteRenderer content={stripLeadingTitle(draft, current?.title)} resetKey={selected} />
+          </div>
         : <textarea className={styles.editor} value={draft}
                     onChange={e => setDraft(e.target.value)} spellCheck={false} />}
     </div>
@@ -437,22 +480,18 @@ export default function InboxReview({ onCount }) {
         </button>
         {!collapsed && (
           <div className={styles.queueList}>
-            {loading && <p className={styles.status}>Loading…</p>}
-            {error   && <p className={styles.statusError}>{error}</p>}
+            {loading && items.length === 0 && <Skeleton lines={5} height={32} />}
+            {error && <ErrorState message="Couldn't load the inbox" onRetry={() => load()} />}
             {!loading && !error && items.length === 0 && (
               <p className={styles.status}>Inbox is empty. Capture a resource and its proposed notes appear here.</p>
             )}
             {deletable.length > 0 && (
               <div className={styles.bulkBar}>
-                <label className={styles.selAll}>
-                  <input type="checkbox" checked={allChecked} onChange={toggleAll}
-                         ref={el => { if (el) el.indeterminate = checked.size > 0 && !allChecked; }} />
-                  Select all
-                </label>
+                <Checkbox label="Select all" checked={allChecked} onChange={toggleAll} />
                 {checked.size > 0 && (
-                  <button className={styles.bulkDel} onClick={deleteSelected} disabled={busy}>
-                    🗑 Delete {checked.size}
-                  </button>
+                  <Button size="sm" variant="danger" onClick={deleteSelected} disabled={busy}>
+                    Delete {checked.size}
+                  </Button>
                 )}
               </div>
             )}
@@ -483,17 +522,17 @@ export default function InboxReview({ onCount }) {
             {barOpen && (
               <div className={styles.barControls}>
                 {current.inPlace ? (
-                  <button className={styles.primary} onClick={acknowledge} disabled={busy}>Save &amp; acknowledge</button>
+                  <Button variant="primary" onClick={acknowledge} disabled={busy} title="Enter">Save &amp; acknowledge</Button>
                 ) : (
                   <>
                     <span className={styles.barLabel}>Proposed folder</span>
-                    <button className={styles.folderBtn} onClick={openFolderPicker} title={dest}>
-                      📁 {dest || 'Choose a folder'} ▸
-                    </button>
-                    <button className={styles.primary} onClick={file} disabled={busy}>Save &amp; file</button>
-                    <button className={styles.ghost} onClick={split} disabled={busy}
-                            title="Create another note for the same source region (splits this one into chapters)">Split</button>
-                    <button className={styles.ghost} onClick={discard} disabled={busy}>Discard</button>
+                    <Button className={styles.folderBtn} icon="folder" onClick={openFolderPicker} title={dest}>
+                      {dest || 'Choose a folder'}
+                    </Button>
+                    <Button variant="primary" onClick={file} disabled={busy} title="Enter">Save &amp; file</Button>
+                    <Button variant="ghost" onClick={split} disabled={busy}
+                            title="Create another note for the same source region (splits this one into chapters)">Split</Button>
+                    <Button variant="ghost" onClick={discard} disabled={busy}>Discard</Button>
                   </>
                 )}
                 {status && <span className={styles.barStatus}>{status}</span>}
@@ -502,7 +541,12 @@ export default function InboxReview({ onCount }) {
           </div>
         </div>
       ) : (
-        <div className={styles.emptyMain}><p>Select a note to review.</p></div>
+        <div className={styles.emptyMain}>
+          {loading ? <Skeleton lines={3} height={32} /> : error ? null : (
+            <EmptyState icon="inbox" title={items.length ? 'Select a note to review' : 'Nothing to review'}
+                        description={items.length ? undefined : 'Captured resources show up here as proposed notes.'} />
+          )}
+        </div>
       )}
 
       {picker && <FolderPicker {...picker} />}

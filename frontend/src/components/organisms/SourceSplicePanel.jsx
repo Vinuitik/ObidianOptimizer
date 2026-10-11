@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import { parseSourceRegion } from '../../utils/inboxParse';
 import { pdfPageUrl } from '../../utils/noteMedia';   // shared so offline warm caches identical keys
 import RsvpReader from '../molecules/RsvpReader';
+import SegmentedTabs from '../molecules/SegmentedTabs';
 import NoteRenderer from '../molecules/NoteRenderer';
 import styles from './SourceSplicePanel.module.css';
 
@@ -20,9 +21,9 @@ export default function SourceSplicePanel({ item, onOrientation }) {
   // external ref when there's no local copy yet.
   const kind = item ? sourceKind(region.local || region.ref, item) : null;
 
-  // Text sources default to RSVP (fast read); toggle to a rendered read view so the
-  // user can eyeball the note themselves. Sticky across notes.
-  const [textMode, setTextMode] = useState('rsvp');   // 'rsvp' | 'read'
+  // Text sources default to the rendered Read view; RSVP (one word at a time) is the opt-in
+  // secondary mode. Sticky across notes.
+  const [textMode, setTextMode] = useState('read');   // 'read' | 'rsvp'
 
   // Report split orientation so the review layout matches the source shape (landscape
   // video → wide → horizontal split; portrait/other → vertical). YouTube is ~always
@@ -38,7 +39,7 @@ export default function SourceSplicePanel({ item, onOrientation }) {
   return (
     <div className={styles.panel}>
       <div className={styles.head}>
-        <span className={styles.kind}>{kind}</span>
+        <span className={styles.kind}>{KIND_LABEL[kind] ?? kind}</span>
         {region.ref && (
           <a className={styles.ref} href={hrefFor(region.ref)} target="_blank" rel="noreferrer" title={region.ref}>
             ↗ {shorten(region.ref)}
@@ -47,12 +48,13 @@ export default function SourceSplicePanel({ item, onOrientation }) {
         {region.startSeconds != null && <span className={styles.at}>{fmtRange(region.startSeconds, region.endSeconds)}</span>}
         {region.pages.length > 0 && <span className={styles.at}>{pageRange(region.pages)}</span>}
         {kind === 'text' && (
-          <div className={styles.toggle}>
-            <button className={`${styles.toggleBtn} ${textMode === 'rsvp' ? styles.toggleOn : ''}`}
-                    onClick={() => setTextMode('rsvp')}>RSVP</button>
-            <button className={`${styles.toggleBtn} ${textMode === 'read' ? styles.toggleOn : ''}`}
-                    onClick={() => setTextMode('read')}>Read</button>
-          </div>
+          <SegmentedTabs
+            className={styles.toggle}
+            aria-label="Text view"
+            tabs={[{ id: 'read', label: 'Read' }, { id: 'rsvp', label: 'RSVP' }]}
+            value={textMode}
+            onChange={setTextMode}
+          />
         )}
       </div>
       <div className={styles.viewer}>
@@ -106,8 +108,8 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
     }
     return <iframe className={styles.frame} src={region.ref} title="source page" />;
   }
-  // text / unknown → default RSVP (fast read); 'read' renders the note so the user can
-  // scan it themselves (read-only Milkdown, the real renderer).
+  // text / unknown → 'read' (default) renders the note (read-only Milkdown, the real
+  // renderer); 'rsvp' flashes it a word at a time.
   if (textMode === 'read') {
     return <div className={styles.readbox}><NoteRenderer content={item.content} resetKey={item.path} /></div>;
   }
@@ -200,6 +202,8 @@ function vaultPdfPath(ref) {
   if (!r || /^https?:\/\//i.test(r)) return null;
   return /\.pdf$/i.test(r) ? r.replace(/^\/+/, '') : null;
 }
+
+const KIND_LABEL = { youtube: 'YouTube', video: 'Video', pdf: 'PDF', web: 'Web page', text: 'Text' };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function sourceKind(ref, item) {

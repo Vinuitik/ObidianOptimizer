@@ -3,7 +3,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--color-surface);
+  background: var(--surface);
 }
 
 .head {
@@ -12,23 +12,23 @@
   gap: var(--sp-3);
   flex-wrap: wrap;
   padding: var(--sp-2) var(--sp-3);
-  border-bottom: 1px solid var(--color-border);
-  font-size: var(--text-sm);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-14);
 }
 
 .kind {
   text-transform: uppercase;
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: var(--tracking-display);
   font-weight: 600;
-  font-size: var(--text-xs);
-  color: var(--color-text-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  font-size: var(--fs-13);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
   padding: 0.1rem var(--sp-2);
 }
 
 .ref {
-  color: var(--color-accent-soft);
+  color: var(--accent-text);
   text-decoration: none;
   max-width: 60%;
   overflow: hidden;
@@ -37,27 +37,10 @@
 }
 .ref:hover { text-decoration: underline; }
 
-.at { color: var(--color-text-2); }
+.at { color: var(--text-2); }
 
 /* RSVP ↔ Read toggle for text sources */
-.toggle { margin-left: auto; display: flex; gap: var(--sp-1); }
-.toggleBtn {
-  font-size: var(--text-xs);
-  padding: var(--sp-1) var(--sp-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-card);
-  color: var(--color-text-2);
-  cursor: pointer;
-}
-.toggleBtn:hover { color: var(--color-text); border-color: var(--color-border-hover); }
-.toggleOn {
-  background: var(--color-accent-dim);
-  color: var(--color-accent-soft);
-  border-color: var(--color-accent-border);
-  font-weight: 600;
-}
-
+.toggle { margin-left: auto; }
 /* Rendered read view fills the panel and scrolls */
 .readbox {
   width: 100%;
@@ -74,7 +57,7 @@
   align-items: stretch;
   justify-content: center;
   overflow: auto;
-  background: var(--color-surface);
+  background: var(--surface);
 }
 
 .frame, .media {
@@ -82,7 +65,7 @@
   height: 100%;
   border: 0;
 }
-.media { object-fit: contain; background: #000; }
+.media { object-fit: contain; background: var(--bg); }
 
 .empty {
   display: flex;
@@ -91,8 +74,8 @@
   height: 100%;
   padding: var(--sp-5);
   text-align: center;
-  color: var(--color-text-2);
-  font-size: var(--text-sm);
+  color: var(--text-2);
+  font-size: var(--fs-14);
 }
 
 /* Rendered PDF page viewer (server-rasterized pages + toggle-able region highlight) */
@@ -108,15 +91,15 @@
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-card);
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
 }
 .pdfToggle {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  font-size: var(--text-xs);
-  color: var(--color-text-2);
+  font-size: var(--fs-13);
+  color: var(--text-2);
   cursor: pointer;
 }
 .pdfPages {
@@ -128,13 +111,13 @@
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3);
-  background: var(--color-surface);
+  background: var(--surface);
 }
 .pdfPage {
   max-width: 100%;
   height: auto;
-  box-shadow: 0 1px 6px rgb(0 0 0 / 45%);
-  background: #fff;
+  box-shadow: var(--shadow-1);
+  background: var(--text);
 }
 .pdfMissing {
   display: flex;
@@ -145,22 +128,22 @@
   height: 100%;
   padding: var(--sp-5);
   text-align: center;
-  color: var(--color-text-2);
-  font-size: var(--text-sm);
+  color: var(--text-2);
+  font-size: var(--fs-14);
 }
-.pdfMissing a { color: var(--color-accent-soft); }
+.pdfMissing a { color: var(--accent-text); }
 .pdfBtn {
   margin-left: auto;
-  font-size: var(--text-xs);
+  font-size: var(--fs-13);
   padding: var(--sp-1) var(--sp-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-card);
-  color: var(--color-text-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text-2);
   cursor: pointer;
   text-decoration: none;
 }
-.pdfBtn:hover { color: var(--color-text); border-color: var(--color-border-hover); }
+.pdfBtn:hover { color: var(--text); border-color: var(--line-strong); }
 /* the two buttons sit together on the right; only the first gets the auto margin */
 .pdfBtn ~ .pdfBtn { margin-left: var(--sp-2); }
 .pdfEmbed { flex: 1; min-height: 0; width: 100%; border: 0; }
@@ -175,16 +158,16 @@
   height: 100%;
   padding: var(--sp-5);
   text-align: center;
-  color: var(--color-text-2);
-  font-size: var(--text-sm);
+  color: var(--text-2);
+  font-size: var(--fs-14);
 }
 .blockedBtn {
-  font-size: var(--text-xs);
+  font-size: var(--fs-13);
   padding: var(--sp-1) var(--sp-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-card);
-  color: var(--color-accent-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--accent-text);
   text-decoration: none;
 }
-.blockedBtn:hover { color: var(--color-text); border-color: var(--color-border-hover); }
+.blockedBtn:hover { color: var(--text); border-color: var(--line-strong); }

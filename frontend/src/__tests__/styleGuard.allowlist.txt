@@ -3,10 +3,4 @@
 components/molecules/ImageLightbox.module.css
 components/molecules/NavItem.module.css
 components/molecules/SearchBar.module.css
-components/organisms/FeedView.module.css
-components/organisms/FolderPicker.module.css
-components/organisms/InboxPanel.module.css
-components/organisms/InboxReview.module.css
-components/organisms/SourceSplicePanel.module.css
 components/organisms/SyncBanner.module.css
-pages/LearnPage.module.css
