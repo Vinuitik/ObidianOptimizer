@@ -19,7 +19,7 @@
 .guide {
   width: 2px;
   height: 10px;
-  background: var(--color-accent);
+  background: var(--accent);
   opacity: 0.7;
 }
 
@@ -31,13 +31,13 @@
   font-size: clamp(1.6rem, 5vw, 2.6rem);
   line-height: 1;
   width: 100%;
-  color: var(--color-text);
+  color: var(--text);
 }
 
 .before { text-align: right; }
 .after  { text-align: left; }
 .pivot  {
-  color: var(--color-accent-soft);
+  color: var(--accent-text);
   font-weight: 700;
   padding: 0 1px;
 }
@@ -52,24 +52,24 @@
 .play {
   min-width: 2.4rem;
   padding: var(--sp-1) var(--sp-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-card);
-  color: var(--color-text);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text);
   cursor: pointer;
-  font-size: var(--text-sm);
+  font-size: var(--fs-14);
 }
-.play:hover { border-color: var(--color-border-hover); }
+.play:hover { border-color: var(--line-strong); }
 
 .wpm { flex: 1 1 120px; }
-.wpmLabel { font-size: var(--text-xs); color: var(--color-text-2); min-width: 4.5rem; }
-.count { font-size: var(--text-xs); color: var(--color-text-2); margin-left: auto; }
+.wpmLabel { font-size: var(--fs-13); color: var(--text-2); min-width: 4.5rem; }
+.count { font-size: var(--fs-13); color: var(--text-2); margin-left: auto; }
 
 .scrub { width: 100%; }
 
 .empty {
   padding: var(--sp-5) var(--sp-4);
   text-align: center;
-  color: var(--color-text-2);
-  font-size: var(--text-sm);
+  color: var(--text-2);
+  font-size: var(--fs-14);
 }

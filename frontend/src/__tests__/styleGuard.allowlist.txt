@@ -6,10 +6,7 @@ components/molecules/ReviewRating.module.css
 components/molecules/SearchBar.module.css
 components/organisms/EditorErrorBoundary.module.css
 components/organisms/FlashcardSession.module.css
-components/organisms/FolderPicker.module.css
 components/organisms/FolderTree.module.css
-components/organisms/InboxPanel.module.css
-components/organisms/InboxReview.module.css
 components/organisms/LinksPanel.module.css
 components/organisms/LoginModal.module.css
 components/organisms/MilkdownEditor.module.css
@@ -17,7 +14,6 @@ components/organisms/QuitGuard.module.css
 components/organisms/ResourcePanel.module.css
 components/organisms/ReviewList.module.css
 components/organisms/RouteErrorBoundary.module.css
-components/organisms/SourceSplicePanel.module.css
 components/organisms/SyncBanner.module.css
 components/organisms/TrackAddBox.module.css
 components/templates/SplitLayout.module.css
