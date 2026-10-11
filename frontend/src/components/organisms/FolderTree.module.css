@@ -21,27 +21,8 @@
 }
 
 .newRootBtn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   width: 100%;
-  text-align: left;
-  padding: 9px 12px;
-  font-size: var(--text-sm);
-  font-family: var(--font-body);
-  font-weight: 500;
-  color: var(--color-accent-soft);
-  background: var(--color-accent-dim);
-  border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-sm2);
-  cursor: pointer;
-  transition: background var(--ease-fast), border-color var(--ease-fast);
-  box-sizing: border-box;
-}
-
-.newRootBtn:hover {
-  background: rgba(124, 92, 255, 0.22);
-  border-color: rgba(124, 92, 255, 0.5);
+  justify-content: flex-start;
 }
 
 .loadingRow {
@@ -72,19 +53,6 @@
 
 .folderInputField {
   width: 100%;
-  box-sizing: border-box;
-  background: var(--color-card);
-  border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-sm2);
-  color: var(--color-text);
-  font-size: 13.5px;
-  font-family: var(--font-body);
-  padding: 5px 8px;
-  outline: none;
-}
-
-.folderInputField:focus {
-  border-color: var(--color-accent-soft);
 }
 
 .noResults {

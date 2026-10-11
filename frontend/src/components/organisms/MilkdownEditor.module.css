@@ -51,9 +51,9 @@
   flex: 1;
   outline: none;
   caret-color: var(--color-accent);
-  font-family: var(--font-body);
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
+  font-family: var(--font-reading);
+  font-size: var(--fs-18);
+  line-height: var(--lh-reading);
   color: var(--color-text);
   padding-bottom: var(--sp-10);
 }
@@ -68,7 +68,7 @@
 .milkdownWrapper :global(.ProseMirror h2),
 .milkdownWrapper :global(.ProseMirror h3),
 .milkdownWrapper :global(.ProseMirror h4) {
-  font-family: var(--font-heading);
+  font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   margin: var(--sp-5) 0 var(--sp-2);
@@ -232,7 +232,7 @@
 
 .milkdownWrapper :global(.ProseMirror th) {
   background: var(--color-card);
-  font-family: var(--font-heading);
+  font-family: var(--font-display);
   font-weight: 600;
   color: var(--color-text);
 }
@@ -242,7 +242,7 @@
 }
 
 .milkdownWrapper :global(.ProseMirror tr:nth-child(even) td) {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--accent-tint);
 }
 
 /* remarkLineBreak converts \n → span[data-type="hardbreak"]. Force a visual line break. */
@@ -261,7 +261,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(var(--color-accent-rgb, 124, 92, 252), 0.08);
+  background: var(--accent-tint);
   border: 2px dashed var(--color-accent);
   border-radius: var(--radius-md);
   pointer-events: none;
@@ -305,7 +305,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-2);
   min-width: 260px;
   max-width: 400px;
   max-height: 280px;

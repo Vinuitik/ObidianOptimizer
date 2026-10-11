@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import NavItem from '../molecules/NavItem';
 import SearchBar from '../molecules/SearchBar';
-import Icon from '../atoms/Icon';
+import Button from '../atoms/Button';
+import Input from '../atoms/Input';
 import useStore from '../../store/useStore';
 import styles from './FolderTree.module.css';
 
@@ -220,20 +221,18 @@ export default function FolderTree() {
       <div className={styles.controls}>
         <SearchBar value={query} onChange={setQuery} />
         {vaultRoot && (
-          <button className={styles.newRootBtn} onClick={() => startNewNote(vaultRoot)}>
-            <Icon name="plus" size={15} color="var(--color-accent-soft)" />
+          <Button variant="secondary" icon="plus" className={styles.newRootBtn} onClick={() => startNewNote(vaultRoot)}>
             New note
-          </button>
+          </Button>
         )}
         {vaultRoot && (
-          <button className={styles.newRootBtn} onClick={() => { setRootName(''); setRootCreating(true); }}>
-            <Icon name="folder" size={15} color="var(--color-accent-soft)" />
+          <Button variant="secondary" icon="folder" className={styles.newRootBtn} onClick={() => { setRootName(''); setRootCreating(true); }}>
             New folder
-          </button>
+          </Button>
         )}
         {rootCreating && (
           <form className={styles.folderInput} onSubmit={submitRootFolder}>
-            <input
+            <Input
               autoFocus
               className={styles.folderInputField}
               value={rootFolderName}

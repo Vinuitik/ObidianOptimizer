@@ -7,6 +7,7 @@ import MilkdownEditor from '../organisms/MilkdownEditor';
 import NewNoteForm from '../organisms/NewNoteForm';
 import Button from '../atoms/Button';
 import Chip from '../atoms/Chip';
+import IconButton from '../atoms/IconButton';
 import Icon from '../atoms/Icon';
 import ReviewRating from '../molecules/ReviewRating';
 import TabBar from '../molecules/TabBar';
@@ -26,6 +27,15 @@ function noteFolderHint(fullPath) {
   if (!fullPath) return null;
   const parts = fullPath.split(/[/\\]/);
   return parts.length >= 2 ? parts[parts.length - 2] : null;
+}
+
+// Unsaved = body, title or pasted files differ from what is on disk.
+function selectDirty(s) {
+  if (!s.currentNotePath || !s.isMutable) return false;
+  const base = s.currentNotePath.split(/[/\\]/).pop().replace(/\.md$/, '');
+  return s.pendingRaw !== s.currentNoteRaw
+    || s.pendingTitle !== base
+    || Object.keys(s.pendingFiles ?? {}).length > 0;
 }
 
 function useResize(initialWidth) {
@@ -90,6 +100,58 @@ export default function SplitLayout() {
   const cancelNewNote  = useStore(s => s.cancelNewNote);
   const pendingTitle   = useStore(s => s.pendingTitle);
   const setPendingTitle = useStore(s => s.setPendingTitle);
+  const showToast      = useStore(s => s.showToast);
+  const dirty          = useStore(selectDirty);
+
+  // 'saving' | 'saved' | 'error' | null — visible save state next to the Save button
+  const [saveStatus, setSaveStatus] = useState(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+
+  const handleSave = useCallback(async () => {
+    setSaveStatus('saving');
+    setConfirmDiscard(false);
+    try {
+      await syncNote();
+      setSaveStatus('saved');
+    } catch (e) {
+      setSaveStatus('error');
+      showToast({ message: `Couldn't save — ${e?.message ?? e}. Your changes are still here.`, tone: 'error' });
+    }
+  }, [syncNote, showToast]);
+
+  const handleCancel = () => {
+    if (dirty) setConfirmDiscard(true);
+    else cancelEdit();
+  };
+
+  // Cmd/Ctrl+S saves while editing (and swallows the browser's "save page").
+  useEffect(() => {
+    if (!isMutable) return undefined;
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMutable, handleSave]);
+
+  useEffect(() => {
+    if (saveStatus !== 'saved') return undefined;
+    const t = setTimeout(() => setSaveStatus(null), 2500);
+    return () => clearTimeout(t);
+  }, [saveStatus]);
+
+  // Switching note / leaving edit mode drops any open discard prompt.
+  useEffect(() => { setConfirmDiscard(false); }, [currentNotePath, isMutable]);
+  useEffect(() => { if (dirty && saveStatus === 'error') setSaveStatus(null); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveLabel = saveStatus === 'saving' ? 'Saving…'
+    : saveStatus === 'error' && isMutable ? 'Save failed'
+    : isMutable ? (dirty ? 'Unsaved changes' : 'No changes')
+    : saveStatus === 'saved' ? 'Saved'
+    : null;
 
   const [leftWidth, onLeftHandleDown] = useResize(DEFAULT_WIDTH);
   const [rightWidth, onRightHandleDown] = useResize(DEFAULT_WIDTH);
@@ -116,9 +178,8 @@ export default function SplitLayout() {
   const titleIsPlaceholder = centerMode === 'view' && !title;
   const isInReview = reviewNotes.some(n => n.fullPath === currentNotePath);
 
-  const centerTitle = centerMode === 'new'
-    ? 'New Note'
-    : title ?? 'Select a note';
+  // No note open -> the editor pane carries the ONE "Select a note" message; header stays quiet.
+  const centerTitle = centerMode === 'new' ? 'New Note' : title ?? '';
 
   const dueSlot = reviewNotes.length > 0
     ? <span className={styles.dueCount}>{reviewNotes.length} due</span>
@@ -154,7 +215,7 @@ export default function SplitLayout() {
           {/* Left edge — collapse button only */}
           <div className={styles.headerEdge}>
             {leftCollapsed && (
-              <Button onClick={toggleLeft} variant="ghost">▶ Files</Button>
+              <Button onClick={toggleLeft} variant="secondary" icon="folder" className={styles.filesBtn}>Files</Button>
             )}
           </div>
 
@@ -207,22 +268,39 @@ export default function SplitLayout() {
                     Optimize
                   </Chip>
                 )}
+                {saveLabel && (
+                  <span
+                    className={`${styles.saveState} ${saveStatus === 'error' && isMutable ? styles.saveError : ''}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {saveLabel}
+                  </span>
+                )}
                 {isMutable ? (
-                  <>
-                    <Button onClick={syncNote}>Save</Button>
-                    <Button variant="ghost" onClick={cancelEdit}>Cancel</Button>
-                  </>
+                  confirmDiscard ? (
+                    <div className={styles.discardPrompt} role="alertdialog" aria-label="Discard unsaved changes">
+                      <span>Discard unsaved changes?</span>
+                      <Button variant="danger" size="sm" onClick={() => { setConfirmDiscard(false); cancelEdit(); }}>Discard</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setConfirmDiscard(false)}>Keep editing</Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Button variant="primary" onClick={handleSave} loading={saveStatus === 'saving'}>Save</Button>
+                      <Button variant="ghost" onClick={handleCancel}>Cancel</Button>
+                    </>
+                  )
                 ) : (
                   <>
-                    <Chip onClick={toggleMutable}>Edit</Chip>
-                    <Button
+                    <Button variant="secondary" onClick={toggleMutable}>Edit</Button>
+                    <IconButton
+                      icon="x"
                       variant="danger"
+                      aria-label="Move to trash"
                       onClick={() => {
                         if (window.confirm(`Move "${title}" to trash?`)) deleteNote(currentNotePath);
                       }}
-                    >
-                      🗑
-                    </Button>
+                    />
                   </>
                 )}
               </>

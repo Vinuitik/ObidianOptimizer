@@ -73,7 +73,7 @@
 }
 
 .centerTitle {
-  font-family: var(--font-heading);
+  font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
@@ -96,7 +96,7 @@
 }
 
 .headerTitleInput {
-  font-family: var(--font-heading);
+  font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
@@ -275,7 +275,7 @@
     position: absolute;
     inset: 0;
     z-index: 40;                 /* under the drawer (50), over the editor */
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--scrim);
     animation: scrimIn 160ms ease;
   }
 }
@@ -283,4 +283,42 @@
 @keyframes scrimIn {
   from { opacity: 0; }
   to   { opacity: 1; }
+}
+
+.saveState {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.saveError {
+  color: var(--danger);
+}
+
+.discardPrompt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-13);
+  color: var(--text-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 768px) {
+  .centerHeader {
+    flex-wrap: wrap;
+  }
+
+  /* Files opener: full-width 44px row above the title (only rendered while collapsed). */
+  .headerEdge:first-child:not(:empty) {
+    flex: 1 0 100%;
+  }
+
+  .filesBtn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: flex-start;
+  }
 }
