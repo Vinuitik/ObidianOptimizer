@@ -6,6 +6,12 @@ import {
   completeAssignmentOffline as completeAssignment,
   flagCardOffline as flagCard,
 } from '../../pwa/offlineApi';
+import Button from '../atoms/Button';
+import Badge from '../atoms/Badge';
+import Skeleton from '../atoms/Skeleton';
+import Textarea from '../atoms/Textarea';
+import Input from '../atoms/Input';
+import Card from '../molecules/Card';
 import styles from './FlashcardSession.module.css';
 
 const SESSION_POINTS = 10; // point budget per mini-test (points = card difficulty 1-5)
@@ -74,10 +80,11 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
 
   if (phase === 'loading') {
     return <div className={styles.session} data-testid="flashcard-loading">
-      <p className={styles.lockedNote}>Building your test…</p>
+      <p className={styles.lockedNote} role="status">Building your test…</p>
+      <Skeleton lines={4} height={18} />
       {/* Escape hatch: never trap the user on a slow/stuck build. */}
       <div className={styles.nav}>
-        <button className={styles.navBtn} onClick={onClose}>Cancel</button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
       </div>
     </div>;
   }
@@ -86,10 +93,10 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
       <p className={styles.lockedNote}>Could not build a test for this note: {error}</p>
       <div className={styles.nav}>
         {/* No cards for this note → the inline note IS the grading surface (canGrade). */}
-        <button className={styles.reviewNoteBtn} onClick={() => onReviewNote(notePath, true)}>
+        <Button variant="primary" onClick={() => onReviewNote(notePath, true)}>
           Review note directly →
-        </button>
-        <button className={styles.navBtn} onClick={onClose}>Close</button>
+        </Button>
+        <Button variant="ghost" onClick={onClose}>Close</Button>
       </div>
     </div>;
   }
@@ -174,9 +181,9 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
           </div>
         </div>
 
-        <div className={styles.card} data-testid="flashcard-card">
+        <Card className={styles.card} data-testid="flashcard-card">
           <span className={styles.cardType}>
-            {TYPE_LABELS[card.type]} · {card.difficulty} pt{card.difficulty > 1 ? 's' : ''}
+            <Badge tone="accent">{TYPE_LABELS[card.type]} · {card.difficulty} pt{card.difficulty > 1 ? 's' : ''}</Badge>
           </span>
           <p className={styles.question}>{questionOf(card, variants)}</p>
 
@@ -210,17 +217,17 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
             flagged={Boolean(flagged[card.id])}
             onFlag={(reason) => flagThisCard(card.id, reason)}
           />
-        </div>
+        </Card>
 
         <div className={styles.nav}>
-          <button className={styles.navBtn} onClick={() => setIdx(i => Math.max(0, i - 1))}
-                  disabled={idx === 0 || submitting}>← Prev</button>
-          <button className={styles.navBtn} onClick={() => setAnswer(card.id, IDK)}
-                  disabled={submitting} data-testid="idk-btn">I don’t know</button>
-          <button className={styles.navBtnPrimary} onClick={next} disabled={submitting}
+          <Button variant="ghost" onClick={() => setIdx(i => Math.max(0, i - 1))}
+                  disabled={idx === 0 || submitting}>← Prev</Button>
+          <Button variant="secondary" onClick={() => setAnswer(card.id, IDK)}
+                  disabled={submitting} data-testid="idk-btn">I don’t know</Button>
+          <Button variant="primary" onClick={next} disabled={submitting}
                   data-testid="next-btn">
             {submitting ? 'Grading…' : (idx === cards.length - 1 ? 'Finish' : 'Next →')}
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -338,10 +345,13 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
       </div>
 
       <div className={styles.resultFooter}>
-        <button className={styles.reviewNoteBtn} onClick={() => onReviewNote(notePath)}>
+        <Button variant="ghost" onClick={() => onReviewNote(notePath)}>
           Review note directly →
-        </button>
-        <button className={styles.navBtn} onClick={onClose}>Close</button>
+        </Button>
+        {/* Primary + auto-focused so Enter continues to the next due note. */}
+        <Button variant="primary" onClick={onClose} autoFocus data-testid="next-note-btn">
+          Next note →
+        </Button>
       </div>
     </div>
   );
@@ -362,21 +372,21 @@ function FlagControl({ flagged, onFlag }) {
     </p>;
   }
   if (!open) {
-    return <button className={styles.flagLink} data-testid="flag-btn"
-                   onClick={() => setOpen(true)}>🚩 Flag this card</button>;
+    return <Button variant="ghost" size="sm" className={styles.flagLink} data-testid="flag-btn"
+                   onClick={() => setOpen(true)}>🚩 Flag this card</Button>;
   }
   return (
     <div className={styles.flagBox} data-testid="flag-box">
-      <textarea className={styles.flagReason} rows={2} value={reason}
+      <Textarea className={styles.flagReason} rows={2} value={reason}
                 placeholder="Why is this card bad? (optional — helps the AI fix it)"
                 onChange={e => setReason(e.target.value)} data-testid="flag-reason" />
       <div className={styles.flagActions}>
-        <button className={styles.flagCancel} onClick={() => { setOpen(false); setReason(''); }}
-                disabled={busy}>Cancel</button>
-        <button className={styles.flagConfirm} data-testid="flag-confirm" disabled={busy}
+        <Button variant="ghost" size="sm" onClick={() => { setOpen(false); setReason(''); }}
+                disabled={busy}>Cancel</Button>
+        <Button variant="danger" size="sm" data-testid="flag-confirm" disabled={busy}
                 onClick={async () => { setBusy(true); await onFlag(reason.trim()); setBusy(false); }}>
           {busy ? 'Flagging…' : 'Flag card'}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -410,7 +420,7 @@ function McqOptions({ card, answer, onSelect }) {
 function OpenEndedInput({ answer, onChange }) {
   return (
     <div className={styles.openBlock}>
-      <textarea className={styles.openTextarea} placeholder="Type your answer…"
+      <Textarea className={styles.openTextarea} placeholder="Type your answer…"
                 value={answer} rows={5}
                 onChange={e => onChange(e.target.value)} data-testid="open-textarea" />
     </div>
@@ -420,7 +430,7 @@ function OpenEndedInput({ answer, onChange }) {
 function ExerciseInput({ answer, onChange }) {
   return (
     <div className={styles.openBlock}>
-      <input className={styles.openTextarea} placeholder="Your answer…"
+      <Input className={styles.openTextarea} placeholder="Your answer…"
              value={answer}
              onChange={e => onChange(e.target.value)}
              data-testid="exercise-input" />

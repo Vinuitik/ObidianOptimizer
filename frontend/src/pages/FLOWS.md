@@ -159,6 +159,14 @@ To add a chart: section in DashboardPage + counter in `StatsController.java`
 
 ## ReviewPage
 
+Fast loop (W1): mount → `load()` (`initReviewSession`, Skeleton → ready | ErrorState+Retry) → effect auto-opens
+`reviewNotes[0]` via `startSession` (once; re-arms when queue empties) → read-track: keys 1-4 = Hard/Good/Easy/Very easy,
+Enter = Good (`InlineNoteReview` window keydown; ignored in inputs/focused buttons) → `completeReview` → "Graded X" row
+(`flash`) → after `ADVANCE_MS` (800) `handleClose` → next note (DFS order, `reviewOrder.js`). Flashcard result: primary
+auto-focused "Next note →" (`FlashcardSession`) → `onClose` → same advance. Queue empty → `EmptyState` "All caught up".
+List order = server's oldest-due-first (payload has no due dates, so no client sort).
+To change auto-advance delay: `ADVANCE_MS`. To change keys: `BANDS` + `InlineNoteReview` onKey.
+
 Flashcard tests vs self-rated slideshow (see cards FLOWS + frontend/FLOWS.md). The inline
 "Review note directly →" view (`InlineNoteReview`, shown when a note has no cards yet)
 renders through the shared `molecules/NoteRenderer` (read-only Milkdown — the SAME pipeline

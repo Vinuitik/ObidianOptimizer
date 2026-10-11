@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import useStore from '../../store/useStore';
 import { gradeNoteOffline as gradeNote } from '../../pwa/offlineApi';
+import Button from '../atoms/Button';
 import styles from './ReviewRating.module.css';
 
 const OPTIONS = [
@@ -34,13 +35,16 @@ export default function ReviewRating({ fullPath }) {
 
   return (
     <div className={styles.wrapper} ref={wrapperRef}>
-      <button
-        className={styles.trigger}
+      <Button
+        variant="secondary"
+        size="sm"
         onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
         title="Rate this note"
+        aria-haspopup="true"
+        aria-expanded={open}
       >
         Rate ▾
-      </button>
+      </Button>
       {open && (
         <div className={styles.dropdown}>
           {OPTIONS.map(({ label, value, cls }) => (
