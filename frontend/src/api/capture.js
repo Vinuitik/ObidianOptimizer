@@ -54,3 +54,24 @@ export async function captureResource(url, trackId) {
   }
   return { ok: true, duplicate: false };
 }
+
+// Upload a file (PDF/audio/video/...) into the capture pipeline, tagged to a track.
+// Multipart: no Content-Type header (the browser sets the boundary).
+export async function captureFile(file, trackId) {
+  const form = new FormData();
+  form.append('file', file);
+  if (trackId != null) form.append('trackId', String(trackId));
+  const res = await fetch(`${BASE}/capture/file`, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    method: 'POST',
+    body: form,
+  });
+  if (res.status === 409) return { ok: true, duplicate: true };
+  if (!res.ok) {
+    let msg = String(res.status);
+    try { msg = (await res.json()).error ?? msg; } catch { /* not json */ }
+    return { ok: false, error: msg };
+  }
+  return { ok: true, duplicate: false };
+}
