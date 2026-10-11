@@ -122,3 +122,9 @@ export async function requestPersistentStorage() {
     /* best-effort */
   }
 }
+
+// True once a new worker is waiting — lets a late-mounting UI (the persistent update
+// banner) show itself even if onUpdateAvailable already fired before it subscribed.
+export function isUpdateReady() {
+  return notified;
+}

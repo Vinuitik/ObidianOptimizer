@@ -5,6 +5,8 @@ import SyncPage from './SyncPage';
 import ReviewPage from '../pages/ReviewPage';
 import LearnPage from '../pages/LearnPage';
 import TracksPage from '../pages/TracksPage';
+import MobileNotesPage from './MobileNotesPage';
+import MobileSearchPage from './MobileSearchPage';
 import PageTransition from '../components/motion/PageTransition';
 
 // Enter-only fadeRise per route (each route element remounts on navigation).
@@ -15,7 +17,8 @@ const page = el => <PageTransition>{el}</PageTransition>;
 //   • Learn    — triage the ingest inbox (online; offline learn lane is the next step).
 //   • Capture  — Android share-sheet target → ingest pipeline (+ manual paste).
 //   • Tracks   — curricula + subscriptions; same component the desktop renders.
-//   • Sync     — download the review subset for offline; replay the outbox.
+//   • Notes    — read-only vault browser (+ /search, linked from Notes).
+//   • Sync     — NOT a tab: the TopBar sync chip opens /sync (download for offline; outbox).
 // Everything else (full note editor, folder tree, search, dashboard, settings) lives
 // on the full site, reached by opening the link in a browser. See ResponsiveApp.
 //
@@ -33,7 +36,11 @@ export default function PwaApp() {
           <Route path="/learn" element={page(<LearnPage />)} />
           <Route path="/capture" element={page(<CapturePage />)} />
           <Route path="/tracks" element={page(<TracksPage />)} />
-          <Route path="/settings" element={page(<SyncPage />)} />
+          <Route path="/notes" element={page(<MobileNotesPage />)} />
+          <Route path="/search" element={page(<MobileSearchPage />)} />
+          <Route path="/sync" element={page(<SyncPage />)} />
+          {/* old links / bookmarks */}
+          <Route path="/settings" element={<Navigate to="/sync" replace />} />
           <Route path="*" element={<Navigate to="/review" replace />} />
         </Route>
       </Routes>

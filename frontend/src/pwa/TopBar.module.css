@@ -5,33 +5,37 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 14px;
-  padding-top: calc(10px + env(safe-area-inset-top, 0));
-  background: var(--color-surface, #161922);
-  border-bottom: 1px solid var(--color-border, #262a35);
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  padding-top: calc(var(--sp-1) + env(safe-area-inset-top, 0));
+  min-height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
 }
 
-.brand {
-  font-size: 13px;
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-18);
   font-weight: 600;
-  color: var(--color-text, #e6e8ee);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-1);
 }
 
-.authBtn {
-  background: none;
-  border: 1px solid var(--color-border, #262a35);
-  border-radius: 6px;
-  color: var(--color-muted, #8a90a0);
-  font-size: 12px;
-  font-family: inherit;
-  padding: 5px 10px;
-  cursor: pointer;
+/* 44px tap area around the small Badge */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--sp-1);
+  text-decoration: none;
   -webkit-tap-highlight-color: transparent;
 }
