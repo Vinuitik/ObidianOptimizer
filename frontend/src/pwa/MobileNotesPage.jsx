@@ -24,10 +24,20 @@ export default function MobileNotesPage() {
     if (isAuthenticated) fetchRootChildren();
   }, [isAuthenticated, fetchRootChildren]);
 
-  // Show the reader whenever a note becomes current (FolderTree calls openTab).
-  useEffect(() => {
-    if (currentNotePath) setViewing(true);
-  }, [currentNotePath]);
+  const openTab   = useStore(s => s.openTab);
+  const showToast = useStore(s => s.showToast);
+
+  // Tap → open the reader explicitly. openTab is a no-op when the note is already
+  // the active tab (currentNotePath unchanged), so we can't rely on it to flip the view.
+  async function handleOpen(path) {
+    if (path === useStore.getState().currentNotePath) { setViewing(true); return; }
+    try {
+      await openTab(path);
+      setViewing(true);
+    } catch {
+      showToast({ message: "Couldn't open note (offline or slow connection)", tone: 'error' });
+    }
+  }
 
   const html = useMemo(() => renderMarkdown(currentNoteRaw || ''), [currentNoteRaw]);
 
@@ -66,7 +76,7 @@ export default function MobileNotesPage() {
     <div className={styles.page}>
       <Link to="/search" className={styles.searchLink}>Search notes</Link>
       <div className={styles.tree}>
-        <FolderTree />
+        <FolderTree onOpenNote={handleOpen} />
       </div>
     </div>
   );

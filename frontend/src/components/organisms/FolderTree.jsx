@@ -21,7 +21,7 @@ function hasMatch(name, node, query) {
 
 const DRAG_TYPE = 'application/obsidian-note';
 
-function TreeNode({ name, node, depth, query, currentNotePath }) {
+function TreeNode({ name, node, depth, query, currentNotePath, onOpenNote }) {
   const [open, setOpen]               = useState(false);
   const [loading, setLoading]         = useState(false);
   const [dragOver, setDragOver]       = useState(false);
@@ -66,7 +66,7 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
           isFolder={false}
           isActive={isActive}
           depth={depth}
-          onClick={() => openTab(node.fullPath)}
+          onClick={() => (onOpenNote ? onOpenNote(node.fullPath) : openTab(node.fullPath))}
           onDelete={() => {
             if (window.confirm(`Move "${displayName}" to trash?`)) deleteNote(node.fullPath);
           }}
@@ -187,6 +187,7 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
             depth={depth + 1}
             query={query}
             currentNotePath={currentNotePath}
+            onOpenNote={onOpenNote}
           />
         ))}
       </NavItem>
@@ -194,7 +195,8 @@ function TreeNode({ name, node, depth, query, currentNotePath }) {
   );
 }
 
-export default function FolderTree() {
+// onOpenNote(fullPath): optional override of the tap-a-note action (mobile reader).
+export default function FolderTree({ onOpenNote } = {}) {
   const [query, setQuery]               = useState('');
   const [rootCreating, setRootCreating] = useState(false);
   const [rootFolderName, setRootName]   = useState('');
@@ -252,6 +254,7 @@ export default function FolderTree() {
           depth={0}
           query={query}
           currentNotePath={currentNotePath}
+          onOpenNote={onOpenNote}
         />
       ))}
       {!hasResults && (
