@@ -11,9 +11,16 @@ Boot → always-online stack:
 - "Am I the service?" = `/proc/self/cgroup` contains `obsidian-optimizer.service` (`UNDER_UNIT`). **Not** `$INVOCATION_ID` — VS Code/GNOME terminals inherit their own, which made by-hand runs look supervised (bug found 2026-10-10).
 - On `systemctl stop`: SIGTERM hits the cgroup → `start.sh` EXIT trap kills the wrapper process group + `docker compose down`. Give it time via `TimeoutStopSec` (unit).
 
+## Push → test → redeploy
+`git push` → `.git/hooks/pre-push` → `test.sh` (all offline suites, ~3 min) → any FAIL = push aborted, no deploy → all green + `refs/heads/master` among pushed refs → `sudo -n systemctl restart obsidian-optimizer` (bg) → git sends the push
+- Commits no longer deploy (old `post-commit` hook removed 2026-10-16). Non-master pushes: tests only.
+- Git has no post-push hook → deploy fires *before* the network push; a failed push leaves live briefly ahead of GitHub (accepted).
+- `git push --no-verify` skips tests AND deploy. To change: `.git/hooks/pre-push` (not versioned — `.git/hooks` is local to this clone).
+- After push: GitHub Actions `ci.yml` re-runs Java unit/IT, Vitest, `docker compose build` (dummy secrets in that job). Python suites (host-wrapper, embedder) run only locally.
+
 ## Stop + stay stopped ("restart unless stopped")
 `stop.sh` → writes `<repo>/.stopped` → `sudo systemctl stop obsidian-optimizer` (EXIT trap: `compose down` + wrapper kill)
-- Flag set + systemd runs `start.sh` (restart, reboot, post-commit hook's `systemctl restart`) → `start.sh` exits **42** → unit's `RestartPreventExitStatus=42` → stays down. Unit shows `failed` (cosmetic).
+- Flag set + systemd runs `start.sh` (restart, reboot, pre-push hook's `systemctl restart`) → `start.sh` exits **42** → unit's `RestartPreventExitStatus=42` → stays down. Unit shows `failed` (cosmetic).
 - Resume: run `start.sh` by hand (clears flag + hands off to systemd). No flag → `Restart=always` behaves as before (crash → back in 10s).
 - Verified 2026-10-06: flagged restart stays down; unflagged start comes up; `kill -9` of start.sh restarts. 2026-10-10: by-hand hand-off verified (returns in 0.7s, stack stays up). Not tested: a real reboot.
 - Cloudflared is in compose profile `tunnel`; `.env` has `COMPOSE_PROFILES=tunnel` so plain `docker compose down` covers it.

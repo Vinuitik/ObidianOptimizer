@@ -111,9 +111,8 @@ P0 ──► P1a (backend) ─┐                 ┌─► P2 (offline) ─┐
    └─► P1b (frontend) ┴─► P1v (verify) ─┤                 ├─► P4 (re-plan first)
                                         └─► P3 (subscribe)┘
 ```
-Parallel pairs run in git worktrees. ⚠️ `.git/hooks/post-commit` restarts the live stack on
-EVERY commit, worktree branches included → live verification only in P1v / after merge, never
-while a sibling agent is committing.
+Parallel pairs run in git worktrees. Commits no longer redeploy (2026-10-16); only a
+`git push` of master does, via `.git/hooks/pre-push` after tests pass.
 
 ### P0 — prove discovery, document what exists
 - Scope: `SettingsRepository.getSubscriptionPollIntervalMs` default 1h → 6h (+ any UI/test/doc

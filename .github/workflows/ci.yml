@@ -88,4 +88,7 @@ jobs:
         run: docker compose build
         env:
           COMPOSE_DOCKER_CLI_BUILD: "1"
+          # compose interpolates ${VAR:?} even for `build` — dummies, never used at runtime
+          APP_AUTH_PASSWORD: ci-dummy
+          MCP_API_TOKEN: ci-dummy
           DOCKER_BUILDKIT: "1"
