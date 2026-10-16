@@ -18,7 +18,7 @@ from model_runtime import embed_texts
 log = logging.getLogger("embedder.flashcards.judge")
 
 COSINE_HIGH = float(os.environ.get("COSINE_HIGH", "0.85"))
-COSINE_LOW = float(os.environ.get("COSINE_LOW", "0.70"))
+COSINE_LOW = float(os.environ.get("COSINE_LOW", "0.30"))
 JUDGE_BAND = os.environ.get("JUDGE_BAND", "on").lower() != "off"
 
 JUDGE_PROMPT = """Grade a student's answer against the rubric. Output ONLY JSON:

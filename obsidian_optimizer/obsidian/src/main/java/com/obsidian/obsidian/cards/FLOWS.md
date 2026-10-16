@@ -182,7 +182,7 @@ POST /api/assignments {scope, points}        scope = note path or folder prefix
 POST /api/attempts {assignmentId, cardId, answer}
   → mcq: index compare · exercise: frozen expected (numeric tolerance /
     normalized string) · open: embedder /flashcards/judge (cosine bands
-    0.70/0.85, middle band → wrapper CLI judge with key_points rubric)
+    0.30/0.85, middle band → wrapper CLI judge with key_points rubric)
   → verdict CORRECT (full difficulty points) / PARTIAL (half) / WRONG (0)
 POST /api/assignments/{id}/complete
   → per-note score = Σ earned / Σ difficulty (GROUP BY note)
@@ -252,6 +252,8 @@ AFTER answering, so it teaches the reasoning without leaking answers mid-test.
   (Java) and generate.py ensure_schema (Python), both CREATE IF NOT EXISTS —
   keep them in sync when altering.
 
+- **Open-answer cosine floor (0.30)**: embeddinggemma scores short paraphrases of long references at 0.34-0.46 (garbage: 0.11-0.17), so the old 0.70 floor auto-failed real partial answers. Band is now wrong <=0.30 / LLM judge 0.30-0.85 / correct >=0.85; more judge calls (host-wrapper must be up, else fallback PARTIAL). Env override `COSINE_LOW`/`COSINE_HIGH`.
+
 ## Change Index
 
 | Thing to change | Where |
@@ -295,3 +297,4 @@ AFTER answering, so it teaches the reasoning without leaking answers mid-test.
 | Card tiers / session caps | `AssignmentService.Tier` / `MAX_PER_TIER` / `MAX_CARDS_PER_NOTE` / `SESSION_MAX_CARDS` |
 | Tier bag draw | `AssignmentRepository.drawCardInTier` |
 | Content hashing | `common/ContentHashing.sha256` (single hash fn for all pipelines) |
+| Open-answer cosine floor/ceiling | `embedder/flashcards/judge.py → COSINE_LOW / COSINE_HIGH` (env overrides) |

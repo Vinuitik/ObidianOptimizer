@@ -26,7 +26,7 @@ def test_high_cosine_is_correct_without_judge(monkeypatch):
 
 
 def test_low_cosine_is_wrong_without_judge(monkeypatch):
-    _mock_embeddings(monkeypatch, 0.30)
+    _mock_embeddings(monkeypatch, 0.20)
     out = judge.judge_open_answer("Q", "an answer", ["reference"])
     assert out["verdict"] == "WRONG" and not out["judge_used"]
 

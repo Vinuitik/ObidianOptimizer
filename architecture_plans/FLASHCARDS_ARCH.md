@@ -124,7 +124,7 @@ Cost shape: 2 Haiku calls per note, input = one note. Cents per vault, even rege
 | mcq | index compare | 0 |
 | exercise | run solver(params), compare with tolerance / normalized string | 0 |
 | code | run in code-runner container vs visible+hidden tests; partial credit by tests passed | 0 |
-| open | banded: embed user answer (mxbai, already running) → max cosine vs reference_answers. **≥ HIGH (0.85): correct. ≤ LOW (0.70): wrong. In between: Haiku judge** with key_points rubric → verdict + one-line feedback | 0 for clear cases; ~500 tokens for borderline |
+| open | banded: embed user answer (mxbai, already running) → max cosine vs reference_answers. **≥ HIGH (0.85): correct. ≤ LOW (0.30): wrong. In between: Haiku judge** with key_points rubric → verdict + one-line feedback | 0 for clear cases; ~500 tokens for borderline |
 
 The pure-cosine version (user's original idea) is the backbone; the judge band exists because embeddings are **negation-blind** — "X causes Y" and "X does not cause Y" land within a few cosine points of each other. See Technology Notes. Thresholds tunable; set `JUDGE_BAND=off` to run pure cosine.
 
