@@ -32,6 +32,7 @@ const COMPLETION = {
 };
 
 beforeEach(() => {
+  localStorage.clear(); // flashSessionPersist would otherwise leak a session between tests
   vi.clearAllMocks();
   api.buildAssignment.mockResolvedValue(ASSIGNMENT);
   api.submitAttempt.mockResolvedValue({ verdict: 'CORRECT', pointsEarned: 2, maxPoints: 2 });

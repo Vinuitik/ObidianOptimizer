@@ -175,6 +175,30 @@ local `reviewMode` pref:
 - OFF: Review tab hidden, review list runs inline in the Notes right panel, **no new cards**
   (existing kept). To change: `SettingsPage` `flashcardsEnabled` field + the three gates above.
 
+
+**Flashcard session persistence (tab switch / app kill)** — `FlashcardSession` mirrors its state
+(assignment, idx, answers, flagged, phase, verdicts, completion) into `store/flashSessionPersist.js`
+(localStorage `obsOpt_flashSession`) on every change → `ReviewPage` mount: `restoreActiveNote()` reads it
+into `activeNote` (so the auto-open effect doesn't pick another note) → `FlashcardSession` mount hydrates
+from it, skips `buildAssignment` → Finish: `finish()` is idempotent per assignment id (in-memory ref +
+persisted `grading`/`phase:'result'`), writes the result record directly (lands even if unmounted
+mid-grading); a remount during grading polls storage instead of re-submitting → "Close"/"Next note"/"Cancel"
+→ `clearFlashSession`. "Review note directly" keeps it (back-tab shows the result again).
+`completeReview` → `markNoteDone` → `fetchReviewNotes` filters those paths (Drive mode: IDB due-list
+still has the note until sync).
+Original blank cause: all session state was component-local; remount → `activeNote=null`, note already
+dismissed from `reviewNotes` → "All caught up"/empty pane (or a different note auto-opened).
+To change: `restoreActiveNote()`, `FlashcardSession` persist effect / `finish()` guard.
+
+**Technology Notes (persistence)**: localStorage, not sessionStorage — the installed PWA can be killed by
+the OS and sessionStorage dies with the tab/process. One active session only, keyed by notePath +
+assignment id, day-scoped (`date`; yesterday's is ignored). Size: the whole assignment (cards+variants,
+tens of KB) is stored; quota errors are swallowed (best effort, degrades to old behavior). Staleness:
+a session abandoned without Close resumes next time the same day; a `grading` marker older than 60 s
+(`GRADING_STALE_MS`) is treated as a dead app and re-finish is allowed (answers can then be re-sent;
+server verification is per card/assignment). Not shared across devices; lost if site data is cleared.
+MCQ options ignore touch presses >500 ms or moved >10 px (`McqOptions`); mouse/keyboard unaffected.
+
 ---
 
 ## GetAppPage — Get app / Get extension (`/get-app`)
@@ -240,3 +264,7 @@ TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `su
 | Feed tab badge | `LearnPage.jsx` `pendingCount` |
 | `feedAutoAccept` setting | `SettingsPage.jsx` `F.feedAutoAccept` |
 | Legacy subscription tracks UI | `TracksPage.jsx` `NEW_TRACK_TYPES` |
+| Flashcard session persistence | `store/flashSessionPersist.js`, `FlashcardSession.jsx` persist effect + `finish()`, `ReviewPage.jsx restoreActiveNote()` |
+| Done-today filter (Drive mode) | `useStore.js completeReview()` → `markNoteDone`; `fetchReviewNotes` → `doneNotePaths` |
+| MCQ long-press/scroll guard | `FlashcardSession.jsx McqOptions` (`LONG_PRESS_MS`, `MOVE_PX`), CSS `.option` |
+| Flag form per card | `FlashcardSession.jsx` `<FlagControl key={card.id}>` |

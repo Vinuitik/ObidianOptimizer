@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useStore from '../../store/useStore';
 import {
   buildAssignmentOffline as buildAssignment,
@@ -12,7 +12,12 @@ import Skeleton from '../atoms/Skeleton';
 import Textarea from '../atoms/Textarea';
 import Input from '../atoms/Input';
 import Card from '../molecules/Card';
+import {
+  loadFlashSession, saveFlashSession, clearFlashSession,
+} from '../../store/flashSessionPersist';
 import styles from './FlashcardSession.module.css';
+
+const GRADING_STALE_MS = 60_000; // a 'grading' marker older than this = the app died mid-finish
 
 const SESSION_POINTS = 10; // point budget per mini-test (points = card difficulty 1-5)
 
@@ -21,6 +26,9 @@ function questionOf(card, variants) {
   if (card.type === 'exercise') return variants?.[card.id]?.rendered ?? card.payload.template;
   return card.payload.question;
 }
+
+const LONG_PRESS_MS = 500;
+const MOVE_PX = 10;
 
 const TYPE_LABELS = { mcq: 'Multiple choice', open: 'Open ended', exercise: 'Exercise' };
 
@@ -52,17 +60,55 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
   const completeReview      = useStore(s => s.completeReview);
   const recordFlashcardDone = useStore(s => s.recordFlashcardDone);
   const showToast           = useStore(s => s.showToast);
-  const [flagged, setFlagged]       = useState({});        // { [cardId]: true } once flagged
-  const [phase, setPhase]           = useState('loading'); // loading | quiz | result | error
+  // A test in progress (or finished-but-not-closed) for this note survives unmount (tab
+  // switch) and app kill — see store/flashSessionPersist.js. Read once, on mount.
+  const [restored] = useState(() => {
+    const r = loadFlashSession(notePath);
+    return r && r.assignment && Array.isArray(r.assignment.cards) ? r : null;
+  });
+  const wasGrading = Boolean(restored?.grading && Date.now() - restored.grading < GRADING_STALE_MS);
+  const [flagged, setFlagged]       = useState(restored?.flagged ?? {});   // { [cardId]: true } once flagged
+  const [phase, setPhase]           = useState(restored ? restored.phase : 'loading'); // loading | quiz | result | error
   const [error, setError]           = useState(null);
-  const [assignment, setAssignment] = useState(null);
-  const [idx, setIdx]               = useState(0);
-  const [answers, setAnswers]       = useState({});  // { [cardId]: string } — buffered client-side, unsent until Finish
-  const [verdicts, setVerdicts]     = useState({});  // { [cardId]: {verdict, pointsEarned, maxPoints, feedback} } — filled at Finish
-  const [completion, setCompletion] = useState(null); // { notes: [{notePath, score, band, due}] }
-  const [submitting, setSubmitting] = useState(false); // true while Finish is grading all buffered answers
+  const [assignment, setAssignment] = useState(restored?.assignment ?? null);
+  const [idx, setIdx]               = useState(restored?.idx ?? 0);
+  const [answers, setAnswers]       = useState(restored?.answers ?? {});  // { [cardId]: string } — buffered client-side, unsent until Finish
+  const [verdicts, setVerdicts]     = useState(restored?.verdicts ?? {}); // { [cardId]: {verdict, pointsEarned, maxPoints, feedback} } — filled at Finish
+  const [completion, setCompletion] = useState(restored?.completion ?? null); // { notes: [{notePath, score, band, due}] }
+  const [submitting, setSubmitting] = useState(wasGrading); // true while Finish is grading all buffered answers
+  const finishing = useRef(false);
+
+  // Persist on every state change so a remount resumes exactly here. Never let a stale
+  // quiz snapshot overwrite a stored result (finish() writes that directly, even when
+  // this component was unmounted mid-grading).
+  useEffect(() => {
+    if (!assignment || (phase !== 'quiz' && phase !== 'result')) return;
+    const stored = loadFlashSession(notePath);
+    if (stored?.assignmentId === assignment.id && stored.phase === 'result' && phase !== 'result') return;
+    saveFlashSession({
+      notePath, assignmentId: assignment.id, assignment, idx, answers, flagged, phase, verdicts, completion,
+      grading: submitting ? (stored?.grading || Date.now()) : null,
+    });
+  }, [notePath, assignment, phase, idx, answers, flagged, verdicts, completion, submitting]);
+
+  // Remounted while a previous mount is still grading: wait for its result instead of re-submitting.
+  useEffect(() => {
+    if (!wasGrading) return undefined;
+    const t = setInterval(() => {
+      const s = loadFlashSession(notePath);
+      if (s?.phase === 'result') {
+        setVerdicts(s.verdicts ?? {}); setCompletion(s.completion ?? null);
+        setSubmitting(false); setPhase('result');
+      } else if (!s?.grading || Date.now() - s.grading > GRADING_STALE_MS) {
+        setSubmitting(false);
+      } else return;
+      clearInterval(t);
+    }, 300);
+    return () => clearInterval(t);
+  }, [notePath, wasGrading]);
 
   useEffect(() => {
+    if (restored) return undefined;
     let cancelled = false;
     buildAssignment(notePath, SESSION_POINTS)
       .then(a => {
@@ -84,7 +130,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
       <Skeleton lines={4} height={18} />
       {/* Escape hatch: never trap the user on a slow/stuck build. */}
       <div className={styles.nav}>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="ghost" onClick={() => { clearFlashSession(notePath); onClose(); }}>Cancel</Button>
       </div>
     </div>;
   }
@@ -96,7 +142,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
         <Button variant="primary" onClick={() => onReviewNote(notePath, true)}>
           Review note directly →
         </Button>
-        <Button variant="ghost" onClick={onClose}>Close</Button>
+        <Button variant="ghost" onClick={() => { clearFlashSession(notePath); onClose(); }}>Close</Button>
       </div>
     </div>;
   }
@@ -130,6 +176,15 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
   // attempt (keeping their difficulty in the per-note score denominator) rather
   // than being silently skipped.
   async function finish() {
+    // Idempotent per assignment: a second call (double tap, remount mid-grading, or an
+    // already-finished test) must not re-submit. In-memory ref + the persisted record.
+    const stored = loadFlashSession(notePath);
+    const sameAsg = stored?.assignmentId === assignment.id;
+    if (finishing.current || (sameAsg && (stored.phase === 'result'
+        || (stored.grading && Date.now() - stored.grading < GRADING_STALE_MS)))) return;
+    finishing.current = true;
+    saveFlashSession({ ...(sameAsg ? stored : {}), notePath, assignmentId: assignment.id, assignment,
+      idx, answers, flagged, phase: 'quiz', verdicts: {}, completion: null, grading: Date.now() });
     setSubmitting(true);
     const results = {};
     await Promise.all(cards.map(async c => {
@@ -145,20 +200,29 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
       }
     }));
     setVerdicts(results);
+    let result = null;
     try {
       // completeReview dismisses from the review list on success (including a queued-
       // offline result — the server finishes grading on sync) and toasts on a genuine
       // failure, same as the slideshow/ReviewRating paths. Without this the note used to
       // linger looking un-reviewed with no indication anything went wrong.
-      const result = await completeReview(notePath, () => completeAssignment(assignment.id));
+      result = await completeReview(notePath, () => completeAssignment(assignment.id));
       setCompletion(result);
       // Count this test against today's flashcard budget so a reload won't re-offer
       // flashcard slots past the daily cap (see reviewPlan.js / getReviewSession).
       recordFlashcardDone();
     } catch { /* toast already shown by completeReview; result phase still renders per-card verdicts */ }
+    // Written directly (not via the effect) so it lands even if we were unmounted mid-grading.
+    saveFlashSession({ notePath, assignmentId: assignment.id, assignment, idx, answers, flagged,
+      phase: 'result', verdicts: results, completion: result, grading: null });
+    finishing.current = false;
     setSubmitting(false);
     setPhase('result');
   }
+
+  // Leaving the test for good (Close / Next note) drops the persisted session;
+  // "Review note directly" keeps it so coming back still shows the result.
+  function closeSession() { clearFlashSession(notePath); onClose(); }
 
   function next() {
     if (idx < cards.length - 1) { setIdx(i => i + 1); return; }
@@ -214,6 +278,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
           {/* Flag a bad card any time — before or after answering. Excluded from
               grading, and a replacement starts generating right away. */}
           <FlagControl
+            key={card.id}
             flagged={Boolean(flagged[card.id])}
             onFlag={(reason) => flagThisCard(card.id, reason)}
           />
@@ -335,6 +400,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
                 {/* Flag a bad card: quarantines it now and starts a replacement generating
                     right away, using the reason to steer the agent away from the flaw. */}
                 <FlagControl
+                  key={c.id}
                   flagged={Boolean(flagged[c.id])}
                   onFlag={(reason) => flagThisCard(c.id, reason)}
                 />
@@ -349,7 +415,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
           Review note directly →
         </Button>
         {/* Primary + auto-focused so Enter continues to the next due note. */}
-        <Button variant="primary" onClick={onClose} autoFocus data-testid="next-note-btn">
+        <Button variant="primary" onClick={closeSession} autoFocus data-testid="next-note-btn">
           Next note →
         </Button>
       </div>
@@ -397,14 +463,36 @@ function McqOptions({ card, answer, onSelect }) {
   // to the server, so the student can change their pick freely, including after
   // navigating away and back. Exam style: never reveal which is correct here —
   // that's in the end-of-test breakdown.
+  // Only a clean tap selects: a touch/pen press held > LONG_PRESS_MS (long-press) or one
+  // that drifted > MOVE_PX (a scroll) is swallowed. Keyboard activation and mouse clicks
+  // are unaffected (no touch pointerdown precedes them).
+  const press = useRef({ t: 0, x: 0, y: 0, bad: false, mouse: false });
+  const onDown = e => {
+    press.current = { t: Date.now(), x: e.clientX, y: e.clientY, bad: false, mouse: e.pointerType === 'mouse' };
+  };
+  const onMove = e => {
+    const p = press.current;
+    if (p.t && !p.mouse && Math.hypot(e.clientX - p.x, e.clientY - p.y) > MOVE_PX) p.bad = true;
+  };
+  const onUp = () => {
+    const p = press.current;
+    if (p.t && !p.mouse && Date.now() - p.t > LONG_PRESS_MS) p.bad = true;
+  };
+  const onCancel = () => { if (press.current.t) press.current.bad = true; };
+  const onPick = val => {
+    const bad = press.current.bad;
+    press.current = { t: 0, x: 0, y: 0, bad: false, mouse: false };
+    if (!bad) onSelect(val);
+  };
   return (
     <div className={styles.openBlock}>
-      <div className={styles.options} data-testid="mcq-options">
+      <div className={styles.options} data-testid="mcq-options"
+           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel}>
         {card.payload.options.map((opt, i) => {
           const strI   = String(i);
           const chosen = answer === strI;
           return (
-            <button key={i} onClick={() => onSelect(strI)}
+            <button key={i} onClick={() => onPick(strI)}
                     className={`${styles.option} ${chosen ? styles.optionChosen : ''}`}
                     data-testid={`option-${i}`}>
               <span className={styles.optionLetter}>{String.fromCharCode(65 + i)}</span>

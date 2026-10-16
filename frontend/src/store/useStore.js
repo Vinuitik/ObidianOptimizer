@@ -43,6 +43,7 @@ import {
 } from '../pwa/offlineApi';
 import { allocateTracks } from '../pwa/reviewPlan';
 import { getMeta } from '../pwa/db';
+import { doneNotePaths, markNoteDone } from './flashSessionPersist';
 import { readPrefs, writePrefs } from '../pwa/prefsSync';
 import { setPendingBlobs } from '../utils/obsidianImagePlugin';
 import { computeHunks, applyHunks } from '../utils/diff';
@@ -379,7 +380,12 @@ const useStore = create((set, get) => ({
     }
     const totalMax = maxDailyReviews ?? 50;         // total-per-day ceiling = fetch size
     try {
-      const { notes, hasMore } = await fetchReview(offset, totalMax);
+      const fetched = await fetchReview(offset, totalMax);
+      const hasMore = fetched.hasMore;
+      // Drive mode: the local due-list still holds a note whose flashcard test was finished
+      // today until the outbox syncs — hide it so it's never re-offered (flashSessionPersist).
+      const doneToday = doneNotePaths();
+      const notes = doneToday.size ? fetched.notes.filter(n => !doneToday.has(n.path)) : fetched.notes;
       // Split into flashcard vs read tracks under the caps. flashcardsDone shrinks
       // the flashcard budget so the day never exceeds maxDailyFlashcards.
       const { flashcardsDone } = getReviewSession();
@@ -418,6 +424,7 @@ const useStore = create((set, get) => ({
     try {
       const result = await action();
       get().dismissFromReview(fullPath);
+      markNoteDone(fullPath); // Drive mode: local due-list re-lists it until sync
       return result;
     } catch (e) {
       get().showToast(`Rating failed: ${e.message ?? e}`);
