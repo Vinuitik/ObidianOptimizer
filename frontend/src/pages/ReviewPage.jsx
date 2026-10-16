@@ -13,7 +13,7 @@ import EmptyState from '../components/molecules/EmptyState';
 import ErrorState from '../components/molecules/ErrorState';
 import PageHeader from '../components/molecules/PageHeader';
 import { listItem } from '../components/motion/presets';
-import { pickNextInOrder } from './reviewOrder';
+import { pickNextInterleaved, advanceHistory } from './reviewOrder';
 import styles from './ReviewPage.module.css';
 
 // How long the "Graded Good" confirmation stays before the next note opens.
@@ -46,6 +46,12 @@ export default function ReviewPage() {
   const [loadState, setLoadState]   = useState('loading'); // loading | ready | error
   const [flash, setFlash]           = useState(null);      // { title, band } — "Graded Good" row, ~800ms
   const autoOpened = useRef(false);
+  const orderHist = useRef({ lastTrack: null, run: 0 });   // interleave state, see reviewOrder.js
+  const pickNext = (notes, done) => {
+    const n = pickNextInterleaved(notes, done, orderHist.current);
+    if (n) orderHist.current = advanceHistory(orderHist.current, n.track);
+    return n;
+  };
 
   function load() {
     setLoadState('loading');
@@ -79,7 +85,7 @@ export default function ReviewPage() {
     if (reviewNotes.length === 0) { autoOpened.current = false; return; }
     if (!autoOpened.current && !activeNote && !inlineNote) {
       autoOpened.current = true;
-      startSession(reviewNotes[0]);
+      startSession(pickNext(reviewNotes, null));
     }
   }, [loadState, reviewNotes, activeNote, inlineNote]);
 
@@ -114,7 +120,7 @@ export default function ReviewPage() {
   // remaining set (fromPath itself is already gone from it).
   function handleClose(fromPath) {
     const done = fromPath ?? inlineNote?.fullPath ?? activeNote?.fullPath ?? null;
-    const next = pickNextInOrder(useStore.getState().reviewNotes, done);
+    const next = pickNext(useStore.getState().reviewNotes, done);
     if (next) {
       startSession(next);   // transitions cleanly (sets/clears active+inline itself)
     } else {

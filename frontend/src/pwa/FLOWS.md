@@ -103,6 +103,7 @@ totalMax, flashcardsDoneToday})` → `buildReviewList` (carries `track`) → `re
   stops at `totalMax`. To change split rules: `reviewPlan.allocateTracks()`.
 - `hasCards`: online from `/review` (EXISTS against active `cards`); offline from a prebuilt
   assignment existing (`db.getAllAssignments` → set of notePaths in `offlineApi.localReviewPage`).
+- **Interleaving (after the split):** `track` is consumed by `reviewOrder.pickNextInterleaved` for auto-open/auto-advance, spreading cards evenly among reads from the *remaining* counts (2/8 -> C RRRR C RRRR). Allocation/caps untouched. To change: `reviewOrder.nextTrack()`.
 - **Carryover is emergent, not stored:** a note leaves the queue only when graded, so a
   skipped note stays due and ages → sorts first tomorrow → wins a flashcard slot ahead of
   newly-due notes ("flashcards-first"). No per-day plan table.
@@ -397,7 +398,7 @@ field: `OfflineExportService.exportFeed()` (server) must carry it first.
 | Download progress phase labels | `SyncPage.jsx` `STAGE_LABELS` / `stageText()` / `mediaSummary()`; emitted by `drivePull.pullReviewFromDrive`/`refreshAndPull` (`onStage`) + `warmMedia.warmReviewMedia` (`onProgress.phase`) |
 | What media is warmed (images/A-V/PDF/other) | `utils/noteMedia.js` `mediaEntriesForNote()` (shares `pdfPageUrl` with `SourceSplicePanel`) |
 | SW media routing (incl. `/pdf-page`) | `public/sw.js` `isMedia()` + `VERSION` bump |
-| Review auto-advance (DFS pre-order next note) | `pages/reviewOrder.js` `pickNextInOrder()` / `pages/ReviewPage.jsx handleClose(fromPath)` |
+| Review auto-advance (interleave card/read by remaining ratio, DFS within track) | `pages/reviewOrder.js` `nextTrack()` / `pickNextInterleaved()` / `pages/ReviewPage.jsx pickNext()` |
 | Learn auto-advance (next in source group, stop at group end) | `components/organisms/InboxReview.jsx` `nextInGroup()` + `load({preferGroup})` (file/acknowledge/discard) |
 | PWA auto-sync cron (launch/focus/interval) | `MobileLayout.jsx` effect → `autoSync.maybeAutoSync()` |
 | Auto-sync freshness window | `autoSync.js` `FRESH_MS` (6h) |

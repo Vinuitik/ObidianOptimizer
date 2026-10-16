@@ -47,3 +47,38 @@ export function pickNextInOrder(reviewNotes, excludePath) {
   const after = sorted.find(n => comparePaths(n.fullPath, excludePath) > 0);
   return after ?? sorted[0];
 }
+
+// ---- Interleaving flashcard-track and read-track notes ----------------------------
+// Goal: spread the (few) flashcard notes evenly among the (many) read notes, with the
+// ratio derived from what is LEFT (C cards, R reads) every time — no stored plan.
+// 2 cards / 8 reads -> C RRRR C RRRR; 3/3 -> C R C R C R.
+//
+// `hist` = { lastTrack, run }: track of the note just opened and, for reads, how many
+// reads in a row since the last card. Right after a card -> read. During a read run
+// the run's target length is round((R + run) / (C + 1)) (re-derived from the remaining
+// reads plus those already done); a card is due once the run reaches it.
+export function nextTrack(C, R, hist = {}) {
+  if (C <= 0) return 'read';
+  if (R <= 0) return 'flashcard';
+  const { lastTrack = null, run = 0 } = hist;
+  if (lastTrack == null) return 'flashcard';
+  if (lastTrack === 'flashcard') return 'read';
+  const gap = Math.round((R + run) / (C + 1));
+  return run >= gap ? 'flashcard' : 'read';
+}
+
+// History after opening a note of `track`.
+export function advanceHistory(hist, track) {
+  if (track === 'flashcard') return { lastTrack: 'flashcard', run: 0 };
+  return { lastTrack: 'read', run: hist?.lastTrack === 'read' ? hist.run + 1 : 1 };
+}
+
+// Picks the next note: chooses the track via nextTrack, then the next note of that
+// track in DFS order after `excludePath` (wrapping). Notes without `track` count as read.
+export function pickNextInterleaved(reviewNotes, excludePath, hist = {}) {
+  if (!reviewNotes.length) return null;
+  const cards = reviewNotes.filter(n => n.track === 'flashcard');
+  const reads = reviewNotes.filter(n => n.track !== 'flashcard');
+  const t = nextTrack(cards.length, reads.length, hist);
+  return pickNextInOrder(t === 'flashcard' ? cards : reads, excludePath);
+}
