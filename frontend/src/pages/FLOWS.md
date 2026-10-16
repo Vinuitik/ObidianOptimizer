@@ -149,9 +149,9 @@ To add a chart: section in DashboardPage + counter in `StatsController.java`
 ## ReviewPage
 
 Fast loop (W1): mount → `load()` (`initReviewSession`, Skeleton → ready | ErrorState+Retry) → effect auto-opens
-`reviewNotes[0]` via `startSession` (once; re-arms when queue empties) → read-track: keys 1-4 = Hard/Good/Easy/Very easy,
+`pickNext(reviewNotes)` (interleaved, `reviewOrder.js`) via `startSession` (once; re-arms when queue empties) → read-track: keys 1-4 = Hard/Good/Easy/Very easy,
 Enter = Good (`InlineNoteReview` window keydown; ignored in inputs/focused buttons) → `completeReview` → "Graded X" row
-(`flash`) → after `ADVANCE_MS` (800) `handleClose` → next note (DFS order, `reviewOrder.js`). Flashcard result: primary
+(`flash`) → after `ADVANCE_MS` (800) `handleClose` → next note (`pickNext` = `pickNextInterleaved`: track by remaining ratio, DFS within track). Flashcard result: primary
 auto-focused "Next note →" (`FlashcardSession`) → `onClose` → same advance. Queue empty → `EmptyState` "All caught up".
 List order = server's oldest-due-first (payload has no due dates, so no client sort).
 To change auto-advance delay: `ADVANCE_MS`. To change keys: `BANDS` + `InlineNoteReview` onKey.
@@ -240,3 +240,15 @@ TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `su
 | Feed tab badge | `LearnPage.jsx` `pendingCount` |
 | `feedAutoAccept` setting | `SettingsPage.jsx` `F.feedAutoAccept` |
 | Legacy subscription tracks UI | `TracksPage.jsx` `NEW_TRACK_TYPES` |
+
+## Flow — review order (interleaved flashcard / read)
+Files: reviewOrder.js, ReviewPage.jsx
+Auto-open + `handleClose` → `ReviewPage.pickNext(notes, donePath)` → `reviewOrder.pickNextInterleaved(notes, donePath, orderHist.current)` → `nextTrack(C, R, hist)` (C/R = remaining flashcard/read counts, recomputed every call, no stored plan) → `pickNextInOrder(thatTrackOnly, donePath)` (DFS, wraps) → `advanceHistory` updates the `orderHist` ref `{lastTrack, run}`.
+- Rule: nothing yet → card; after a card → read; in a read run → card once `run >= round((R+run)/(C+1))`. 2 cards/8 reads → C RRRR C RRRR; 3/3 → CRCRCR; C=0 or R=0 → plain DFS. To change: `reviewOrder.nextTrack()`.
+- History lives only in a ref (session-local, lost on reload → ratio just recomputes from what is left; manual note clicks don't update it). Left-hand list keeps server order.
+
+| Touchable | Where |
+|---|---|
+| Interleave rule | `reviewOrder.nextTrack()` |
+| Within-track order | `reviewOrder.pickNextInOrder()` / `comparePaths()` |
+| Call sites | `ReviewPage.pickNext`, auto-open effect, `handleClose` |
