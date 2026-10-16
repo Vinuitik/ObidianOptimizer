@@ -1,6 +1,6 @@
 # Store Flows
 
-Files: useStore.js
+Files: useStore.js, flashSessionPersist.js
 
 ---
 

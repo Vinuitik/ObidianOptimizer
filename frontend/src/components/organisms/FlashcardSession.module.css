@@ -37,6 +37,9 @@
   color: var(--text);
   font-size: var(--fs-14);
   cursor: pointer;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
 }
 .option:hover:not(:disabled) { border-color: var(--accent-line); background: var(--accent-tint); }

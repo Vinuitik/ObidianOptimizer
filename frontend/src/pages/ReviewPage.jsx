@@ -14,6 +14,7 @@ import ErrorState from '../components/molecules/ErrorState';
 import PageHeader from '../components/molecules/PageHeader';
 import { listItem } from '../components/motion/presets';
 import { pickNextInterleaved, advanceHistory } from './reviewOrder';
+import { loadFlashSession } from '../store/flashSessionPersist';
 import styles from './ReviewPage.module.css';
 
 // How long the "Graded Good" confirmation stays before the next note opens.
@@ -25,6 +26,12 @@ const bandLabel = (b) => {
   const t = b.replace('_', ' ').toLowerCase();
   return t.charAt(0).toUpperCase() + t.slice(1);
 };
+
+function restoreActiveNote() {
+  const s = loadFlashSession();
+  if (!s?.notePath) return null;
+  return { fullPath: s.notePath, shortName: s.notePath.split(/[/\\]/).pop().replace(/\.md$/, ''), track: 'flashcard' };
+}
 
 export default function ReviewPage() {
   const reviewNotes       = useStore(s => s.reviewNotes);
@@ -40,7 +47,8 @@ export default function ReviewPage() {
   // sync). Non-Drive offline (desktop blip) falls back to self-rated review of the note.
   const useFlashcards     = flashcardsEnabled && (online || isDriveMode());
 
-  const [activeNote, setActiveNote] = useState(null); // { shortName, fullPath }
+  // A flashcard test left mid-way (tab switch / app kill) reopens exactly where it was.
+  const [activeNote, setActiveNote] = useState(restoreActiveNote); // { shortName, fullPath }
   const [sessionKey, setSessionKey] = useState(0);    // bumped to reset session
   const [inlineNote, setInlineNote] = useState(null); // { title, raw } while showing note inline
   const [loadState, setLoadState]   = useState('loading'); // loading | ready | error
