@@ -55,6 +55,7 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
 
 ## Flow — PWA shell chrome (W6, UI redesign 2026-10-11)
 `MobileLayout` → `TopBar` (page title from `TopBar.TITLES[pathname]`, sync chip, `RefreshButton`, sign in/out) → `UpdateBanner` → routed page → `BottomNav`.
+- **Notes tap:** `MobileNotesPage.handleOpen(path)` (passed to `FolderTree` as `onOpenNote`) → `openTab` → `setViewing(true)`; re-tapping the current note just reopens the reader; fetch failure → error toast. (`openTab` no-ops for the already-active tab, so the view must not depend on `currentNotePath` changing.)
 - **Tabs:** Review · Learn · Capture · Tracks · Notes (`BottomNav.TABS`). Sync is NOT a tab. To change: `BottomNav.TABS` + `MobileApp` `<Route>`.
 - **Sync chip:** `TopBar` → `syncStatus.useSyncStatus()` → `deriveSyncStatus({online, stage, failedCount, lastSync})` → Badge linking to `/sync`. Priority offline > syncing > failed > synced Xh ago > not synced. `online` = `useOffline`; `stage` = store `syncStage`; `lastSync` = IndexedDB meta (re-read when `stage` changes, ticks every 60s); `failedCount` = `api/capture.fetchFailedCaptures()` polled every `OUTBOX_RETRY_MS` (signed-in + online only). To change wording/priority: `deriveSyncStatus`.
 - **Due badge:** `BottomNav` → `useDueCount()` = store `reviewNotes.length` (same list ReviewPage shows); primed once after sign-in through `initReviewSession()` (no new endpoint). Shows 0 until the queue loads; caps at 99+.
