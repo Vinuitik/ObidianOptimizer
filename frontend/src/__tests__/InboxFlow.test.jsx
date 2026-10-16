@@ -74,6 +74,29 @@ describe('InboxReview flow', () => {
     await waitFor(() => expect(screen.getByTestId('preview').textContent).toBe('body of Beta'));
   });
 
+  // 6bbc2c6 — InboxReview had its own local groupKeyOf (captureId || path), a stale
+  // duplicate of sourceColor.js's inboxGroupKey (captureId || inboxFolder || path) that
+  // drifted out of sync. A note with neither a captureId NOR a shared inboxFolder fell
+  // through to its own unique path, so nextInGroup could never find its sibling and
+  // auto-advance silently stopped firing for manually-organized mini-folder notes.
+  it('discarding an un-captured note advances to its sibling in the same mini-folder, not an unrelated source', async () => {
+    const b1 = note('/b1', 'Beta', 9);
+    const a1 = note('/a1', 'Alpha', null, { inboxFolder: 'Misc' });
+    const a2 = note('/a2', 'Alpha Two', null, { inboxFolder: 'Misc' });
+    h.fetchInbox.mockResolvedValueOnce([b1, a1, a2]).mockResolvedValue([b1, a2]);
+    render(<InboxReview />);
+    await screen.findByTestId('preview');
+    // Expand the "Misc" mini-folder, then start on Alpha (same group as the sibling we
+    // expect to land on next).
+    fireEvent.click(screen.getByTitle('Misc'));
+    fireEvent.click(screen.getByText('Alpha'));
+    await waitFor(() => expect(screen.getByTestId('preview').textContent).toBe('body of Alpha'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+
+    await waitFor(() => expect(screen.getByTestId('preview').textContent).toBe('body of Alpha Two'));
+  });
+
   it('Enter inside the editor textarea does not file (needs Ctrl/Cmd)', async () => {
     h.fetchInbox.mockResolvedValue([note('/a1', 'Alpha', 1)]);
     render(<InboxReview />);
