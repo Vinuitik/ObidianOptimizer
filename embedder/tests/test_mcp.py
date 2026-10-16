@@ -128,6 +128,21 @@ def test_mcp_with_wrong_api_key_is_401(client):
     assert resp.status_code == 401
 
 
+# bcc8046 — remote MCP connectors (claude.ai, ChatGPT, Gemini) send a browser Origin
+# header that never matched the old allowlist (own-domain only), so the DNS-rebinding
+# Origin check 403'd every external connector before auth even ran.
+def test_mcp_from_claude_ai_origin_is_allowed(client):
+    headers = dict(MCP_HEADERS, **{"Origin": "https://claude.ai"})
+    resp = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize"}, headers=headers)
+    assert resp.status_code != 403
+
+
+def test_mcp_from_unlisted_origin_is_rejected(client):
+    headers = dict(MCP_HEADERS, **{"Origin": "https://evil.example.com"})
+    resp = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize"}, headers=headers)
+    assert resp.status_code == 403
+
+
 def test_embed_endpoint_does_not_require_api_key(client):
     resp = client.post("/embed", json={"texts": ["hello"]})
     assert resp.status_code == 200
