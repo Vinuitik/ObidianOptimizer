@@ -57,3 +57,4 @@ To add extension: `MediaController.*_EXTS` set + `subdirFor()` routing + `mimeFo
 | MIME types | `MediaController.mimeFor()` |
 | Search order for serving | `MediaController.SEARCH_SUBDIRS` |
 | Upload size limit | `application.properties spring.servlet.multipart.max-*-size` |
+| Vault scoping (M3) | `MediaController` root = `ActiveVault.root()` (was `getVaultPath()`), `markPending(activeVault.id(), …)` |

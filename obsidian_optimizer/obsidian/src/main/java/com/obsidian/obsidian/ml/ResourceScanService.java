@@ -79,41 +79,48 @@ public class ResourceScanService {
         appReady = true;
     }
 
-    private final PollingQueueWorker<String> pollingWorker;
+    private record PendingNote(long vaultId, String absPath) {}
+
+    private final PollingQueueWorker<PendingNote> pollingWorker;
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
 
     public ResourceScanService(SettingsRepository settingsRepo, NoteIndexRepository noteIndexRepo,
-                               IngestClient ingestClient) {
+                               IngestClient ingestClient, com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.settingsRepo = settingsRepo;
         this.noteIndexRepo = noteIndexRepo;
         this.ingestClient = ingestClient;
 
-        WorkQueue<String> queue = new WorkQueue<>() {
+        WorkQueue<PendingNote> queue = new WorkQueue<>() {
             @Override
-            public List<String> claimBatch(int limit) {
-                return noteIndexRepo.findIngestPending(limit);
+            public List<PendingNote> claimBatch(int limit) {
+                // Scanner: active vault only.
+                long vaultId = activeVault.id();
+                return noteIndexRepo.findIngestPending(vaultId, limit).stream()
+                    .map(p -> new PendingNote(vaultId, p)).toList();
             }
 
             // scan() unconditionally persists the ingest_pending gate itself, for
             // both the found-embeds and no-embeds-left cases — there is no separate
             // done/failed/deferred state to record here.
-            @Override public void markDone(String item) {}
-            @Override public void markFailed(String item, Exception error) {}
-            @Override public void markDeferred(String item) {}
+            @Override public void markDone(PendingNote item) {}
+            @Override public void markFailed(PendingNote item, Exception error) {}
+            @Override public void markDeferred(PendingNote item) {}
         };
 
-        PollingQueueWorker.ItemProcessor<String> processor = absPath -> {
+        PollingQueueWorker.ItemProcessor<PendingNote> processor = p -> {
             try {
-                scan(absPath, Files.readString(Paths.get(absPath)));
+                scan(p.vaultId(), p.absPath(), Files.readString(Paths.get(p.absPath())));
                 return true;
             } catch (Exception e) {
-                log.debug("[ResourceScanService] ingest retry read failed for {}: {}", absPath, e.getMessage());
+                log.debug("[ResourceScanService] ingest retry read failed for {}: {}", p.absPath(), e.getMessage());
                 return false;
             }
         };
 
-        PollingQueueWorker.BatchListener<String> listener = new PollingQueueWorker.BatchListener<>() {
+        PollingQueueWorker.BatchListener<PendingNote> listener = new PollingQueueWorker.BatchListener<>() {
             @Override
-            public void onBatchClaimed(List<String> batch) {
+            public void onBatchClaimed(List<PendingNote> batch) {
                 log.info("[ResourceScanService] re-firing ingest for {} pending note(s)", batch.size());
             }
         };
@@ -131,21 +138,21 @@ public class ResourceScanService {
      * @param absNotePath absolute path of the note (as held by FileRepository)
      * @param content     the note's current markdown
      */
-    public void scan(String absNotePath, String content) {
+    public void scan(long vaultId, String absNotePath, String content) {
         if (!ingestEnabled) {
             // Pipeline disabled: clear the gate so the note isn't held back waiting
             // for a transcript that will never come — it embeds/cards from its text.
-            noteIndexRepo.setIngestPending(absNotePath, false);
+            noteIndexRepo.setIngestPending(vaultId, absNotePath, false);
             return;
         }
         List<String> embeds = embedsNeedingIngest(content);
         // Readiness gate (synchronous, before any early return): the flag must be
         // CLEARED for clean notes too, not only set for pending ones — otherwise a
         // note never loses its pending status once its ingest marker lands.
-        noteIndexRepo.setIngestPending(absNotePath, !embeds.isEmpty());
+        noteIndexRepo.setIngestPending(vaultId, absNotePath, !embeds.isEmpty());
         if (embeds.isEmpty()) return;
         if (!appReady) return;   // backend web server not up yet — retry worker fires once ready
-        String relPath = toRelative(absNotePath);
+        String relPath = toRelative(vaultId, absNotePath);
         if (relPath == null) return;           // note is outside the vault
         for (String embed : embeds) {
             trigger(relPath, embed);
@@ -195,9 +202,9 @@ public class ResourceScanService {
         });
     }
 
-    private String toRelative(String absNotePath) {
+    private String toRelative(long vaultId, String absNotePath) {
         try {
-            Path vault = Paths.get(settingsRepo.getVaultPath()).toAbsolutePath().normalize();
+            Path vault = activeVault.rootFor(vaultId).toAbsolutePath().normalize();
             Path note  = Paths.get(absNotePath).toAbsolutePath().normalize();
             if (!note.startsWith(vault)) return null;
             return vault.relativize(note).toString().replace('\\', '/');

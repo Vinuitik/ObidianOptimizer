@@ -44,6 +44,8 @@ import java.util.Map;
 @RequestMapping("/inbox")
 public class InboxController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(InboxController.class);
     private static final String INBOX_DIR = "_inbox";
 
@@ -56,7 +58,9 @@ public class InboxController {
 
     public InboxController(FileRepository repository, SettingsRepository settingsRepo,
                            NoteIndexRepository noteIndex, CaptureRepository captureRepo,
-                           IngestClient ingestClient) {
+                           IngestClient ingestClient,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.repository = repository;
         this.settingsRepo = settingsRepo;
         this.noteIndex = noteIndex;
@@ -113,7 +117,7 @@ public class InboxController {
     public ResponseEntity<List<InboxItem>> list() {
         List<InboxItem> items = new ArrayList<>();
 
-        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
+        Path dir = activeVault.root().resolve(INBOX_DIR);
         if (Files.isDirectory(dir)) {
             // Recursive: standalone notes now live in per-source subfolders
             // (_inbox/<captureId>/[chapter]/note.md). Legacy flat _inbox/*.md still list.
@@ -155,10 +159,10 @@ public class InboxController {
             }
         }
 
-        for (CaptureRepository.Capture c : captureRepo.listAll()) {
+        for (CaptureRepository.Capture c : captureRepo.listAll(activeVault.id())) {
             if (!"note".equals(c.sourceType())) continue;
             if (!"processing".equals(c.status()) && !"ready".equals(c.status())) continue;
-            for (String path : noteIndex.findNotesByCapture(c.id())) {
+            for (String path : noteIndex.findNotesByCapture(activeVault.id(), c.id())) {
                 String content = repository.getText(path);
                 String title = Paths.get(path).getFileName().toString().replaceAll("\\.md$", "");
                 items.add(InboxItem.staged(path, title, null, null, content, c.id(), 1, 0, true,
@@ -229,7 +233,7 @@ public class InboxController {
             JsonNode root = objectMapper.readTree(result.body());
             String folder = root.path("suggestedFolder").asText(null);
             return (folder == null || folder.isBlank()) ? null
-                : Paths.get(settingsRepo.getVaultPath()).resolve(folder).normalize().toString();
+                : activeVault.root().resolve(folder).normalize().toString();
         } catch (Exception e) {
             log.warn("[inbox] group suggestion parse failed: {}", e.getMessage());
             return null;
@@ -259,7 +263,7 @@ public class InboxController {
             log.info("[inbox] filed {} -> {}", req.path(), newPath);
 
             // When a capture's last proposed note leaves _inbox, the capture is fully triaged.
-            if (captureId != null && noteIndex.countUnfiledNotesForCapture(captureId) == 0) {
+            if (captureId != null && noteIndex.countUnfiledNotesForCapture(activeVault.id(), captureId) == 0) {
                 fileCapture(captureId);
             }
             return ResponseEntity.ok(Map.of("path", newPath));
@@ -305,7 +309,7 @@ public class InboxController {
             return ResponseEntity.badRequest().body("invalid folder name");
         }
         try {
-            Path inbox = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
+            Path inbox = activeVault.root().resolve(INBOX_DIR);
             Files.createDirectories(inbox);
             String path = repository.createFolder(inbox.toString(), name);
             log.info("[inbox] created mini-folder {}", path);
@@ -321,7 +325,7 @@ public class InboxController {
             return ResponseEntity.badRequest().body("inbox path required");
         }
         try {
-            Path inbox = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR).normalize();
+            Path inbox = activeVault.root().resolve(INBOX_DIR).normalize();
             // folder is a subfolder RELATIVE to _inbox; blank/null → _inbox root.
             String rel = req.folder() == null ? "" : req.folder().trim().replace('\\', '/')
                             .replaceAll("^/+", "").replaceAll("/+$", "");
@@ -346,7 +350,7 @@ public class InboxController {
         log.info("[inbox] capture {} fully filed", captureId);
         CaptureRepository.Capture c = captureRepo.get(captureId);
         if (c != null && c.sourcePath() != null && !c.sourcePath().isBlank()) {
-            String abs = Paths.get(settingsRepo.getVaultPath()).resolve(c.sourcePath()).toString();
+            String abs = activeVault.root().resolve(c.sourcePath()).toString();
             repository.softDeleteFile(abs);
             log.info("[inbox] trashed capture {} source {}", captureId, c.sourcePath());
         }
@@ -372,7 +376,7 @@ public class InboxController {
             // it too. A filed note keeps its index row, so findNotesByCapture stays non-empty
             // and the file survives — "keep the source only if you kept a fragment of it".
             if (captureId != null && local != null
-                    && noteIndex.findNotesByCapture(captureId).isEmpty()) {
+                    && noteIndex.findNotesByCapture(activeVault.id(), captureId).isEmpty()) {
                 trashLocalMedia(local);
             }
             return ResponseEntity.ok().build();
@@ -396,7 +400,7 @@ public class InboxController {
         if (l.startsWith("http://") || l.startsWith("https://")) return;
         if (!(l.startsWith("resources/") || l.startsWith("_workspace/"))) return;
         try {
-            String abs = Paths.get(settingsRepo.getVaultPath()).resolve(l).normalize().toString();
+            String abs = activeVault.root().resolve(l).normalize().toString();
             repository.softDeleteFile(abs);
             log.info("[inbox] trashed orphaned local media {}", l);
         } catch (IOException e) {
@@ -450,7 +454,7 @@ public class InboxController {
      *  same ingest-source when un-captured — AND the same capture-seq). Starts at 1 so the
      *  original (implicit minor 0) keeps its bare "#N" label and siblings become #N-1, #N-2. */
     private int nextSplitMinor(String captureId, String source, Integer seq) {
-        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve(INBOX_DIR);
+        Path dir = activeVault.root().resolve(INBOX_DIR);
         int max = 0;
         if (Files.isDirectory(dir)) {
             try (var stream = Files.walk(dir)) {
@@ -535,7 +539,7 @@ public class InboxController {
      *  defaulting the note into the vault root (which isn't a valid note home anyway). */
     private String suggestedFolderAbs(String rel) {
         if (rel == null || rel.isBlank() || rel.equals(".")) return "";
-        Path root = Paths.get(settingsRepo.getVaultPath());
+        Path root = activeVault.root();
         return root.resolve(rel).normalize().toString();
     }
 

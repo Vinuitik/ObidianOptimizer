@@ -24,6 +24,8 @@ import java.util.Map;
 @RequestMapping("/sync")
 public class SyncController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(SyncController.class);
 
     private final SyncService            syncService;
@@ -44,7 +46,9 @@ public class SyncController {
                           SyncOAuthService oauthService,
                           SettingsRepository settingsRepo,
                           SyncWorker syncWorker,
-                          DbBackupService dbBackupService) {
+                          DbBackupService dbBackupService,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.syncService           = syncService;
         this.syncQueueRepo         = syncQueueRepo;
         this.deviceIdentityService = deviceIdentityService;
@@ -59,7 +63,7 @@ public class SyncController {
     /** GET /api/sync/status — queue counts + configuration/connection state + quota */
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getStatus() {
-        Map<String, Object> body = new LinkedHashMap<>(syncQueueRepo.getStatusSummary());
+        Map<String, Object> body = new LinkedHashMap<>(syncQueueRepo.getStatusSummary(activeVault.id()));
         body.put("deviceId",             deviceIdentityService.getDeviceId());
         body.put("enabled",              settingsRepo.isSyncEnabled());
         body.put("encryptionConfigured", encryptionService.isConfigured());
@@ -126,7 +130,7 @@ public class SyncController {
     public ResponseEntity<Map<String, Object>> triggerUpload() {
         boolean started = syncWorker.triggerManualUpload();
         log.info("[SyncController] manual upload {}", started ? "started" : "already running");
-        Map<String, Object> body = new LinkedHashMap<>(syncQueueRepo.getStatusSummary());
+        Map<String, Object> body = new LinkedHashMap<>(syncQueueRepo.getStatusSummary(activeVault.id()));
         body.put("started", started);
         body.putAll(syncService.uploadProgress());
         return ResponseEntity.accepted().body(body);
@@ -138,7 +142,7 @@ public class SyncController {
         log.info("[SyncController] manual download triggered");
         try {
             syncService.downloadAll();
-            return ResponseEntity.ok(syncQueueRepo.getStatusSummary());
+            return ResponseEntity.ok(syncQueueRepo.getStatusSummary(activeVault.id()));
         } catch (IOException e) {
             log.error("[SyncController] download failed: {}", e.getMessage());
             return ResponseEntity.internalServerError()

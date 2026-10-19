@@ -131,10 +131,6 @@ public class SettingsRepository {
             key, value);
     }
 
-    public String getVaultPath() {
-        return get("vaultPath");
-    }
-
     public String getResourcePath() {
         return get("resourcePath");
     }

@@ -67,6 +67,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIfEnvironmentVariable(named = "DRIVE_LIVE", matches = "1")
 class DriveLiveIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     // Singleton container started in a static block (not @Container-managed): the
     // ordered PER_CLASS test methods share one instance and one Postgres, and the
     // explicit start guarantees the mapped port exists before @DynamicPropertySource
@@ -245,8 +250,8 @@ class DriveLiveIT {
             assertThat(f.contentHash()).isEqualTo(sha256Of(f.vaultPath(), local));
             uploadedHashes.put(f.vaultPath(), f.contentHash());
         }
-        assertThat(syncQueue.findByStatus("PENDING")).isEmpty();
-        assertThat(syncQueue.findByStatus("FAILED")).isEmpty();
+        assertThat(syncQueue.findByStatus(1L, "PENDING")).isEmpty();
+        assertThat(syncQueue.findByStatus(1L, "FAILED")).isEmpty();
     }
 
     /** .md files hash their UTF-8 string form (see SyncService.uploadOne readFile). */
@@ -280,7 +285,7 @@ class DriveLiveIT {
             assertThat(sha256Of(e.getKey(), Files.readAllBytes(local))).isEqualTo(e.getValue());
         }
         // restored notes are re-indexed and reviewable again
-        assertThat(noteIndex.getAllPaths()).anyMatch(p -> p.endsWith("Alpha.md"));
+        assertThat(noteIndex.getAllPaths(1L)).anyMatch(p -> p.endsWith("Alpha.md"));
     }
 
     // ── 3. local-wins conflict rule ──────────────────────────────────────────
@@ -297,7 +302,7 @@ class DriveLiveIT {
         assertThat(Files.readString(Path.of(alpha))).contains("LOCAL EDIT not yet uploaded");
         // …and the next upload pass publishes it
         syncService.uploadPending();
-        assertThat(syncQueue.findByStatus("PENDING")).isEmpty();
+        assertThat(syncQueue.findByStatus(1L, "PENDING")).isEmpty();
     }
 
     // ── 4. tombstones ────────────────────────────────────────────────────────

@@ -57,16 +57,16 @@ public class SyncQueueRepository {
      * event just publishes immediately (OutboxRelay's AFTER_COMMIT listener falls back
      * to synchronous execution when there's no ambient transaction).
      */
-    public void markPending(String path, String contentHash) {
+    public void markPending(long vaultId, String path, String contentHash) {
         jdbc.update("""
-            INSERT INTO sync_queue(path, content_hash, status, retry_count)
-            VALUES (?, ?, 'PENDING', 0)
+            INSERT INTO sync_queue(path, content_hash, status, retry_count, vault_id)
+            VALUES (?, ?, 'PENDING', 0, ?)
             ON CONFLICT (path, vault_id) DO UPDATE SET
                 content_hash = EXCLUDED.content_hash,
                 status       = 'PENDING',
                 retry_count  = 0
-            """, path, contentHash);
-        outboxRepo.enqueue(RabbitQueueConfig.SYNC_UPLOAD_QUEUE, Map.of("path", path));
+            """, path, contentHash, vaultId);
+        outboxRepo.enqueue(vaultId, RabbitQueueConfig.SYNC_UPLOAD_QUEUE, Map.of("path", path));
     }
 
     /**
@@ -76,12 +76,12 @@ public class SyncQueueRepository {
      * PENDING — the newer content is uploaded on the next pass.
      * Returns true if the row transitioned to DONE.
      */
-    public boolean markDoneIfHashMatches(String path, String driveFileId, String uploadedHash) {
+    public boolean markDoneIfHashMatches(long vaultId, String path, String driveFileId, String uploadedHash) {
         return jdbc.update("""
             UPDATE sync_queue
             SET status = 'DONE', last_synced_at = ?, drive_file_id = ?
-            WHERE path = ? AND content_hash = ?
-            """, System.currentTimeMillis(), driveFileId, path, uploadedHash) > 0;
+            WHERE path = ? AND content_hash = ? AND vault_id = ?
+            """, System.currentTimeMillis(), driveFileId, path, uploadedHash, vaultId) > 0;
     }
 
     /**
@@ -89,30 +89,30 @@ public class SyncQueueRepository {
      * hash from Drive metadata. Unlike markDoneIfHashMatches this must upsert —
      * files created on another device have no local queue row yet.
      */
-    public void markSynced(String path, String contentHash, String driveFileId) {
+    public void markSynced(long vaultId, String path, String contentHash, String driveFileId) {
         jdbc.update("""
-            INSERT INTO sync_queue(path, content_hash, status, last_synced_at, drive_file_id, retry_count)
-            VALUES (?, ?, 'DONE', ?, ?, 0)
+            INSERT INTO sync_queue(path, content_hash, status, last_synced_at, drive_file_id, retry_count, vault_id)
+            VALUES (?, ?, 'DONE', ?, ?, 0, ?)
             ON CONFLICT (path, vault_id) DO UPDATE SET
                 content_hash   = EXCLUDED.content_hash,
                 status         = 'DONE',
                 last_synced_at = EXCLUDED.last_synced_at,
                 drive_file_id  = EXCLUDED.drive_file_id,
                 retry_count    = 0
-            """, path, contentHash, System.currentTimeMillis(), driveFileId);
+            """, path, contentHash, System.currentTimeMillis(), driveFileId, vaultId);
     }
 
-    public void markFailed(String path) {
+    public void markFailed(long vaultId, String path) {
         jdbc.update("""
             UPDATE sync_queue
             SET status = 'FAILED', retry_count = retry_count + 1
-            WHERE path = ?
-            """, path);
+            WHERE path = ? AND vault_id = ?
+            """, path, vaultId);
     }
 
     /** Remove entry (local bookkeeping only — does NOT touch Drive). */
-    public void delete(String path) {
-        jdbc.update("DELETE FROM sync_queue WHERE path = ?", path);
+    public void delete(long vaultId, String path) {
+        jdbc.update("DELETE FROM sync_queue WHERE path = ? AND vault_id = ?", path, vaultId);
     }
 
     /**
@@ -121,20 +121,20 @@ public class SyncQueueRepository {
      * Drive copy; if it never uploaded, just drop the row. Replaces a pending upload
      * atomically — we never upload-then-orphan.
      */
-    public void tombstone(String path) {
+    public void tombstone(long vaultId, String path) {
         int updated = jdbc.update("""
             UPDATE sync_queue SET status = 'DELETE_PENDING'
-            WHERE path = ? AND drive_file_id IS NOT NULL
-            """, path);
+            WHERE path = ? AND vault_id = ? AND drive_file_id IS NOT NULL
+            """, path, vaultId);
         if (updated == 0) {
-            delete(path);
+            delete(vaultId, path);
         }
     }
 
-    public List<SyncEntry> findByStatus(String status) {
+    public List<SyncEntry> findByStatus(long vaultId, String status) {
         return jdbc.query("""
             SELECT path, content_hash, status, last_synced_at, drive_file_id, retry_count
-            FROM sync_queue WHERE status = ? ORDER BY path
+            FROM sync_queue WHERE vault_id = ? AND status = ? ORDER BY path
             """,
             (rs, __) -> new SyncEntry(
                 rs.getString("path"),
@@ -144,7 +144,7 @@ public class SyncQueueRepository {
                 rs.getString("drive_file_id"),
                 rs.getInt("retry_count")
             ),
-            status);
+            vaultId, status);
     }
 
     /**
@@ -152,12 +152,13 @@ public class SyncQueueRepository {
      * retry cap (self-healing — a transient Drive error no longer strands a file forever).
      * Once retry_count reaches maxRetries a FAILED row is skipped = dead-letter.
      */
-    public List<SyncEntry> findUploadable(int maxRetries) {
+    public List<SyncEntry> findUploadable(long vaultId, int maxRetries) {
         return jdbc.query("""
             SELECT path, content_hash, status, last_synced_at, drive_file_id, retry_count
             FROM sync_queue
-            WHERE status = 'PENDING'
-               OR (status = 'FAILED' AND retry_count < ?)
+            WHERE vault_id = ?
+              AND (status = 'PENDING'
+                   OR (status = 'FAILED' AND retry_count < ?))
             ORDER BY path
             """,
             (rs, __) -> new SyncEntry(
@@ -168,13 +169,13 @@ public class SyncQueueRepository {
                 rs.getString("drive_file_id"),
                 rs.getInt("retry_count")
             ),
-            maxRetries);
+            vaultId, maxRetries);
     }
 
-    public SyncEntry findByPath(String path) {
+    public SyncEntry findByPath(long vaultId, String path) {
         List<SyncEntry> rows = jdbc.query("""
             SELECT path, content_hash, status, last_synced_at, drive_file_id, retry_count
-            FROM sync_queue WHERE path = ?
+            FROM sync_queue WHERE vault_id = ? AND path = ?
             """,
             (rs, __) -> new SyncEntry(
                 rs.getString("path"),
@@ -184,15 +185,15 @@ public class SyncQueueRepository {
                 rs.getString("drive_file_id"),
                 rs.getInt("retry_count")
             ),
-            path);
+            vaultId, path);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    public Map<String, Object> getStatusSummary() {
+    public Map<String, Object> getStatusSummary(long vaultId) {
         Map<String, Object> result = new LinkedHashMap<>();
-        jdbc.queryForList("SELECT status, COUNT(*) AS count FROM sync_queue GROUP BY status")
+        jdbc.queryForList("SELECT status, COUNT(*) AS count FROM sync_queue WHERE vault_id = ? GROUP BY status", vaultId)
             .forEach(row -> result.put(row.get("status").toString().toLowerCase() + "Count", row.get("count")));
-        List<Long> ts = jdbc.queryForList("SELECT MAX(last_synced_at) FROM sync_queue", Long.class);
+        List<Long> ts = jdbc.queryForList("SELECT MAX(last_synced_at) FROM sync_queue WHERE vault_id = ?", Long.class, vaultId);
         result.put("lastSyncedAt", ts.isEmpty() ? null : ts.get(0));
         return result;
     }

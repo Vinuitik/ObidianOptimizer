@@ -31,6 +31,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class InboxControllerSplitTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @Mock FileRepository repository;
     @Mock SettingsRepository settingsRepo;
     @Mock NoteIndexRepository noteIndex;
@@ -45,9 +47,9 @@ class InboxControllerSplitTest {
     void setUp() throws IOException {
         vault = Files.createTempDirectory("vault");
         inbox = Files.createDirectories(vault.resolve("_inbox"));
-        controller = new InboxController(repository, settingsRepo, noteIndex, captureRepo, ingestClient);
+        controller = new InboxController(repository, settingsRepo, noteIndex, captureRepo, ingestClient, activeVault);
 
-        lenient().when(settingsRepo.getVaultPath()).thenReturn(vault.toString());
+        activeVault.set(1L, java.nio.file.Path.of(String.valueOf(vault.toString())));
         // getText reads the file back off disk.
         lenient().when(repository.getText(anyString())).thenAnswer(inv ->
             Files.readString(Path.of(inv.getArgument(0, String.class))));

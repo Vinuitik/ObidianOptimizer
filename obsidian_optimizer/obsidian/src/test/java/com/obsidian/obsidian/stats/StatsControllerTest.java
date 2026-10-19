@@ -31,6 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class StatsControllerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     JdbcTemplate jdbc;
     CardRepository cardRepo;
     PendingImageJobRepository imageJobRepo;
@@ -44,13 +46,13 @@ class StatsControllerTest {
         jdbc = mock(JdbcTemplate.class);
         cardRepo = mock(CardRepository.class);
         imageJobRepo = mock(PendingImageJobRepository.class);
-        controller = new StatsController(jdbc, cardRepo, imageJobRepo);
+        controller = new StatsController(jdbc, cardRepo, imageJobRepo, activeVault);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
-        when(jdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(), (Class<Long>) org.mockito.ArgumentMatchers.eq(Long.class)))
+        when(jdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(), (Class<Long>) org.mockito.ArgumentMatchers.eq(Long.class), org.mockito.ArgumentMatchers.<Object>any()))
             .thenReturn(10L, 4L, 50L, 7L); // notesTotal, notesEmbedded, chunksTotal, eligible — in call order
-        when(cardRepo.stats()).thenReturn(Map.of("notes_with_cards", 3, "active_cards", 20, "archived_cards", 5));
-        when(imageJobRepo.countByStatus()).thenReturn(Map.of("PENDING", 2, "DONE", 8));
+        when(cardRepo.stats(1L)).thenReturn(Map.of("notes_with_cards", 3, "active_cards", 20, "archived_cards", 5));
+        when(imageJobRepo.countByStatus(1L)).thenReturn(Map.of("PENDING", 2, "DONE", 8));
 
         // Point both outbound calls at closed ports by default — each test that wants a
         // live fake server overrides the relevant URL after starting it.
@@ -97,7 +99,7 @@ class StatsControllerTest {
     void stats_notesEmbeddedNeverExceedsNotesTotal_evenIfQueriesRaceOutOfOrder() throws Exception {
         // notesEmbedded (second query) returning MORE than notesTotal (first query) would
         // be a data race between the two COUNT queries; Math.min() must clamp it.
-        when(jdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(), (Class<Long>) org.mockito.ArgumentMatchers.eq(Long.class)))
+        when(jdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(), (Class<Long>) org.mockito.ArgumentMatchers.eq(Long.class), org.mockito.ArgumentMatchers.<Object>any()))
             .thenReturn(5L, 9L, 50L, 7L); // notesEmbedded(9) > notesTotal(5)
 
         mvc.perform(get("/stats"))

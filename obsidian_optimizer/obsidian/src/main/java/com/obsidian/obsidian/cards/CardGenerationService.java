@@ -34,8 +34,9 @@ public class CardGenerationService {
         .version(HttpClient.Version.HTTP_1_1).build();
 
     /** Returns the embedder's result summary, or null on failure (logged). */
-    public JsonNode generateFor(String notePath, String sourceHash) {
-        return post(objectMapper.createObjectNode()
+    public JsonNode generateFor(long vaultId, String notePath, String sourceHash) {
+        // vault_id rides along for the embedder (M5 starts scoping on it; ignored until then).
+        return post(objectMapper.createObjectNode().put("vault_id", vaultId)
             .put("note_path", notePath).put("source_hash", sourceHash), notePath);
     }
 
@@ -45,8 +46,8 @@ public class CardGenerationService {
      * reasons so the replacements avoid the same flaws. Keeps a note's card count
      * consistent — one replacement per flagged card. Returns null on failure.
      */
-    public JsonNode regenerate(String notePath, String sourceHash, int targetCount, java.util.List<String> feedback) {
-        var body = objectMapper.createObjectNode()
+    public JsonNode regenerate(long vaultId, String notePath, String sourceHash, int targetCount, java.util.List<String> feedback) {
+        var body = objectMapper.createObjectNode().put("vault_id", vaultId)
             .put("note_path", notePath).put("source_hash", sourceHash)
             .put("target_count", Math.max(1, targetCount));
         var arr = body.putArray("feedback");

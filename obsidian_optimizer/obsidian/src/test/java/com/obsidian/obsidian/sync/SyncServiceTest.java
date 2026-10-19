@@ -34,6 +34,8 @@ import static org.mockito.Mockito.when;
 
 class SyncServiceTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @TempDir Path vault;
 
     SyncQueueRepository    queueRepo  = mock(SyncQueueRepository.class);
@@ -50,8 +52,8 @@ class SyncServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         service = new SyncService(queueRepo, crypto, drive, device,
-                                  settings, noteIndex, linkRepo, imageScan);
-        when(settings.getVaultPath()).thenReturn(vault.toString());
+                                  settings, noteIndex, linkRepo, imageScan, activeVault);
+        activeVault.set(1L, java.nio.file.Path.of(vault.toString()));
         when(crypto.isConfigured()).thenReturn(true);
         when(drive.isConfigured()).thenReturn(true);
         when(device.getDeviceId()).thenReturn("dev-1");
@@ -94,7 +96,7 @@ class SyncServiceTest {
         writeVaultFile("folder/note.md", content);
         String actualHash = ContentHashing.sha256(
             content.getBytes(StandardCharsets.UTF_8));
-        when(queueRepo.findUploadable(anyInt()))
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt()))
             .thenReturn(List.of(pending("folder/note.md", actualHash)));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("drive-id-9");
@@ -105,8 +107,8 @@ class SyncServiceTest {
         verify(drive).uploadFile(eq("folder/note.md"),
             eq(content.getBytes(StandardCharsets.UTF_8)),
             eq(actualHash), eq("dev-1"), eq(null));
-        verify(queueRepo).markDoneIfHashMatches("folder/note.md", "drive-id-9", actualHash);
-        verify(queueRepo, never()).markFailed(anyString());
+        verify(queueRepo).markDoneIfHashMatches(1L, "folder/note.md", "drive-id-9", actualHash);
+        verify(queueRepo, never()).markFailed(org.mockito.ArgumentMatchers.eq(1L), anyString());
     }
 
     @Test
@@ -116,11 +118,11 @@ class SyncServiceTest {
         String staleQueueHash  = "stale-hash";
         String actualHash = ContentHashing.sha256(
             "edited content".getBytes(StandardCharsets.UTF_8));
-        when(queueRepo.findUploadable(anyInt()))
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt()))
             .thenReturn(List.of(pending("note.md", staleQueueHash)));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("id");
-        when(queueRepo.markDoneIfHashMatches(anyString(), anyString(), anyString()))
+        when(queueRepo.markDoneIfHashMatches(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyString(), anyString()))
             .thenReturn(false); // conditional refused — row was re-marked PENDING
 
         service.uploadPending();
@@ -128,32 +130,32 @@ class SyncServiceTest {
         // Drive metadata gets the hash of what actually went out…
         verify(drive).uploadFile(eq("note.md"), any(), eq(actualHash), eq("dev-1"), any());
         // …but DONE is attempted against the stale queue hash and refused, not failed
-        verify(queueRepo).markDoneIfHashMatches("note.md", "id", staleQueueHash);
-        verify(queueRepo, never()).markFailed(anyString());
+        verify(queueRepo).markDoneIfHashMatches(1L, "note.md", "id", staleQueueHash);
+        verify(queueRepo, never()).markFailed(org.mockito.ArgumentMatchers.eq(1L), anyString());
     }
 
     @Test
     void uploadMarksFailedWhenFileUnreadable() throws Exception {
-        when(queueRepo.findUploadable(anyInt()))
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt()))
             .thenReturn(List.of(pending("ghost.md", "h")));
 
         service.uploadPending();
 
-        verify(queueRepo).markFailed("ghost.md");
+        verify(queueRepo).markFailed(1L, "ghost.md");
         verify(drive, never()).uploadFile(anyString(), any(), anyString(), anyString(), any());
     }
 
     @Test
     void uploadFailureOnOneFileDoesNotStopTheBatch() throws Exception {
         writeVaultFile("ok.md", "fine");
-        when(queueRepo.findUploadable(anyInt()))
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt()))
             .thenReturn(List.of(pending("ghost.md", "h1"), pending("ok.md", "h2")));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("id-ok");
 
         service.uploadPending();
 
-        verify(queueRepo).markFailed("ghost.md");
+        verify(queueRepo).markFailed(1L, "ghost.md");
         verify(drive).uploadFile(eq("ok.md"), any(), anyString(), anyString(), any());
     }
 
@@ -161,7 +163,7 @@ class SyncServiceTest {
     void uploadReusesExistingDriveFileId() throws Exception {
         writeVaultFile("note.md", "v2");
         SyncEntry entry = new SyncEntry("note.md", "h", "PENDING", null, "existing-id", 1);
-        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(entry));
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(entry));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("existing-id");
 
@@ -176,14 +178,14 @@ class SyncServiceTest {
         // Self-healing: a previously-FAILED row still under the retry cap is retried.
         writeVaultFile("retry.md", "second chance");
         SyncEntry failedRow = new SyncEntry("retry.md", "h", "FAILED", null, null, 2);
-        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(failedRow));
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(failedRow));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("id-retry");
 
         service.uploadPending();
 
         verify(drive).uploadFile(eq("retry.md"), any(), anyString(), anyString(), any());
-        verify(queueRepo).markDoneIfHashMatches(eq("retry.md"), eq("id-retry"), anyString());
+        verify(queueRepo).markDoneIfHashMatches(org.mockito.ArgumentMatchers.eq(1L), eq("retry.md"), eq("id-retry"), anyString());
     }
 
     @Test
@@ -191,7 +193,7 @@ class SyncServiceTest {
         writeVaultFile("a/x.md", "1");
         writeVaultFile("a/y.md", "2");
         writeVaultFile("b/z.md", "3");
-        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(
             pending("a/x.md", "h1"), pending("a/y.md", "h2"), pending("b/z.md", "h3")));
         when(drive.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("id");
@@ -207,7 +209,7 @@ class SyncServiceTest {
         assertThat(service.uploadProgress()).containsEntry("uploading", false);
 
         writeVaultFile("p.md", "x");
-        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of(pending("p.md", "h")));
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(pending("p.md", "h")));
         service.uploadPending();
 
         // drain finished — not stuck "uploading", and total reflects the batch
@@ -232,11 +234,11 @@ class SyncServiceTest {
         service.downloadAll();
 
         assertThat(vault.resolve("new.md")).hasContent(content);
-        verify(noteIndex).upsert(eq(vault.resolve("new.md").toString()),
+        verify(noteIndex).upsert(org.mockito.ArgumentMatchers.eq(1L), eq(vault.resolve("new.md").toString()),
             eq("new"), any(), org.mockito.ArgumentMatchers.anyLong());
-        verify(linkRepo).updateLinks(eq(vault.resolve("new.md").toString()), any());
-        verify(imageScan).registerImages(eq(vault.resolve("new.md").toString()), eq(content));
-        verify(queueRepo).markSynced("new.md", hash, "fid-new.md");
+        verify(linkRepo).updateLinks(org.mockito.ArgumentMatchers.eq(1L), eq(vault.resolve("new.md").toString()), any());
+        verify(imageScan).registerImages(org.mockito.ArgumentMatchers.eq(1L), eq(vault.resolve("new.md").toString()), eq(content));
+        verify(queueRepo).markSynced(1L, "new.md", hash, "fid-new.md");
     }
 
     @Test
@@ -249,7 +251,7 @@ class SyncServiceTest {
         service.downloadAll();
 
         verify(drive, never()).downloadFile(anyString());
-        verify(queueRepo, never()).markSynced(anyString(), anyString(), anyString());
+        verify(queueRepo, never()).markSynced(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -257,14 +259,14 @@ class SyncServiceTest {
         writeVaultFile("edited.md", "local newer version");
         when(drive.listAllFiles())
             .thenReturn(List.of(driveFile("edited.md", "different-remote-hash")));
-        when(queueRepo.findByPath("edited.md"))
+        when(queueRepo.findByPath(1L, "edited.md"))
             .thenReturn(pending("edited.md", "local-hash"));
 
         service.downloadAll();
 
         // LOCAL WINS: no download, no overwrite, upload still queued
         verify(drive, never()).downloadFile(anyString());
-        verify(queueRepo, never()).markSynced(anyString(), anyString(), anyString());
+        verify(queueRepo, never()).markSynced(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyString(), anyString());
         assertThat(vault.resolve("edited.md")).hasContent("local newer version");
     }
 
@@ -291,7 +293,7 @@ class SyncServiceTest {
 
         assertThat(vault.resolve("resources/images/pic.png")).hasBinaryContent(png);
         verifyNoInteractions(noteIndex);
-        verify(queueRepo).markSynced("resources/images/pic.png", hash,
+        verify(queueRepo).markSynced(1L, "resources/images/pic.png", hash,
             "fid-resources/images/pic.png");
     }
 
@@ -309,7 +311,7 @@ class SyncServiceTest {
         service.downloadAll();
 
         assertThat(vault.resolve("good.md")).hasContent(good);
-        verify(queueRepo).markSynced(eq("good.md"), eq(goodHash), anyString());
+        verify(queueRepo).markSynced(org.mockito.ArgumentMatchers.eq(1L), eq("good.md"), eq(goodHash), anyString());
     }
 
     @Test
@@ -336,7 +338,7 @@ class SyncServiceTest {
         verifyNoInteractions(noteIndex);
         verifyNoInteractions(linkRepo);
         verifyNoInteractions(imageScan);
-        verify(queueRepo, never()).markSynced(anyString(), anyString(), anyString());
+        verify(queueRepo, never()).markSynced(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -358,18 +360,18 @@ class SyncServiceTest {
     void initialScanQueuesNewAndChangedNotesOnly() throws Exception {
         Path a = writeVaultFile("a.md", "alpha");
         Path b = writeVaultFile("b.md", "beta");
-        when(noteIndex.getAllPathsWithHash()).thenReturn(List.of(
+        when(noteIndex.getAllPathsWithHash(1L)).thenReturn(List.of(
             Map.of("path", a.toString(), "content_hash", "hash-a"),
             Map.of("path", b.toString(), "content_hash", "hash-b")));
         // a.md already DONE with same hash → skipped; b.md unknown → queued
-        when(queueRepo.findByPath("a.md"))
+        when(queueRepo.findByPath(1L, "a.md"))
             .thenReturn(new SyncEntry("a.md", "hash-a", "DONE", 1L, "fid", 0));
-        when(queueRepo.findByPath("b.md")).thenReturn(null);
+        when(queueRepo.findByPath(1L, "b.md")).thenReturn(null);
 
         service.initialScan();
 
-        verify(queueRepo, never()).markPending(eq("a.md"), anyString());
-        verify(queueRepo).markPending("b.md", "hash-b");
+        verify(queueRepo, never()).markPending(org.mockito.ArgumentMatchers.eq(1L), eq("a.md"), anyString());
+        verify(queueRepo).markPending(1L, "b.md", "hash-b");
     }
 
     @Test
@@ -378,12 +380,12 @@ class SyncServiceTest {
         Files.createDirectories(img.getParent());
         byte[] bytes = {1, 2, 3};
         Files.write(img, bytes);
-        when(noteIndex.getAllPathsWithHash()).thenReturn(List.of());
-        when(queueRepo.findByPath(anyString())).thenReturn(null);
+        when(noteIndex.getAllPathsWithHash(1L)).thenReturn(List.of());
+        when(queueRepo.findByPath(org.mockito.ArgumentMatchers.eq(1L), anyString())).thenReturn(null);
 
         service.initialScan();
 
-        verify(queueRepo).markPending("resources/images/x.png",
+        verify(queueRepo).markPending(1L, "resources/images/x.png",
             ContentHashing.sha256(bytes));
     }
 
@@ -392,39 +394,39 @@ class SyncServiceTest {
     @Test
     void tombstonesAreTrashedAndRowsRemoved() throws Exception {
         SyncEntry doomed = new SyncEntry("gone.md", "h", "DELETE_PENDING", 1L, "fid-gone", 0);
-        when(queueRepo.findByStatus("DELETE_PENDING")).thenReturn(List.of(doomed));
-        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of());
+        when(queueRepo.findByStatus(1L, "DELETE_PENDING")).thenReturn(List.of(doomed));
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of());
 
         service.uploadPending();
 
         verify(drive).trashFile("fid-gone");
-        verify(queueRepo).delete("gone.md");
+        verify(queueRepo).delete(1L, "gone.md");
     }
 
     @Test
     void tombstoneStaysWhenTrashFails() throws Exception {
         SyncEntry doomed = new SyncEntry("gone.md", "h", "DELETE_PENDING", 1L, "fid-gone", 0);
-        when(queueRepo.findByStatus("DELETE_PENDING")).thenReturn(List.of(doomed));
-        when(queueRepo.findUploadable(anyInt())).thenReturn(List.of());
+        when(queueRepo.findByStatus(1L, "DELETE_PENDING")).thenReturn(List.of(doomed));
+        when(queueRepo.findUploadable(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of());
         org.mockito.Mockito.doThrow(new IOException("boom")).when(drive).trashFile("fid-gone");
 
         service.uploadPending();
 
-        verify(queueRepo, never()).delete("gone.md"); // retried next pass
+        verify(queueRepo, never()).delete(1L, "gone.md"); // retried next pass
     }
 
     @Test
     void downloadSkipsFilesWithPendingLocalDelete() throws Exception {
         DriveFileInfo df = driveFile("deleted.md", "hash-x");
         when(drive.listAllFiles()).thenReturn(List.of(df));
-        when(queueRepo.findByPath("deleted.md"))
+        when(queueRepo.findByPath(1L, "deleted.md"))
             .thenReturn(new SyncEntry("deleted.md", "h", "DELETE_PENDING", 1L, df.fileId(), 0));
 
         service.downloadAll();
 
         // downloading would resurrect the deleted file and cancel its tombstone
         verify(drive, never()).downloadFile(anyString());
-        verify(queueRepo, never()).markSynced(anyString(), anyString(), anyString());
+        verify(queueRepo, never()).markSynced(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyString(), anyString());
     }
 
     // ── janitor ───────────────────────────────────────────────────────────
@@ -453,7 +455,7 @@ class SyncServiceTest {
         DriveFileInfo queued  = orphan("queued.md",  123L);   // PENDING re-upload
         DriveFileInfo doomed  = orphan("doomed.md",  123L);   // true orphan
         when(drive.listAllFiles()).thenReturn(List.of(alive, fresh, queued, doomed));
-        when(queueRepo.findByPath("queued.md"))
+        when(queueRepo.findByPath(1L, "queued.md"))
             .thenReturn(new SyncEntry("queued.md", "h", "PENDING", null, null, 0));
 
         SyncService.JanitorResult r = service.janitor(false);
@@ -464,7 +466,7 @@ class SyncServiceTest {
         verify(drive, never()).trashFile("fid-alive.md");
         verify(drive, never()).trashFile("fid-fresh.md");
         verify(drive, never()).trashFile("fid-queued.md");
-        verify(queueRepo).delete("doomed.md");
+        verify(queueRepo).delete(1L, "doomed.md");
     }
 
     // ── toRelative ────────────────────────────────────────────────────────

@@ -48,7 +48,7 @@ class SpreadServiceTest {
     void withinCap_noteNotMoved() throws IOException {
         LocalDate tomorrow = LocalDate.now().plusDays(1);
         Path f = writeNote("n1.md", tomorrow, 5, 250);
-        var result = service.run(List.of(f), 5);
+        var result = service.run(1L, List.of(f), 5);
         assertThat(result.moved()).isEqualTo(0);
         assertThat(FrontmatterRewriter.read(f).due()).isEqualTo(tomorrow);
     }
@@ -58,7 +58,7 @@ class SpreadServiceTest {
         LocalDate tomorrow = LocalDate.now().plusDays(1);
         Path n1 = writeNote("n1.md", tomorrow, 5, 200);
         Path n2 = writeNote("n2.md", tomorrow, 5, 300);
-        var result = service.run(List.of(n1, n2), 1);
+        var result = service.run(1L, List.of(n1, n2), 1);
         assertThat(result.moved()).isEqualTo(1);
         LocalDate d1 = FrontmatterRewriter.read(n1).due();
         LocalDate d2 = FrontmatterRewriter.read(n2).due();
@@ -70,7 +70,7 @@ class SpreadServiceTest {
         LocalDate tomorrow = LocalDate.now().plusDays(1);
         Path n1 = writeNote("n1.md", tomorrow, 5, 200);   // lower ease = harder
         Path n2 = writeNote("n2.md", tomorrow, 5, 300);
-        service.run(List.of(n1, n2), 1);
+        service.run(1L, List.of(n1, n2), 1);
         assertThat(FrontmatterRewriter.read(n1).due()).isEqualTo(tomorrow);   // hardest stays
         assertThat(FrontmatterRewriter.read(n2).due()).isAfter(tomorrow);
     }
@@ -80,7 +80,7 @@ class SpreadServiceTest {
         LocalDate tomorrow = LocalDate.now().plusDays(1);
         Path hard = writeFsrsNote("hard.md", tomorrow, 8.0);
         Path easy = writeFsrsNote("easy.md", tomorrow, 3.0);
-        service.run(List.of(hard, easy), 1);
+        service.run(1L, List.of(hard, easy), 1);
         assertThat(FrontmatterRewriter.read(hard).due()).isEqualTo(tomorrow);  // hardest stays
         assertThat(FrontmatterRewriter.read(easy).due()).isAfter(tomorrow);
     }
@@ -90,13 +90,13 @@ class SpreadServiceTest {
         LocalDate yesterday = LocalDate.now().minusDays(1);
         Path n1 = writeNote("n1.md", yesterday, 5, 200);
         Path n2 = writeNote("n2.md", yesterday, 5, 300);
-        var result = service.run(List.of(n1, n2), 1);
+        var result = service.run(1L, List.of(n1, n2), 1);
         assertThat(result.moved()).isGreaterThanOrEqualTo(1);
     }
 
     @Test
     void emptyList_returnsZero() {
-        var result = service.run(List.of(), 5);
+        var result = service.run(1L, List.of(), 5);
         assertThat(result.total()).isEqualTo(0);
         assertThat(result.moved()).isEqualTo(0);
     }
@@ -105,7 +105,7 @@ class SpreadServiceTest {
     void fileWithoutFrontmatter_isIgnored() throws IOException {
         Path f = tmp.resolve("plain.md");
         Files.writeString(f, "# Just a heading\n\nNo frontmatter.");
-        var result = service.run(List.of(f), 5);
+        var result = service.run(1L, List.of(f), 5);
         assertThat(result.total()).isEqualTo(0);
     }
 
@@ -114,7 +114,7 @@ class SpreadServiceTest {
         LocalDate d = LocalDate.now().plusDays(1);
         Path n1 = writeNote("n1.md", d, 5, 200);
         Path n2 = writeNote("n2.md", d, 5, 300);
-        var result = service.run(List.of(n1, n2), 10);
+        var result = service.run(1L, List.of(n1, n2), 10);
         assertThat(result.total()).isEqualTo(2);
         assertThat(result.moved()).isEqualTo(0);
     }

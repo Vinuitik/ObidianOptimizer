@@ -22,6 +22,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 class CaptureRepositoryIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =
@@ -58,22 +63,22 @@ class CaptureRepositoryIT {
     void existsForSource_falseForFreshRef_trueOnceAnyRowExists() {
         String ref = "https://example.com/" + UUID.randomUUID();
 
-        assertThat(repo.existsForSource(ref)).isFalse();
+        assertThat(repo.existsForSource(1L, ref)).isFalse();
 
-        repo.enqueue(UUID.randomUUID().toString(), "web_dom", ref, null, "title");
+        repo.enqueue(1L, UUID.randomUUID().toString(), "web_dom", ref, null, "title");
 
-        assertThat(repo.existsForSource(ref)).isTrue();
+        assertThat(repo.existsForSource(1L, ref)).isTrue();
     }
 
     @Test
     void existsForSource_staysTrue_afterStatusMovesPastLive_unlikeExistsLiveForSource() {
         String ref = "https://example.com/" + UUID.randomUUID();
         String id = UUID.randomUUID().toString();
-        repo.enqueue(id, "web_dom", ref, null, "title");
+        repo.enqueue(1L, id, "web_dom", ref, null, "title");
 
         jdbc.update("UPDATE capture SET status = 'filed' WHERE id = ?", id);
 
-        assertThat(repo.existsLiveForSource(ref)).isFalse();
-        assertThat(repo.existsForSource(ref)).isTrue();
+        assertThat(repo.existsLiveForSource(1L, ref)).isFalse();
+        assertThat(repo.existsForSource(1L, ref)).isTrue();
     }
 }

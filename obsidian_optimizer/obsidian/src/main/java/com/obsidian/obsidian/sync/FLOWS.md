@@ -489,3 +489,4 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 | Drive path validation | `SyncService.downloadAll()` `target.startsWith(vaultRootPath)` |
 | Initial vault scan | `SyncService.initialScan()` |
 | Folder ID cache invalidation | `DriveService.folderCache.clear()` |
+| Vault scoping (M3) | `SyncQueueRepository` methods take `long vaultId` first; `SyncService`/`SyncController` act on the ACTIVE vault only (root = `ActiveVault.root()`) — all-vaults sync is M4 |

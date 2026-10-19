@@ -41,6 +41,7 @@ class SecurityConfigTest {
 
     @Autowired private MockMvc mvc;
 
+    @MockBean com.obsidian.obsidian.vaults.ActiveVault activeVault;   // VaultHeaderFilter is a scanned @Component
     @MockBean JdbcTemplate jdbc;
     @MockBean CardRepository cardRepo;
     @MockBean PendingImageJobRepository imageJobRepo;
@@ -48,8 +49,9 @@ class SecurityConfigTest {
     private void stubStats() {
         when(jdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(), (Class<Long>) org.mockito.ArgumentMatchers.eq(Long.class)))
             .thenReturn(0L);
-        when(cardRepo.stats()).thenReturn(Map.of("notes_with_cards", 0, "active_cards", 0, "archived_cards", 0));
-        when(imageJobRepo.countByStatus()).thenReturn(Map.of());
+        when(activeVault.id()).thenReturn(1L);
+        when(cardRepo.stats(1L)).thenReturn(Map.of("notes_with_cards", 0, "active_cards", 0, "archived_cards", 0));
+        when(imageJobRepo.countByStatus(1L)).thenReturn(Map.of());
     }
 
     // ── Protected vs public ──────────────────────────────────────────────────

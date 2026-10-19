@@ -41,6 +41,11 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 class SyncUploadRabbitFlowIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>(DockerImageName.parse("paradedb/paradedb:latest")
@@ -119,14 +124,14 @@ class SyncUploadRabbitFlowIT {
         when(driveService.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("drive-id-phase6");
 
-        syncQueueRepo.markPending("phase6/note.md", hash);
+        syncQueueRepo.markPending(1L, "phase6/note.md", hash);
 
         waitUntil(() -> {
-            SyncEntry e = syncQueueRepo.findByPath("phase6/note.md");
+            SyncEntry e = syncQueueRepo.findByPath(1L, "phase6/note.md");
             return e != null && "DONE".equals(e.status());
         }, 5000);
 
-        SyncEntry done = syncQueueRepo.findByPath("phase6/note.md");
+        SyncEntry done = syncQueueRepo.findByPath(1L, "phase6/note.md");
         assertThat(done.driveFileId()).isEqualTo("drive-id-phase6");
         org.mockito.Mockito.verify(driveService).uploadFile(
             eq("phase6/note.md"), any(), eq(hash), anyString(), any());
@@ -140,23 +145,23 @@ class SyncUploadRabbitFlowIT {
         when(driveService.uploadFile(anyString(), any(), anyString(), anyString(), any()))
             .thenThrow(new IOException("simulated persistent Drive failure"));
 
-        syncQueueRepo.markPending("phase6/broken.md", hash);
+        syncQueueRepo.markPending(1L, "phase6/broken.md", hash);
 
         // sync.upload.max-retries=2 in this test: two failed attempts, ~300ms apart on
         // the retry ladder, then dead-lettered — exactly like the pre-Rabbit polling
         // model's retry_count cap, just delivered by the DLX+TTL wait queue instead of
         // a slow poll tick.
         waitUntil(() -> {
-            SyncEntry e = syncQueueRepo.findByPath("phase6/broken.md");
+            SyncEntry e = syncQueueRepo.findByPath(1L, "phase6/broken.md");
             return e != null && "FAILED".equals(e.status()) && e.retryCount() >= 2;
         }, 8000);
 
-        SyncEntry failed = syncQueueRepo.findByPath("phase6/broken.md");
+        SyncEntry failed = syncQueueRepo.findByPath(1L, "phase6/broken.md");
         assertThat(failed.status()).isEqualTo("FAILED");
         assertThat(failed.retryCount()).isEqualTo(2);
 
         // No further redelivery past the cap — retry_count stays put after a settle window.
         Thread.sleep(1000);
-        assertThat(syncQueueRepo.findByPath("phase6/broken.md").retryCount()).isEqualTo(2);
+        assertThat(syncQueueRepo.findByPath(1L, "phase6/broken.md").retryCount()).isEqualTo(2);
     }
 }

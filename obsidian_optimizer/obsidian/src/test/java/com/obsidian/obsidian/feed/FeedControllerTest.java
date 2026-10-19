@@ -20,6 +20,8 @@ import static org.mockito.Mockito.*;
  *  /feed/sources/resolve preview endpoint — mocked collaborators, no DB/HTTP. */
 class FeedControllerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     SourceRepository sourceRepo;
     FeedRepository feedRepo;
     FeedService feedService;
@@ -42,7 +44,7 @@ class FeedControllerTest {
         feedService = mock(FeedService.class);
         pollWorker = mock(SourcePollWorker.class);
         client = mock(TrackAgentClient.class);
-        controller = new FeedController(feedRepo, sourceRepo, feedService, pollWorker, client);
+        controller = new FeedController(feedRepo, sourceRepo, feedService, pollWorker, client, activeVault);
     }
 
     // ── resolveSource ────────────────────────────────────────────────────────
@@ -159,25 +161,25 @@ class FeedControllerTest {
     @Test
     void createSource_pageWatchFallback_persistsWithNullFeedUrlAndPolls() {
         String url = "https://arxiv.org/list/cs.LG/recent";
-        when(sourceRepo.getByUrl(url)).thenReturn(null);
+        when(sourceRepo.getByUrl(1L, url)).thenReturn(null);
         when(client.discover(url, "feed")).thenReturn(new DiscoverResult(false, List.of(), null));
         List<Candidate> candidates = List.of(cand("https://arxiv.org/list/cs.LG/2026-10", "Listing"));
         when(client.discover(url, "page_watch")).thenReturn(new DiscoverResult(true, candidates, null));
         Source created = src(1, "page_watch", url);
-        when(sourceRepo.create("page_watch", url, null, "arxiv.org", null, null)).thenReturn(created);
-        when(sourceRepo.get(1)).thenReturn(created);
+        when(sourceRepo.create(1L, "page_watch", url, null, "arxiv.org", null, null)).thenReturn(created);
+        when(sourceRepo.get(1L, 1)).thenReturn(created);
 
         ResponseEntity<?> resp = controller.createSource(new FeedController.CreateSourceRequest(url, null, null, null));
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(pollWorker).ingestCandidates(created, candidates, true);
+        verify(pollWorker).ingestCandidates(1L, created, candidates, true);
     }
 
     @Test
     void createSource_existingUrl_shortCircuitsBeforeDiscover() {
         String url = "https://lilianweng.github.io/";
         Source existing = src(5, "rss", url);
-        when(sourceRepo.getByUrl(url)).thenReturn(existing);
+        when(sourceRepo.getByUrl(1L, url)).thenReturn(existing);
 
         ResponseEntity<?> resp = controller.createSource(new FeedController.CreateSourceRequest(url, null, null, null));
 

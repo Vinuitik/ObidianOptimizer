@@ -48,6 +48,8 @@ import java.util.List;
 @Service
 public class MailboxConsumeService {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(MailboxConsumeService.class);
 
     private final DriveService drive;
@@ -81,7 +83,9 @@ public class MailboxConsumeService {
                                  CardRepository cardRepo,
                                  FlaggedCardRegenService flaggedCardRegen,
                                  CaptureController captureController,
-                                 FeedService feedService) {
+                                 FeedService feedService,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.drive = drive;
         this.encryption = encryption;
         this.reviewService = reviewService;
@@ -166,9 +170,9 @@ public class MailboxConsumeService {
                     case "flag"        -> applyFlag(ev);
                     case "capture", "captureText" -> applyCapture(ev);
                     case "captureFile" -> applyCaptureFile(ev);
-                    case "feed_accept"  -> feedService.accept(ev.path("itemId").asLong());
-                    case "feed_bin"     -> feedService.bin(ev.path("itemId").asLong());
-                    case "feed_restore" -> feedService.restore(ev.path("itemId").asLong());
+                    case "feed_accept"  -> feedService.accept(activeVault.id(), ev.path("itemId").asLong());
+                    case "feed_bin"     -> feedService.bin(activeVault.id(), ev.path("itemId").asLong());
+                    case "feed_restore" -> feedService.restore(activeVault.id(), ev.path("itemId").asLong());
                     default -> {
                         allCommitted = false; // unknown kind → keep the file for a newer server
                         continue;
@@ -192,7 +196,7 @@ public class MailboxConsumeService {
     private void applyGrade(JsonNode ev) {
         ReviewService.Band band = ReviewService.Band.valueOf(
             ev.path("band").asText("").toUpperCase().replace(' ', '_'));
-        reviewService.grade(ev.path("notePath").asText(), band);
+        reviewService.grade(activeVault.id(), ev.path("notePath").asText(), band);
     }
 
     /** Deferred grading: replay the offline flashcard answers through the real engine, then
@@ -200,7 +204,7 @@ public class MailboxConsumeService {
      *  assignment, so a retried file is safe. */
     private void applyAssignment(JsonNode ev) {
         UUID assignmentId = UUID.fromString(ev.path("assignmentId").asText());
-        Map<String, Object> assignment = assignmentRepo.findAssignment(assignmentId);
+        Map<String, Object> assignment = assignmentRepo.findAssignment(activeVault.id(), assignmentId);
         if (assignment == null) {
             // Assignment expired/cleaned — nothing to grade; treat as done so we don't loop.
             log.warn("[Mailbox] assignment {} not found — skipping", assignmentId);
@@ -212,10 +216,10 @@ public class MailboxConsumeService {
                 String cardId = it.next();
                 UUID cid = UUID.fromString(cardId);
                 if (!assignmentRepo.attemptExists(assignmentId, cid)) {
-                    assignmentService.submitAttempt(assignmentId, cid, answers.get(cardId).asText());
+                    assignmentService.submitAttempt(activeVault.id(), assignmentId, cid, answers.get(cardId).asText());
                 }
             }
-            assignmentService.complete(assignmentId);
+            assignmentService.complete(activeVault.id(), assignmentId);
         }
     }
 
@@ -266,10 +270,10 @@ public class MailboxConsumeService {
     private void applyFlag(JsonNode ev) {
         UUID cardId = UUID.fromString(ev.path("cardId").asText());
         String reason = ev.path("reason").asText(null);
-        String notePath = cardRepo.flag(cardId, reason);
+        String notePath = cardRepo.flag(activeVault.id(), cardId, reason);
         if (notePath != null) {
             try {
-                flaggedCardRegen.regenerateNote(notePath);
+                flaggedCardRegen.regenerateNote(activeVault.id(), notePath);
             } catch (Exception e) {
                 log.warn("[Mailbox] immediate regen failed for {}: {} (nightly sweep will retry)",
                     notePath, e.getMessage());

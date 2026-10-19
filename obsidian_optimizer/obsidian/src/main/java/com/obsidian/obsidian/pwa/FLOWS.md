@@ -78,3 +78,4 @@ re-export. Triggers: on boot + `@Scheduled(${mailbox.consume.cron:0 */15 * * * *
 | Consume cadence | `mailbox.consume.cron` (default every 15m) + on-boot listener |
 | Idempotency ledger | `ConsumedEventRepository` (`consumed_events`) |
 | Drive `_offline`/`_mailbox` ops | `sync/DriveService` (`uploadOffline`, `listMailbox`, `deleteFile`) |
+| Vault scoping (M3) | `MailboxConsumeService` / `OfflineExportService` act on the active vault (`activeVault.id()`); per-vault mailbox is M4b |

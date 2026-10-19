@@ -9,10 +9,14 @@ import java.util.Map;
 @RestController
 public class ReviewController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private final ReviewService reviewService;
     private final NoteReviewRepository reviewRepo;
 
-    ReviewController(ReviewService reviewService, NoteReviewRepository reviewRepo) {
+    ReviewController(ReviewService reviewService, NoteReviewRepository reviewRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.reviewService = reviewService;
         this.reviewRepo = reviewRepo;
     }
@@ -20,7 +24,7 @@ public class ReviewController {
     /** Notes due for review now, most overdue first. */
     @GetMapping("reviews/due")
     public List<Map<String, Object>> due(@RequestParam(defaultValue = "50") int limit) {
-        return reviewRepo.findDue(limit);
+        return reviewRepo.findDue(activeVault.id(), limit);
     }
 
     /**
@@ -36,7 +40,7 @@ public class ReviewController {
             return ResponseEntity.badRequest()
                 .body("band must be one of HARD, GOOD, EASY, VERY_EASY");
         }
-        return ResponseEntity.ok(reviewService.grade(req.notePath(), band));
+        return ResponseEntity.ok(reviewService.grade(activeVault.id(), req.notePath(), band));
     }
 
     record GradeRequest(String notePath, String band) {}

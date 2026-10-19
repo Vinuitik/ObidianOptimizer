@@ -8,9 +8,13 @@ import java.util.UUID;
 @RestController
 public class AssignmentController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private final AssignmentService assignmentService;
 
-    AssignmentController(AssignmentService assignmentService) {
+    AssignmentController(AssignmentService assignmentService,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.assignmentService = assignmentService;
     }
 
@@ -18,7 +22,7 @@ public class AssignmentController {
     @PostMapping("assignments")
     public ResponseEntity<?> build(@RequestBody BuildRequest req) {
         try {
-            return ResponseEntity.ok(assignmentService.build(req.scope(), req.points()));
+            return ResponseEntity.ok(assignmentService.build(activeVault.id(), req.scope(), req.points()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }
@@ -28,7 +32,7 @@ public class AssignmentController {
     @PostMapping("attempts")
     public ResponseEntity<?> attempt(@RequestBody AttemptRequest req) {
         try {
-            return ResponseEntity.ok(assignmentService.submitAttempt(
+            return ResponseEntity.ok(assignmentService.submitAttempt(activeVault.id(), 
                 req.assignmentId(), req.cardId(), req.answer()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
@@ -41,7 +45,7 @@ public class AssignmentController {
     @PostMapping("assignments/{id}/complete")
     public ResponseEntity<?> complete(@PathVariable UUID id) {
         try {
-            return ResponseEntity.ok(assignmentService.complete(id));
+            return ResponseEntity.ok(assignmentService.complete(activeVault.id(), id));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
         }

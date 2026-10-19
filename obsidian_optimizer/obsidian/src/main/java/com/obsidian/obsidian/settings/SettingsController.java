@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 public class SettingsController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(SettingsController.class);
 
     private final SettingsRepository settingsRepo;
@@ -20,7 +22,9 @@ public class SettingsController {
     private final DriveService driveService;
 
     SettingsController(SettingsRepository settingsRepo, FileRepository repository,
-                       VaultEncryptionService encryptionService, DriveService driveService) {
+                       VaultEncryptionService encryptionService, DriveService driveService,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.settingsRepo      = settingsRepo;
         this.repository        = repository;
         this.encryptionService = encryptionService;
@@ -30,7 +34,7 @@ public class SettingsController {
     @GetMapping("settings")
     public SettingsResponse getSettings() {
         return new SettingsResponse(
-            settingsRepo.getVaultPath(),
+            activeVault.root().toString(),
             settingsRepo.getResourcePath(),
             settingsRepo.getReviewPageSize(),
             settingsRepo.getStartupSyncMode(),

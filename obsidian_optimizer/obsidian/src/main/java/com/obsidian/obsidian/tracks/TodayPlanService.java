@@ -32,6 +32,8 @@ import java.util.function.IntToDoubleFunction;
 @Service
 public class TodayPlanService {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     public static final String MODE_KEY = "trackMode";
     public static final String MODE_NORMAL = "normal";
     public static final String MODE_LOCKIN = "lockin";
@@ -39,7 +41,9 @@ public class TodayPlanService {
     private final TrackRepository trackRepo;
     private final SettingsRepository settingsRepo;
 
-    public TodayPlanService(TrackRepository trackRepo, SettingsRepository settingsRepo) {
+    public TodayPlanService(TrackRepository trackRepo, SettingsRepository settingsRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.trackRepo = trackRepo;
         this.settingsRepo = settingsRepo;
     }
@@ -83,7 +87,7 @@ public class TodayPlanService {
     TodayPlan today(LocalDate date) {
         String mode = getMode();
         double todayCap = trackRepo.getCapacity(weekdayOf(date));
-        List<Track> active = trackRepo.listActive();
+        List<Track> active = trackRepo.listActive(activeVault.id());
         Map<Long, Integer> pending = new HashMap<>();
         for (Track t : active) pending.put(t.id(), trackRepo.countPendingItems(t.id()));
 
@@ -109,7 +113,7 @@ public class TodayPlanService {
 
     List<WeekDay> week(LocalDate start) {
         String mode = getMode();
-        List<Track> active = trackRepo.listActive();
+        List<Track> active = trackRepo.listActive(activeVault.id());
         Map<Long, Integer> pending = new HashMap<>();
         for (Track t : active) pending.put(t.id(), trackRepo.countPendingItems(t.id()));
 

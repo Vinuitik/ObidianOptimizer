@@ -36,13 +36,16 @@ public class CardJobWorker {
     private final CardRepository cardRepo;
     private final CardGenerationService generationService;
     private final SettingsRepository settingsRepo;
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
 
     // Own lane: card generation calls the LLM (slow / rate-limited), so it must not
     // run on the shared scheduler thread where it would starve the other workers.
     private final WorkerLane lane = new WorkerLane("cards");
 
     public CardJobWorker(CardRepository cardRepo, CardGenerationService generationService,
-                         SettingsRepository settingsRepo) {
+                         SettingsRepository settingsRepo,
+                         com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.cardRepo = cardRepo;
         this.generationService = generationService;
         this.settingsRepo = settingsRepo;
@@ -66,7 +69,10 @@ public class CardJobWorker {
     /** Runs on the cards lane. One batch per tick — batch-capped so a fresh vault
      *  doesn't burn a night of credits at once; the scan delay paces retries. */
     void drain() {
-        List<Map<String, Object>> pending = cardRepo.findNotesNeedingCards(batchLimit);
+        // Scanner: active vault only. The id is pinned for the whole drain so a card
+        // generated for a note is recorded against the vault the note was selected in.
+        long vaultId = activeVault.id();
+        List<Map<String, Object>> pending = cardRepo.findNotesNeedingCards(vaultId, batchLimit);
         if (pending.isEmpty()) return;
 
         log.info("[CardJobWorker] {} note(s) need cards (batch limit {})", pending.size(), batchLimit);
@@ -75,14 +81,14 @@ public class CardJobWorker {
             // body_hash (frontmatter-stripped) is the card identity/diff key — see
             // CardRepository.findNotesNeedingCards. Stored embedder-side as source_hash.
             String hash = (String) row.get("body_hash");
-            var result = generationService.generateFor(path, hash);
+            var result = generationService.generateFor(vaultId, path, hash);
             // Record the attempt only when the embedder actually answered:
             // a zero-yield generation must not retry every cycle (credits),
             // but a transport failure (wrapper/embedder down — typical right
             // after boot) must NOT burn the ledger, or those notes would
             // never retry until edited.
             if (result != null) {
-                cardRepo.recordAttempt(path, hash);
+                cardRepo.recordAttempt(vaultId, path, hash);
             }
         }
     }

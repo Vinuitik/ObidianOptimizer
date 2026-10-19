@@ -4,6 +4,7 @@ import java.time.Instant;
 
 public class PendingImageJob {
     private String id;
+    private long vaultId = 1L;
     private String notePath;
     private String imagePath;
     private String status;      // PENDING | DONE | SKIPPED
@@ -21,6 +22,9 @@ public class PendingImageJob {
 
     public String getId()           { return id; }
     public void   setId(String id)  { this.id = id; }
+
+    public long   getVaultId()               { return vaultId; }
+    public void   setVaultId(long vaultId)   { this.vaultId = vaultId; }
 
     public String getNotePath()                  { return notePath; }
     public void   setNotePath(String notePath)   { this.notePath = notePath; }

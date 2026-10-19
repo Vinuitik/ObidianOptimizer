@@ -62,35 +62,35 @@ public class FeedRepository {
         """;
 
     /** Insert a pending item with no body (every kind except youtube_posts). */
-    public Long insertIfNew(long sourceId, String itemUrl, String title, String thumbUrl,
+    public Long insertIfNew(long vaultId, long sourceId, String itemUrl, String title, String thumbUrl,
                             Integer durationS, Instant publishedAt) {
-        return insertIfNew(sourceId, itemUrl, title, thumbUrl, durationS, publishedAt, null);
+        return insertIfNew(vaultId, sourceId, itemUrl, title, thumbUrl, durationS, publishedAt, null);
     }
 
     /** Insert a pending item; returns its id, or null if {@code item_url} already exists
      *  (dedup — whatever its status). {@code body} is only non-null for youtube_posts items
      *  (the post's full text, read back by {@link FeedService#accept}). */
-    public Long insertIfNew(long sourceId, String itemUrl, String title, String thumbUrl,
+    public Long insertIfNew(long vaultId, long sourceId, String itemUrl, String title, String thumbUrl,
                             Integer durationS, Instant publishedAt, String body) {
         List<Long> ids = jdbc.queryForList("""
-            INSERT INTO feed_items(source_id, item_url, title, thumb_url, duration_s, published_at, body)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO feed_items(source_id, item_url, title, thumb_url, duration_s, published_at, body, vault_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (vault_id, item_url) DO NOTHING RETURNING id
             """, Long.class, sourceId, itemUrl, title, thumbUrl, durationS,
-            publishedAt == null ? null : Timestamp.from(publishedAt), body);
+            publishedAt == null ? null : Timestamp.from(publishedAt), body, vaultId);
         return ids.isEmpty() ? null : ids.get(0);
     }
 
-    public FeedItem get(long id) {
-        List<FeedItem> rows = jdbc.query(SELECT + " WHERE fi.id = ?", FeedRepository::map, id);
+    public FeedItem get(long vaultId, long id) {
+        List<FeedItem> rows = jdbc.query(SELECT + " WHERE fi.vault_id = ? AND fi.id = ?", FeedRepository::map, vaultId, id);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     /** Newest published first (unknown dates last, then newest inserted). */
-    public List<FeedItem> list(String status, int limit) {
+    public List<FeedItem> list(long vaultId, String status, int limit) {
         return jdbc.query(SELECT + """
-             WHERE fi.status = ? ORDER BY fi.published_at DESC NULLS LAST, fi.id DESC LIMIT ?
-            """, FeedRepository::map, status, limit);
+             WHERE fi.vault_id = ? AND fi.status = ? ORDER BY fi.published_at DESC NULLS LAST, fi.id DESC LIMIT ?
+            """, FeedRepository::map, vaultId, status, limit);
     }
 
     /** Atomic pending/binned → accepted claim. Returns false if already accepted (caller then

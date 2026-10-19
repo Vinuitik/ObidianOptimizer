@@ -1,8 +1,8 @@
 # Vaults — FLOWS
 
-Files: VaultRepository.java, ActiveVault.java, VaultKeys.java, VaultMigrationIT.java (test); plan: architecture_plans/VAULTS_PLAN.md
+Files: VaultRepository.java, ActiveVault.java, VaultKeys.java, VaultHeaderFilter.java, VaultMigrationIT.java + VaultScopingIT.java + VaultHeaderFilterTest.java (tests); plan: architecture_plans/VAULTS_PLAN.md
 
-Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id). Queries still unfiltered (M3). Everything below marked [NOT IMPLEMENTED] is a later milestone.
+Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id) + M3 (Java scoping: every vault-scoped query filters on `vault_id`, paths come from `ActiveVault`, `X-Vault-Id` filter). Everything marked [NOT IMPLEMENTED] is a later milestone.
 
 ## Boot: registry + backfill
 Spring start → `VaultRepository.initSchema()` (@PostConstruct) → CREATE `vaults` + partial unique index `uq_vaults_single_active` → seed vault 1 (`ON CONFLICT DO NOTHING`) → `setval` on the id sequence
@@ -23,17 +23,31 @@ Every `ON CONFLICT (...)` on those tables names vault_id (Java repos + `embedder
 BM25: `NoteChunkRepository.initSchema()` creates/rebuilds `idx_note_chunks_bm25 (id, text, vault_id)` once (only if indexdef lacks vault_id); verified on `paradedb/paradedb:latest`. On a pg_search that rejects it, falls back to `(id, text)` with a WARN and M3 must post-filter.
 Not touched (no vault in key): bandit_arms, daily_capacity, consumed_events, app_settings (global); capture/tracks/outbox/assignments (surrogate PK, `ON CONFLICT (id)` / `(track_id, capture_id)`); ON CONFLICT DO NOTHING without target (note_links, scope_state, daily_capacity).
 
+## Scoping (M3)
+Rule: no ThreadLocal, no hidden "current vault" inside a repository. Every method of a vault-scoped repo takes `long vaultId` FIRST (reads: `WHERE vault_id = ?`; writes: `INSERT ... vault_id`; `ON CONFLICT` already names it from M2).
+- Request path: controller → `activeVault.id()` → service → repo. Services below controllers either take `vaultId` explicitly (`AssignmentService`, `ReviewService`, `FsrsStateWriter`, `ReviewPreparationService`, `FeedService`, `ImageScanService`, `EmbeddingService`, `SearchService`) or pin `ActiveVault` themselves (`FileRepository`, `SyncService`, `TodayPlanService`, `TrackProgressService`, `ChronoService`).
+- Queue consumers: use the vault stored with the work. DB-row jobs carry it (`PendingImageJob.vaultId`, `Capture.vaultId`, `PendingChunk.vaultId`); Rabbit messages carry `"vaultId"` in the payload (`OutboxRepository.enqueue(vaultId, queue, payload)` adds it); a message without it is treated as vault 1 (queued before M3). Filesystem root of a job's vault: `ActiveVault.rootFor(vaultId)`.
+- Scanners (startup sync in `FileRepository.init`, `ChunkEmbeddingReconciler`, `NoteEmbeddingWorker` poll, `ResourceScanService` retry, `ImageProcessingWorker` poll, `CardJobWorker`, `FlaggedCardRegenService.run`, `CaptureIngestWorker` worklists, `SourcePollWorker.drain`, `ChronoService.runAllJobs`, `TodayPlanService`) read `activeVault.id()` once per pass: active vault only, no proactive work for inactive vaults.
+- `ActiveVault.root()` replaces `SettingsRepository.getVaultPath()` (removed) and `FileRepository.ROOT_FILE` (removed). `GET /settings` reports `ActiveVault.root()` as `vaultPath`.
+- By-surrogate-id ops that expose data take the vault too (`TrackRepository.get/getItem/delete`, `SourceRepository.get/delete`, `FeedRepository.get`, `AssignmentRepository.findCard/findAssignment`, `CardRepository.flag`). Pure id-keyed bookkeeping on a row the caller already fetched (e.g. `CaptureRepository.updateStatus(id)`, `TrackRepository.completeItem(id)`) is NOT re-checked.
+- `VaultHeaderFilter` (servlet filter, every path except `/api/internal/**`): header `X-Vault-Id` present and != `ActiveVault.id()` (or non-numeric) → `409 {"error":"vault_mismatch","activeVaultId":N,"requestedVaultId":M}`; header absent → allowed (frontend sends it from M7). To change: `VaultHeaderFilter.shouldNotFilter()` / `doFilterInternal()`.
+- BM25: the `idx_note_chunks_bm25 (id, text, vault_id)` index from M2 is queried with an ordinary `AND vault_id = ?` predicate next to `@@@ paradedb.match(...)` (`NoteChunkRepository.findByTextSearch`); correct whether or not pg_search pushes the filter into the index.
+- Tests: `VaultScopingIT` (two temp-dir vaults, row 2 inserted, `ActiveVault.set(id, root)`): notes, review queue, FSRS rows, BM25 + vector search, embed queue, image jobs, cards/assignments, tracks/sources/feed/capture/workspace never leak; `VaultHeaderFilterTest` (409). ITs that use a temp vault must pin `activeVault.set(1L, VAULT)` (the registry row says `/vault`); unit tests use `ActiveVault.forTest(id, root)`.
+
 ## Not yet
-- Repos take vaultId, `ActiveVault.switchTo`, `VaultSwitchedEvent`, `X-Vault-Id` filter [NOT IMPLEMENTED] (M3)
+- `ActiveVault.switchTo`, `VaultSwitchedEvent`, rescan-on-switch [NOT IMPLEMENTED] (M4)
 - `vault_settings`, per-vault Drive sync/chrono [NOT IMPLEMENTED] (M4)
 - Python scoping [NOT IMPLEMENTED] (M5); mounts/host-wrapper `POST /vaults` [NOT IMPLEMENTED] (M6); frontend [NOT IMPLEMENTED] (M7); GC job (M7b); DROP DEFAULT (M8) [NOT IMPLEMENTED]
 
 ## Technology Notes
 - Schema management is `CREATE/ALTER ... IF NOT EXISTS` at bean init, no Flyway: no versioning, no rollback; bean order is the only ordering guarantee (hence `@DependsOn`). A repo missing `@DependsOn` can fail on a fresh DB (FK to a not-yet-created `vaults`).
 - Key swaps take ACCESS EXCLUSIVE and rebuild the table's index (seconds on current sizes; note_chunks/BM25 rebuild is the slowest). Swapping a PK where some other table later adds an FK to it would fail the DROP; keep FKs on surrogate ids. A key with vault_id LAST keeps existing path lookups on the index; M3 queries filter both anyway.
+- M3 scoping is enforced by code, not the DB: a repo method that forgets `vault_id` on an INSERT still lands in vault 1 until M8 drops the DEFAULT. `VaultScopingIT` is the only guard — add a case there when adding a vault-scoped query.
 - `DEFAULT 1` is a safety net: any insert that forgets vault_id lands in vault 1 silently. It is removed only in M8; until then wrong-vault writes are NOT caught.
 - `ADD COLUMN ... NOT NULL DEFAULT 1` on Postgres 11+ is metadata-only (instant), but takes a brief ACCESS EXCLUSIVE lock per table.
-- `ActiveVault` is an in-memory AtomicReference, single backend node; it is loaded once at boot and never refreshed in M1.
+- `ActiveVault` is an in-memory AtomicReference, single backend node; it is loaded once at boot and never refreshed (no switching until M4). Scanners read it once per pass, so after M4 a switch mid-pass finishes the pass in the old vault's rows (by design: in-flight work completes in its own vault) — but `FileRepository`, `SyncService` and other `ActiveVault`-pinning services re-read it per call and would follow a switch.
+- `FileRepository` is an active-vault facade: a queue consumer that calls it (e.g. `InternalAgentController.createNote` driven by an embedder callback) writes to the vault that is active NOW, not the job's vault. The embedder side carries `vault_id` from M5.
+- Rabbit payloads without `vaultId` (queued before the M3 deploy) are treated as vault 1.
 - Seed hardcodes id 1 and container_path `/vault` (must match the compose mount). If `/vault` is changed, the UNIQUE(container_path) seed insert for id 1 is skipped when a row already exists, silently keeping the old value.
 - Only one `active` row is allowed (partial unique index); the seed is `ON CONFLICT DO NOTHING`, so an install that already has some other active vault keeps it.
 
@@ -49,3 +63,9 @@ Not touched (no vault in key): bandit_arms, daily_capacity, consumed_events, app
 | BM25 index def | `NoteChunkRepository.initSchema()` |
 | Python cards key + upsert | `generate.ensure_schema`, `generate._store` |
 | Migration test | `VaultMigrationIT` |
+| Vault-scoping tests | `VaultScopingIT`, `VaultHeaderFilterTest` |
+| Add vault scoping to a query | give the repo method `long vaultId` first, `WHERE vault_id = ?` / insert column; controller passes `activeVault.id()`; queue consumer reads the row/message vault |
+| 409 on vault mismatch | `VaultHeaderFilter` |
+| Job's vault filesystem root | `ActiveVault.rootFor(vaultId)` |
+| Rabbit payload carries vaultId | `OutboxRepository.enqueue(vaultId, queue, payload)` |
+| Test helpers | `ActiveVault.set(id, root)`, `ActiveVault.forTest(id, root)` |

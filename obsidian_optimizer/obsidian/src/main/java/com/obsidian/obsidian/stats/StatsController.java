@@ -26,6 +26,8 @@ import java.util.Map;
 @RestController
 public class StatsController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private final JdbcTemplate jdbc;
     private final CardRepository cardRepo;
     private final PendingImageJobRepository imageJobRepo;
@@ -45,7 +47,9 @@ public class StatsController {
 
     public StatsController(JdbcTemplate jdbc,
                            CardRepository cardRepo,
-                           PendingImageJobRepository imageJobRepo) {
+                           PendingImageJobRepository imageJobRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.jdbc = jdbc;
         this.cardRepo = cardRepo;
         this.imageJobRepo = imageJobRepo;
@@ -57,25 +61,25 @@ public class StatsController {
 
         // 1. Vector embedding progress — a note counts as embedded when its
         //    current content_hash equals embedded_hash (NoteEmbeddingWorker)
-        long notesTotal    = count("SELECT COUNT(*) FROM notes");
+        long notesTotal    = count("SELECT COUNT(*) FROM notes WHERE vault_id = ?");
         long notesEmbedded = count(
-            "SELECT COUNT(*) FROM notes WHERE embedded_hash IS NOT NULL AND embedded_hash = content_hash");
-        long chunksTotal   = count("SELECT COUNT(*) FROM note_chunks");
+            "SELECT COUNT(*) FROM notes WHERE vault_id = ? AND embedded_hash IS NOT NULL AND embedded_hash = content_hash");
+        long chunksTotal   = count("SELECT COUNT(*) FROM note_chunks WHERE vault_id = ?");
         out.put("embedding", Map.of(
             "notesTotal", notesTotal,
             "notesEmbedded", Math.min(notesEmbedded, notesTotal),
             "chunksTotal", chunksTotal));
 
         // 2. Image pipeline queue (the multi-day, rate-limited operation)
-        Map<String, Integer> byStatus = imageJobRepo.countByStatus();
+        Map<String, Integer> byStatus = imageJobRepo.countByStatus(activeVault.id());
         out.put("images", Map.of(
             "pending", byStatus.getOrDefault("PENDING", 0),
             "done",    byStatus.getOrDefault("DONE", 0),
             "skipped", byStatus.getOrDefault("SKIPPED", 0)));
 
         // 3. Flashcard generation coverage — eligible = notes with sr_due set
-        long eligible = count("SELECT COUNT(*) FROM notes WHERE sr_due IS NOT NULL");
-        Map<String, Object> cardStats = cardRepo.stats();
+        long eligible = count("SELECT COUNT(*) FROM notes WHERE vault_id = ? AND sr_due IS NOT NULL");
+        Map<String, Object> cardStats = cardRepo.stats(activeVault.id());
         out.put("flashcards", Map.of(
             "eligibleNotes",  eligible,
             "notesWithCards", ((Number) cardStats.get("notes_with_cards")).longValue(),
@@ -92,7 +96,7 @@ public class StatsController {
     }
 
     private long count(String sql) {
-        Long n = jdbc.queryForObject(sql, Long.class);
+        Long n = jdbc.queryForObject(sql, Long.class, activeVault.id());
         return n == null ? 0 : n;
     }
 

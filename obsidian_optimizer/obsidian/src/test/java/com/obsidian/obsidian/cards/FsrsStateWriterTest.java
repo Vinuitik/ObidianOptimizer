@@ -43,11 +43,11 @@ class FsrsStateWriterTest {
     void write_mirrorsToDbAndFrontmatter_preservingEase(@TempDir Path dir) throws Exception {
         Path p = note(dir, "---\nsr-due: 2026-06-01\nsr-interval: 3\nsr-ease: 250\ntitle: x\n---\nbody\n");
 
-        writer().write(p.toString(), new FsrsState(13.8269, 2.1112),
+        writer().write(1L, p.toString(), new FsrsState(13.8269, 2.1112),
             Instant.parse("2026-06-12T10:00:00Z"),
             Timestamp.from(Instant.parse("2026-06-26T10:00:00Z")), 14, "dEasy:sMid", 1.2);
 
-        verify(reviewRepo).upsert(eq(p.toString()), eq(13.8269), eq(2.1112),
+        verify(reviewRepo).upsert(org.mockito.ArgumentMatchers.eq(1L), eq(p.toString()), eq(13.8269), eq(2.1112),
             any(), any(), eq("dEasy:sMid"), eq(1.2));
         verify(fileRepo).reindexAfterExternalWrite(p.toString());
 
@@ -64,19 +64,19 @@ class FsrsStateWriterTest {
     void read_returnsDbRow_whenPresent_withoutTouchingFrontmatter(@TempDir Path dir) throws Exception {
         ReviewRow dbRow = new ReviewRow("/vault/n.md", 5.0, 4.0, 2,
             Timestamp.from(Instant.now()), Timestamp.from(Instant.now()), "dMid:sShort", 0.85);
-        when(reviewRepo.find("/vault/n.md")).thenReturn(dbRow);
+        when(reviewRepo.find(1L, "/vault/n.md")).thenReturn(dbRow);
 
-        assertThat(writer().read("/vault/n.md")).isSameAs(dbRow);
-        verify(reviewRepo, never()).upsert(any(), anyDouble(), anyDouble(), any(), any(), any(), anyDouble());
+        assertThat(writer().read(1L, "/vault/n.md")).isSameAs(dbRow);
+        verify(reviewRepo, never()).upsert(org.mockito.ArgumentMatchers.eq(1L), any(), anyDouble(), anyDouble(), any(), any(), any(), anyDouble());
     }
 
     @Test
     void read_hydratesFromFrontmatter_whenDbMissing_andBackfillsDb(@TempDir Path dir) throws Exception {
         Path p = note(dir, "---\nsr-due: 2026-06-26\nsr-interval: 14\nfsrs-s: 13.826900\n"
             + "fsrs-d: 2.111200\nfsrs-last: 2026-06-12\nfsrs-arm: 1.200000\nfsrs-bucket: dEasy:sMid\n---\nbody\n");
-        when(reviewRepo.find(p.toString())).thenReturn(null);
+        when(reviewRepo.find(1L, p.toString())).thenReturn(null);
 
-        ReviewRow row = writer().read(p.toString());
+        ReviewRow row = writer().read(1L, p.toString());
 
         assertThat(row).isNotNull();
         assertThat(row.stability()).isEqualTo(13.8269);
@@ -84,15 +84,15 @@ class FsrsStateWriterTest {
         assertThat(row.pendingBucket()).isEqualTo("dEasy:sMid");
         assertThat(row.pendingArm()).isEqualTo(1.2);
         // backfilled into the DB so the next query is fast again
-        verify(reviewRepo).upsert(eq(p.toString()), eq(13.8269), eq(2.1112),
+        verify(reviewRepo).upsert(org.mockito.ArgumentMatchers.eq(1L), eq(p.toString()), eq(13.8269), eq(2.1112),
             any(), any(), eq("dEasy:sMid"), eq(1.2));
     }
 
     @Test
     void read_returnsNull_whenNoStateAnywhere(@TempDir Path dir) throws Exception {
         Path p = note(dir, "---\nsr-due: 2026-06-26\nsr-interval: 14\n---\nbody\n"); // legacy only, no fsrs-*
-        when(reviewRepo.find(p.toString())).thenReturn(null);
+        when(reviewRepo.find(1L, p.toString())).thenReturn(null);
 
-        assertThat(writer().read(p.toString())).isNull();
+        assertThat(writer().read(1L, p.toString())).isNull();
     }
 }

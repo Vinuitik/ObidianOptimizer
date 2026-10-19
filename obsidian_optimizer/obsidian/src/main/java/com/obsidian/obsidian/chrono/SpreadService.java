@@ -33,7 +33,7 @@ public class SpreadService {
 
     public record SpreadResult(int total, int moved) {}
 
-    public SpreadResult run(List<Path> mdFiles, int maxDailyReviews) {
+    public SpreadResult run(long vaultId, List<Path> mdFiles, int maxDailyReviews) {
         LocalDate today = LocalDate.now();
         TreeMap<Integer, List<NoteInfo>> byDay = new TreeMap<>();
 
@@ -72,7 +72,7 @@ public class SpreadService {
             LocalDate assignedDate = today.plusDays(entry.getKey());
             for (NoteInfo note : entry.getValue()) {
                 if (assignedDate.equals(note.originalDue)) continue;
-                if (moveDate(note, assignedDate)) moved++;
+                if (moveDate(vaultId, note, assignedDate)) moved++;
             }
         }
 
@@ -80,10 +80,10 @@ public class SpreadService {
         return new SpreadResult(total, moved);
     }
 
-    private boolean moveDate(NoteInfo note, LocalDate newDue) {
+    private boolean moveDate(long vaultId, NoteInfo note, LocalDate newDue) {
         try {
             if (note.isFsrs) {
-                stateWriter.reschedule(note.file.toAbsolutePath().toString(), newDue);
+                stateWriter.reschedule(vaultId, note.file.toAbsolutePath().toString(), newDue);
             } else {
                 FrontmatterRewriter.write(note.file, new FrontmatterRewriter.SrFields(
                     newDue, note.legacy.interval(), note.legacy.ease()));

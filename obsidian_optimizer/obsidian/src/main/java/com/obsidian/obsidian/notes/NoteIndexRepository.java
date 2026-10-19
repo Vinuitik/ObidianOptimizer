@@ -82,69 +82,70 @@ public class NoteIndexRepository {
 
     /** Proposed-note paths for a capture, in source order (capture_seq). Used by the
      *  Learn queue to render a resource's notes without shuffling. */
-    public List<String> findNotesByCapture(String captureId) {
+    public List<String> findNotesByCapture(long vaultId, String captureId) {
         return jdbc.queryForList("""
             SELECT path FROM notes
-            WHERE capture_id = ?
+            WHERE vault_id = ? AND capture_id = ?
             ORDER BY capture_seq ASC NULLS LAST, path ASC
-            """, String.class, captureId);
+            """, String.class, vaultId, captureId);
     }
 
     /** How many of a capture's notes are still parked in _inbox/ awaiting triage.
      *  When this hits zero the capture is fully filed (InboxController flips status). */
-    public int countUnfiledNotesForCapture(String captureId) {
+    public int countUnfiledNotesForCapture(long vaultId, String captureId) {
         Integer n = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM notes WHERE capture_id = ? AND path LIKE '%/_inbox/%'",
-            Integer.class, captureId);
+            "SELECT COUNT(*) FROM notes WHERE vault_id = ? AND capture_id = ? AND path LIKE '%/_inbox/%'",
+            Integer.class, vaultId, captureId);
         return n == null ? 0 : n;
     }
 
     /** Notes whose text changed since they were last embedded (or never were).
      *  Returns path → content_hash at selection time. */
-    public Map<String, String> findNotesNeedingEmbedding(int limit) {
+    public Map<String, String> findNotesNeedingEmbedding(long vaultId, int limit) {
         Map<String, String> out = new LinkedHashMap<>();
         jdbc.query("""
             SELECT path, content_hash FROM notes
-            WHERE content_hash IS NOT NULL
+            WHERE vault_id = ?
+              AND content_hash IS NOT NULL
               AND content_hash IS DISTINCT FROM embedded_hash
               AND ingest_pending = false
             ORDER BY modified_at DESC
             LIMIT ?
-            """, rs -> { out.put(rs.getString("path"), rs.getString("content_hash")); }, limit);
+            """, rs -> { out.put(rs.getString("path"), rs.getString("content_hash")); }, vaultId, limit);
         return out;
     }
 
     /** Single-note version of {@link #findNotesNeedingEmbedding}'s predicate — used
      *  by the outbox producer at the registerImages chokepoint to decide whether the
      *  note just written is worth an "embed" message, without a table scan. */
-    public boolean needsEmbedding(String path) {
+    public boolean needsEmbedding(long vaultId, String path) {
         Boolean needs = jdbc.queryForObject("""
             SELECT EXISTS (
                 SELECT 1 FROM notes
-                WHERE path = ?
+                WHERE vault_id = ? AND path = ?
                   AND content_hash IS NOT NULL
                   AND content_hash IS DISTINCT FROM embedded_hash
                   AND ingest_pending = false
             )
-            """, Boolean.class, path);
+            """, Boolean.class, vaultId, path);
         return Boolean.TRUE.equals(needs);
     }
 
     /** Records that {@code indexedHash} is fully embedded. Guarded so a note
      *  edited mid-indexing stays in the work list (hash no longer matches). */
-    public void markEmbedded(String path, String indexedHash) {
+    public void markEmbedded(long vaultId, String path, String indexedHash) {
         jdbc.update(
-            "UPDATE notes SET embedded_hash = ? WHERE path = ? AND content_hash = ?",
-            indexedHash, path, indexedHash);
+            "UPDATE notes SET embedded_hash = ? WHERE vault_id = ? AND path = ? AND content_hash = ?",
+            indexedHash, vaultId, path, indexedHash);
     }
 
-    public void syncWithDisk(List<File> diskFiles) {
+    public void syncWithDisk(long vaultId, List<File> diskFiles) {
         Map<String, File> diskMap = new HashMap<>();
         for (File f : diskFiles) diskMap.put(f.getAbsolutePath(), f);
 
         Map<String, Long> dbMap = new HashMap<>();
-        jdbc.query("SELECT path, modified_at FROM notes",
-            (RowCallbackHandler) rs -> dbMap.put(rs.getString("path"), rs.getLong("modified_at")));
+        jdbc.query("SELECT path, modified_at FROM notes WHERE vault_id = ?",
+            (RowCallbackHandler) rs -> dbMap.put(rs.getString("path"), rs.getLong("modified_at")), vaultId);
 
         int inserted = 0, updated = 0, deleted = 0;
 
@@ -159,8 +160,8 @@ public class NoteIndexRepository {
                     String content = Files.readString(file.toPath());
                     FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(content);
                     String title = file.getName().replace(".md", "");
-                    upsert(path, title, meta, diskMod);
-                    noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
+                    upsert(vaultId, path, title, meta, diskMod);
+                    noteLinkRepo.updateLinks(vaultId, path, NoteLinkRepository.extractTargets(content));
                     if (dbMod == null) inserted++; else updated++;
                 } catch (IOException e) {
                     log.warn("[syncWithDisk] skip {}: {}", path, e.getMessage());
@@ -170,8 +171,8 @@ public class NoteIndexRepository {
 
         for (String dbPath : dbMap.keySet()) {
             if (!diskMap.containsKey(dbPath)) {
-                delete(dbPath);
-                noteLinkRepo.deleteSource(dbPath);
+                delete(vaultId, dbPath);
+                noteLinkRepo.deleteSource(vaultId, dbPath);
                 deleted++;
             }
         }
@@ -180,22 +181,22 @@ public class NoteIndexRepository {
             inserted, updated, deleted, diskMap.size(), dbMap.size());
     }
 
-    public ArrayList<String> getAllPaths() {
+    public ArrayList<String> getAllPaths(long vaultId) {
         return new ArrayList<>(
-            jdbc.queryForList("SELECT path FROM notes ORDER BY path", String.class));
+            jdbc.queryForList("SELECT path FROM notes WHERE vault_id = ? ORDER BY path", String.class, vaultId));
     }
 
-    public FileRepository.ReviewPage getReviewNotesPaged(int offset, int limit) {
+    public FileRepository.ReviewPage getReviewNotesPaged(long vaultId, int offset, int limit) {
         // Exclude the ingest staging folder (_inbox): those notes are awaiting
         // triage in the Learn Inbox and must not enter the FSRS review queue until
         // the user files them to a real folder.
         List<String> rows = jdbc.queryForList("""
             SELECT path FROM notes
-            WHERE sr_due <= CURRENT_DATE
+            WHERE vault_id = ? AND sr_due <= CURRENT_DATE
               AND path NOT LIKE '%/_inbox/%'
             ORDER BY sr_due ASC, path ASC
             LIMIT ? OFFSET ?
-            """, String.class, limit + 1, offset);
+            """, String.class, vaultId, limit + 1, offset);
 
         boolean hasMore = rows.size() > limit;
         List<String> page = hasMore ? rows.subList(0, limit) : rows;
@@ -204,30 +205,31 @@ public class NoteIndexRepository {
 
     /** Due query enriched with a hasCards flag per note (EXISTS against active cards),
      *  same ordering/exclusions as getReviewNotesPaged. Feeds the hybrid-review split. */
-    public FileRepository.ReviewPageInfo getReviewNotesPagedWithCards(int offset, int limit) {
+    public FileRepository.ReviewPageInfo getReviewNotesPagedWithCards(long vaultId, int offset, int limit) {
         List<FileRepository.ReviewNoteInfo> rows = jdbc.query("""
             SELECT n.path AS path,
                    EXISTS (SELECT 1 FROM cards c
-                           WHERE c.note_path = n.path AND c.status = 'ACTIVE') AS has_cards
+                           WHERE c.note_path = n.path AND c.vault_id = n.vault_id
+                             AND c.status = 'ACTIVE') AS has_cards
             FROM notes n
-            WHERE n.sr_due <= CURRENT_DATE
+            WHERE n.vault_id = ? AND n.sr_due <= CURRENT_DATE
               AND n.path NOT LIKE '%/_inbox/%'
             ORDER BY n.sr_due ASC, n.path ASC
             LIMIT ? OFFSET ?
             """,
             (rs, i) -> new FileRepository.ReviewNoteInfo(rs.getString("path"), rs.getBoolean("has_cards")),
-            limit + 1, offset);
+            vaultId, limit + 1, offset);
 
         boolean hasMore = rows.size() > limit;
         List<FileRepository.ReviewNoteInfo> page = hasMore ? rows.subList(0, limit) : rows;
         return new FileRepository.ReviewPageInfo(new ArrayList<>(page), hasMore);
     }
 
-    public void upsert(String path, String title, FrontmatterParser.NoteMetadata meta, long modifiedAt) {
+    public void upsert(long vaultId, String path, String title, FrontmatterParser.NoteMetadata meta, long modifiedAt) {
         jdbc.update("""
             INSERT INTO notes(path, title, sr_due, sr_interval, sr_ease, modified_at,
-                              capture_id, capture_seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                              capture_id, capture_seq, vault_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (path, vault_id) DO UPDATE SET
               title       = EXCLUDED.title,
               sr_due      = EXCLUDED.sr_due,
@@ -244,57 +246,58 @@ public class NoteIndexRepository {
             meta.srEase(),
             modifiedAt,
             meta.captureId(),
-            meta.captureSeq());
+            meta.captureSeq(),
+            vaultId);
     }
 
-    public void rename(String oldPath, String newPath, String newTitle) {
+    public void rename(long vaultId, String oldPath, String newPath, String newTitle) {
         jdbc.update(
-            "UPDATE notes SET path = ?, title = ? WHERE path = ?",
-            newPath, newTitle, oldPath);
+            "UPDATE notes SET path = ?, title = ? WHERE path = ? AND vault_id = ?",
+            newPath, newTitle, oldPath, vaultId);
     }
 
-    public void delete(String path) {
-        jdbc.update("DELETE FROM notes WHERE path = ?", path);
+    public void delete(long vaultId, String path) {
+        jdbc.update("DELETE FROM notes WHERE path = ? AND vault_id = ?", path, vaultId);
     }
 
     /** Updates both hashes in one write at the registerImages chokepoint.
      *  content_hash = full file (Drive sync); body_hash = frontmatter-stripped
      *  (card work-list key, so sr-due/chrono frontmatter edits don't re-card). */
-    public void updateContentHash(String path, String contentHash, String bodyHash) {
-        jdbc.update("UPDATE notes SET content_hash = ?, body_hash = ? WHERE path = ?",
-            contentHash, bodyHash, path);
+    public void updateContentHash(long vaultId, String path, String contentHash, String bodyHash) {
+        jdbc.update("UPDATE notes SET content_hash = ?, body_hash = ? WHERE path = ? AND vault_id = ?",
+            contentHash, bodyHash, path, vaultId);
     }
 
     /** Readiness gate flag — true while the note has an un-ingested resource embed.
      *  Maintained by ResourceScanService on every write; read by the embedding and
      *  card worklists to skip notes whose content isn't finalized yet. */
-    public void setIngestPending(String path, boolean pending) {
-        jdbc.update("UPDATE notes SET ingest_pending = ? WHERE path = ?", pending, path);
+    public void setIngestPending(long vaultId, String path, boolean pending) {
+        jdbc.update("UPDATE notes SET ingest_pending = ? WHERE path = ? AND vault_id = ?", pending, path, vaultId);
     }
 
     /** Notes still waiting on ingest (the retry worker re-fires these). Random order
      *  so a large backlog rotates fairly instead of starving the tail; the embedder
      *  de-dups, so re-firing an already-queued note is harmless. */
-    public List<String> findIngestPending(int limit) {
+    public List<String> findIngestPending(long vaultId, int limit) {
         return jdbc.queryForList(
-            "SELECT path FROM notes WHERE ingest_pending = true ORDER BY random() LIMIT ?",
-            String.class, limit);
+            "SELECT path FROM notes WHERE vault_id = ? AND ingest_pending = true ORDER BY random() LIMIT ?",
+            String.class, vaultId, limit);
     }
 
-    public String getContentHash(String path) {
+    public String getContentHash(long vaultId, String path) {
         List<String> rows = jdbc.queryForList(
-            "SELECT content_hash FROM notes WHERE path = ?", String.class, path);
+            "SELECT content_hash FROM notes WHERE vault_id = ? AND path = ?", String.class, vaultId, path);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     /** Frontmatter-stripped hash — the key the card worker diffs on (see findNotesNeedingCards). */
-    public String getBodyHash(String path) {
+    public String getBodyHash(long vaultId, String path) {
         List<String> rows = jdbc.queryForList(
-            "SELECT body_hash FROM notes WHERE path = ?", String.class, path);
+            "SELECT body_hash FROM notes WHERE vault_id = ? AND path = ?", String.class, vaultId, path);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    public List<Map<String, Object>> getAllPathsWithHash() {
-        return jdbc.queryForList("SELECT path, content_hash FROM notes WHERE content_hash IS NOT NULL");
+    public List<Map<String, Object>> getAllPathsWithHash(long vaultId) {
+        return jdbc.queryForList("SELECT path, content_hash FROM notes WHERE vault_id = ? AND content_hash IS NOT NULL", vaultId);
     }
 }

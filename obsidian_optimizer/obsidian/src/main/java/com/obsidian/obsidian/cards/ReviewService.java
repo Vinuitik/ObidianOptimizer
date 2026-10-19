@@ -63,12 +63,12 @@ public class ReviewService {
         this.stateWriter = stateWriter;
     }
 
-    public GradeResult grade(String notePath, Band band) {
-        return grade(notePath, band, Instant.now());
+    public GradeResult grade(long vaultId, String notePath, Band band) {
+        return grade(vaultId, notePath, band, Instant.now());
     }
 
-    GradeResult grade(String notePath, Band band, Instant now) {
-        ReviewRow existing = stateWriter.read(notePath);
+    GradeResult grade(long vaultId, String notePath, Band band, Instant now) {
+        ReviewRow existing = stateWriter.read(vaultId, notePath);
 
         // 1. Delayed reward for the scheduling decision behind THIS review,
         //    credited to the EFFECTIVE arm = the interval the note was really
@@ -104,7 +104,7 @@ public class ReviewService {
         long scheduledDays = Math.max(1, Math.round(baseInterval * arm));
 
         Timestamp due = Timestamp.from(now.plus(scheduledDays, ChronoUnit.DAYS));
-        stateWriter.write(notePath, state, now, due, (int) scheduledDays, bucket, arm);
+        stateWriter.write(vaultId, notePath, state, now, due, (int) scheduledDays, bucket, arm);
 
         log.info("[Review] {} band={} S={} D={} base={}d arm={} due={}",
             notePath, band, String.format("%.2f", state.stability()),

@@ -4,6 +4,7 @@ import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.sync.SyncQueueRepository;
+import com.obsidian.obsidian.vaults.ActiveVault;
 
 import java.io.File;
 import java.io.IOException;
@@ -37,50 +38,54 @@ public class FileRepository {
     // not real notes; never indexed even though nested inside _inbox/.
     private static final Set<String> EXCLUDED_DIRS = Set.of(".git", ".obsidian", "_trash", "resources", "_workspace", "_reports", "_sources");
 
-    private String ROOT_FILE;
-
     private final NoteLinkRepository  noteLinkRepo;
     private final SettingsRepository  settingsRepo;
     private final NoteIndexRepository noteIndex;
     private final ImageScanService    imageScanService;
     private final SyncQueueRepository syncQueueRepo;
+    private final ActiveVault         activeVault;
 
     public FileRepository(NoteLinkRepository noteLinkRepo,
                           SettingsRepository settingsRepo,
                           NoteIndexRepository noteIndex,
                           ImageScanService imageScanService,
-                          SyncQueueRepository syncQueueRepo) {
+                          SyncQueueRepository syncQueueRepo,
+                          ActiveVault activeVault) {
         this.noteLinkRepo  = noteLinkRepo;
         this.settingsRepo  = settingsRepo;
         this.noteIndex     = noteIndex;
         this.imageScanService = imageScanService;
         this.syncQueueRepo = syncQueueRepo;
+        this.activeVault   = activeVault;
     }
+
+    /** Active vault root / id. Everything this class does targets the active vault only. */
+    private String root() { return activeVault.root().toString(); }
+    private long vid()    { return activeVault.id(); }
 
     @PostConstruct
     public void init() {
-        ROOT_FILE = settingsRepo.getVaultPath();
         List<File> diskFiles = bfsDiskFiles();
 
         String syncMode = settingsRepo.getStartupSyncMode();
         if ("async".equals(syncMode)) {
-            log.info("[init] async sync started for {}", ROOT_FILE);
+            log.info("[init] async sync started for {}", root());
             CompletableFuture.runAsync(() -> {
-                noteIndex.syncWithDisk(diskFiles);
-                imageScanService.scanAll(diskFiles);
+                noteIndex.syncWithDisk(vid(), diskFiles);
+                imageScanService.scanAll(vid(), diskFiles);
             });
         } else {
-            log.info("[init] blocking sync started for {}", ROOT_FILE);
-            noteIndex.syncWithDisk(diskFiles);
+            log.info("[init] blocking sync started for {}", root());
+            noteIndex.syncWithDisk(vid(), diskFiles);
             log.info("[init] blocking sync complete");
-            imageScanService.scanAll(diskFiles);
+            imageScanService.scanAll(vid(), diskFiles);
         }
     }
 
     // ── Read ─────────────────────────────────────────────────────────────────
 
     public ArrayList<String> getNoteNames() {
-        return noteIndex.getAllPaths();
+        return noteIndex.getAllPaths(vid());
     }
 
     public String getText(String path) {
@@ -96,7 +101,7 @@ public class FileRepository {
     }
 
     public String getRootPath() {
-        return new File(ROOT_FILE).getAbsolutePath();
+        return new File(root()).getAbsolutePath();
     }
 
     public List<Path> listMdPaths() {
@@ -107,7 +112,7 @@ public class FileRepository {
 
     public void triggerDeltaSync() {
         log.info("[FileRepository] Post-chrono delta sync.");
-        noteIndex.syncWithDisk(bfsDiskFiles());
+        noteIndex.syncWithDisk(vid(), bfsDiskFiles());
     }
 
     public ChildrenResult getDirectChildren(String folderPath) {
@@ -141,13 +146,13 @@ public class FileRepository {
     }
 
     public ReviewPage getReviewNotesPaged(int offset, int limit) {
-        return noteIndex.getReviewNotesPaged(offset, limit);
+        return noteIndex.getReviewNotesPaged(vid(), offset, limit);
     }
 
     /** Same due query, but each note tagged with whether it has active flashcards —
      *  the hybrid-review UI uses this to split the daily set into flashcard vs read tracks. */
     public ReviewPageInfo getReviewNotesPagedWithCards(int offset, int limit) {
-        return noteIndex.getReviewNotesPagedWithCards(offset, limit);
+        return noteIndex.getReviewNotesPagedWithCards(vid(), offset, limit);
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────────
@@ -190,10 +195,10 @@ public class FileRepository {
 
         String path = noteFile.getAbsolutePath();
         FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(initialContent);
-        noteIndex.upsert(path, name.replace(".md", ""), meta, noteFile.lastModified());
-        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(initialContent));
-        imageScanService.registerImages(path, initialContent);
-        syncQueueRepo.markPending(toRelative(path), ContentHashing.sha256(initialContent));
+        noteIndex.upsert(vid(), path, name.replace(".md", ""), meta, noteFile.lastModified());
+        noteLinkRepo.updateLinks(vid(), path, NoteLinkRepository.extractTargets(initialContent));
+        imageScanService.registerImages(vid(), path, initialContent);
+        syncQueueRepo.markPending(vid(), toRelative(path), ContentHashing.sha256(initialContent));
         return path;
     }
 
@@ -205,10 +210,10 @@ public class FileRepository {
 
         String title = file.getName().replace(".md", "");
         FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(content);
-        noteIndex.upsert(path, title, meta, file.lastModified());
-        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
-        imageScanService.registerImages(path, content);
-        syncQueueRepo.markPending(toRelative(path), ContentHashing.sha256(content));
+        noteIndex.upsert(vid(), path, title, meta, file.lastModified());
+        noteLinkRepo.updateLinks(vid(), path, NoteLinkRepository.extractTargets(content));
+        imageScanService.registerImages(vid(), path, content);
+        syncQueueRepo.markPending(vid(), toRelative(path), ContentHashing.sha256(content));
     }
 
     public void patchNote(String path, List<PatchHunk> hunks) throws IOException {
@@ -245,10 +250,10 @@ public class FileRepository {
 
         String title = file.getName().replace(".md", "");
         FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(newContent);
-        noteIndex.upsert(path, title, meta, file.lastModified());
-        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(newContent));
-        imageScanService.registerImages(path, newContent);
-        syncQueueRepo.markPending(toRelative(path), ContentHashing.sha256(newContent));
+        noteIndex.upsert(vid(), path, title, meta, file.lastModified());
+        noteLinkRepo.updateLinks(vid(), path, NoteLinkRepository.extractTargets(newContent));
+        imageScanService.registerImages(vid(), path, newContent);
+        syncQueueRepo.markPending(vid(), toRelative(path), ContentHashing.sha256(newContent));
     }
 
     public String renameNote(String oldPath, String newName) throws IOException {
@@ -265,7 +270,7 @@ public class FileRepository {
             throw new IOException("A note named '" + newName + "' already exists in this folder");
         }
 
-        List<String> sources = noteLinkRepo.findSourcesByTarget(oldName);
+        List<String> sources = noteLinkRepo.findSourcesByTarget(vid(), oldName);
 
         if (!oldFile.renameTo(newFile)) {
             throw new IOException("Rename failed");
@@ -284,21 +289,21 @@ public class FileRepository {
                     // Rewritten backlink sources changed on disk — keep their index
                     // hash current and queue them for Drive sync, or the Drive copy
                     // stays stale until the next unrelated edit.
-                    imageScanService.registerImages(sourcePath, updated);
-                    syncQueueRepo.markPending(toRelative(sourcePath), ContentHashing.sha256(updated));
+                    imageScanService.registerImages(vid(), sourcePath, updated);
+                    syncQueueRepo.markPending(vid(), toRelative(sourcePath), ContentHashing.sha256(updated));
                 }
             } catch (IOException e) {
                 log.warn("[renameNote] failed to rewrite links in {}: {}", sourcePath, e.getMessage());
             }
         }
 
-        noteIndex.rename(oldPath, newPath, newName);
-        noteLinkRepo.renameTarget(oldName, newName);
-        noteLinkRepo.renameSource(oldPath, newPath);
-        syncQueueRepo.tombstone(toRelative(oldPath));
+        noteIndex.rename(vid(), oldPath, newPath, newName);
+        noteLinkRepo.renameTarget(vid(), oldName, newName);
+        noteLinkRepo.renameSource(vid(), oldPath, newPath);
+        syncQueueRepo.tombstone(vid(), toRelative(oldPath));
         try {
             String content = Files.readString(Paths.get(newPath));
-            syncQueueRepo.markPending(toRelative(newPath), ContentHashing.sha256(content));
+            syncQueueRepo.markPending(vid(), toRelative(newPath), ContentHashing.sha256(content));
         } catch (IOException e) {
             log.warn("[renameNote] sync queue update failed for {}: {}", newPath, e.getMessage());
         }
@@ -328,12 +333,12 @@ public class FileRepository {
         String newAbsPath = newPath.toFile().getAbsolutePath();
         String title = sourceFile.getName().replace(".md", "");
 
-        noteIndex.rename(sourcePath, newAbsPath, title);
-        noteLinkRepo.renameSource(sourcePath, newAbsPath);
-        syncQueueRepo.tombstone(toRelative(sourcePath));
+        noteIndex.rename(vid(), sourcePath, newAbsPath, title);
+        noteLinkRepo.renameSource(vid(), sourcePath, newAbsPath);
+        syncQueueRepo.tombstone(vid(), toRelative(sourcePath));
         try {
             String content = Files.readString(newPath);
-            syncQueueRepo.markPending(toRelative(newAbsPath), ContentHashing.sha256(content));
+            syncQueueRepo.markPending(vid(), toRelative(newAbsPath), ContentHashing.sha256(content));
         } catch (IOException e) {
             log.warn("[moveNote] sync queue update failed for {}: {}", newAbsPath, e.getMessage());
         }
@@ -345,7 +350,7 @@ public class FileRepository {
         File file = new File(path);
         if (!file.exists()) throw new IOException("Note not found: " + path);
 
-        File trashDir = new File(ROOT_FILE, "_trash");
+        File trashDir = new File(root(), "_trash");
         if (!trashDir.exists()) trashDir.mkdirs();
 
         File dest = new File(trashDir, file.getName());
@@ -356,9 +361,9 @@ public class FileRepository {
 
         if (!file.renameTo(dest)) throw new IOException("Failed to move note to trash");
 
-        noteIndex.delete(path);
-        noteLinkRepo.deleteSource(path);
-        syncQueueRepo.tombstone(toRelative(path));
+        noteIndex.delete(vid(), path);
+        noteLinkRepo.deleteSource(vid(), path);
+        syncQueueRepo.tombstone(vid(), toRelative(path));
     }
 
     /**
@@ -371,7 +376,7 @@ public class FileRepository {
         File file = new File(path);
         if (!file.exists()) return; // already gone — acknowledge is idempotent
 
-        File trashDir = new File(ROOT_FILE, "_trash");
+        File trashDir = new File(root(), "_trash");
         if (!trashDir.exists()) trashDir.mkdirs();
 
         File dest = new File(trashDir, file.getName());
@@ -401,11 +406,11 @@ public class FileRepository {
             throw new IOException("Folder not found: " + path);
         }
 
-        Path vaultRoot = Paths.get(ROOT_FILE).toAbsolutePath().normalize();
+        Path vaultRoot = Paths.get(root()).toAbsolutePath().normalize();
         if (candidate.equals(vaultRoot)) {
             throw new IOException("Cannot delete the vault root");
         }
-        File trashDir = new File(ROOT_FILE, "_trash");
+        File trashDir = new File(root(), "_trash");
         if (candidate.equals(trashDir.getAbsoluteFile().toPath().normalize())) {
             throw new IOException("Cannot delete the trash folder");
         }
@@ -414,11 +419,11 @@ public class FileRepository {
         // 1. Purge index/links/sync for every indexed note under this folder,
         //    BEFORE the move (paths are absolute, so a prefix match is exact).
         String prefix = folder.getAbsolutePath() + File.separator;
-        for (String notePath : noteIndex.getAllPaths()) {
+        for (String notePath : noteIndex.getAllPaths(vid())) {
             if (notePath.startsWith(prefix)) {
-                noteIndex.delete(notePath);
-                noteLinkRepo.deleteSource(notePath);
-                syncQueueRepo.tombstone(toRelative(notePath));
+                noteIndex.delete(vid(), notePath);
+                noteLinkRepo.deleteSource(vid(), notePath);
+                syncQueueRepo.tombstone(vid(), toRelative(notePath));
             }
         }
 
@@ -433,7 +438,7 @@ public class FileRepository {
     }
 
     private String toRelative(String absPath) {
-        return Paths.get(ROOT_FILE).relativize(Paths.get(absPath)).toString().replace('\\', '/');
+        return Paths.get(root()).relativize(Paths.get(absPath)).toString().replace('\\', '/');
     }
 
     /**
@@ -446,11 +451,11 @@ public class FileRepository {
         File file = new File(path);
         if (!file.exists()) throw new IOException("Note not found: " + path);
         String content = Files.readString(Paths.get(path));
-        noteIndex.upsert(path, file.getName().replace(".md", ""),
+        noteIndex.upsert(vid(), path, file.getName().replace(".md", ""),
             FrontmatterParser.parse(content), file.lastModified());
-        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(content));
-        imageScanService.registerImages(path, content);
-        syncQueueRepo.markPending(toRelative(path), ContentHashing.sha256(content));
+        noteLinkRepo.updateLinks(vid(), path, NoteLinkRepository.extractTargets(content));
+        imageScanService.registerImages(vid(), path, content);
+        syncQueueRepo.markPending(vid(), toRelative(path), ContentHashing.sha256(content));
     }
 
     // ── Path guards ───────────────────────────────────────────────────────────
@@ -463,7 +468,7 @@ public class FileRepository {
         if (rawPath == null || rawPath.isBlank()) {
             throw new IOException("Path required");
         }
-        Path vaultRoot = Paths.get(ROOT_FILE).toAbsolutePath().normalize();
+        Path vaultRoot = Paths.get(root()).toAbsolutePath().normalize();
         Path candidate = Paths.get(rawPath).toAbsolutePath().normalize();
         if (!candidate.startsWith(vaultRoot)) {
             throw new IOException("Path is outside the vault: " + rawPath);
@@ -491,7 +496,7 @@ public class FileRepository {
 
     private List<File> bfsDiskFiles() {
         List<File> files = new ArrayList<>();
-        File root = new File(ROOT_FILE);
+        File root = new File(root());
         Queue<File> queue = new ArrayDeque<>();
         queue.add(root);
 

@@ -28,18 +28,18 @@ public class TrackReviewHandoff {
     /** Idempotent: a note already in the FSRS pool (legacy or current) is just rescheduled
      *  to today, preserving its memory state; a genuinely new note gets a fresh initial
      *  state seeded at GOOD (neutral) and due today. */
-    public void seedDueToday(String notePath) {
-        ReviewRow migrated = stateWriter.normalizeLegacy(notePath);
+    public void seedDueToday(long vaultId, String notePath) {
+        ReviewRow migrated = stateWriter.normalizeLegacy(vaultId, notePath);
         if (migrated != null) {
-            stateWriter.reschedule(notePath, LocalDate.now());
+            stateWriter.reschedule(vaultId, notePath, LocalDate.now());
             return;
         }
-        ReviewRow existing = stateWriter.read(notePath);
+        ReviewRow existing = stateWriter.read(vaultId, notePath);
         if (existing != null) {
-            stateWriter.reschedule(notePath, LocalDate.now());
+            stateWriter.reschedule(vaultId, notePath, LocalDate.now());
             return;
         }
         FsrsService.FsrsState state = fsrs.initialState(FsrsService.GRADE_GOOD);
-        stateWriter.writeState(notePath, state, Instant.now(), LocalDate.now(), 1);
+        stateWriter.writeState(vaultId, notePath, state, Instant.now(), LocalDate.now(), 1);
     }
 }

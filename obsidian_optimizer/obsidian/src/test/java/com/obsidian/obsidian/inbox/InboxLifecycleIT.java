@@ -40,6 +40,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 class InboxLifecycleIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>(org.testcontainers.utility.DockerImageName
@@ -95,7 +100,7 @@ class InboxLifecycleIT {
     }
 
     private void reindex() {
-        noteIndex.syncWithDisk(fileRepo.listMdPaths().stream()
+        noteIndex.syncWithDisk(1L, fileRepo.listMdPaths().stream()
             .map(Path::toFile).collect(Collectors.toList()));
     }
 
@@ -127,7 +132,7 @@ class InboxLifecycleIT {
 
     @Test
     void standalone_listShowsItem_reviewQueueExcludesInboxUntilFiled() throws IOException {
-        captureRepo.create("cap-stand-1", "url", "https://example.com/lecture",
+        captureRepo.create(1L, "cap-stand-1", "url", "https://example.com/lecture",
                            "_inbox/_sources/cap-stand-1.md", "Lecture");
         write("_inbox/_sources/cap-stand-1.md", "snapshot");
         Path note = write("_inbox/Proposed.md", standaloneBody("cap-stand-1", YESTERDAY));
@@ -143,13 +148,13 @@ class InboxLifecycleIT {
         assertThat(item.captureId()).isEqualTo("cap-stand-1");
 
         // staged notes are indexed but MUST NOT be in the FSRS review queue
-        assertThat(noteIndex.getAllPaths()).contains(note.toString());
+        assertThat(noteIndex.getAllPaths(1L)).contains(note.toString());
         assertThat(duePaths()).noneMatch(p -> p.contains("_inbox"));
     }
 
     @Test
     void standalone_file_movesNote_stripsInboxKeys_filesCapture_trashesSnapshot() throws IOException {
-        captureRepo.create("cap-stand-2", "url", "https://example.com/lecture2",
+        captureRepo.create(1L, "cap-stand-2", "url", "https://example.com/lecture2",
                            "_inbox/_sources/cap-stand-2.md", "Lecture2");
         write("_inbox/_sources/cap-stand-2.md", "snapshot");
         Path note = write("_inbox/FileMe.md", standaloneBody("cap-stand-2", YESTERDAY));
@@ -184,7 +189,7 @@ class InboxLifecycleIT {
 
     @Test
     void standalone_file_secondNotePending_captureStaysProcessing() throws IOException {
-        captureRepo.create("cap-multi", "url", "https://example.com/series",
+        captureRepo.create(1L, "cap-multi", "url", "https://example.com/series",
                            "_inbox/_sources/cap-multi.md", "Series");
         write("_inbox/_sources/cap-multi.md", "snapshot");
         Path first  = write("_inbox/Part1.md", standaloneBody("cap-multi", YESTERDAY));
@@ -216,7 +221,7 @@ class InboxLifecycleIT {
             <!-- ingest:lecture.mp4 sha=abc -->synthesized block<!-- /ingest:lecture.mp4 -->
             """.formatted(YESTERDAY);
         Path note = write("Topic/Existing.md", body);
-        captureRepo.create("cap-inplace", "note", "Topic/Existing.md",
+        captureRepo.create(1L, "cap-inplace", "note", "Topic/Existing.md",
                            "_inbox/_sources/cap-inplace.md", "Existing");
         write("_inbox/_sources/cap-inplace.md", "pre-rewrite snapshot");
         reindex();
@@ -244,7 +249,7 @@ class InboxLifecycleIT {
 
     @Test
     void discard_lastNoteOfCapture_trashesNoteAndOrphanedLocalMedia() throws IOException {
-        captureRepo.create("cap-media", "url", "https://youtube.com/watch?v=x",
+        captureRepo.create(1L, "cap-media", "url", "https://youtube.com/watch?v=x",
                            null, "Video");
         Path media = write("resources/media/talk.mp4", "fake-video-bytes");
         String body = standaloneBody("cap-media", YESTERDAY)
@@ -255,7 +260,7 @@ class InboxLifecycleIT {
         inbox.discardNote(note.toString());
 
         assertThat(note).doesNotExist();
-        assertThat(noteIndex.getAllPaths()).doesNotContain(note.toString());
+        assertThat(noteIndex.getAllPaths(1L)).doesNotContain(note.toString());
         // last surviving note of the capture → its downloaded media is orphaned → trashed
         assertThat(media).doesNotExist();
         try (var trash = Files.list(VAULT.resolve("_trash"))) {
@@ -266,7 +271,7 @@ class InboxLifecycleIT {
 
     @Test
     void discard_siblingNoteSurvives_localMediaKept() throws IOException {
-        captureRepo.create("cap-media2", "url", "https://youtube.com/watch?v=y",
+        captureRepo.create(1L, "cap-media2", "url", "https://youtube.com/watch?v=y",
                            null, "Video2");
         Path media = write("resources/media/keep.mp4", "fake-video-bytes");
         String body = standaloneBody("cap-media2", YESTERDAY)
@@ -288,10 +293,10 @@ class InboxLifecycleIT {
     void list_ignoresFiledCaptures_andNonNoteSources() throws IOException {
         // filed in-place capture → not listed
         write("Topic/Done.md", "---\ncapture-id: cap-done\n---\nbody");
-        captureRepo.create("cap-done", "note", "Topic/Done.md", null, "Done");
+        captureRepo.create(1L, "cap-done", "note", "Topic/Done.md", null, "Done");
         captureRepo.updateStatus("cap-done", "filed");
         // queued url capture (durable queue row, no notes yet) → not an inbox item
-        captureRepo.enqueue("cap-queued", "url", "https://example.com/z", null, "Z");
+        captureRepo.enqueue(1L, "cap-queued", "url", "https://example.com/z", null, "Z");
         reindex();
 
         assertThat(inbox.listItems()).isEmpty();

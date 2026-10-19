@@ -54,6 +54,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class CaptureIngestWorker {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(CaptureIngestWorker.class);
 
     private final CaptureRepository captureRepo;
@@ -99,7 +101,9 @@ public class CaptureIngestWorker {
     public CaptureIngestWorker(CaptureRepository captureRepo, IngestClient ingestClient,
                                SettingsRepository settingsRepo, NoteIndexRepository noteIndex,
                                FileRepository fileRepo, RabbitTemplate rabbitTemplate,
-                               PipelineFailureRepository pipelineFailureRepo) {
+                               PipelineFailureRepository pipelineFailureRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.captureRepo = captureRepo;
         this.ingestClient = ingestClient;
         this.settingsRepo = settingsRepo;
@@ -178,10 +182,10 @@ public class CaptureIngestWorker {
     }
 
     void drainDeferred() {
-        for (CaptureRepository.Capture c : captureRepo.findDeferred(batchLimit)) {
+        for (CaptureRepository.Capture c : captureRepo.findDeferred(activeVault.id(), batchLimit)) {
             // Idempotency guard: synthesis already published notes for this capture → don't
             // re-run it (would duplicate). Settle it back to processing (awaiting triage).
-            if (!noteIndex.findNotesByCapture(c.id()).isEmpty()) {
+            if (!noteIndex.findNotesByCapture(c.vaultId(), c.id()).isEmpty()) {
                 captureRepo.updateStatus(c.id(), "processing");
                 continue;
             }
@@ -219,7 +223,7 @@ public class CaptureIngestWorker {
         // 'failed' captures are deliberately NOT swept here — they only leave 'failed' by
         // succeeding (a manual retry re-entering the flow) or an explicit user dismiss.
         long cutoff = System.currentTimeMillis() - cleanupMinAgeMs;
-        for (CaptureRepository.Capture c : captureRepo.findStaleActive(cutoff)) {
+        for (CaptureRepository.Capture c : captureRepo.findStaleActive(activeVault.id(), cutoff)) {
             sweepOrphan(c, active);
         }
     }
@@ -227,11 +231,11 @@ public class CaptureIngestWorker {
     private void sweepOrphan(CaptureRepository.Capture c, Set<String> active) {
         if (active.contains(c.id())) return;                          // still ingesting
         if (ridingLadder.contains(c.id())) return;                    // backing off, not abandoned
-        if (!noteIndex.findNotesByCapture(c.id()).isEmpty()) return;  // still has children
+        if (!noteIndex.findNotesByCapture(c.vaultId(), c.id()).isEmpty()) return;  // still has children
         String file = localVaultFile(c);
         // Don't trash a file a DUPLICATE capture (same upload twice) still shares — its
         // sibling may still have notes pointing at it. Only the last reference trashes it.
-        boolean trash = file != null && captureRepo.countLiveReferencesToFile(file, c.id()) == 0;
+        boolean trash = file != null && captureRepo.countLiveReferencesToFile(c.vaultId(), file, c.id()) == 0;
         if (trash) trashVaultFile(file);
         captureRepo.updateStatus(c.id(), "discarded");
         log.info("[cleanup] capture {} has no notes → discarded{}",
@@ -249,7 +253,7 @@ public class CaptureIngestWorker {
 
     private void trashVaultFile(String vaultRel) {
         try {
-            String abs = Paths.get(settingsRepo.getVaultPath()).resolve(vaultRel).normalize().toString();
+            String abs = activeVault.root().resolve(vaultRel).normalize().toString();
             fileRepo.softDeleteFile(abs);   // idempotent — no-op if already gone
         } catch (Exception e) {
             log.warn("[cleanup] could not trash {}: {}", vaultRel, e.toString());
@@ -261,7 +265,7 @@ public class CaptureIngestWorker {
      *  message was lost) exactly as attempt 0 — same as a fresh capture. */
     void drain() {
         if (!appReady) return;
-        List<CaptureRepository.Capture> batch = captureRepo.findQueued(batchLimit);
+        List<CaptureRepository.Capture> batch = captureRepo.findQueued(activeVault.id(), batchLimit);
         if (batch.isEmpty()) return;
         for (CaptureRepository.Capture c : batch) {
             if (!captureRepo.claim(c.id())) continue;   // a concurrent drain/listener won it
@@ -387,7 +391,7 @@ public class CaptureIngestWorker {
         CaptureRepository.Capture c = captureRepo.get(captureId);
         captureRepo.markFailed(captureId, error);
         log.warn("[CaptureIngestWorker] {} dead-lettered: {}", captureId, error);
-        pipelineFailureRepo.record("capture", "ingest_submit",
+        pipelineFailureRepo.record(c != null ? c.vaultId() : activeVault.id(), "capture", "ingest_submit",
             Map.of("captureId", captureId,
                    "sourceRef", c != null && c.sourceRef() != null ? c.sourceRef() : "",
                    "sourceType", c != null && c.sourceType() != null ? c.sourceType() : ""),
@@ -412,7 +416,7 @@ public class CaptureIngestWorker {
      *  embedder's text route gets the content, not just a path. */
     private IngestClient.Result submit(CaptureRepository.Capture c) throws Exception {
         if ("text".equals(c.sourceType())) {
-            String text = readTextResource(c.sourcePath());
+            String text = readTextResource(c.vaultId(), c.sourcePath());
             if (text == null || text.isBlank()) {
                 return new IngestClient.Result(false, 422, null, "text resource missing");
             }
@@ -421,9 +425,9 @@ public class CaptureIngestWorker {
         return ingestClient.submitStandalone(c.id(), c.sourceRef(), c.sourceType());
     }
 
-    private String readTextResource(String vaultRelPath) throws Exception {
+    private String readTextResource(long vaultId, String vaultRelPath) throws Exception {
         if (vaultRelPath == null) return null;
-        Path file = Paths.get(settingsRepo.getVaultPath()).resolve(vaultRelPath).normalize();
+        Path file = activeVault.rootFor(vaultId).resolve(vaultRelPath).normalize();
         if (!Files.isRegularFile(file)) return null;
         return Files.readString(file);
     }

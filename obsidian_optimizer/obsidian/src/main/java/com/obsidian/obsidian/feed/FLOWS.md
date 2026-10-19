@@ -303,9 +303,10 @@ updating the frontend in the same change.
 | "Subscribe to this channel" on a card | `FeedView.jsx FeedCard` → `useStore.subscribeToChannel()` (P3) |
 | Extension Subscribe preview | `extension/popup.js` `#sub-preview-btn` → `background.js resolveSource()` (P3) |
 | page_watch link-diff discovery | embedder `discover.py` `discover_page_watch()` (P3) |
-| youtube_posts discovery + text ingest | embedder `discover.py` `discover_youtube_posts()`; `FeedService.accept()` → `storePostText()` + `captureRepo.enqueue("text")` (P3); vault path from `SettingsRepository.getVaultPath()` |
+| youtube_posts discovery + text ingest | embedder `discover.py` `discover_youtube_posts()`; `FeedService.accept()` → `storePostText()` + `captureRepo.enqueue("text")` (P3); vault root from `ActiveVault.rootFor(vaultId)` |
 | Offline export (pending, text-only, cap 200) | `OfflineExportService.exportFeed()` (P2) |
 | Offline export trigger | `SourcePollWorker.ingestCandidates()` (`inserted > 0`) |
 | Offline swipe mailbox kinds | `MailboxConsumeService.consumeFile` (`feed_accept`/`feed_bin`/`feed_restore`) |
 | Offline swipe outbox kinds | `pwa/outbox.js` `enqueueFeedAccept`/`enqueueFeedBin`/`enqueueFeedRestore` + `flush()` |
 | Offline swipe cache (phone) | `pwa/offlineApi.js` `pulledFeed()`/`dropFromFeed()` → IDB meta `feedItems` |
+| Vault scoping (M3) | `SourceRepository`/`FeedRepository` take `long vaultId` first; `FeedService.accept/bin/restore(vaultId, …)`; `SourcePollWorker.drain()` pins `activeVault.id()` (scanner) and passes it down; `storePostText` root = `ActiveVault.rootFor(vaultId)` (replaces `SettingsRepository.getVaultPath()`) |

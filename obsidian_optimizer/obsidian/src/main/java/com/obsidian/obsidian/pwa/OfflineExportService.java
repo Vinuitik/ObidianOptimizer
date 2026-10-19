@@ -35,6 +35,8 @@ import java.util.Map;
 @Service
 public class OfflineExportService {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(OfflineExportService.class);
     static final String REVIEW_BUNDLE = "review-bundle.json.enc";
     static final String CARDS_BUNDLE = "cards.json.enc";
@@ -60,7 +62,9 @@ public class OfflineExportService {
                                 AssignmentService assignmentService,
                                 InboxController inbox,
                                 com.obsidian.obsidian.settings.SettingsRepository settingsRepo,
-                                FeedRepository feedRepo) {
+                                FeedRepository feedRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.repository = repository;
         this.encryption = encryption;
         this.drive = drive;
@@ -112,7 +116,7 @@ public class OfflineExportService {
         List<Map<String, Object>> assignments = new ArrayList<>();
         for (String path : page.notes()) {
             try {
-                Map<String, Object> a = assignmentService.build(path, SESSION_POINTS);
+                Map<String, Object> a = assignmentService.build(activeVault.id(), path, SESSION_POINTS);
                 Map<String, Object> rec = new LinkedHashMap<>();
                 rec.put("assignmentId", a.get("id"));
                 rec.put("notePath", path);
@@ -161,7 +165,7 @@ public class OfflineExportService {
         if (!drive.isConfigured())      throw new IllegalStateException("Drive not connected");
         if (!encryption.isConfigured()) throw new IllegalStateException("Sync passphrase not set");
 
-        List<FeedItem> pending = feedRepo.list("pending", FEED_ITEM_LIMIT);
+        List<FeedItem> pending = feedRepo.list(activeVault.id(), "pending", FEED_ITEM_LIMIT);
         List<Map<String, Object>> rows = new ArrayList<>();
         for (FeedItem it : pending) {
             Map<String, Object> rec = new LinkedHashMap<>();

@@ -22,6 +22,8 @@ import java.util.UUID;
 @Service
 public class FeedService {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     /** Thrown by {@link #restore}: capture already left QUEUED (maps to HTTP 409). */
     public static class CaptureStartedException extends RuntimeException {
         public CaptureStartedException(String m) { super(m); }
@@ -36,7 +38,9 @@ public class FeedService {
 
     public FeedService(FeedRepository feedRepo, SourceRepository sourceRepo, CaptureRepository captureRepo,
                        CaptureIngestWorker ingestWorker, TrackRepository trackRepo,
-                       SettingsRepository settingsRepo) {
+                       SettingsRepository settingsRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.feedRepo = feedRepo;
         this.sourceRepo = sourceRepo;
         this.captureRepo = captureRepo;
@@ -48,25 +52,25 @@ public class FeedService {
     /** pending/binned → accepted + exactly one capture tagged with the target track.
      *  Idempotent: the atomic claim means a 2nd/concurrent call returns the same captureId.
      *  Returns null if the item doesn't exist. */
-    public String accept(long itemId) {
-        FeedItem item = feedRepo.get(itemId);
+    public String accept(long vaultId, long itemId) {
+        FeedItem item = feedRepo.get(vaultId, itemId);
         if (item == null) return null;
         String captureId = UUID.randomUUID().toString().substring(0, 12);
         if (!feedRepo.claimAccepted(itemId, captureId)) {
-            return feedRepo.get(itemId).captureId();   // already accepted → same id
+            return feedRepo.get(vaultId, itemId).captureId();   // already accepted → same id
         }
         try {
-            Source src = sourceRepo.get(item.sourceId());
+            Source src = sourceRepo.get(vaultId, item.sourceId());
             long trackId = (src != null && src.targetTrackId() != null)
-                ? src.targetTrackId() : trackRepo.getOrCreatePassive().id();
+                ? src.targetTrackId() : trackRepo.getOrCreatePassive(vaultId).id();
             String title = (item.title() == null || item.title().isBlank()) ? item.itemUrl() : item.title();
             if (item.body() != null && !item.body().isBlank()) {
                 // youtube_posts: the full text is already in hand (see feed/FLOWS.md) — a
                 // text capture (body kept under resources/files/<id>.md, which the ingest
                 // worker reads back for source_type 'text'), not a URL fetch.
-                captureRepo.enqueue(captureId, "text", title, storePostText(captureId, title, item.body()), title);
+                captureRepo.enqueue(vaultId, captureId, "text", title, storePostText(vaultId, captureId, title, item.body()), title);
             } else {
-                captureRepo.enqueue(captureId, CaptureController.classifyUrl(item.itemUrl()),
+                captureRepo.enqueue(vaultId, captureId, CaptureController.classifyUrl(item.itemUrl()),
                     item.itemUrl(), null, title);
             }
             captureRepo.setTrackId(captureId, trackId);
@@ -78,14 +82,15 @@ public class FeedService {
         return captureId;
     }
 
-    public void bin(long itemId) {
+    public void bin(long vaultId, long itemId) {
+        if (feedRepo.get(vaultId, itemId) == null) return;
         feedRepo.bin(itemId);
     }
 
     /** → pending. An accepted item is only restorable while its capture is still QUEUED
      *  (cancelled atomically); otherwise {@link CaptureStartedException}. */
-    public void restore(long itemId) {
-        FeedItem item = feedRepo.get(itemId);
+    public void restore(long vaultId, long itemId) {
+        FeedItem item = feedRepo.get(vaultId, itemId);
         if (item == null) return;
         if ("accepted".equals(item.status()) && item.captureId() != null
                 && captureRepo.get(item.captureId()) != null
@@ -95,9 +100,9 @@ public class FeedService {
         feedRepo.markPending(itemId);
     }
 
-    private String storePostText(String captureId, String title, String text) {
+    private String storePostText(long vaultId, String captureId, String title, String text) {
         try {
-            Path dir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve("files");
+            Path dir = activeVault.rootFor(vaultId).resolve("resources").resolve("files");
             Files.createDirectories(dir);
             String name = captureId + ".md";
             Files.writeString(dir.resolve(name), "# " + title.replace("\n", " ").trim() + "\n\n" + text.trim() + "\n");

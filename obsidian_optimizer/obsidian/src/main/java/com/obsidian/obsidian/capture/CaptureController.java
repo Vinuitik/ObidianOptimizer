@@ -53,6 +53,8 @@ import java.util.regex.Pattern;
 @RestController
 public class CaptureController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(CaptureController.class);
 
     // ![[clip.mp4]] / ![[img.png]] → the same media URL renderMarkdown() emits.
@@ -91,7 +93,9 @@ public class CaptureController {
                              CaptureIngestWorker ingestWorker, SettingsRepository settingsRepo,
                              OutboxRepository outboxRepo,
                              PipelineFailureRepository pipelineFailureRepo,
-                             PlatformTransactionManager txManager) {
+                             PlatformTransactionManager txManager,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.repository = repository;
         this.captureRepo = captureRepo;
         this.ingestWorker = ingestWorker;
@@ -145,7 +149,7 @@ public class CaptureController {
         if ((url == null || url.isBlank()) && !hasText) {
             throw new IllegalArgumentException("url or text required");
         }
-        if (!hasText && captureRepo.existsLiveForSource(url.trim())) {
+        if (!hasText && captureRepo.existsLiveForSource(activeVault.id(), url.trim())) {
             throw new DuplicateCaptureException(url.trim());
         }
 
@@ -179,7 +183,7 @@ public class CaptureController {
             payload.put("captureId", captureId);
             payload.put("sourceRef", hasText ? "" : (url == null ? "" : url));
             payload.put("hasText", hasText);
-            pipelineFailureRepo.record("capture", "enqueue", payload,
+            pipelineFailureRepo.record(activeVault.id(), "capture", "enqueue", payload,
                 e.getClass().getSimpleName(), String.valueOf(e.getMessage()), null);
             throw e;
         }
@@ -197,8 +201,8 @@ public class CaptureController {
     private void enqueueAndPublish(String id, String sourceType, String sourceRef,
                                    String sourcePath, String title) {
         txTemplate.executeWithoutResult(status -> {
-            captureRepo.enqueue(id, sourceType, sourceRef, sourcePath, title);
-            outboxRepo.enqueue(RabbitQueueConfig.CAPTURE_QUEUE, Map.of("id", id));
+            captureRepo.enqueue(activeVault.id(), id, sourceType, sourceRef, sourcePath, title);
+            outboxRepo.enqueue(activeVault.id(), RabbitQueueConfig.CAPTURE_QUEUE, Map.of("id", id));
         });
     }
 
@@ -208,8 +212,8 @@ public class CaptureController {
                                                String sourcePath, String title,
                                                String playlistId, int position) {
         txTemplate.executeWithoutResult(status -> {
-            captureRepo.enqueuePlaylistItem(id, sourceType, sourceRef, sourcePath, title, playlistId, position);
-            outboxRepo.enqueue(RabbitQueueConfig.CAPTURE_QUEUE, Map.of("id", id));
+            captureRepo.enqueuePlaylistItem(activeVault.id(), id, sourceType, sourceRef, sourcePath, title, playlistId, position);
+            outboxRepo.enqueue(activeVault.id(), RabbitQueueConfig.CAPTURE_QUEUE, Map.of("id", id));
         });
     }
 
@@ -272,7 +276,7 @@ public class CaptureController {
             String videoUrl = entries.get(i).get("url");
             String title = entries.get(i).get("title");
             if (videoUrl == null || videoUrl.isBlank()) continue;
-            if (captureRepo.existsLiveForSource(videoUrl)) { skipped++; continue; }
+            if (captureRepo.existsLiveForSource(activeVault.id(), videoUrl)) { skipped++; continue; }
             String childId = UUID.randomUUID().toString().substring(0, 12);
             enqueuePlaylistItemAndPublish(childId, classifyUrl(videoUrl), videoUrl, null, title,
                 playlistId, i);
@@ -363,7 +367,7 @@ public class CaptureController {
 
     /** Persist shared bytes under resources/files/<captureId>.<ext> (vault-relative path). */
     private String storeBinaryResource(String captureId, String ext, byte[] bytes) throws java.io.IOException {
-        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve("files");
+        Path dir = activeVault.root().resolve("resources").resolve("files");
         Files.createDirectories(dir);
         String name = captureId + (ext.isEmpty() ? "" : "." + ext);
         Files.write(dir.resolve(name), bytes);
@@ -384,7 +388,7 @@ public class CaptureController {
     /** Write captured text as a markdown resource under resources/files/ (served by
      *  MediaController like any other resource). Returns the vault-relative path. */
     private String storeTextResource(String captureId, String title, String text) throws java.io.IOException {
-        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve("files");
+        Path dir = activeVault.root().resolve("resources").resolve("files");
         Files.createDirectories(dir);
         String name = captureId + ".md";
         String content = "# " + title.replace("\n", " ").trim() + "\n\n" + text.trim() + "\n";
@@ -410,7 +414,7 @@ public class CaptureController {
     @GetMapping("capture/failed")
     public ResponseEntity<List<Map<String, Object>>> listFailed() {
         List<Map<String, Object>> out = new ArrayList<>();
-        for (CaptureRepository.Capture c : captureRepo.listFailed()) {
+        for (CaptureRepository.Capture c : captureRepo.listFailed(activeVault.id())) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", c.id());
             m.put("sourceType", c.sourceType());

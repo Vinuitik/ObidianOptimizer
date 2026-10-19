@@ -156,3 +156,4 @@ Files without a frontmatter block are skipped entirely.
 | Max daily reviews | Settings UI → `SettingsRepository.getMaxDailyReviews()` |
 | Bankruptcy limit (mass gate) | Settings UI → `SettingsRepository.getBankruptcyLimit()` |
 | FileMover extensions | `FileMoverService.*_EXTS` sets |
+| Vault scoping (M3) | `ChronoService.runAllJobs()` pins `activeVault.id()/root()` for the whole run; `BankruptcyService.run`/`SpreadService.run` take `vaultId` first |

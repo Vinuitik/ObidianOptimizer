@@ -28,6 +28,8 @@ import java.util.regex.Pattern;
 @RequestMapping("/workspace")
 public class WorkspaceController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(WorkspaceController.class);
 
     private static final Set<String> VIDEO_EXTS   = Set.of(".mp4", ".mov", ".mkv", ".webm", ".avi");
@@ -51,7 +53,9 @@ public class WorkspaceController {
     private final SettingsRepository settingsRepo;
     private final WorkspaceRepository workspaceRepo;
 
-    public WorkspaceController(SettingsRepository settingsRepo, WorkspaceRepository workspaceRepo) {
+    public WorkspaceController(SettingsRepository settingsRepo, WorkspaceRepository workspaceRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.settingsRepo = settingsRepo;
         this.workspaceRepo = workspaceRepo;
     }
@@ -67,11 +71,11 @@ public class WorkspaceController {
      */
     @GetMapping("/files")
     public ResponseEntity<List<WorkspaceFile>> listFiles() {
-        Path dir = Paths.get(settingsRepo.getVaultPath()).resolve("_workspace");
+        Path dir = activeVault.root().resolve("_workspace");
         List<WorkspaceFile> files = new ArrayList<>();
-        for (WorkspaceRepository.WorkspaceItem item : workspaceRepo.listAll()) {
+        for (WorkspaceRepository.WorkspaceItem item : workspaceRepo.listAll(activeVault.id())) {
             if (!Files.isRegularFile(dir.resolve(item.filename()))) {
-                workspaceRepo.delete(item.filename());
+                workspaceRepo.delete(activeVault.id(), item.filename());
                 continue;
             }
             files.add(new WorkspaceFile(item.filename(), item.type()));
@@ -100,7 +104,7 @@ public class WorkspaceController {
         }
 
         try {
-            Path workspaceDir = Paths.get(settingsRepo.getVaultPath()).resolve("_workspace");
+            Path workspaceDir = activeVault.root().resolve("_workspace");
             Files.createDirectories(workspaceDir);
 
             HttpClient client = HttpClient.newBuilder()
@@ -148,7 +152,7 @@ public class WorkspaceController {
                 Files.copy(stream, target, StandardCopyOption.REPLACE_EXISTING);
             }
 
-            workspaceRepo.insert(filename, typeFor(filename), null, 0);
+            workspaceRepo.insert(activeVault.id(), filename, typeFor(filename), null, 0);
             log.info("[workspace] saved {} ({} bytes) from {}", filename, Files.size(target), uri.getHost());
             return ResponseEntity.ok(Map.of("filename", filename));
 
@@ -182,7 +186,7 @@ public class WorkspaceController {
         }
 
         try {
-            Path workspaceDir = Paths.get(settingsRepo.getVaultPath()).resolve("_workspace");
+            Path workspaceDir = activeVault.root().resolve("_workspace");
             Files.createDirectories(workspaceDir);
 
             // Strip path components (browsers may send a full path) then sanitize.
@@ -199,7 +203,7 @@ public class WorkspaceController {
                 Files.copy(stream, target, StandardCopyOption.REPLACE_EXISTING);
             }
 
-            workspaceRepo.insert(filename, typeFor(filename), null, 0);
+            workspaceRepo.insert(activeVault.id(), filename, typeFor(filename), null, 0);
             log.info("[workspace] uploaded {} ({} bytes)", filename, Files.size(target));
             return ResponseEntity.ok(Map.of("filename", filename, "path", "_workspace/" + filename));
 

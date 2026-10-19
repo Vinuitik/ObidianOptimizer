@@ -22,6 +22,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 class SyncQueueRepositoryIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =
@@ -58,8 +63,8 @@ class SyncQueueRepositoryIT {
 
     @Test
     void markPending_insertsPendingRow() {
-        repo.markPending("notes/a.md", "hash1");
-        SyncEntry entry = repo.findByPath("notes/a.md");
+        repo.markPending(1L, "notes/a.md", "hash1");
+        SyncEntry entry = repo.findByPath(1L, "notes/a.md");
         assertThat(entry).isNotNull();
         assertThat(entry.status()).isEqualTo("PENDING");
         assertThat(entry.contentHash()).isEqualTo("hash1");
@@ -68,10 +73,10 @@ class SyncQueueRepositoryIT {
 
     @Test
     void markDoneIfHashMatches_transitionsToDone_whenHashUnchanged() {
-        repo.markPending("notes/a.md", "hash1");
-        boolean done = repo.markDoneIfHashMatches("notes/a.md", "drive-id-1", "hash1");
+        repo.markPending(1L, "notes/a.md", "hash1");
+        boolean done = repo.markDoneIfHashMatches(1L, "notes/a.md", "drive-id-1", "hash1");
         assertThat(done).isTrue();
-        SyncEntry entry = repo.findByPath("notes/a.md");
+        SyncEntry entry = repo.findByPath(1L, "notes/a.md");
         assertThat(entry.status()).isEqualTo("DONE");
         assertThat(entry.driveFileId()).isEqualTo("drive-id-1");
         assertThat(entry.lastSyncedAt()).isNotNull();
@@ -79,14 +84,14 @@ class SyncQueueRepositoryIT {
 
     @Test
     void markFailed_incrementsRetryCount_markPendingResetsIt() {
-        repo.markPending("notes/a.md", "hash1");
-        repo.markFailed("notes/a.md");
-        repo.markFailed("notes/a.md");
-        assertThat(repo.findByPath("notes/a.md").retryCount()).isEqualTo(2);
-        assertThat(repo.findByPath("notes/a.md").status()).isEqualTo("FAILED");
+        repo.markPending(1L, "notes/a.md", "hash1");
+        repo.markFailed(1L, "notes/a.md");
+        repo.markFailed(1L, "notes/a.md");
+        assertThat(repo.findByPath(1L, "notes/a.md").retryCount()).isEqualTo(2);
+        assertThat(repo.findByPath(1L, "notes/a.md").status()).isEqualTo("FAILED");
 
-        repo.markPending("notes/a.md", "hash2");
-        SyncEntry entry = repo.findByPath("notes/a.md");
+        repo.markPending(1L, "notes/a.md", "hash2");
+        SyncEntry entry = repo.findByPath(1L, "notes/a.md");
         assertThat(entry.retryCount()).isZero();
         assertThat(entry.status()).isEqualTo("PENDING");
     }
@@ -96,31 +101,31 @@ class SyncQueueRepositoryIT {
     @Test
     void editDuringUpload_keepsRowPending_soNewContentUploadsNextPass() {
         // 1. note edited → queued
-        repo.markPending("notes/race.md", "hash-v1");
+        repo.markPending(1L, "notes/race.md", "hash-v1");
 
         // 2. upload worker reads the PENDING batch (captures hash-v1) …
-        SyncEntry snapshot = repo.findByStatus("PENDING").get(0);
+        SyncEntry snapshot = repo.findByStatus(1L, "PENDING").get(0);
 
         // 3. … meanwhile the user edits the note again
-        repo.markPending("notes/race.md", "hash-v2");
+        repo.markPending(1L, "notes/race.md", "hash-v2");
 
         // 4. worker finishes uploading v1 and tries to mark DONE with its stale hash
-        boolean done = repo.markDoneIfHashMatches("notes/race.md", "drive-id-1", snapshot.contentHash());
+        boolean done = repo.markDoneIfHashMatches(1L, "notes/race.md", "drive-id-1", snapshot.contentHash());
 
         // The DONE must be refused: v2 still needs uploading
         assertThat(done).isFalse();
-        SyncEntry entry = repo.findByPath("notes/race.md");
+        SyncEntry entry = repo.findByPath(1L, "notes/race.md");
         assertThat(entry.status()).isEqualTo("PENDING");
         assertThat(entry.contentHash()).isEqualTo("hash-v2");
     }
 
     @Test
     void noEditDuringUpload_marksDoneNormally() {
-        repo.markPending("notes/calm.md", "hash-v1");
-        SyncEntry snapshot = repo.findByStatus("PENDING").get(0);
-        boolean done = repo.markDoneIfHashMatches("notes/calm.md", "drive-id-9", snapshot.contentHash());
+        repo.markPending(1L, "notes/calm.md", "hash-v1");
+        SyncEntry snapshot = repo.findByStatus(1L, "PENDING").get(0);
+        boolean done = repo.markDoneIfHashMatches(1L, "notes/calm.md", "drive-id-9", snapshot.contentHash());
         assertThat(done).isTrue();
-        assertThat(repo.findByPath("notes/calm.md").status()).isEqualTo("DONE");
+        assertThat(repo.findByPath(1L, "notes/calm.md").status()).isEqualTo("DONE");
     }
 
     // ── Download bookkeeping ──────────────────────────────────────────────────
@@ -128,8 +133,8 @@ class SyncQueueRepositoryIT {
     @Test
     void markSynced_upsertsRowForFileCreatedOnAnotherDevice() {
         // no local queue row exists for this path
-        repo.markSynced("notes/from-other-device.md", "remote-hash", "drive-id-7");
-        SyncEntry entry = repo.findByPath("notes/from-other-device.md");
+        repo.markSynced(1L, "notes/from-other-device.md", "remote-hash", "drive-id-7");
+        SyncEntry entry = repo.findByPath(1L, "notes/from-other-device.md");
         assertThat(entry).isNotNull();
         assertThat(entry.status()).isEqualTo("DONE");
         assertThat(entry.contentHash()).isEqualTo("remote-hash");
@@ -138,9 +143,9 @@ class SyncQueueRepositoryIT {
 
     @Test
     void markSynced_overwritesExistingRowWithDriveState() {
-        repo.markPending("notes/b.md", "old-local-hash");
-        repo.markSynced("notes/b.md", "drive-hash", "drive-id-2");
-        SyncEntry entry = repo.findByPath("notes/b.md");
+        repo.markPending(1L, "notes/b.md", "old-local-hash");
+        repo.markSynced(1L, "notes/b.md", "drive-hash", "drive-id-2");
+        SyncEntry entry = repo.findByPath(1L, "notes/b.md");
         assertThat(entry.status()).isEqualTo("DONE");
         assertThat(entry.contentHash()).isEqualTo("drive-hash");
     }

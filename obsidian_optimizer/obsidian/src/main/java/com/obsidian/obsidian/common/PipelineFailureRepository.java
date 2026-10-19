@@ -68,15 +68,15 @@ public class PipelineFailureRepository {
 
     /** Best-effort, like {@code embedder/failures.py}'s record_failure — recording a
      *  failure must never itself mask the original one. */
-    public void record(String source, String stage, Map<String, Object> inputPayload,
+    public void record(long vaultId, String source, String stage, Map<String, Object> inputPayload,
                        String errorType, String errorMessage, String bundleRef) {
         try {
             String json = mapper.writeValueAsString(inputPayload);
             jdbc.update("""
                 INSERT INTO pipeline_failures
-                    (source, stage, input_payload, error_type, error_message, bundle_ref)
-                VALUES (?, ?, ?::jsonb, ?, ?, ?)
-                """, source, stage, json, errorType, errorMessage, bundleRef);
+                    (source, stage, input_payload, error_type, error_message, bundle_ref, vault_id)
+                VALUES (?, ?, ?::jsonb, ?, ?, ?, ?)
+                """, source, stage, json, errorType, errorMessage, bundleRef, vaultId);
         } catch (Exception e) {
             log.warn("[PipelineFailureRepository] failed to record failure (source={} stage={}): {}",
                 source, stage, e.toString());
@@ -89,9 +89,10 @@ public class PipelineFailureRepository {
 
     /** Newest-first, for the "Pipeline Failures" review page. {@code onlyOpen} filters to
      *  unresolved rows (the page's default view); source/stage narrow it further. */
-    public List<Failure> list(boolean onlyOpen, String source, String stage, int limit) {
-        StringBuilder sql = new StringBuilder("SELECT * FROM pipeline_failures WHERE 1=1");
+    public List<Failure> list(long vaultId, boolean onlyOpen, String source, String stage, int limit) {
+        StringBuilder sql = new StringBuilder("SELECT * FROM pipeline_failures WHERE vault_id = ?");
         List<Object> params = new ArrayList<>();
+        params.add(vaultId);
         if (onlyOpen) sql.append(" AND resolved_at IS NULL");
         if (source != null && !source.isBlank()) { sql.append(" AND source = ?"); params.add(source); }
         if (stage != null && !stage.isBlank()) { sql.append(" AND stage = ?"); params.add(stage); }
@@ -102,10 +103,10 @@ public class PipelineFailureRepository {
 
     /** User (or a fix landing) is done with this one — stop showing it in the open view.
      *  Rows are never auto-discarded, only explicitly resolved. */
-    public boolean resolve(long id) {
+    public boolean resolve(long vaultId, long id) {
         return jdbc.update(
-            "UPDATE pipeline_failures SET resolved_at = now() WHERE id = ? AND resolved_at IS NULL",
-            id) > 0;
+            "UPDATE pipeline_failures SET resolved_at = now() WHERE id = ? AND vault_id = ? AND resolved_at IS NULL",
+            id, vaultId) > 0;
     }
 
     private static Failure map(ResultSet rs, int rowNum) throws SQLException {

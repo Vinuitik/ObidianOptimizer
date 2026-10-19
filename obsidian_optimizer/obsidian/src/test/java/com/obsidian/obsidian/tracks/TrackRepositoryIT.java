@@ -30,6 +30,11 @@ import static org.assertj.core.api.Assertions.within;
 @Testcontainers
 class TrackRepositoryIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =
@@ -66,7 +71,7 @@ class TrackRepositoryIT {
 
     @Test
     void create_thenGet_roundTrips() {
-        Track created = repo.create("Rust Book", "book", "manual");
+        Track created = repo.create(1L, "Rust Book", "book", "manual");
 
         assertThat(created.title()).isEqualTo("Rust Book");
         assertThat(created.type()).isEqualTo("book");
@@ -74,15 +79,15 @@ class TrackRepositoryIT {
         assertThat(created.includeInProgress()).isTrue();
         assertThat(created.deadline()).isNull();
 
-        Track fetched = repo.get(created.id());
+        Track fetched = repo.get(1L, created.id());
         assertThat(fetched).isEqualTo(created);
     }
 
     @Test
     void update_partial_onlyChangesGivenFields() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
 
-        Track updated = repo.update(t.id(), "Rust Book v2", null, null, null, null, null, false);
+        Track updated = repo.update(1L, t.id(), "Rust Book v2", null, null, null, null, null, false);
 
         assertThat(updated.title()).isEqualTo("Rust Book v2");
         assertThat(updated.type()).isEqualTo("book"); // unchanged
@@ -90,9 +95,9 @@ class TrackRepositoryIT {
 
     @Test
     void update_setsDeadlineAndPriority() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
 
-        Track updated = repo.update(t.id(), null, null, null, LocalDate.of(2026, 9, 1), "must", null, false);
+        Track updated = repo.update(1L, t.id(), null, null, null, LocalDate.of(2026, 9, 1), "must", null, false);
 
         assertThat(updated.deadline()).isEqualTo(LocalDate.of(2026, 9, 1));
         assertThat(updated.priority()).isEqualTo("must");
@@ -100,10 +105,10 @@ class TrackRepositoryIT {
 
     @Test
     void update_clearDeadline_nullsBothDeadlineAndPriority() {
-        Track t = repo.create("Rust Book", "book", "manual");
-        repo.update(t.id(), null, null, null, LocalDate.of(2026, 9, 1), "must", null, false);
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
+        repo.update(1L, t.id(), null, null, null, LocalDate.of(2026, 9, 1), "must", null, false);
 
-        Track cleared = repo.update(t.id(), null, null, null, null, null, null, true);
+        Track cleared = repo.update(1L, t.id(), null, null, null, null, null, null, true);
 
         assertThat(cleared.deadline()).isNull();
         assertThat(cleared.priority()).isNull();
@@ -111,24 +116,24 @@ class TrackRepositoryIT {
 
     @Test
     void delete_cascadesItemsAndSchedule() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
         repo.addItem(t.id(), "Ch1", null);
         repo.setSchedule(t.id(), Map.of(0, 2));
 
-        repo.delete(t.id());
+        repo.delete(1L, t.id());
 
-        assertThat(repo.get(t.id())).isNull();
+        assertThat(repo.get(1L, t.id())).isNull();
         assertThat(repo.listItems(t.id())).isEmpty();
         assertThat(repo.getSchedule(t.id())).isEmpty();
     }
 
     @Test
     void listActive_excludesArchived() {
-        Track active = repo.create("Active", "book", "manual");
-        Track archived = repo.create("Archived", "book", "manual");
-        repo.update(archived.id(), null, null, "archived", null, null, null, false);
+        Track active = repo.create(1L, "Active", "book", "manual");
+        Track archived = repo.create(1L, "Archived", "book", "manual");
+        repo.update(1L, archived.id(), null, null, "archived", null, null, null, false);
 
-        List<Track> result = repo.listActive();
+        List<Track> result = repo.listActive(1L);
 
         assertThat(result).extracting(Track::id).containsExactly(active.id());
     }
@@ -137,7 +142,7 @@ class TrackRepositoryIT {
 
     @Test
     void addItem_appendsAtNextPosition() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
 
         TrackItem i1 = repo.addItem(t.id(), "Ch1", null);
         TrackItem i2 = repo.addItem(t.id(), "Ch2", null);
@@ -153,7 +158,7 @@ class TrackRepositoryIT {
 
     @Test
     void reorderItem_movingForward_shiftsSiblingsBack() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
         TrackItem i1 = repo.addItem(t.id(), "A", null); // pos 0
         TrackItem i2 = repo.addItem(t.id(), "B", null); // pos 1
         TrackItem i3 = repo.addItem(t.id(), "C", null); // pos 2
@@ -166,7 +171,7 @@ class TrackRepositoryIT {
 
     @Test
     void reorderItem_movingBackward_shiftsSiblingsForward() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
         TrackItem i1 = repo.addItem(t.id(), "A", null); // pos 0
         TrackItem i2 = repo.addItem(t.id(), "B", null); // pos 1
         TrackItem i3 = repo.addItem(t.id(), "C", null); // pos 2
@@ -179,7 +184,7 @@ class TrackRepositoryIT {
 
     @Test
     void completeItem_marksDoneAndIsIdempotent() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
         TrackItem item = repo.addItem(t.id(), "Ch1", null);
 
         boolean firstFlip = repo.completeItem(item.id());
@@ -193,7 +198,7 @@ class TrackRepositoryIT {
 
     @Test
     void nextPendingItems_excludesDoneAndRespectsLimit() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
         TrackItem i1 = repo.addItem(t.id(), "A", null);
         repo.addItem(t.id(), "B", null);
         repo.addItem(t.id(), "C", null);
@@ -209,7 +214,7 @@ class TrackRepositoryIT {
 
     @Test
     void setSchedule_fullReplace() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
         repo.setSchedule(t.id(), Map.of(0, 2, 2, 1));
 
         assertThat(repo.getScheduleBudget(t.id(), 0)).isEqualTo(2);
@@ -263,17 +268,17 @@ class TrackRepositoryIT {
 
     @Test
     void listProgressRows_countsDoneAndTotal_excludesIncludeInProgressFalse() {
-        Track counted = repo.create("Counted", "book", "manual");
+        Track counted = repo.create(1L, "Counted", "book", "manual");
         TrackItem i1 = repo.addItem(counted.id(), "A", null);
         repo.addItem(counted.id(), "B", null);
         repo.completeItem(i1.id());
 
-        Track excluded = repo.create("Excluded", "book", "manual");
+        Track excluded = repo.create(1L, "Excluded", "book", "manual");
         TrackItem e1 = repo.addItem(excluded.id(), "A", null);
         repo.completeItem(e1.id());
-        repo.update(excluded.id(), null, null, null, null, null, false, false); // include_in_progress=false
+        repo.update(1L, excluded.id(), null, null, null, null, null, false, false); // include_in_progress=false
 
-        List<TrackProgressRow> rows = repo.listProgressRows();
+        List<TrackProgressRow> rows = repo.listProgressRows(1L);
 
         assertThat(rows).extracting(r -> r.track().id()).containsExactly(counted.id());
         TrackProgressRow row = rows.get(0);
@@ -283,18 +288,18 @@ class TrackRepositoryIT {
 
     @Test
     void listProgressRows_excludesArchivedTracks() {
-        Track archived = repo.create("Archived", "book", "manual");
+        Track archived = repo.create(1L, "Archived", "book", "manual");
         repo.addItem(archived.id(), "A", null);
-        repo.update(archived.id(), null, null, "archived", null, null, null, false);
+        repo.update(1L, archived.id(), null, null, "archived", null, null, null, false);
 
-        assertThat(repo.listProgressRows()).isEmpty();
+        assertThat(repo.listProgressRows(1L)).isEmpty();
     }
 
     // ── Subscriptions schema (Step 1) ───────────────────────────────────────
 
     @Test
     void subscriptionColumns_defaultNull_andGroupIdDefaultsNull() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
         TrackItem item = repo.addItem(t.id(), "Ch1", null);
 
         assertThat(t.sourceUrl()).isNull();
@@ -305,10 +310,10 @@ class TrackRepositoryIT {
 
     @Test
     void getOrCreateGroup_calledTwiceForSameCapture_returnsSameGroup() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
 
-        TrackItemGroup first = repo.getOrCreateGroup(t.id(), "cap-1", "Video Title", "https://example.com/v1");
-        TrackItemGroup second = repo.getOrCreateGroup(t.id(), "cap-1", "Video Title", "https://example.com/v1");
+        TrackItemGroup first = repo.getOrCreateGroup(1L, t.id(), "cap-1", "Video Title", "https://example.com/v1");
+        TrackItemGroup second = repo.getOrCreateGroup(1L, t.id(), "cap-1", "Video Title", "https://example.com/v1");
 
         assertThat(second.id()).isEqualTo(first.id());
         assertThat(second.title()).isEqualTo("Video Title");
@@ -317,8 +322,8 @@ class TrackRepositoryIT {
 
     @Test
     void addItem_fourArg_withGroupId_readsBackGroupId() {
-        Track t = repo.create("Rust Book", "book", "manual");
-        TrackItemGroup group = repo.getOrCreateGroup(t.id(), "cap-2", "Video Title", null);
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
+        TrackItemGroup group = repo.getOrCreateGroup(1L, t.id(), "cap-2", "Video Title", null);
 
         TrackItem item = repo.addItem(t.id(), "Chapter 1", "vault/Ch1.md", group.id());
 
@@ -327,7 +332,7 @@ class TrackRepositoryIT {
 
     @Test
     void addItem_threeArg_stillDelegatesToNullGroup() {
-        Track t = repo.create("Rust Book", "book", "manual");
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
 
         TrackItem item = repo.addItem(t.id(), "Chapter 1", "vault/Ch1.md");
 
@@ -336,8 +341,8 @@ class TrackRepositoryIT {
 
     @Test
     void reorderItem_ignoresGroupId_positionMathUnaffected() {
-        Track t = repo.create("Rust Book", "book", "manual");
-        TrackItemGroup group = repo.getOrCreateGroup(t.id(), "cap-3", "Video Title", null);
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
+        TrackItemGroup group = repo.getOrCreateGroup(1L, t.id(), "cap-3", "Video Title", null);
         TrackItem i1 = repo.addItem(t.id(), "A", null, group.id()); // pos 0, grouped
         TrackItem i2 = repo.addItem(t.id(), "B", null, null);       // pos 1, ungrouped
         TrackItem i3 = repo.addItem(t.id(), "C", null, group.id()); // pos 2, grouped
@@ -357,7 +362,7 @@ class TrackRepositoryIT {
         repo.initSchema();
         repo.initSchema();
 
-        Track t = repo.create("Rust Book", "book", "manual");
-        assertThat(repo.get(t.id())).isEqualTo(t);
+        Track t = repo.create(1L, "Rust Book", "book", "manual");
+        assertThat(repo.get(1L, t.id())).isEqualTo(t);
     }
 }

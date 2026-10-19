@@ -28,6 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *  about what Files.write would have done. */
 class WorkspaceControllerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @TempDir Path vault;
 
     SettingsRepository settingsRepo;
@@ -39,9 +41,9 @@ class WorkspaceControllerTest {
     void setUp() {
         settingsRepo = mock(SettingsRepository.class);
         workspaceRepo = mock(WorkspaceRepository.class);
-        when(settingsRepo.getVaultPath()).thenReturn(vault.toString());
+        activeVault.set(1L, java.nio.file.Path.of(String.valueOf(vault.toString())));
         workspaceDir = vault.resolve("_workspace");
-        mvc = MockMvcBuilders.standaloneSetup(new WorkspaceController(settingsRepo, workspaceRepo)).build();
+        mvc = MockMvcBuilders.standaloneSetup(new WorkspaceController(settingsRepo, workspaceRepo, activeVault)).build();
     }
 
     // ── /workspace/upload ────────────────────────────────────────────────────────
@@ -55,7 +57,7 @@ class WorkspaceControllerTest {
             .andExpect(jsonPath("$.filename").value("lecture.mp4"));
 
         assertThat(Files.readString(workspaceDir.resolve("lecture.mp4"))).isEqualTo("bytes");
-        verify(workspaceRepo).insert("lecture.mp4", "video", null, 0);
+        verify(workspaceRepo).insert(1L, "lecture.mp4", "video", null, 0);
     }
 
     @Test
@@ -119,7 +121,7 @@ class WorkspaceControllerTest {
         mvc.perform(multipart("/workspace/upload").file(v2)).andExpect(status().isOk());
 
         assertThat(Files.readString(workspaceDir.resolve("notes.pdf"))).isEqualTo("version-two");
-        verify(workspaceRepo, times(2)).insert("notes.pdf", "pdf", null, 0);
+        verify(workspaceRepo, times(2)).insert(1L, "notes.pdf", "pdf", null, 0);
     }
 
     // ── /workspace/save (URL validation only — no outbound network in a unit test) ──
@@ -152,7 +154,7 @@ class WorkspaceControllerTest {
     void listFiles_prunesRowsWhoseFileWasDeletedByHand() throws Exception {
         Files.createDirectories(workspaceDir);
         Files.writeString(workspaceDir.resolve("present.pdf"), "x");
-        when(workspaceRepo.listAll()).thenReturn(List.of(
+        when(workspaceRepo.listAll(1L)).thenReturn(List.of(
             new WorkspaceRepository.WorkspaceItem("present.pdf", "pdf", null, 0, 1L),
             new WorkspaceRepository.WorkspaceItem("missing.pdf", "pdf", null, 0, 2L)));
 
@@ -161,7 +163,7 @@ class WorkspaceControllerTest {
             .andExpect(jsonPath("$.length()").value(1))
             .andExpect(jsonPath("$[0].name").value("present.pdf"));
 
-        verify(workspaceRepo).delete("missing.pdf");
-        verify(workspaceRepo, never()).delete("present.pdf");
+        verify(workspaceRepo).delete(1L, "missing.pdf");
+        verify(workspaceRepo, never()).delete(1L, "present.pdf");
     }
 }

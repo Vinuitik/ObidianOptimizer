@@ -261,3 +261,4 @@ a matching frontend registry — so a feature plugs in/out in one place. `[NOT I
 | Offline swipe events | `MailboxConsumeService.consumeFile` switch + `pwa/mailbox.js`/`pwa/outbox.js` (P2, implemented) |
 | Feed UI | `LearnPage` mode switch + `FeedView.jsx` `[NEW]` |
 | Today allocation of passive items | `TodayPlanService.today()` (unchanged; via "Passive" track) |
+| Vault scoping (M3) | see feed/FLOWS.md; repos/service/poll worker take `vaultId` first |

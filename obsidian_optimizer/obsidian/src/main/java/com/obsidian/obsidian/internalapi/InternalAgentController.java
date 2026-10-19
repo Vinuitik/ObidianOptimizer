@@ -44,6 +44,8 @@ import java.util.Map;
 @RequestMapping("/api/internal")
 public class InternalAgentController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(InternalAgentController.class);
 
     private final FileRepository fileRepository;
@@ -59,7 +61,9 @@ public class InternalAgentController {
                                    SettingsRepository settingsRepo,
                                    MediaController mediaController,
                                    CaptureRepository captureRepo,
-                                   TrackRepository trackRepo) {
+                                   TrackRepository trackRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.fileRepository = fileRepository;
         this.settingsRepo = settingsRepo;
         this.mediaController = mediaController;
@@ -106,7 +110,7 @@ public class InternalAgentController {
             CaptureRepository.Capture cap = captureRepo.get(captureId);
             if (cap != null && cap.trackId() != null) {
                 String groupTitle = (cap.title() != null && !cap.title().isBlank()) ? cap.title() : cap.sourceRef();
-                long groupId = trackRepo.getOrCreateGroup(cap.trackId(), captureId, groupTitle, cap.sourceRef()).id();
+                long groupId = trackRepo.getOrCreateGroup(cap.vaultId(), cap.trackId(), captureId, groupTitle, cap.sourceRef()).id();
                 trackRepo.addItem(cap.trackId(), noteTitle, notePath, groupId);
             }
         } catch (Exception e) {
@@ -126,7 +130,7 @@ public class InternalAgentController {
             return ResponseEntity.badRequest().body("title is required");
         }
         String type = (req.type() == null || req.type().isBlank()) ? "custom" : req.type();
-        return ResponseEntity.ok(trackRepo.create(req.title().trim(), type, "manual"));
+        return ResponseEntity.ok(trackRepo.create(activeVault.id(), req.title().trim(), type, "manual"));
     }
 
     /** MCP-originated track item append (ingest_resource/create_note with track_id — the
@@ -137,7 +141,7 @@ public class InternalAgentController {
                                           @PathVariable long id,
                                           @RequestBody AddTrackItemRequest req) {
         if (badToken(token)) return unauthorized();
-        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (trackRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         if (req.title() == null || req.title().isBlank()) {
             return ResponseEntity.badRequest().body("title is required");
         }
@@ -148,7 +152,7 @@ public class InternalAgentController {
         String groupTitle = (cap != null && cap.title() != null && !cap.title().isBlank())
             ? cap.title() : req.title().trim();
         String sourceUrl = cap != null ? cap.sourceRef() : null;
-        long groupId = trackRepo.getOrCreateGroup(id, req.captureId(), groupTitle, sourceUrl).id();
+        long groupId = trackRepo.getOrCreateGroup(activeVault.id(), id, req.captureId(), groupTitle, sourceUrl).id();
         return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath(), groupId));
     }
 
@@ -161,7 +165,7 @@ public class InternalAgentController {
     public ResponseEntity<?> trackItems(@RequestHeader(value = "X-Internal-Token", required = false) String token,
                                         @PathVariable long id) {
         if (badToken(token)) return unauthorized();
-        Track track = trackRepo.get(id);
+        Track track = trackRepo.get(activeVault.id(), id);
         if (track == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(Map.of("title", track.title(), "items", trackRepo.listItems(id)));
     }
@@ -197,7 +201,7 @@ public class InternalAgentController {
             String sourcePath = "_inbox/_sources/" + filename;
 
             String title = req.sourceRef().replaceAll(".*[/\\\\]", "").replaceAll("\\.md$", "");
-            captureRepo.create(req.captureId(), "note", req.sourceRef(), sourcePath, title);
+            captureRepo.create(activeVault.id(), req.captureId(), "note", req.sourceRef(), sourcePath, title);
             return ResponseEntity.ok(Map.of("sourcePath", sourcePath));
         } catch (IOException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
@@ -246,7 +250,7 @@ public class InternalAgentController {
     }
 
     private Path resolveUnderVault(String rel) throws IOException {
-        Path vault = Paths.get(settingsRepo.getVaultPath()).toAbsolutePath().normalize();
+        Path vault = activeVault.root().toAbsolutePath().normalize();
         Path target = vault.resolve(rel == null ? "" : rel).normalize();
         if (!target.startsWith(vault)) {
             throw new IOException("path escapes vault: " + rel);

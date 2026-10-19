@@ -21,6 +21,8 @@ import static org.mockito.Mockito.*;
 /** Poll/drain logic with mocked collaborators — no DB, no HTTP. */
 class SourcePollWorkerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     SourceRepository sourceRepo;
     FeedRepository feedRepo;
     FeedService feedService;
@@ -44,9 +46,9 @@ class SourcePollWorkerTest {
         settings = mock(SettingsRepository.class);
         client = mock(TrackAgentClient.class);
         offlineExport = mock(OfflineExportService.class);
-        worker = new SourcePollWorker(sourceRepo, feedRepo, feedService, settings, client, offlineExport);
+        worker = new SourcePollWorker(sourceRepo, feedRepo, feedService, settings, client, offlineExport, activeVault);
         when(settings.getSubscriptionPollIntervalMs()).thenReturn(21_600_000L);
-        when(feedRepo.insertIfNew(anyLong(), any(), any(), any(), any(), any(), any())).thenReturn(100L, 101L, 102L);
+        when(feedRepo.insertIfNew(anyLong(), anyLong(), any(), any(), any(), any(), any(), any())).thenReturn(100L, 101L, 102L);
     }
 
     private void discovers(Candidate... cs) {
@@ -56,97 +58,97 @@ class SourcePollWorkerTest {
     @Test
     void autoAcceptFalse_insertsPending_neverAccepts() {
         Source s = src(1, false, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         discovers(cand("https://blog.example/a"), cand("https://blog.example/b"));
 
         worker.drain();
 
-        verify(feedRepo, times(2)).insertIfNew(eq(1L), any(), any(), eq("https://i/t.jpg"), eq(60), any(), any());
-        verify(feedService, never()).accept(anyLong());
+        verify(feedRepo, times(2)).insertIfNew(eq(1L), eq(1L), any(), any(), eq("https://i/t.jpg"), eq(60), any(), any());
+        verify(feedService, never()).accept(org.mockito.ArgumentMatchers.eq(1L), anyLong());
         verify(sourceRepo).markChecked(eq(1L), any());
     }
 
     @Test
     void autoAcceptTrue_acceptsNewItems() {
         Source s = src(1, true, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         discovers(cand("https://blog.example/a"), cand("https://blog.example/b"));
 
         worker.drain();
 
-        verify(feedService).accept(100L);
-        verify(feedService).accept(101L);
+        verify(feedService).accept(1L, 100L);
+        verify(feedService).accept(1L, 101L);
     }
 
     @Test
     void autoAcceptNull_inheritsGlobal() {
         Source s = src(1, null, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         discovers(cand("https://blog.example/a"));
 
         when(settings.isFeedAutoAccept()).thenReturn(false);
         worker.drain();
-        verify(feedService, never()).accept(anyLong());
+        verify(feedService, never()).accept(org.mockito.ArgumentMatchers.eq(1L), anyLong());
 
         when(settings.isFeedAutoAccept()).thenReturn(true);
         worker.drain();
-        verify(feedService).accept(anyLong());
+        verify(feedService).accept(org.mockito.ArgumentMatchers.eq(1L), anyLong());
     }
 
     @Test
     void sourceFalseOverridesGlobalTrue() {
         Source s = src(1, false, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         when(settings.isFeedAutoAccept()).thenReturn(true);
         discovers(cand("https://blog.example/a"));
 
         worker.drain();
 
-        verify(feedService, never()).accept(anyLong());
+        verify(feedService, never()).accept(org.mockito.ArgumentMatchers.eq(1L), anyLong());
     }
 
     @Test
     void firstPoll_backlog_neverAutoAccepted_evenIfSourceAuto() {
         Source s = src(1, true, null);
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         when(settings.isFeedAutoAccept()).thenReturn(true);
         discovers(cand("https://blog.example/a"), cand("https://blog.example/b"));
 
         worker.drain();
 
-        verify(feedRepo, times(2)).insertIfNew(anyLong(), any(), any(), any(), any(), any(), any());
-        verify(feedService, never()).accept(anyLong());
+        verify(feedRepo, times(2)).insertIfNew(anyLong(), anyLong(), any(), any(), any(), any(), any(), any());
+        verify(feedService, never()).accept(org.mockito.ArgumentMatchers.eq(1L), anyLong());
         verify(sourceRepo).markChecked(eq(1L), any());
     }
 
     @Test
     void duplicate_insertReturnsNull_notAccepted() {
         Source s = src(1, true, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
-        when(feedRepo.insertIfNew(anyLong(), any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
+        when(feedRepo.insertIfNew(anyLong(), anyLong(), any(), any(), any(), any(), any(), any())).thenReturn(null);
         discovers(cand("https://blog.example/a"));
 
         worker.drain();
 
-        verify(feedService, never()).accept(anyLong());
+        verify(feedService, never()).accept(org.mockito.ArgumentMatchers.eq(1L), anyLong());
     }
 
     @Test
     void emptyFeed_isOk_cursorAdvances() {
         Source s = src(1, true, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         discovers();
 
         worker.drain();
 
-        verify(feedRepo, never()).insertIfNew(anyLong(), any(), any(), any(), any(), any(), any());
+        verify(feedRepo, never()).insertIfNew(anyLong(), anyLong(), any(), any(), any(), any(), any(), any());
         verify(sourceRepo).markChecked(eq(1L), any());
     }
 
     @Test
     void newItemsInserted_triggersOfflineFeedExport() throws Exception {
         Source s = src(1, false, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         discovers(cand("https://blog.example/a"));
 
         worker.drain();
@@ -157,7 +159,7 @@ class SourcePollWorkerTest {
     @Test
     void noNewItems_doesNotTriggerExport() {
         Source s = src(1, true, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         discovers(); // empty feed → inserted == 0
 
         worker.drain();
@@ -168,7 +170,7 @@ class SourcePollWorkerTest {
     @Test
     void exportFailure_isSwallowed_doesNotBreakDrain() throws Exception {
         Source s = src(1, false, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         discovers(cand("https://blog.example/a"));
         doThrow(new IllegalStateException("Drive not connected")).when(offlineExport).exportFeed();
 
@@ -180,7 +182,7 @@ class SourcePollWorkerTest {
     @Test
     void discoverFailure_leavesCursorUntouched() {
         Source s = src(1, true, null);
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         when(client.discover(any(), any())).thenReturn(new DiscoverResult(false, List.of(), null));
 
         worker.drain();
@@ -191,7 +193,7 @@ class SourcePollWorkerTest {
     @Test
     void notDue_skipped() {
         Source s = src(1, true, Instant.now().minusSeconds(60));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
 
         worker.drain();
 
@@ -201,13 +203,13 @@ class SourcePollWorkerTest {
     @Test
     void itemUrlsAreNormalizedBeforeInsert() {
         Source s = src(1, false, Instant.now().minusSeconds(7 * 3600));
-        when(sourceRepo.listActive()).thenReturn(List.of(s));
+        when(sourceRepo.listActive(1L)).thenReturn(List.of(s));
         discovers(cand("https://youtu.be/abcdefghijk?utm_source=x"), cand("https://blog.example/p?utm_medium=y&id=3"));
 
         worker.drain();
 
-        verify(feedRepo).insertIfNew(eq(1L), eq("https://www.youtube.com/watch?v=abcdefghijk"), any(), any(), any(), any(), any());
-        verify(feedRepo).insertIfNew(eq(1L), eq("https://blog.example/p?id=3"), any(), any(), any(), any(), any());
+        verify(feedRepo).insertIfNew(eq(1L), eq(1L), eq("https://www.youtube.com/watch?v=abcdefghijk"), any(), any(), any(), any(), any());
+        verify(feedRepo).insertIfNew(eq(1L), eq(1L), eq("https://blog.example/p?id=3"), any(), any(), any(), any(), any());
     }
 
     @Test

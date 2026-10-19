@@ -46,3 +46,4 @@ deleted right there — `_workspace/` is user-worked only, so no janitor is need
 | Table schema | `WorkspaceRepository.initSchema()` (`workspace_items`) |
 | Stale-row pruning | `WorkspaceController.listFiles()` (delete-on-missing) |
 | Shelf UI | `frontend/.../organisms/ResourcePanel.jsx` + `api/workspace.js` |
+| Vault scoping (M3) | `WorkspaceRepository` methods take `long vaultId` first; `WorkspaceController` passes `activeVault.id()` and roots at `ActiveVault.root()` |

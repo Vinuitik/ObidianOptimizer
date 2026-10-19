@@ -182,3 +182,4 @@ authenticated()` — no new security rule needed). Frontend: `pages/FLOWS.md`
 | Pipeline failure ledger — read/resolve/client-report REST surface | `PipelineFailureController.java` (`GET /pipeline-failures`, `POST /pipeline-failures/{id}/resolve`, `POST /pipeline-failures`) |
 | Capture's own immediate-failure (pre-ladder) ledger write | `CaptureController.enqueueCapture()` catch block |
 | Broker itself (image, volume, healthcheck) | root `docker-compose.yml` `rabbitmq` service |
+| Vault scoping (M3) | `OutboxRepository.enqueue(vaultId, queue, payload)` (writes `vault_id` and adds `vaultId` to the payload); `PipelineFailureRepository.record/list/resolve` take `vaultId` |

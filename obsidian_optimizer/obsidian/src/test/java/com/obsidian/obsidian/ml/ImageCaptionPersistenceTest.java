@@ -22,14 +22,16 @@ import static org.mockito.Mockito.when;
  */
 class ImageCaptionPersistenceTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     private final ObjectMapper mapper = new ObjectMapper();
 
     private ImageProcessingWorker worker(PendingImageJobRepository jobRepo,
                                          EmbeddingService emb, NoteChunkRepository chunkRepo) {
         var outboxRepo = mock(OutboxRepository.class);
         var txManager = mock(PlatformTransactionManager.class);
-        var w = new ImageProcessingWorker(jobRepo, emb, chunkRepo, outboxRepo, txManager);
-        when(chunkRepo.queryMaxChunkIndex(anyString(), eq("image"))).thenReturn(null); // start at 0
+        var w = new ImageProcessingWorker(jobRepo, emb, chunkRepo, outboxRepo, txManager, activeVault);
+        when(chunkRepo.queryMaxChunkIndex(org.mockito.ArgumentMatchers.eq(1L), anyString(), eq("image"))).thenReturn(null); // start at 0
         return w;
     }
 
@@ -47,8 +49,8 @@ class ImageCaptionPersistenceTest {
         worker.handleResult(job, mapper.readTree("{\"text\":\"a real caption\"}"), "mistral");
 
         // caption saved as text-only (NULL vector) — NOT dropped
-        verify(chunkRepo).upsertChunkTextOnly(eq("notes/x.md"), eq(0), eq("image"), eq("a real caption"), anyString());
-        verify(chunkRepo, never()).upsertChunk(anyString(), anyInt(), anyString(), anyString(), any(), anyString());
+        verify(chunkRepo).upsertChunkTextOnly(org.mockito.ArgumentMatchers.eq(1L), eq("notes/x.md"), eq(0), eq("image"), eq("a real caption"), anyString());
+        verify(chunkRepo, never()).upsertChunk(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyInt(), anyString(), anyString(), any(), anyString());
         // job is DONE = captioned (never re-caption); embedding is now the reconciler's job
         verify(jobRepo).markDone("job1");
     }
@@ -66,8 +68,8 @@ class ImageCaptionPersistenceTest {
         job.setId("job2");
         worker.handleResult(job, mapper.readTree("{\"text\":\"caption two\"}"), "mistral");
 
-        verify(chunkRepo).upsertChunk(eq("notes/y.md"), eq(0), eq("image"), eq("caption two"), any(), anyString());
-        verify(chunkRepo, never()).upsertChunkTextOnly(anyString(), anyInt(), anyString(), anyString(), anyString());
+        verify(chunkRepo).upsertChunk(org.mockito.ArgumentMatchers.eq(1L), eq("notes/y.md"), eq(0), eq("image"), eq("caption two"), any(), anyString());
+        verify(chunkRepo, never()).upsertChunkTextOnly(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyInt(), anyString(), anyString(), anyString());
         verify(jobRepo).markDone("job2");
     }
 }

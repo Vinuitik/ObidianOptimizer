@@ -298,3 +298,4 @@ AFTER answering, so it teaches the reasoning without leaking answers mid-test.
 | Tier bag draw | `AssignmentRepository.drawCardInTier` |
 | Content hashing | `common/ContentHashing.sha256` (single hash fn for all pipelines) |
 | Open-answer cosine floor/ceiling | `embedder/flashcards/judge.py → COSINE_LOW / COSINE_HIGH` (env overrides) |
+| Vault scoping (M3) | `CardRepository`/`NoteReviewRepository`/`AssignmentRepository` methods take `long vaultId` first (SQL `vault_id = ?`, inserts write it); `AssignmentService`/`ReviewService`/`FsrsStateWriter`/`ReviewPreparationService` pass it through; controllers pass `activeVault.id()`; `CardJobWorker.drain()` + `FlaggedCardRegenService.run()` pin `activeVault.id()` (scanners = active vault only); `vault_id` rides in the `/flashcards/generate` body (Python reads it in M5) |

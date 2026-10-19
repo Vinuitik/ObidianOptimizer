@@ -21,8 +21,10 @@ import static org.mockito.Mockito.when;
  */
 class ChunkEmbeddingReconcilerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     private ChunkEmbeddingReconciler reconciler(NoteChunkRepository repo, EmbeddingService emb) {
-        var r = new ChunkEmbeddingReconciler(repo, emb);
+        var r = new ChunkEmbeddingReconciler(repo, emb, activeVault);
         ReflectionTestUtils.setField(r, "enabled", true);
         ReflectionTestUtils.setField(r, "batchSize", 100);
         return r;
@@ -32,27 +34,27 @@ class ChunkEmbeddingReconcilerTest {
     void fillsNullVectorChunkOnSuccessfulEmbed() {
         var repo = mock(NoteChunkRepository.class);
         var emb = mock(EmbeddingService.class);
-        when(repo.findChunksNeedingEmbedding(anyInt()))
-            .thenReturn(List.of(new PendingChunk("notes/x.md", "image", 0, "a caption")));
+        when(repo.findChunksNeedingEmbedding(org.mockito.ArgumentMatchers.eq(1L), anyInt()))
+            .thenReturn(List.of(new PendingChunk(1L, "notes/x.md", "image", 0, "a caption")));
         when(emb.embed("a caption")).thenReturn(new float[]{0.3f, 0.4f});
-        when(repo.setChunkEmbedding(eq("notes/x.md"), eq("image"), eq(0), any())).thenReturn(true);
+        when(repo.setChunkEmbedding(org.mockito.ArgumentMatchers.eq(1L), eq("notes/x.md"), eq("image"), eq(0), any())).thenReturn(true);
 
         reconciler(repo, emb).drain();
 
-        verify(repo).setChunkEmbedding(eq("notes/x.md"), eq("image"), eq(0), any());
+        verify(repo).setChunkEmbedding(org.mockito.ArgumentMatchers.eq(1L), eq("notes/x.md"), eq("image"), eq(0), any());
     }
 
     @Test
     void leavesChunkNullWhenEmbedderUnavailable() {
         var repo = mock(NoteChunkRepository.class);
         var emb = mock(EmbeddingService.class);
-        when(repo.findChunksNeedingEmbedding(anyInt()))
-            .thenReturn(List.of(new PendingChunk("notes/x.md", "text", 2, "some prose")));
+        when(repo.findChunksNeedingEmbedding(org.mockito.ArgumentMatchers.eq(1L), anyInt()))
+            .thenReturn(List.of(new PendingChunk(1L, "notes/x.md", "text", 2, "some prose")));
         when(emb.embed("some prose")).thenReturn(null);   // embedder down
 
         reconciler(repo, emb).drain();
 
         // vector never written → chunk stays NULL → retried next tick
-        verify(repo, never()).setChunkEmbedding(any(), any(), anyInt(), any());
+        verify(repo, never()).setChunkEmbedding(org.mockito.ArgumentMatchers.eq(1L), any(), any(), anyInt(), any());
     }
 }

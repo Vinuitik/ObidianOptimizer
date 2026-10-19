@@ -16,6 +16,8 @@ import java.util.Map;
 @RequestMapping("feed")
 public class FeedController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private final FeedRepository feedRepo;
     private final SourceRepository sourceRepo;
     private final FeedService feedService;
@@ -23,7 +25,9 @@ public class FeedController {
     private final TrackAgentClient trackAgentClient;
 
     public FeedController(FeedRepository feedRepo, SourceRepository sourceRepo, FeedService feedService,
-                          SourcePollWorker pollWorker, TrackAgentClient trackAgentClient) {
+                          SourcePollWorker pollWorker, TrackAgentClient trackAgentClient,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.feedRepo = feedRepo;
         this.sourceRepo = sourceRepo;
         this.feedService = feedService;
@@ -41,28 +45,28 @@ public class FeedController {
         if (!List.of("pending", "binned", "accepted").contains(status)) {
             return ResponseEntity.badRequest().body("status must be pending|binned|accepted");
         }
-        return ResponseEntity.ok(feedRepo.list(status, Math.max(1, Math.min(limit, 500))));
+        return ResponseEntity.ok(feedRepo.list(activeVault.id(), status, Math.max(1, Math.min(limit, 500))));
     }
 
     @PostMapping("items/{id}/accept")
     public ResponseEntity<?> accept(@PathVariable long id) {
-        String captureId = feedService.accept(id);
+        String captureId = feedService.accept(activeVault.id(), id);
         return captureId == null ? ResponseEntity.notFound().build()
             : ResponseEntity.ok(Map.of("captureId", captureId));
     }
 
     @PostMapping("items/{id}/bin")
     public ResponseEntity<?> bin(@PathVariable long id) {
-        if (feedRepo.get(id) == null) return ResponseEntity.notFound().build();
-        feedService.bin(id);
+        if (feedRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
+        feedService.bin(activeVault.id(), id);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("items/{id}/restore")
     public ResponseEntity<?> restore(@PathVariable long id) {
-        if (feedRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (feedRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         try {
-            feedService.restore(id);
+            feedService.restore(activeVault.id(), id);
         } catch (FeedService.CaptureStartedException e) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(e.getMessage());
         }
@@ -73,7 +77,7 @@ public class FeedController {
 
     @GetMapping("sources")
     public List<Source> sources() {
-        return sourceRepo.list();
+        return sourceRepo.list(activeVault.id());
     }
 
     /** Resolve via the embedder's discover, store the source, insert the current feed contents
@@ -82,15 +86,15 @@ public class FeedController {
     public ResponseEntity<?> createSource(@RequestBody CreateSourceRequest req) {
         if (req.url() == null || req.url().isBlank()) return ResponseEntity.badRequest().body("url is required");
         String url = req.url().trim();
-        Source existing = sourceRepo.getByUrl(url);
+        Source existing = sourceRepo.getByUrl(activeVault.id(), url);
         if (existing != null) return ResponseEntity.ok(existing);
 
         Resolved r = resolve(url);
         if (r == null) return ResponseEntity.unprocessableEntity().body("could not read a feed from that URL");
         String title = (req.title() != null && !req.title().isBlank()) ? req.title().trim() : defaultTitle(url);
-        Source s = sourceRepo.create(r.kind(), url, r.feedUrl(), title, req.autoAccept(), req.targetTrackId());
-        pollWorker.ingestCandidates(s, r.candidates(), true);
-        return ResponseEntity.ok(sourceRepo.get(s.id()));
+        Source s = sourceRepo.create(activeVault.id(), r.kind(), url, r.feedUrl(), title, req.autoAccept(), req.targetTrackId());
+        pollWorker.ingestCandidates(activeVault.id(), s, r.candidates(), true);
+        return ResponseEntity.ok(sourceRepo.get(activeVault.id(), s.id()));
     }
 
     public record ResolveRequest(String url) {}
@@ -138,7 +142,7 @@ public class FeedController {
 
     @PatchMapping("sources/{id}")
     public ResponseEntity<?> patchSource(@PathVariable long id, @RequestBody Map<String, Object> body) {
-        if (sourceRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (sourceRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         Boolean auto = body.get("autoAccept") instanceof Boolean b ? b : null;
         Long track = body.get("targetTrackId") instanceof Number n ? n.longValue() : null;
         String status = body.get("status") instanceof String s ? s : null;
@@ -146,7 +150,7 @@ public class FeedController {
             return ResponseEntity.badRequest().body("status must be active|paused");
         }
         String title = body.get("title") instanceof String t && !t.isBlank() ? t.trim() : null;
-        return ResponseEntity.ok(sourceRepo.update(id,
+        return ResponseEntity.ok(sourceRepo.update(activeVault.id(), id,
             auto, body.containsKey("autoAccept") && body.get("autoAccept") == null,
             track, body.containsKey("targetTrackId") && body.get("targetTrackId") == null,
             status, title));
@@ -154,13 +158,13 @@ public class FeedController {
 
     @DeleteMapping("sources/{id}")
     public ResponseEntity<?> deleteSource(@PathVariable long id) {
-        return sourceRepo.delete(id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+        return sourceRepo.delete(activeVault.id(), id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 
     @PostMapping("sources/{id}/poll")
     public ResponseEntity<?> poll(@PathVariable long id) {
-        if (sourceRepo.get(id) == null) return ResponseEntity.notFound().build();
-        pollWorker.pollNowAsync(id);
+        if (sourceRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
+        pollWorker.pollNowAsync(activeVault.id(), id);
         return ResponseEntity.accepted().build();
     }
 

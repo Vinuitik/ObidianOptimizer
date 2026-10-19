@@ -44,12 +44,12 @@ public class ImageScanService {
     }
 
     /** Called after FileRepository.init() — walks all indexed notes and queues unprocessed images. */
-    public void scanAll(List<File> mdFiles) {
+    public void scanAll(long vaultId, List<File> mdFiles) {
         int queued = 0;
         for (File f : mdFiles) {
             try {
                 String content = Files.readString(f.toPath());
-                queued += registerImages(f.getAbsolutePath(), content);
+                queued += registerImages(vaultId, f.getAbsolutePath(), content);
             } catch (IOException e) {
                 log.warn("[ImageScanService.scanAll] skip {}: {}", f.getAbsolutePath(), e.getMessage());
             }
@@ -69,30 +69,30 @@ public class ImageScanService {
      * {@code embedding.scan.delay-ms}) still finds any note this misses.
      */
     @Transactional
-    public int registerImages(String notePath, String content) {
+    public int registerImages(long vaultId, String notePath, String content) {
         List<String> refs = extractImageRefs(content);
         for (String ref : refs) {
-            PendingImageJobRepository.UpsertResult result = jobRepo.upsertPending(notePath, ref);
+            PendingImageJobRepository.UpsertResult result = jobRepo.upsertPending(vaultId, notePath, ref);
             // Only publish when the row actually needs captioning — an already-DONE
             // image (re-registered because the note's OTHER content changed) has
             // nothing for the listener to do. Same chokepoint, fourth job: the
             // outbox+RabbitMQ fast path for image captioning (Phase 5).
             if (result.needsProcessing()) {
-                outboxRepo.enqueue(ImageCaptionQueueConfig.IMAGE_CAPTION_QUEUE, Map.of("jobId", result.id()));
+                outboxRepo.enqueue(vaultId, ImageCaptionQueueConfig.IMAGE_CAPTION_QUEUE, Map.of("jobId", result.id()));
             }
         }
         String hash = ContentHashing.sha256(content);
         String bodyHash = ContentHashing.sha256(MarkdownPreprocessor.stripFrontmatter(content));
-        noteIndexRepo.updateContentHash(notePath, hash, bodyHash);
+        noteIndexRepo.updateContentHash(vaultId, notePath, hash, bodyHash);
         // Same chokepoint, second job: trigger in-place ingest of any A/V or
         // PDF embeds in this note (best-effort, off-thread — never blocks).
-        resourceScanService.scan(notePath, content);
+        resourceScanService.scan(vaultId, notePath, content);
         // Third job, same chokepoint: the outbox+RabbitMQ fast path for embedding (see
         // QUEUE_UNIFICATION_PLAN.md Phase 3). Checked AFTER scan() so ingest_pending
         // reflects its final value — a note still awaiting a transcript must not fire
         // an embed message yet.
-        if (noteIndexRepo.needsEmbedding(notePath)) {
-            outboxRepo.enqueue(RabbitQueueConfig.EMBED_QUEUE, Map.of("notePath", notePath));
+        if (noteIndexRepo.needsEmbedding(vaultId, notePath)) {
+            outboxRepo.enqueue(vaultId, RabbitQueueConfig.EMBED_QUEUE, Map.of("notePath", notePath));
         }
         return refs.size();
     }

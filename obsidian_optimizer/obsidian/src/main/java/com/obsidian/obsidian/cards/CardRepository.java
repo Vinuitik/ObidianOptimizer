@@ -92,32 +92,33 @@ public class CardRepository {
      * Notes that need (re)generation: review notes (sr_due set) whose current
      * content has no ACTIVE cards AND hasn't already been attempted.
      */
-    public List<Map<String, Object>> findNotesNeedingCards(int limit) {
+    public List<Map<String, Object>> findNotesNeedingCards(long vaultId, int limit) {
         // Keys on body_hash (frontmatter stripped), NOT content_hash: the sr-due
         // rewrite on every review and chrono's frontmatter edits change content_hash
         // but not body_hash, so cards are no longer regenerated (LLM spend) for them.
         return jdbc.queryForList("""
             SELECT n.path, n.body_hash
             FROM notes n
-            WHERE n.sr_due IS NOT NULL
+            WHERE n.vault_id = ?
+              AND n.sr_due IS NOT NULL
               AND n.body_hash IS NOT NULL
               AND n.ingest_pending = false
               AND NOT EXISTS (
                   SELECT 1 FROM pending_image_jobs j
-                  WHERE j.note_path = n.path
+                  WHERE j.note_path = n.path AND j.vault_id = n.vault_id
                     AND j.status = 'PENDING')
               AND NOT EXISTS (
                   SELECT 1 FROM cards c
-                  WHERE c.note_path = n.path
+                  WHERE c.note_path = n.path AND c.vault_id = n.vault_id
                     AND c.source_hash = n.body_hash
                     AND c.status = 'ACTIVE')
               AND NOT EXISTS (
                   SELECT 1 FROM card_gen_attempts a
-                  WHERE a.note_path = n.path
+                  WHERE a.note_path = n.path AND a.vault_id = n.vault_id
                     AND a.source_hash = n.body_hash)
             ORDER BY n.sr_due ASC NULLS LAST, n.path
             LIMIT ?
-            """, limit);
+            """, vaultId, limit);
     }
 
     /**
@@ -129,33 +130,33 @@ public class CardRepository {
      * regenerated (image text lives in note_chunks, not the note body, so
      * body_hash never changes when it arrives).
      */
-    public boolean isReadyForCards(String notePath) {
+    public boolean isReadyForCards(long vaultId, String notePath) {
         Boolean ready = jdbc.queryForObject("""
             SELECT n.ingest_pending = false
                AND NOT EXISTS (
                    SELECT 1 FROM pending_image_jobs j
-                   WHERE j.note_path = n.path AND j.status = 'PENDING')
+                   WHERE j.note_path = n.path AND j.vault_id = n.vault_id AND j.status = 'PENDING')
             FROM notes n
-            WHERE n.path = ?
-            """, Boolean.class, notePath);
+            WHERE n.vault_id = ? AND n.path = ?
+            """, Boolean.class, vaultId, notePath);
         return Boolean.TRUE.equals(ready);
     }
 
-    public void recordAttempt(String notePath, String sourceHash) {
+    public void recordAttempt(long vaultId, String notePath, String sourceHash) {
         jdbc.update("""
-            INSERT INTO card_gen_attempts(note_path, source_hash, attempted_at)
-            VALUES (?, ?, now())
+            INSERT INTO card_gen_attempts(note_path, source_hash, attempted_at, vault_id)
+            VALUES (?, ?, now(), ?)
             ON CONFLICT (note_path, vault_id) DO UPDATE SET
               source_hash = EXCLUDED.source_hash, attempted_at = now()
-            """, notePath, sourceHash);
+            """, notePath, sourceHash, vaultId);
     }
 
-    public List<Map<String, Object>> findActiveByNote(String notePath) {
+    public List<Map<String, Object>> findActiveByNote(long vaultId, String notePath) {
         return jdbc.queryForList("""
             SELECT id, type, payload, difficulty, card_hash, created_at
-            FROM cards WHERE note_path = ? AND status = 'ACTIVE'
+            FROM cards WHERE vault_id = ? AND note_path = ? AND status = 'ACTIVE'
             ORDER BY difficulty, created_at
-            """, notePath);
+            """, vaultId, notePath);
     }
 
     /**
@@ -165,14 +166,14 @@ public class CardRepository {
      */
     /** Flags a card; returns its note_path (so the caller can trigger an immediate
      * regen for that note) or null if the card doesn't exist or was already flagged. */
-    public String flag(java.util.UUID cardId, String reason) {
+    public String flag(long vaultId, java.util.UUID cardId, String reason) {
         String notePath = jdbc.query(
-            "SELECT note_path FROM cards WHERE id = ? AND status <> 'FLAGGED'",
-            rs -> rs.next() ? rs.getString(1) : null, cardId);
+            "SELECT note_path FROM cards WHERE id = ? AND vault_id = ? AND status <> 'FLAGGED'",
+            rs -> rs.next() ? rs.getString(1) : null, cardId, vaultId);
         if (notePath == null) return null;
         jdbc.update("UPDATE cards SET status = 'FLAGGED' WHERE id = ?", cardId);
-        jdbc.update("INSERT INTO card_flags(card_id, note_path, reason) VALUES (?, ?, ?)",
-            cardId, notePath, reason);
+        jdbc.update("INSERT INTO card_flags(card_id, note_path, reason, vault_id) VALUES (?, ?, ?, ?)",
+            cardId, notePath, reason, vaultId);
         return notePath;
     }
 
@@ -181,7 +182,7 @@ public class CardRepository {
      * replacement cards to generate) and the reasons to feed the regen agent.
      * body_hash comes along so the regen records against the current note version.
      */
-    public List<Map<String, Object>> findNotesWithPendingFlags() {
+    public List<Map<String, Object>> findNotesWithPendingFlags(long vaultId) {
         return jdbc.queryForList("""
             SELECT f.note_path,
                    n.body_hash,
@@ -189,16 +190,17 @@ public class CardRepository {
                    ARRAY_AGG(f.reason) FILTER (WHERE f.reason IS NOT NULL
                                                AND f.reason <> '') AS reasons
             FROM card_flags f
-            JOIN notes n ON n.path = f.note_path
-            WHERE f.serviced_at IS NULL
+            JOIN notes n ON n.path = f.note_path AND n.vault_id = f.vault_id
+            WHERE f.vault_id = ?
+              AND f.serviced_at IS NULL
               AND n.body_hash IS NOT NULL
             GROUP BY f.note_path, n.body_hash
-            """);
+            """, vaultId);
     }
 
     /** Same shape as one row of {@link #findNotesWithPendingFlags()}, scoped to a single
      * note — backs the immediate (per-flag) regen trigger, as opposed to the nightly sweep. */
-    public Map<String, Object> findPendingFlagsForNote(String notePath) {
+    public Map<String, Object> findPendingFlagsForNote(long vaultId, String notePath) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
             SELECT f.note_path,
                    n.body_hash,
@@ -206,28 +208,29 @@ public class CardRepository {
                    ARRAY_AGG(f.reason) FILTER (WHERE f.reason IS NOT NULL
                                                AND f.reason <> '') AS reasons
             FROM card_flags f
-            JOIN notes n ON n.path = f.note_path
-            WHERE f.serviced_at IS NULL
+            JOIN notes n ON n.path = f.note_path AND n.vault_id = f.vault_id
+            WHERE f.vault_id = ?
+              AND f.serviced_at IS NULL
               AND n.body_hash IS NOT NULL
               AND f.note_path = ?
             GROUP BY f.note_path, n.body_hash
-            """, notePath);
+            """, vaultId, notePath);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     /** Mark a note's pending flags serviced once its replacements have been generated. */
-    public int markFlagsServiced(String notePath) {
+    public int markFlagsServiced(long vaultId, String notePath) {
         return jdbc.update(
-            "UPDATE card_flags SET serviced_at = now() WHERE note_path = ? AND serviced_at IS NULL",
-            notePath);
+            "UPDATE card_flags SET serviced_at = now() WHERE vault_id = ? AND note_path = ? AND serviced_at IS NULL",
+            vaultId, notePath);
     }
 
-    public Map<String, Object> stats() {
+    public Map<String, Object> stats(long vaultId) {
         return jdbc.queryForMap("""
             SELECT COUNT(*) FILTER (WHERE status = 'ACTIVE')                       AS active_cards,
                    COUNT(*) FILTER (WHERE status = 'ARCHIVED')                     AS archived_cards,
                    COUNT(DISTINCT note_path) FILTER (WHERE status = 'ACTIVE')      AS notes_with_cards
-            FROM cards
-            """);
+            FROM cards WHERE vault_id = ?
+            """, vaultId);
     }
 }

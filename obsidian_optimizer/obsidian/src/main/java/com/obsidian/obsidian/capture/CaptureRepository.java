@@ -31,7 +31,7 @@ public class CaptureRepository {
         this.jdbc = jdbc;
     }
 
-    public record Capture(String id, String sourceType, String sourceRef,
+    public record Capture(long vaultId, String id, String sourceType, String sourceRef,
                           String sourcePath, String title, String status,
                           String bundleRef, long createdAt,
                           String playlistId, Integer playlistPosition, Long trackId,
@@ -75,39 +75,39 @@ public class CaptureRepository {
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
-    public void create(String id, String sourceType, String sourceRef,
+    public void create(long vaultId, String id, String sourceType, String sourceRef,
                        String sourcePath, String title) {
         jdbc.update("""
-            INSERT INTO capture(id, source_type, source_ref, source_path, title, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 'processing', ?)
+            INSERT INTO capture(id, source_type, source_ref, source_path, title, status, created_at, vault_id)
+            VALUES (?, ?, ?, ?, ?, 'processing', ?, ?)
             ON CONFLICT (id) DO NOTHING
-            """, id, sourceType, sourceRef, sourcePath, title, System.currentTimeMillis());
+            """, id, sourceType, sourceRef, sourcePath, title, System.currentTimeMillis(), vaultId);
     }
 
     /** Insert a resource into the durable ingest queue (status {@code queued}); the
      *  {@link CaptureIngestWorker} submits it to the embedder on its next drain. */
-    public void enqueue(String id, String sourceType, String sourceRef,
+    public void enqueue(long vaultId, String id, String sourceType, String sourceRef,
                         String sourcePath, String title) {
         jdbc.update("""
-            INSERT INTO capture(id, source_type, source_ref, source_path, title, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 'queued', ?)
+            INSERT INTO capture(id, source_type, source_ref, source_path, title, status, created_at, vault_id)
+            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)
             ON CONFLICT (id) DO NOTHING
-            """, id, sourceType, sourceRef, sourcePath, title, System.currentTimeMillis());
+            """, id, sourceType, sourceRef, sourcePath, title, System.currentTimeMillis(), vaultId);
     }
 
     /** Same as {@link #enqueue} but tags the row as part of a playlist expansion
      *  (CaptureController) — {@code playlistId} groups the sibling rows, {@code position}
      *  preserves their order in the source playlist. */
-    public void enqueuePlaylistItem(String id, String sourceType, String sourceRef,
+    public void enqueuePlaylistItem(long vaultId, String id, String sourceType, String sourceRef,
                                     String sourcePath, String title,
                                     String playlistId, int position) {
         jdbc.update("""
             INSERT INTO capture(id, source_type, source_ref, source_path, title, status,
-                                created_at, playlist_id, playlist_position)
-            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)
+                                created_at, playlist_id, playlist_position, vault_id)
+            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)
             ON CONFLICT (id) DO NOTHING
             """, id, sourceType, sourceRef, sourcePath, title,
-            System.currentTimeMillis(), playlistId, position);
+            System.currentTimeMillis(), playlistId, position, vaultId);
     }
 
     public void updateStatus(String id, String status) {
@@ -150,18 +150,18 @@ public class CaptureRepository {
     }
 
     /** Oldest-first batch of FAILED captures — candidates for {@code requeueFailed}. */
-    public List<Capture> findFailedRetryable(int limit) {
+    public List<Capture> findFailedRetryable(long vaultId, int limit) {
         return jdbc.query(
-            "SELECT * FROM capture WHERE status = 'failed' ORDER BY created_at ASC LIMIT ?",
-            CaptureRepository::map, limit);
+            "SELECT * FROM capture WHERE vault_id = ? AND status = 'failed' ORDER BY created_at ASC LIMIT ?",
+            CaptureRepository::map, vaultId, limit);
     }
 
     /** Every live FAILED capture (retry-exhausted or not) for the frontend's failed-list —
      *  newest first, same convention as {@link #listAll}. */
-    public List<Capture> listFailed() {
+    public List<Capture> listFailed(long vaultId) {
         return jdbc.query(
-            "SELECT * FROM capture WHERE status = 'failed' ORDER BY created_at DESC",
-            CaptureRepository::map);
+            "SELECT * FROM capture WHERE vault_id = ? AND status = 'failed' ORDER BY created_at DESC",
+            CaptureRepository::map, vaultId);
     }
 
     /** User dismissed a failed capture from the failed-list UI — done trying. */
@@ -181,10 +181,10 @@ public class CaptureRepository {
     }
 
     /** Oldest-first batch of DEFERRED captures awaiting a synthesis retry. */
-    public List<Capture> findDeferred(int limit) {
+    public List<Capture> findDeferred(long vaultId, int limit) {
         return jdbc.query(
-            "SELECT * FROM capture WHERE status = 'deferred' ORDER BY created_at ASC LIMIT ?",
-            CaptureRepository::map, limit);
+            "SELECT * FROM capture WHERE vault_id = ? AND status = 'deferred' ORDER BY created_at ASC LIMIT ?",
+            CaptureRepository::map, vaultId, limit);
     }
 
     /** Atomically claim a DEFERRED row for a retry (→ {@code processing}) so two ticks
@@ -199,19 +199,19 @@ public class CaptureRepository {
      *  cleanup sweep (a source with no notes left → trash it). The age gate keeps mid-ingest
      *  captures out. 'failed' is handled separately ({@link #findExhaustedFailed}) — it gets a
      *  bounded auto-retry first instead of being swept the moment it's stale. */
-    public List<Capture> findStaleActive(long olderThanEpochMillis) {
+    public List<Capture> findStaleActive(long vaultId, long olderThanEpochMillis) {
         return jdbc.query(
-            "SELECT * FROM capture WHERE status = 'processing' AND created_at < ? " +
+            "SELECT * FROM capture WHERE vault_id = ? AND status = 'processing' AND created_at < ? " +
             "ORDER BY created_at ASC",
-            CaptureRepository::map, olderThanEpochMillis);
+            CaptureRepository::map, vaultId, olderThanEpochMillis);
     }
 
 
     /** Oldest-first batch of queued resources awaiting submission (FIFO fairness). */
-    public List<Capture> findQueued(int limit) {
+    public List<Capture> findQueued(long vaultId, int limit) {
         return jdbc.query(
-            "SELECT * FROM capture WHERE status = 'queued' ORDER BY created_at ASC LIMIT ?",
-            CaptureRepository::map, limit);
+            "SELECT * FROM capture WHERE vault_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT ?",
+            CaptureRepository::map, vaultId, limit);
     }
 
     /** Atomically claim a queued row (→ {@code processing}) so a nudge and a scheduled
@@ -225,12 +225,12 @@ public class CaptureRepository {
     /** Is this exact source already in the inbox pipeline (queued/processing/ready)? Used to
      *  reject a duplicate capture LOUDLY — re-sharing the same link/file that's already here.
      *  A discarded/failed capture does NOT block (re-capturing after cleanup is fine). */
-    public boolean existsLiveForSource(String sourceRef) {
+    public boolean existsLiveForSource(long vaultId, String sourceRef) {
         if (sourceRef == null || sourceRef.isBlank()) return false;
         Integer n = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM capture WHERE source_ref = ? " +
+            "SELECT COUNT(*) FROM capture WHERE vault_id = ? AND source_ref = ? " +
             "AND status IN ('queued','processing','deferred','ready')",
-            Integer.class, sourceRef);
+            Integer.class, vaultId, sourceRef);
         return n != null && n > 0;
     }
 
@@ -239,21 +239,21 @@ public class CaptureRepository {
      *  only), this is for a later step's subscription poller: stops it from re-ingesting a
      *  source item that was already fully processed (or even failed/discarded) in a past poll
      *  cycle. */
-    public boolean existsForSource(String sourceRef) {
+    public boolean existsForSource(long vaultId, String sourceRef) {
         if (sourceRef == null || sourceRef.isBlank()) return false;
         Integer n = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM capture WHERE source_ref = ?", Integer.class, sourceRef);
+            "SELECT COUNT(*) FROM capture WHERE vault_id = ? AND source_ref = ?", Integer.class, vaultId, sourceRef);
         return n != null && n > 0;
     }
 
     /** How many OTHER live (non-discarded) captures still reference this vault file as their
      *  source/original. Guards the cleanup sweep against trashing a file shared by a duplicate
      *  capture (same upload twice → same filename) whose sibling still has notes. */
-    public int countLiveReferencesToFile(String vaultRelPath, String excludeId) {
+    public int countLiveReferencesToFile(long vaultId, String vaultRelPath, String excludeId) {
         Integer n = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM capture WHERE id <> ? AND status <> 'discarded' " +
+            "SELECT COUNT(*) FROM capture WHERE vault_id = ? AND id <> ? AND status <> 'discarded' " +
             "AND (source_ref = ? OR source_path = ?)",
-            Integer.class, excludeId, vaultRelPath, vaultRelPath);
+            Integer.class, vaultId, excludeId, vaultRelPath, vaultRelPath);
         return n == null ? 0 : n;
     }
 
@@ -268,9 +268,9 @@ public class CaptureRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    public List<Capture> listAll() {
+    public List<Capture> listAll(long vaultId) {
         return jdbc.query(
-            "SELECT * FROM capture ORDER BY created_at DESC", CaptureRepository::map);
+            "SELECT * FROM capture WHERE vault_id = ? ORDER BY created_at DESC", CaptureRepository::map, vaultId);
     }
 
     private static Capture map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
@@ -279,7 +279,7 @@ public class CaptureRepository {
         long rawTrackId = rs.getLong("track_id");
         Long trackId = rs.wasNull() ? null : rawTrackId;
         return new Capture(
-            rs.getString("id"), rs.getString("source_type"), rs.getString("source_ref"),
+            rs.getLong("vault_id"), rs.getString("id"), rs.getString("source_type"), rs.getString("source_ref"),
             rs.getString("source_path"), rs.getString("title"), rs.getString("status"),
             rs.getString("bundle_ref"), rs.getLong("created_at"),
             rs.getString("playlist_id"), playlistPosition, trackId,

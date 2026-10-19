@@ -39,6 +39,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class TrackControllerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @Mock TrackRepository trackRepo;
     @Mock TodayPlanService todayPlan;
     @Mock TrackReviewHandoff reviewHandoff;
@@ -51,13 +53,13 @@ class TrackControllerTest {
     @BeforeEach
     void setUp() {
         TrackController controller = new TrackController(
-            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, feedController);
+            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, feedController, activeVault);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
     @Test
     void generateMinicourse_unknownTrack_returnsNotFound_clientNeverCalled() throws Exception {
-        when(trackRepo.get(99L)).thenReturn(null);
+        when(trackRepo.get(1L, 99L)).thenReturn(null);
 
         mvc.perform(post("/tracks/99/minicourse"))
             .andExpect(status().isNotFound());
@@ -69,7 +71,7 @@ class TrackControllerTest {
     void generateMinicourse_success_returnsJobBody() throws Exception {
         Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(),
             null, null, null);
-        when(trackRepo.get(1L)).thenReturn(track);
+        when(trackRepo.get(1L, 1L)).thenReturn(track);
         when(trackAgentClient.submitMinicourse(1L))
             .thenReturn(new TrackAgentClient.Result(true, 200, "{\"id\":\"job1\",\"status\":\"pending\"}"));
 
@@ -82,7 +84,7 @@ class TrackControllerTest {
     void generateMinicourse_clientFailure_propagatesStatusAndBody() throws Exception {
         Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(),
             null, null, null);
-        when(trackRepo.get(1L)).thenReturn(track);
+        when(trackRepo.get(1L, 1L)).thenReturn(track);
         when(trackAgentClient.submitMinicourse(1L))
             .thenReturn(new TrackAgentClient.Result(false, 503, "{\"error\":\"embedder unreachable\"}"));
 
@@ -162,8 +164,8 @@ class TrackControllerTest {
             null, null, null);
         Track trackB = new Track(20L, "Track B", "custom", "active", "excel_import", null, null, true, Instant.now(),
             null, null, null);
-        when(trackRepo.create("Track A", "book", "excel_import")).thenReturn(trackA);
-        when(trackRepo.create("Track B", "custom", "excel_import")).thenReturn(trackB);
+        when(trackRepo.create(1L, "Track A", "book", "excel_import")).thenReturn(trackA);
+        when(trackRepo.create(1L, "Track B", "custom", "excel_import")).thenReturn(trackB);
 
         TrackItem item1 = new TrackItem(100L, 10L, 0, "Item 1", null, "pending", null, null);
         TrackItem item2 = new TrackItem(101L, 10L, 1, "Item 2", null, "pending", null, null);
@@ -193,8 +195,8 @@ class TrackControllerTest {
             .andExpect(jsonPath("$.tracksCreated").value(2))
             .andExpect(jsonPath("$.itemsCreated").value(3));
 
-        verify(trackRepo).create("Track A", "book", "excel_import");
-        verify(trackRepo).create("Track B", "custom", "excel_import");
+        verify(trackRepo).create(1L, "Track A", "book", "excel_import");
+        verify(trackRepo).create(1L, "Track B", "custom", "excel_import");
         verify(trackRepo).addItem(10L, "Item 1", null);
         verify(trackRepo).addItem(10L, "Item 2", null);
         verify(trackRepo).addItem(20L, "Item 3", null);
@@ -206,7 +208,7 @@ class TrackControllerTest {
     void commitImport_outOfRangeTrackIndex_skippedNotFiveHundred() throws Exception {
         Track trackA = new Track(10L, "Track A", "book", "active", "excel_import", null, null, true, Instant.now(),
             null, null, null);
-        when(trackRepo.create("Track A", "book", "excel_import")).thenReturn(trackA);
+        when(trackRepo.create(1L, "Track A", "book", "excel_import")).thenReturn(trackA);
 
         TrackItem validItem = new TrackItem(100L, 10L, 0, "Valid Item", null, "pending", null, null);
         when(trackRepo.addItem(10L, "Valid Item", null)).thenReturn(validItem);
@@ -244,6 +246,6 @@ class TrackControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(7));
 
-        verify(trackRepo, never()).create(any(), any(), any());
+        verify(trackRepo, never()).create(org.mockito.ArgumentMatchers.eq(1L), any(), any(), any());
     }
 }

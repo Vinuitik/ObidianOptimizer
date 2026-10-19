@@ -43,69 +43,69 @@ class ReviewPreparationServiceTest {
 
     @Test
     void alwaysNormalizesFsrsState() {
-        when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of(Map.of("id", "x")));  // already has cards
-        prep.prepare(NOTE);
-        verify(stateWriter).normalizeLegacy(NOTE);
+        when(cardRepo.findActiveByNote(1L, NOTE)).thenReturn(List.of(Map.of("id", "x")));  // already has cards
+        prep.prepare(1L, NOTE);
+        verify(stateWriter).normalizeLegacy(1L, NOTE);
     }
 
     @Test
     void whenNoCards_andReady_generatesAgainstBodyHash_andEmbeds() throws Exception {
-        when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of());        // no cards yet
-        when(noteIndex.getBodyHash(NOTE)).thenReturn("bodyhash123");
-        when(cardRepo.isReadyForCards(NOTE)).thenReturn(true);             // ingest + images done
-        when(generationService.generateFor(NOTE, "bodyhash123"))
+        when(cardRepo.findActiveByNote(1L, NOTE)).thenReturn(List.of());        // no cards yet
+        when(noteIndex.getBodyHash(1L, NOTE)).thenReturn("bodyhash123");
+        when(cardRepo.isReadyForCards(1L, NOTE)).thenReturn(true);             // ingest + images done
+        when(generationService.generateFor(1L, NOTE, "bodyhash123"))
             .thenReturn(new ObjectMapper().createObjectNode().put("stored", 4));
 
-        prep.prepare(NOTE);
+        prep.prepare(1L, NOTE);
 
-        verify(generationService).generateFor(NOTE, "bodyhash123");
+        verify(generationService).generateFor(1L, NOTE, "bodyhash123");
         // recordAttempt MUST use body_hash so CardJobWorker.findNotesNeedingCards skips it
-        verify(cardRepo).recordAttempt(NOTE, "bodyhash123");
-        verify(embeddingService).indexNote(NOTE);
+        verify(cardRepo).recordAttempt(1L, NOTE, "bodyhash123");
+        verify(embeddingService).indexNote(1L, NOTE);
     }
 
     @Test
     void whenNotReady_defersCardGeneration_butStillEmbeds() {
-        when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of());
-        when(noteIndex.getBodyHash(NOTE)).thenReturn("bh");
-        when(cardRepo.isReadyForCards(NOTE)).thenReturn(false);   // ingest/images still pending
+        when(cardRepo.findActiveByNote(1L, NOTE)).thenReturn(List.of());
+        when(noteIndex.getBodyHash(1L, NOTE)).thenReturn("bh");
+        when(cardRepo.isReadyForCards(1L, NOTE)).thenReturn(false);   // ingest/images still pending
 
-        prep.prepare(NOTE);
+        prep.prepare(1L, NOTE);
 
         // No image-blind JIT cards — the background worker handles it once ready.
-        verify(generationService, never()).generateFor(any(), any());
-        verify(cardRepo, never()).recordAttempt(any(), any());
+        verify(generationService, never()).generateFor(org.mockito.ArgumentMatchers.eq(1L), any(), any());
+        verify(cardRepo, never()).recordAttempt(org.mockito.ArgumentMatchers.eq(1L), any(), any());
         // Embedding is independent of card readiness and still runs.
-        verify(embeddingService).indexNote(NOTE);
+        verify(embeddingService).indexNote(1L, NOTE);
     }
 
     @Test
     void whenCardsExist_skipsGenerationAndEmbed() {
-        when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of(Map.of("id", "x")));
-        prep.prepare(NOTE);
-        verify(generationService, never()).generateFor(any(), any());
-        verify(embeddingService, never()).indexNote(any());
+        when(cardRepo.findActiveByNote(1L, NOTE)).thenReturn(List.of(Map.of("id", "x")));
+        prep.prepare(1L, NOTE);
+        verify(generationService, never()).generateFor(org.mockito.ArgumentMatchers.eq(1L), any(), any());
+        verify(embeddingService, never()).indexNote(org.mockito.ArgumentMatchers.eq(1L), any());
     }
 
     @Test
     void whenGenerationYieldsNothing_doesNotRecordAttempt() {
-        when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of());
-        when(noteIndex.getBodyHash(NOTE)).thenReturn("bh");
-        when(cardRepo.isReadyForCards(NOTE)).thenReturn(true);
-        when(generationService.generateFor(NOTE, "bh")).thenReturn(null);   // embedder down / zero yield
+        when(cardRepo.findActiveByNote(1L, NOTE)).thenReturn(List.of());
+        when(noteIndex.getBodyHash(1L, NOTE)).thenReturn("bh");
+        when(cardRepo.isReadyForCards(1L, NOTE)).thenReturn(true);
+        when(generationService.generateFor(1L, NOTE, "bh")).thenReturn(null);   // embedder down / zero yield
 
-        prep.prepare(NOTE);
+        prep.prepare(1L, NOTE);
 
-        verify(cardRepo, never()).recordAttempt(any(), any());  // don't burn the retry on a no-op
+        verify(cardRepo, never()).recordAttempt(org.mockito.ArgumentMatchers.eq(1L), any(), any());  // don't burn the retry on a no-op
     }
 
     @Test
     void whenNotIndexed_skipsGeneration() {
-        when(cardRepo.findActiveByNote(NOTE)).thenReturn(List.of());
-        when(noteIndex.getBodyHash(NOTE)).thenReturn(null);    // not in the index yet
+        when(cardRepo.findActiveByNote(1L, NOTE)).thenReturn(List.of());
+        when(noteIndex.getBodyHash(1L, NOTE)).thenReturn(null);    // not in the index yet
 
-        prep.prepare(NOTE);
+        prep.prepare(1L, NOTE);
 
-        verify(generationService, never()).generateFor(any(), any());
+        verify(generationService, never()).generateFor(org.mockito.ArgumentMatchers.eq(1L), any(), any());
     }
 }
