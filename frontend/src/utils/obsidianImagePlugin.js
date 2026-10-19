@@ -1,78 +1,15 @@
 import { $node, $remark } from '@milkdown/utils';
 
-// ── Module-level blob registry: filename → blobURL (for pre-save rendering) ──
+import {
+  setPendingBlobs, addPendingBlob, removePendingBlob, resolveMediaSrc, fileTypeFor,
+  WHITELISTED_EXTS, WHITELISTED_MIME_TYPES, isWhitelisted, generateFilename, mediaUrl,
+} from './media';
 
-const pendingBlobRegistry = new Map();
-
-/** Replace the entire registry (called on tab switch / pendingFiles store change). */
-export function setPendingBlobs(pendingFilesMap) {
-  pendingBlobRegistry.clear();
-  for (const [filename, { blobURL }] of Object.entries(pendingFilesMap)) {
-    pendingBlobRegistry.set(filename, blobURL);
-  }
-}
-
-/** Add a single entry immediately (called in the paste handler before ProseMirror renders). */
-export function addPendingBlob(filename, blobURL) {
-  pendingBlobRegistry.set(filename, blobURL);
-}
-
-/** Remove a single entry after upload completes. */
-export function removePendingBlob(filename) {
-  pendingBlobRegistry.delete(filename);
-}
-
-// ── File-type helpers ─────────────────────────────────────────────────────────
-
-const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
-const VIDEO_EXTS = new Set(['.mp4', '.mov', '.mkv', '.webm', '.avi']);
-const AUDIO_EXTS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.flac']);
-const PDF_EXTS   = new Set(['.pdf']);
-
-export function fileTypeFor(filename) {
-  const dot = filename.lastIndexOf('.');
-  if (dot < 0) return 'other';
-  const ext = filename.slice(dot).toLowerCase();
-  if (IMAGE_EXTS.has(ext)) return 'image';
-  if (VIDEO_EXTS.has(ext)) return 'video';
-  if (AUDIO_EXTS.has(ext)) return 'audio';
-  if (PDF_EXTS.has(ext))   return 'pdf';
-  return 'other';
-}
-
-export const WHITELISTED_EXTS = new Set([
-  ...IMAGE_EXTS, ...VIDEO_EXTS, ...AUDIO_EXTS, ...PDF_EXTS,
-]);
-
-export const WHITELISTED_MIME_TYPES = new Set([
-  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml',
-  'video/mp4', 'video/quicktime', 'video/x-matroska', 'video/webm', 'video/x-msvideo',
-  'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/flac',
-  'application/pdf',
-]);
-
-export function isWhitelisted(file) {
-  if (WHITELISTED_MIME_TYPES.has(file.type)) return true;
-  const name = file.name.toLowerCase();
-  const dot  = name.lastIndexOf('.');
-  return dot >= 0 && WHITELISTED_EXTS.has(name.slice(dot));
-}
-
-// ── Filename generator: stem-{timestamp}{8randomhex}.ext ─────────────────────
-
-export function generateFilename(file) {
-  const name = file.name;
-  const dotIdx = name.lastIndexOf('.');
-  const ext  = dotIdx >= 0 ? name.slice(dotIdx).toLowerCase() : '';
-  const stem = (dotIdx >= 0 ? name.slice(0, dotIdx) : name)
-    .replace(/[^a-zA-Z0-9-_]/g, '_')
-    .slice(0, 40);
-  const ts   = Date.now();
-  const rand = Array.from(crypto.getRandomValues(new Uint8Array(4)))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-  return `${stem}-${ts}${rand}${ext}`;
-}
+// Re-exported so existing importers keep working (helpers live in ./media, Milkdown-free).
+export {
+  setPendingBlobs, addPendingBlob, removePendingBlob, fileTypeFor,
+  WHITELISTED_EXTS, WHITELISTED_MIME_TYPES, isWhitelisted, generateFilename, mediaUrl,
+};
 
 // ── Remark plugin: parse ![[filename]] in the mdast ──────────────────────────
 
@@ -120,24 +57,6 @@ function visit(tree, type, visitor) {
 
 export const obsidianImageRemark$ = $remark('obsidianImage', () => obsidianImageRemarkPlugin);
 
-// ── URL builder: resolves filename → nginx-served path (range requests work) ──
-
-function subdirFor(filename) {
-  const type = fileTypeFor(filename);
-  if (type === 'image') return 'images';
-  if (type === 'video') return 'videos';
-  if (type === 'audio') return 'audio';
-  if (type === 'pdf')   return 'pdf';
-  return 'files';
-}
-
-// EXPORTED: the offline warm (utils/noteMedia) MUST cache embeds under this exact URL,
-// or the review renderer's request misses the cache and images blank out offline. Single
-// source of truth — do not hand-build `/vault-media/...` for embeds anywhere else.
-export function mediaUrl(filename) {
-  return `/vault-media/${subdirFor(filename)}/${encodeURIComponent(filename)}`;
-}
-
 // ── $node: renders as appropriate element, serializes back to ![[...]] ────────
 
 export const obsidianImageNode$ = $node('obsidian_image', () => ({
@@ -149,7 +68,7 @@ export const obsidianImageNode$ = $node('obsidian_image', () => ({
   },
   toDOM(node) {
     const { filename } = node.attrs;
-    const src = pendingBlobRegistry.get(filename) ?? mediaUrl(filename);
+    const src = resolveMediaSrc(filename);
     const type = fileTypeFor(filename);
 
     if (type === 'video') {

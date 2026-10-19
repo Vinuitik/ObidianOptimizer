@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it';
+import { fileTypeFor, resolveMediaSrc } from './media';
 
 const md = new MarkdownIt({
   html: true,
@@ -33,7 +34,7 @@ function parseFrontmatter(content) {
   return { table: `<table><tbody>${rows}</tbody></table>\n`, body };
 }
 
-const escAttr = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+const escAttr = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // [[t]] / [[t|a]] -> <span class="wiki-link" data-wiki-link="t">a-or-t</span>; skips ![[embed]].
 export function renderWikiLinks(text) {
@@ -43,14 +44,25 @@ export function renderWikiLinks(text) {
   });
 }
 
+// ![[file]] -> element by extension; src identical to the editor (mediaUrl / pending blob).
+function embedHtml(filename) {
+  const src = escAttr(resolveMediaSrc(filename));
+  const name = escAttr(filename);
+  const type = fileTypeFor(filename);
+  if (type === 'video') return `<video class="embedded-video" src="${src}" controls data-obsidian-image="${name}"></video>`;
+  if (type === 'audio') return `<audio class="embedded-audio" src="${src}" controls data-obsidian-image="${name}"></audio>`;
+  if (type === 'pdf' || type === 'other') {
+    return `<a class="embedded-file" href="${src}" target="_blank" rel="noopener noreferrer" data-obsidian-image="${name}">${type === 'pdf' ? '📄' : '📎'} ${name}</a>`;
+  }
+  return `<img class="embedded-image" src="${src}" alt="${name}" data-obsidian-image="${name}" />`;
+}
+
 export function renderMarkdown(content) {
   const { table, body } = parseFrontmatter(content);
   let processed = body;
 
   // ![[image.png]] → <img>
-  processed = processed.replace(/!\[\[(.*?)\]\]/gs, (_, p1) =>
-    `<img src="/api/images/${encodeURIComponent(p1)}" alt="${p1}" class="embedded-image" />`
-  );
+  processed = processed.replace(/!\[\[(.*?)\]\]/gs, (_, p1) => embedHtml(p1.trim()));
 
   // [[link|alias]] or [[link]] → clickable wiki-link anchor
   processed = renderWikiLinks(processed);

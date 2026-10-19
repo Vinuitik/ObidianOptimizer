@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -10,6 +10,9 @@ import EditorErrorBoundary from '../components/organisms/EditorErrorBoundary';
 import { editorTheme, readOnlyTheme } from './theme';
 import { livePreviewExtension } from './livePreview';
 import { wikiLinksExtension } from './wikiLinks';
+import { embedsExtension, insertFiles } from './embeds';
+import { setPendingBlobs, WHITELISTED_EXTS } from '../utils/media';
+import ImageLightbox from '../components/molecules/ImageLightbox';
 import styles from './CmEditor.module.css';
 
 const DEBOUNCE_MS = 120;
@@ -20,11 +23,11 @@ const readOnlyExt = (isMutable) => (isMutable
   : [EditorState.readOnly.of(true), EditorView.editable.of(false), readOnlyTheme()]);
 
 // Feature extensions. Each W-milestone agent adds exactly ONE line here.
-export function featureExtensions(opts) {
+export function featureExtensions(opts = {}) {
   return [
     livePreviewExtension(),
     ...wikiLinksExtension(opts),
-    // W2: ...embedsExtension(opts),
+    ...embedsExtension(opts),
     // W3: ...mathExtension(opts),
     // W3: ...tablesExtension(opts),
     // W4: ...hashtagsExtension(opts),
@@ -32,7 +35,7 @@ export function featureExtensions(opts) {
   ];
 }
 
-export function baseExtensions({ onDocChange, onFlush, isMutable }) {
+export function baseExtensions({ onDocChange, onFlush, isMutable, ...featureOpts }) {
   return [
     history(),
     keymap.of([
@@ -46,7 +49,7 @@ export function baseExtensions({ onDocChange, onFlush, isMutable }) {
     markdown({ base: markdownLanguage, codeLanguages: languages }),
     EditorView.lineWrapping,
     editorTheme(),
-    ...featureExtensions({ isMutable }),
+    ...featureExtensions({ isMutable, ...featureOpts }),
     readOnlyCompartment.of(readOnlyExt(isMutable)),
     EditorView.updateListener.of((u) => { if (u.docChanged) onDocChange(u.view); }),
     EditorView.domEventHandlers({
@@ -65,10 +68,19 @@ export function baseExtensions({ onDocChange, onFlush, isMutable }) {
   ];
 }
 
+const ACCEPT = [...WHITELISTED_EXTS].join(',');
+
 function CmEditorInner({ currentNotePath, editorResetKey }) {
   const hostRef = useRef(null);
   const viewRef = useRef(null);
   const isMutable = useStore(s => s.isMutable);
+  const pendingFiles = useStore(s => s.pendingFiles);
+  const fileInputRef = useRef(null);
+  const [zoom, setZoom] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // Blob registry mirrors the active tab's pending files (set before the view is created).
+  useLayoutEffect(() => { setPendingBlobs(pendingFiles); }, [pendingFiles]);
 
   // Create the view once per note / reset — never per keystroke.
   useEffect(() => {
@@ -89,7 +101,10 @@ function CmEditorInner({ currentNotePath, editorResetKey }) {
       parent: hostRef.current,
       state: EditorState.create({
         doc: body,
-        extensions: baseExtensions({ onDocChange, onFlush: flush, isMutable: useStore.getState().isMutable }),
+        extensions: baseExtensions({ onDocChange, onFlush: flush, isMutable: useStore.getState().isMutable,
+          onImageClick: (src, alt) => setZoom({ src, alt }),
+          onDragOver: setIsDragOver,
+        }),
       }),
     });
     viewRef.current = view;
@@ -106,7 +121,31 @@ function CmEditorInner({ currentNotePath, editorResetKey }) {
     viewRef.current?.dispatch({ effects: readOnlyCompartment.reconfigure(readOnlyExt(isMutable)) });
   }, [isMutable]);
 
-  return <div ref={hostRef} className={`${styles.host} ${isMutable ? '' : styles.readonly}`} />;
+  const onPick = (e) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (files.length && viewRef.current) insertFiles(viewRef.current, files);
+  };
+
+  return (
+    <>
+      <div ref={hostRef} className={`${styles.host} ${isMutable ? '' : styles.readonly}`}>
+        {isDragOver && (
+          <div className={styles.dragOverlay}><span className={styles.dragOverlayText}>Drop to attach</span></div>
+        )}
+        {isMutable && (
+          <>
+            <input ref={fileInputRef} type="file" multiple accept={ACCEPT} style={{ display: 'none' }}
+              data-testid="cm-file-input" onChange={onPick} />
+            <button className={styles.uploadBtn} title="Attach file" onClick={() => fileInputRef.current?.click()}>
+              📎 Attach
+            </button>
+          </>
+        )}
+      </div>
+      {zoom && <ImageLightbox src={zoom.src} alt={zoom.alt} onClose={() => setZoom(null)} />}
+    </>
+  );
 }
 
 export default function CmEditor() {

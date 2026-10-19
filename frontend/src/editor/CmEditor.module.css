@@ -15,6 +15,23 @@
 }
 .host > :global(.cm-editor) { flex: 1; min-height: 0; }
 .readonly :global(.cm-content) { opacity: 0.94; }
+
+/* Attachments (W2): drop overlay + attach button */
+.dragOverlay {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-tint); border: 2px dashed var(--accent); border-radius: var(--r-md);
+  pointer-events: none;
+}
+.dragOverlayText { font-size: 14px; font-weight: 500; color: var(--accent); letter-spacing: 0.01em; }
+.uploadBtn {
+  position: absolute; bottom: 10px; right: 12px; z-index: 5;
+  background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 4px 10px; font-size: 13px; line-height: 1.4; cursor: pointer;
+  color: var(--text-3); opacity: 0.75;
+  transition: opacity var(--dur-1) ease, border-color var(--dur-1) ease, color var(--dur-1) ease;
+}
+.uploadBtn:hover { opacity: 1; color: var(--text); border-color: var(--accent-line); }
 .empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   height: 100%; gap: var(--sp-3); color: var(--text-3);
