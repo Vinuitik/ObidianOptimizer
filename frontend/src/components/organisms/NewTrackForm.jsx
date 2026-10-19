@@ -23,7 +23,6 @@ export default function NewTrackForm({ onCreated, autoFocus = false }) {
   const fetchTrackItems = useStore(s => s.fetchTrackItems);
   const updateSchedule = useStore(s => s.updateSchedule);
   const fetchTodayPlan = useStore(s => s.fetchTodayPlan);
-  const addTrackPending = useStore(s => s.addTrackPending);
   const showToast = useStore(s => s.showToast);
 
   const [title, setTitle] = useState('');
@@ -51,13 +50,10 @@ export default function NewTrackForm({ onCreated, autoFocus = false }) {
 
     const cls = classifyInput(paste);
     if (cls.kind === 'urls') {
-      const processing = [];
       for (const url of cls.urls) {
         const res = await captureResource(url, track.id);
         if (!res.ok) failures.push(url);
-        else if (!res.duplicate) processing.push({ trackId: track.id, trackTitle: track.title, label: url });
       }
-      if (processing.length) addTrackPending(processing);
     } else if (cls.kind === 'text') {
       const lines = paste.split('\n').map(l => l.trim()).filter(Boolean);
       for (const line of lines) {

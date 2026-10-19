@@ -182,7 +182,7 @@ Files: useStore.js (feed* slice), api/feed.js
 `undoFeed()` → `restoreFeedItem(lastDecision.item)` → `POST .../restore` → 409: "Already ingesting — discard it in Inbox."
 Bin tab: `fetchFeedBin()`; `restoreFeedItem(item)` (Restore), `ingestFeedItem(item)` (= accept).
 Sources: `fetchFeedSources / addFeedSource(url) → POST /feed/sources / setFeedSourceAutoAccept(id, true|false|null) / deleteFeedSource / checkFeedSource (poll, 202)`.
-Toast: `setFeedNotice(message, 'undo'|'view'|null)` → global `showToast` (`feedNotice` state is gone). `feedLoaded` = first fetch settled (gates skeleton vs empty); `learnView` ('feed'|'inbox'|null) = Learn's tab, decided once per visit by LearnPage.
+Toast: `setFeedNotice(message, 'undo'|'view'|null)` → global `showToast` (`feedNotice` state is gone). `feedLoaded` = first fetch settled (gates skeleton vs empty); `learnView` = legacy Learn tab flag; LearnPage no longer reads it (Today|Week is local state).
 `deleteFeedSource(id)` is optimistic + 7 s Undo toast (`DELETE_UNDO_MS`; the DELETE is only sent after the window). `resolveFeedSource(url)` = subscribe preview (`POST /feed/sources/resolve`, nothing persisted).
 To change toast timing: `showToast` duration / `DELETE_UNDO_MS`. To change swipe threshold: `FeedView.jsx SWIPE_PX`.
 

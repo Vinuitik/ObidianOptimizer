@@ -65,3 +65,18 @@
   .todayItemActions { width: 100%; justify-content: space-between; }
   .weekRow, .capacityRow { gap: var(--sp-1); }
 }
+
+/* Week view + drawer */
+.weekPage { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); max-width: var(--content-max); margin: 0 auto; width: 100%; box-sizing: border-box; }
+.weekToolbar { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.weekGrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--sp-2); }
+.weekDay { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.weekDayHead { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-1); }
+.weekDayName { font-weight: 600; }
+.weekChip { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: inherit; font: inherit; font-size: var(--fs-13); cursor: pointer; text-align: left; }
+.weekChip:hover { border-color: var(--accent); }
+.weekTracks { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.drawerBackdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 40; }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); overflow-y: auto; padding: var(--sp-4); box-sizing: border-box; background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--glass); z-index: 41; display: flex; flex-direction: column; gap: var(--sp-3); }
+.drawerHead { display: flex; justify-content: flex-end; }
+@media (max-width: 900px) { .weekGrid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); } }

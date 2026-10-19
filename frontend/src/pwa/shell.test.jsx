@@ -29,17 +29,11 @@ describe('bottom nav', () => {
     useStore.setState({ isAuthenticated: false, reviewNotes: [], settings: { tracksEnabled: true } });
   });
 
-  it('is Review, Learn, Capture, Tracks, Notes - no Sync tab', () => {
-    expect(TABS.map(t => t.to)).toEqual(['/review', '/learn', '/capture', '/tracks', '/notes']);
+  it('is Review, Learn, Capture, Notes - no Sync tab', () => {
+    expect(TABS.map(t => t.to)).toEqual(['/review', '/learn', '/capture', '/notes']);
     wrap(<BottomNav />);
     const labels = screen.getAllByRole('link').map(a => a.textContent);
-    expect(labels).toEqual(['Review', 'Learn', 'Capture', 'Tracks', 'Notes']);
-  });
-
-  it('hides Tracks when disabled', () => {
-    useStore.setState({ settings: { tracksEnabled: false } });
-    wrap(<BottomNav />);
-    expect(screen.queryByText('Tracks')).toBeNull();
+    expect(labels).toEqual(['Review', 'Learn', 'Capture', 'Notes']);
   });
 
   it('shows due-count badge on Review from the store', () => {

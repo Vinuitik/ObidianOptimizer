@@ -228,12 +228,9 @@ and the dev-facing `FLOWS.md`, keeps `README.md`).
 
 ---
 
-### Learn ▸ Feed (`[Feed | Inbox]` switch)
-`LearnPage` mode state (default `inbox`) → `fetchFeed()` on auth → Feed tab badge = `feedPending.length`
-→ mode `feed` → `organisms/FeedView` (Swipe | Bin | Sources) → decisions via store (`store/FLOWS.md` "Feed").
-To change default mode: `LearnPage.jsx` `useState('inbox')`.
+### Learn ▸ Today | Week
+`LearnPage` view state (default `today`): Today = `TodayPlan` + `InboxReview` below; Week = `WeekPlan` (see frontend/FLOWS.md "Learn — Today | Week"). Feed is NOT mounted here now (Sources page, L2) — `FeedView` temporarily unreachable.
 Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAccept`) → `PUT /settings` (global default; per-source override in Sources tab).
-TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `subscription`; legacy ones stay editable).
 
 ---
 
@@ -249,7 +246,7 @@ TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `su
 | Failed-capture retry/dismiss | `PipelineFailuresPage.handleCaptureAction()` |
 | Chrono result display | `SettingsPage.jsx` Advanced group |
 | Learn split orientation | `LearnPage.jsx` orientation ternary (video orient via `ResourcePanel` Viewer) |
-| Learn Feed/Inbox toggle | `LearnPage.jsx` `mode` state |
+| Learn Today/Week toggle | `LearnPage.jsx` `view` state |
 | Inbox triage UI | `organisms/InboxReview.jsx` + `api/inbox.js` (backend `inbox/InboxController`) |
 | Inbox folder tree grouping | `utils/sourceColor.js` (`buildInboxTree`, `folderAllItems`) |
 | File a whole folder/chapter | `InboxReview.jsx` (`fileGroup`, `openFolderFilePicker`, `openChapterFilePicker`) |
@@ -257,9 +254,7 @@ TracksPage no longer creates/polls subscriptions (`NEW_TRACK_TYPES` excludes `su
 | Dashboard counters | `stats/StatsController.java` (backend) |
 | Get-app / get-extension CTAs | `GetAppPage.jsx` (device detection via `pwa/installPrompt.js`) |
 | Chrome extension download zip | `linux_scripts/build-chrome-extension-zip.sh` → `ext-dist/obsidian-optimizer-chrome.zip` |
-| Feed tab badge | `LearnPage.jsx` `pendingCount` |
 | `feedAutoAccept` setting | `SettingsPage.jsx` `F.feedAutoAccept` |
-| Legacy subscription tracks UI | `TracksPage.jsx` `NEW_TRACK_TYPES` |
 | Flashcard session persistence | `store/flashSessionPersist.js`, `FlashcardSession.jsx` persist effect + `finish()`, `ReviewPage.jsx restoreActiveNote()` |
 | Done-today filter (Drive mode) | `useStore.js completeReview()` → `markNoteDone`; `fetchReviewNotes` → `doneNotePaths` |
 | MCQ long-press/scroll guard | `FlashcardSession.jsx McqOptions` (`LONG_PRESS_MS`, `MOVE_PX`), CSS `.option` |

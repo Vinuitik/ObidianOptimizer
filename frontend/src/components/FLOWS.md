@@ -193,7 +193,7 @@ the full flow (SW update signal, `registerSW.js`, desktop shell). Mounted in
 `FeedView` SegmentedTabs Swipe | Bin | Sources. `Stack`: `AnimatePresence` + `motion/presets.swipe` — exit flies out in the decision direction (`feedLastDecision.kind`), next card scales in. `FeedCard` pointer events → dx → transform on the inner div; release past `SWIPE_PX` (80) → accept/bin. Keys ←/→ (ignored in INPUT/TEXTAREA/SELECT). Undo button in the action bar (`undoFeed`); toasts: accept "Sent to Inbox · View", bin "Binned. · Undo".
 Loading: `!item && !feedLoaded` → Skeleton card (never "all caught up" before the first fetch); empty → `EmptyState` + "Open Inbox".
 `FeedSources` subscribe = URL → **Preview** (`resolveFeedSource`, nothing persisted; Card with human kind label + 3 items) → **Subscribe** (`addFeedSource`) → `onSubscribed()` → FeedView switches to Swipe. Delete → store `deleteFeedSource` (optimistic, Undo toast). Kind labels: `FeedSources.kindLabel`.
-`LearnPage`: tab = store `learnView`; decided once after first `fetchFeed` (Feed if pending>0 else Inbox), reset on unmount. To change: `LearnPage.jsx` effect.
+`LearnPage` no longer mounts FeedView (L2 Sources page will); store `learnView` is only set by the Feed toast "View"/"Open Inbox" and is currently unused by LearnPage.
 To change threshold: `FeedView.jsx SWIPE_PX`. Auto-accept tri-state: `FeedSources.jsx toVal/fromVal`.
 Offline: `decideFeed`/`restoreFeedItem`/`ingestFeedItem` route through `pwa/offlineApi.js`; Bin tab / Sources stay online-only.
 `FeedCard` "Subscribe to this channel" (youtube.com/youtu.be items) → `subscribeToChannel(url)` → `addFeedSource` (direct, no preview).
@@ -235,7 +235,7 @@ Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so ev
 | Media URL encoding | `SourceSplicePanel.mediaUrl()` — per-segment `encodeURIComponent` (spaces/fullwidth-colon in yt-dlp names) |
 | Inbox order within a source | `utils/sourceColor.groupBySource()` → `sourcePosition()` (min page / clip start), NOT captureSeq — reading order |
 | Source footer parse (pages/clip/bbox) | `utils/inboxParse.parseSourceRegion()` (`pages`, `startSeconds`/`endSeconds`, `local`, `bboxes`) |
-| Learn default tab | `pages/LearnPage.jsx` (store `learnView`) |
+| Learn Today/Week | `pages/LearnPage.jsx` `view` state |
 | Inbox Enter-to-file / next-group | `organisms/InboxReview.jsx` `enterRef` effect / `load()` |
 | Swipe threshold / keys | `organisms/FeedView.jsx SWIPE_PX` / `Stack` keydown effect |
 | Feed sources panel | `organisms/FeedSources.jsx` |

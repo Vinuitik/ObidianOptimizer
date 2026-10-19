@@ -98,15 +98,15 @@ Route transitions: `AnimatePresence mode="wait"` + Framer Motion 180ms opacity f
 To add a route: `App.jsx <Routes>` + `NavBar.jsx NAV_ITEMS`
 
 ## Tracks — add to track
-Files: TrackAddBox.jsx, TracksPage.jsx (TrackItemsEditor), api/capture.js
+Files: TrackAddBox.jsx, TrackEditor.jsx (TrackItemsEditor), api/capture.js
 - One box: `classifyInput()` → urls → `captureResource(url, trackId)` each | text → debounced `searchNotes` → pick = `addTrackItem(trackId, title, notePath)`, or "plain item" row = `addTrackItem(trackId, text, null)` | file drop/picker → `captureFile(file, trackId)` (`POST /capture/file`).
 - Captured link/file shows link|file + "processing…" placeholder; `fetchTrackItems` polled every 5s (6x) until item count grows. To change: `TrackAddBox` POLL_MS/POLL_MAX.
 - Persisted item chip = `itemKind()`: note (has notePath) | plain. link/file not derivable after ingest (no backend field). [NOT IMPLEMENTED]
 
 ## Tracks — one-step create + Advanced
-Files: NewTrackForm.jsx, TracksPage.jsx (ManageTab, TrackDetail), TracksPage.manage.test.jsx
+Files: NewTrackForm.jsx, TrackEditor.jsx (TrackDetail), WeekPlan.jsx (drawer host), TrackEditor.test.jsx
 - Create: `NewTrackForm.onSubmit()` → `createTrack(title,'book')` → deadline? `updateTrack({deadline})` : else `updateSchedule(id, DEFAULT_SCHEDULE)` (1/day, Mon-Sun; To change: `NewTrackForm.DEFAULT_SCHEDULE`) → `classifyInput(paste)`: urls → `captureResource(url, id)` each | text → `addTrackItem(id, line, null)` per line. Type defaults to book; change under detail Advanced.
-- Detail: primary = Deadline + Items. One collapsed `<details>` "Advanced" = Type, Status, Show on Progress tab, Priority, Weekly schedule, Generate a course. List column has a second "Advanced" = Daily capacity + Import from spreadsheet.
+- Detail: primary = Deadline + Items. One collapsed `<details>` "Advanced" = Type, Status, Show on Progress tab, Priority, Weekly schedule, Generate a course. Week toolbar (`WeekPlan`) holds + New track / Daily capacity (`CapacityPanel`) / Import (`ImportPanel`), each opening the side drawer.
 - Label-only renames (API unchanged): Mini-course → Generate a course; Include in Progress → Show on Progress tab; Review import → Import preview.
 
 | Change | Where |
@@ -133,7 +133,11 @@ Test files sit next to the component or util they cover: `ComponentName.test.jsx
 - Math node inline editing
 - Tab persistence across page refresh
 
-## Tracks — Today explains itself
-Files: TracksPage.jsx (TodayTab), useStore.js (todayPlanned/todayCapacity), TracksPage.today.test.jsx
-GET /tracks/today → fetchTodayPlan() → TodayTab: header "N of M for today", `item.reason` under each item; empty + no tracks → "Create your first track" → onCreateTrack (TracksPage sets tab='manage'). Labels: lockin="Focus on one track", normal="Balanced". No offline Today implementation exists.
-- W3 (UI redesign): after create, `NewTrackForm` pushes captured URLs to store `trackPending` (`addTrackPending`), calls `fetchTodayPlan()`, then `onCreated` → `TracksPage` switches to Today. `TodayTab` shows `trackPending` as "processing" rows and polls `fetchTodayPlan()` every 5s (max 6) — each new item retires one row (`shiftTrackPending`). Mark done → `completeTrackItem()` → row exits via `listItem` variant + toast "Done". "Add to spaced review" persists per track in localStorage `tracks:addToReview:<trackId>`. Empty-state CTA → Manage with title autofocused (`NewTrackForm autoFocus`). Mode hint line: `TodayTab` (`modeHint`). Tabs = `SegmentedTabs`; Advanced = `Disclosure`; all controls are primitives, `TracksPage.module.css` is layout-only. Before first fetch resolves Today shows a Skeleton (`loaded`).
+## Learn — Today | Week (replaces /tracks page)
+Files: LearnPage.jsx, TodayPlan.jsx, WeekPlan.jsx, TrackEditor.jsx, TracksPlan.module.css, api/tracks.js (fetchWeekPlan)
+- `LearnPage` SegmentedTabs Today | Week (local `useState('today')`; settings `tracksEnabled=false` → Inbox only).
+- Today: `TodayPlan` (GET /tracks/today → `fetchTodayPlan()`: mode toggle, overBudget banner, "N of M for today", reason lines, Mark done → `completeTrackItem()` + toast; "Add to spaced review" in localStorage `tracks:addToReview:<trackId>`) with `InboxReview` rendered BELOW on the same screen. Skeleton until first fetch. Empty CTAs → switch to Week. To change: `TodayPlan.jsx`.
+- Week: `WeekPlan` → `fetchWeekPlan()` (GET /tracks/week) → 7 day cards (chip per track + count, "cap N"); refetches when store `tracks`/`trackCapacity` change and on drawer close. Click chip / "All tracks" chip → right drawer with `TrackDetail` (deadline, items, Advanced: type/status/priority/schedule/mini-course). Toolbar: + New track (`NewTrackForm`), Daily capacity, Import. To change: `WeekPlan.jsx`, `TrackEditor.jsx`.
+- `/tracks` → `<Navigate to="/learn">` (App.jsx + pwa/MobileApp.jsx); nav entries removed. Old Progress tab dropped (store `trackProgress` still exists). Capture-time `trackPending` + track pickers removed.
+- Feed no longer mounted in Learn (moved to Sources, milestone L2) — `FeedView` unreachable until then.
+- Tests: `TodayPlan.test.jsx`, `WeekPlan.test.jsx`, `TrackEditor.test.jsx`, `pages/LearnPage.test.jsx`.

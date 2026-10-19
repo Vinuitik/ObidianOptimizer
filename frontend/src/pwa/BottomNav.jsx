@@ -11,15 +11,12 @@ export const TABS = [
   { to: '/review',  icon: 'clock',  label: 'Review' },
   { to: '/learn',   icon: 'inbox',  label: 'Learn' },
   { to: '/capture', icon: 'plus',   label: 'Capture' },
-  { to: '/tracks',  icon: 'track',  label: 'Tracks', tracksOnly: true },
   { to: '/notes',   icon: 'file',   label: 'Notes' },
 ];
 
 export default function BottomNav() {
-  // Tracks off → tab hidden, but /tracks stays reachable directly (mirrors NavBar).
-  const tracksEnabled = useStore(s => s.settings.tracksEnabled ?? true);
   const due = useDueCount();
-  const tabs = TABS.filter(t => !t.tracksOnly || tracksEnabled);
+  const tabs = TABS;
 
   return (
     <nav className={styles.nav} aria-label="Primary">
