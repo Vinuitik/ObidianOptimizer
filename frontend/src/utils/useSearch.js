@@ -14,6 +14,23 @@ function isServerUnreachable(e) {
 }
 
 /**
+ * Plain async variant of the hook's fetch logic (for non-React callers, e.g. the CM6 [[ suggest
+ * source): semantic search, offline keyword fallback when the server is unreachable.
+ * Rejects with AbortError when aborted; other real errors resolve to [].
+ */
+export async function searchWithFallback(query, { signal } = {}) {
+  try {
+    return await searchNotes(query, { signal });
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e;
+    if (isServerUnreachable(e)) {
+      try { return await offlineKeywordSearch(query); } catch { return []; }
+    }
+    return [];
+  }
+}
+
+/**
  * Debounced semantic search hook.
  *
  * - debounceMs before each request (default 250ms; pass lower for snappier UIs like inline popups)

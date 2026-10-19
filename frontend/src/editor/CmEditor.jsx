@@ -9,6 +9,7 @@ import { splitFrontmatter } from '../utils/frontmatter';
 import EditorErrorBoundary from '../components/organisms/EditorErrorBoundary';
 import { editorTheme, readOnlyTheme } from './theme';
 import { livePreviewExtension } from './livePreview';
+import { wikiLinksExtension } from './wikiLinks';
 import styles from './CmEditor.module.css';
 
 const DEBOUNCE_MS = 120;
@@ -19,10 +20,10 @@ const readOnlyExt = (isMutable) => (isMutable
   : [EditorState.readOnly.of(true), EditorView.editable.of(false), readOnlyTheme()]);
 
 // Feature extensions. Each W-milestone agent adds exactly ONE line here.
-export function featureExtensions(/* opts */) {
+export function featureExtensions(opts) {
   return [
     livePreviewExtension(),
-    // W1: ...wikiLinksExtension(opts),
+    ...wikiLinksExtension(opts),
     // W2: ...embedsExtension(opts),
     // W3: ...mathExtension(opts),
     // W3: ...tablesExtension(opts),

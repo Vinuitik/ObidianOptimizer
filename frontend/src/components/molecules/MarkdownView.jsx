@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import useStore from '../../store/useStore';
 import { splitFrontmatter } from '../../utils/frontmatter';
 import { renderMarkdown } from '../../utils/markdown';
+import { resolveWikiTarget } from '../../utils/wikiResolve';
 import ImageLightbox from './ImageLightbox';
 
 // Read-only markdown renderer (markdown-it via utils/markdown.js) — NOT contentEditable.
@@ -32,8 +33,7 @@ export default function MarkdownView({ content, onOpenNote, className = '' }) {
       e.preventDefault();
       const target = wiki.getAttribute('data-wiki-link');
       if (onOpenNote) { onOpenNote(target); return; }
-      const basename = target.split(/[/\\]/).pop().toLowerCase();
-      const fullPath = noteIndex.get(target.toLowerCase()) ?? noteIndex.get(basename);
+      const fullPath = resolveWikiTarget(noteIndex, target);
       if (fullPath) openTab?.(fullPath);
       return;
     }

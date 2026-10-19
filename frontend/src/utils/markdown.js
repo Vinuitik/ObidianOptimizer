@@ -33,6 +33,16 @@ function parseFrontmatter(content) {
   return { table: `<table><tbody>${rows}</tbody></table>\n`, body };
 }
 
+const escAttr = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+// [[t]] / [[t|a]] -> <span class="wiki-link" data-wiki-link="t">a-or-t</span>; skips ![[embed]].
+export function renderWikiLinks(text) {
+  return text.replace(/(?<!!)\[\[([^\[\]|\n]+)(?:\|([^\[\]\n]+))?\]\]/g, (_, target, alias) => {
+    const t = target.trim();
+    return `<span class="wiki-link" data-wiki-link="${escAttr(t)}">${alias ?? t}</span>`;
+  });
+}
+
 export function renderMarkdown(content) {
   const { table, body } = parseFrontmatter(content);
   let processed = body;
@@ -43,10 +53,7 @@ export function renderMarkdown(content) {
   );
 
   // [[link|alias]] or [[link]] → clickable wiki-link anchor
-  processed = processed.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/gs, (_, target, alias) => {
-    const label = alias ?? target.split(/[/\\]/).pop();
-    return `<a class="wiki-link" data-wiki-link="${target.trim()}" href="#">${label}</a>`;
-  });
+  processed = renderWikiLinks(processed);
 
   // #hashtag → styled span (skip #headings at line start)
   processed = processed.replace(/(?<![#\w])#([a-zA-Z]\w*)/g, (_, tag) =>
