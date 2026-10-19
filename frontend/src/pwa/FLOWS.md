@@ -28,7 +28,7 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
 `ResponsiveApp` → `PwaApp` = `BrowserRouter` → `MobileLayout` (shell + offline banner +
 `BottomNav` + `LoginModal`) → route → leaf page:
 - `/` → redirect `/review`; `/review` → `ReviewPage`; `/learn` → `LearnPage`;
-  `/capture` → `CapturePage`; `/tracks` → `TracksPage`; `/notes` → `MobileNotesPage`; `/search` → `MobileSearchPage`; `/sync` → `SyncPage` (`/settings` redirects to `/sync` for old links).
+  `/capture` → `CapturePage`; `/tracks` → redirect `/learn`; `/notes` → `MobileNotesPage`; `/search` → `MobileSearchPage`; `/sync` → `SyncPage` (`/settings` redirects to `/sync` for old links).
 - `ReviewPage`/`LearnPage` are the **same** desktop components (reused). `LearnPage`'s
   `InboxReview` renders its **mobile single-view** ([Source | Note] toggle) automatically
   (`LearnLayout` branches on `useIsMobile`) — see components/FLOWS.md.
@@ -56,11 +56,11 @@ the icon AND the full site via a link. Width can't tell them apart; launch mode 
 ## Flow — PWA shell chrome (W6, UI redesign 2026-10-11)
 `MobileLayout` → `TopBar` (page title from `TopBar.TITLES[pathname]`, sync chip, `RefreshButton`, sign in/out) → `UpdateBanner` → routed page → `BottomNav`.
 - **Notes tap:** `MobileNotesPage.handleOpen(path)` (passed to `FolderTree` as `onOpenNote`) → `openTab` → `setViewing(true)`; re-tapping the current note just reopens the reader; fetch failure → error toast. (`openTab` no-ops for the already-active tab, so the view must not depend on `currentNotePath` changing.)
-- **Tabs:** Review · Learn · Capture · Tracks · Notes (`BottomNav.TABS`). Sync is NOT a tab. To change: `BottomNav.TABS` + `MobileApp` `<Route>`.
+- **Tabs:** Review · Learn · Capture · Notes (`BottomNav.TABS`). Sync is NOT a tab. To change: `BottomNav.TABS` + `MobileApp` `<Route>`.
 - **Sync chip:** `TopBar` → `syncStatus.useSyncStatus()` → `deriveSyncStatus({online, stage, failedCount, lastSync})` → Badge linking to `/sync`. Priority offline > syncing > failed > synced Xh ago > not synced. `online` = `useOffline`; `stage` = store `syncStage`; `lastSync` = IndexedDB meta (re-read when `stage` changes, ticks every 60s); `failedCount` = `api/capture.fetchFailedCaptures()` polled every `OUTBOX_RETRY_MS` (signed-in + online only). To change wording/priority: `deriveSyncStatus`.
 - **Due badge:** `BottomNav` → `useDueCount()` = store `reviewNotes.length` (same list ReviewPage shows); primed once after sign-in through `initReviewSession()` (no new endpoint). Shows 0 until the queue loads; caps at 99+.
 - **Update banner:** `registerSW.onUpdateAvailable` / `isUpdateReady()` → `UpdateBanner` (persistent, "Reload" → `applyUpdate()`). `main.jsx` still also fires a one-off toast (outside this folder).
-- **Capture result:** `CapturePage` modes Link / Note / File / Subscribe; every outcome shows where it went + link (sent → `/learn` [+ `/tracks` if tagged]; queued → `/sync`). File = `api/capture.captureFile` (online only, not queued).
+- **Capture result:** `CapturePage` modes Link / Note / File / Subscribe; every outcome shows where it went + link (sent → `/learn`; queued → `/sync`). File = `api/capture.captureFile` (online only, not queued).
 - **SyncPage:** one status card ("Offline ready: N cards · synced Xh ago" — N = `db.getAllReviewNotes().length`) + Download button; Failed captures / Account / Drive link / Backup / Notifications are `Disclosure`s (`storageKey` `pwa.sync.*`).
 - Styling: all pwa CSS is layout-only tokens (`MobilePages.module.css`); controls come from atoms/molecules. Allowlist entries for pwa/* removed.
 

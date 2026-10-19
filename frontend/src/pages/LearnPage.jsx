@@ -1,35 +1,21 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import InboxReview from '../components/organisms/InboxReview';
-import FeedView from '../components/organisms/FeedView';
-import Skeleton from '../components/atoms/Skeleton';
+import TodayPlan from '../components/organisms/TodayPlan';
+import WeekPlan from '../components/organisms/WeekPlan';
 import SegmentedTabs from '../components/molecules/SegmentedTabs';
 import styles from './LearnPage.module.css';
 
-// Learn IS the ingest review now: capture a resource → it's segmented into proposed
-// notes → you review + file them here. The old "Library" view (manual _workspace media
-// shelf: ResourcePanel + NotePanel) predated the capture→ingest→inbox pipeline and was
-// vestigial, so it's gone — resources flow through the Inbox instead of being browsed by
-// hand. (ResourcePanel/NotePanel/LearnLayout kept in-tree but unused, easy to restore.)
+// Learn = Today (scheduled track items + Inbox review below) | Week (7-day grid + track editor).
+// Capture → ingest → proposed notes still lands in the Inbox. The Feed moved out (Sources page,
+// milestone L2): FeedView/feed store stay in-tree but are unmounted until then.
 export default function LearnPage() {
   const fetchRootChildren = useStore(s => s.fetchRootChildren);
   const fetchNoteNames    = useStore(s => s.fetchNoteNames);
   const isAuthenticated   = useStore(s => s.isAuthenticated);
   const vaultRoot         = useStore(s => s.vaultRoot);
-  const fetchFeed         = useStore(s => s.fetchFeed);
-  const pendingCount      = useStore(s => s.feedPending.length);
-  const feedLoaded        = useStore(s => s.feedLoaded);
-  const mode              = useStore(s => s.learnView);     // 'feed' | 'inbox' | null (undecided)
-  const setMode           = useStore(s => s.setLearnView);
-
-  useEffect(() => { if (isAuthenticated) fetchFeed(); }, [isAuthenticated, fetchFeed]);
-
-  // Open on Feed when there is something to triage, else Inbox. Decided ONCE per visit (after the
-  // first feed fetch resolves) so swiping the last card doesn't yank the user to Inbox.
-  useEffect(() => {
-    if (isAuthenticated && feedLoaded && mode == null) setMode(pendingCount > 0 ? 'feed' : 'inbox');
-  }, [isAuthenticated, feedLoaded, mode, pendingCount, setMode]);
-  useEffect(() => () => setMode(null), [setMode]);   // next visit re-decides
+  const tracksEnabled     = useStore(s => s.settings.tracksEnabled ?? true);
+  const [view, setView]   = useState('today');
 
   useEffect(() => {
     if (isAuthenticated && !vaultRoot) {
@@ -45,19 +31,22 @@ export default function LearnPage() {
     );
   }
 
-  const tabs = [
-    { id: 'feed', label: 'Feed', badge: pendingCount > 0 ? pendingCount : undefined },
-    { id: 'inbox', label: 'Inbox' },
-  ];
+  if (!tracksEnabled) return <div className={styles.page}><div className={styles.viewBody}><InboxReview /></div></div>;
+
+  const tabs = [{ id: 'today', label: 'Today' }, { id: 'week', label: 'Week' }];
 
   return (
     <div className={styles.page}>
       <div className={styles.viewTabs}>
-        <SegmentedTabs tabs={tabs} value={mode ?? 'inbox'} onChange={setMode} aria-label="Learn sections" />
+        <SegmentedTabs tabs={tabs} value={view} onChange={setView} aria-label="Learn sections" />
       </div>
       <div className={styles.viewBody}>
-        {mode == null ? <div className={styles.loading}><Skeleton lines={4} height={44} /></div>
-          : mode === 'feed' ? <FeedView /> : <InboxReview />}
+        {view === 'week' ? <WeekPlan /> : (
+          <div className={styles.todayStack}>
+            <TodayPlan onCreateTrack={() => setView('week')} onManage={() => setView('week')} />
+            <InboxReview />
+          </div>
+        )}
       </div>
     </div>
   );

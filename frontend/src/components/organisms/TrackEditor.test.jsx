@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import TracksPage from './TracksPage';
+import NewTrackForm from './NewTrackForm';
+import { TrackDetail } from './TrackEditor';
 
 const fn = () => vi.fn().mockResolvedValue([]);
 const state = {
@@ -8,29 +9,26 @@ const state = {
   tracks: [{ id: 5, title: 'Existing', type: 'book', status: 'active', deadline: null, includeInProgress: false }],
   trackItems: {}, trackSchedules: {}, trackCapacity: {}, trackProgress: [],
   todayItems: [], todayMode: 'normal', todayOverBudget: false,
-  trackPending: [], addTrackPending: vi.fn(), updateSchedule: vi.fn(),
+  updateSchedule: vi.fn(),
   showToast: vi.fn(),
   createTrack: vi.fn(), updateTrack: vi.fn(), addTrackItem: vi.fn(),
   fetchTracks: fn(), fetchTrackItems: fn(), fetchTrackCapacity: fn(),
   fetchTrackSchedule: fn(), fetchTodayPlan: fn(), fetchTrackProgress: fn(),
 };
-vi.mock('../store/useStore', () => ({ default: vi.fn(sel => sel(state)) }));
+vi.mock('../../store/useStore', () => ({ default: vi.fn(sel => sel(state)) }));
 
 const mockCapture = vi.fn();
-vi.mock('../api/capture', () => ({
+vi.mock('../../api/capture', () => ({
   captureResource: (...a) => mockCapture(...a),
   captureFile: vi.fn(),
 }));
-vi.mock('../api/notes', () => ({ searchNotes: vi.fn().mockResolvedValue([]) }));
-vi.mock('../api/tracks', () => ({
+vi.mock('../../api/notes', () => ({ searchNotes: vi.fn().mockResolvedValue([]) }));
+vi.mock('../../api/tracks', () => ({
   generateMinicourse: vi.fn(), fetchMinicourseJob: vi.fn(), approveMinicourse: vi.fn(),
   importCsv: vi.fn(), commitImport: vi.fn(),
 }));
 
-function openManage() {
-  render(<TracksPage />);
-  fireEvent.click(screen.getByText('Manage tracks'));
-}
+function openManage() { render(<NewTrackForm />); }
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -41,7 +39,7 @@ beforeEach(() => {
   mockCapture.mockResolvedValue({ ok: true });
 });
 
-describe('NewTrackForm (Manage tab)', () => {
+describe('NewTrackForm', () => {
   it('creates with title only', async () => {
     openManage();
     fireEvent.change(screen.getByLabelText('Track title'), { target: { value: 'Rust' } });
@@ -53,17 +51,14 @@ describe('NewTrackForm (Manage tab)', () => {
     expect(state.updateSchedule).toHaveBeenCalledWith(9, { 0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 });
   });
 
-  it('create with 3 links -> captures, queues processing rows, switches to Today', async () => {
+  it('create with 3 links -> captures each, one schedule, refreshes Today', async () => {
     openManage();
     fireEvent.change(screen.getByLabelText('Track title'), { target: { value: 'Rust' } });
     fireEvent.change(screen.getByLabelText('Links or items'), { target: { value: 'https://a.com\nhttps://b.com\nhttps://c.com' } });
     fireEvent.click(screen.getByText('+ New track'));
     await waitFor(() => expect(mockCapture).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(state.addTrackPending).toHaveBeenCalled());
-    expect(state.addTrackPending.mock.calls[0][0]).toHaveLength(3);
     expect(state.updateSchedule).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(screen.queryByLabelText('Track title')).toBeNull());
-    expect(state.fetchTodayPlan).toHaveBeenCalled();
+    await waitFor(() => expect(state.fetchTodayPlan).toHaveBeenCalled());
   });
 
   it('title required', () => {
@@ -95,9 +90,8 @@ describe('NewTrackForm (Manage tab)', () => {
 
 describe('Track detail Advanced disclosure', () => {
   it('is collapsed by default and holds the secondary settings', () => {
-    openManage();
-    fireEvent.click(screen.getByText('Existing'));
-    const btn = screen.getAllByText('Advanced')[1].closest('button');
+    render(<TrackDetail track={state.tracks[0]} onDeleted={() => {}} />);
+    const btn = screen.getByText('Advanced').closest('button');
     expect(btn.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByText('Show on Progress tab')).toBeNull();
     fireEvent.click(btn);

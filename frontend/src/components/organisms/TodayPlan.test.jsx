@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import TracksPage from './TracksPage';
+import TodayPlan from './TodayPlan';
 
 // Tiny reactive store so Today re-renders when completeTrackItem removes a row.
 const h = vi.hoisted(() => ({ state: {}, listeners: new Set() }));
@@ -10,15 +10,14 @@ function resetState() {
   Object.keys(h.state).forEach(k => delete h.state[k]);
   Object.assign(h.state, {
     isAuthenticated: true, tracks: [],
-    trackItems: {}, trackSchedules: {}, trackCapacity: {}, trackProgress: [], trackPending: [],
+    trackItems: {}, trackSchedules: {}, trackCapacity: {}, trackProgress: [],
     todayItems: [], todayMode: 'normal', todayOverBudget: false, todayPlanned: 0, todayCapacity: 4,
     showToast: vi.fn(), setTrackMode: vi.fn(), completeTrackItem: vi.fn(),
-    shiftTrackPending: vi.fn(), clearTrackPending: vi.fn(),
     fetchTracks: fn(), fetchTrackItems: fn(), fetchTrackCapacity: fn(),
     fetchTrackSchedule: fn(), fetchTodayPlan: fn(), fetchTrackProgress: fn(),
   });
 }
-vi.mock('../store/useStore', async () => {
+vi.mock('../../store/useStore', async () => {
   const { useSyncExternalStore } = await import('react');
   const useStore = sel => useSyncExternalStore(
     cb => { h.listeners.add(cb); return () => h.listeners.delete(cb); },
@@ -27,26 +26,25 @@ vi.mock('../store/useStore', async () => {
   useStore.getState = () => h.state;
   return { default: useStore };
 });
-vi.mock('../api/capture', () => ({ captureResource: vi.fn(), captureFile: vi.fn() }));
-vi.mock('../api/notes', () => ({ searchNotes: vi.fn().mockResolvedValue([]) }));
-vi.mock('../api/tracks', () => ({
+vi.mock('../../api/capture', () => ({ captureResource: vi.fn(), captureFile: vi.fn() }));
+vi.mock('../../api/notes', () => ({ searchNotes: vi.fn().mockResolvedValue([]) }));
+vi.mock('../../api/tracks', () => ({
   generateMinicourse: vi.fn(), fetchMinicourseJob: vi.fn(), approveMinicourse: vi.fn(),
   importCsv: vi.fn(), commitImport: vi.fn(),
 }));
 
-beforeEach(() => { resetState(); localStorage.clear(); });
+const onCreate = vi.fn(); const onManage = vi.fn();
+beforeEach(() => { onCreate.mockClear(); onManage.mockClear(); resetState(); localStorage.clear(); });
 
-describe('TodayTab', () => {
-  it('empty state CTA switches to Manage with title focused', async () => {
-    render(<TracksPage />);
+describe('TodayPlan', () => {
+  it('empty state CTA calls onCreateTrack', async () => {
+    render(<TodayPlan onCreateTrack={onCreate} onManage={onManage} />);
     fireEvent.click(await screen.findByText('Create your first track'));
-    const title = screen.getByLabelText('Track title');
-    expect(title).toBeTruthy();
-    expect(document.activeElement).toBe(title);
+    expect(onCreate).toHaveBeenCalled();
   });
 
   it('shows a skeleton before the first fetch resolves, not the empty state', () => {
-    render(<TracksPage />);
+    render(<TodayPlan onCreateTrack={onCreate} onManage={onManage} />);
     expect(screen.queryByText('Create your first track')).toBeNull();
   });
 
@@ -58,7 +56,7 @@ describe('TodayTab', () => {
         { itemId: 2, trackId: 1, trackTitle: 'Rust', title: 'Ch 2', reason: 'Fills leftover capacity' },
       ],
     });
-    render(<TracksPage />);
+    render(<TodayPlan onCreateTrack={onCreate} onManage={onManage} />);
     expect(await screen.findByText('2 of 4 for today')).toBeTruthy();
     expect(screen.getByText('Due Fri · ~3/day to finish')).toBeTruthy();
     expect(screen.getByText('Fills leftover capacity')).toBeTruthy();
@@ -66,17 +64,10 @@ describe('TodayTab', () => {
 
   it('uses renamed mode labels and explains the mode', async () => {
     setState({ todayMode: 'lockin' });
-    render(<TracksPage />);
+    render(<TodayPlan onCreateTrack={onCreate} onManage={onManage} />);
     expect(await screen.findByText('Focus on one track')).toBeTruthy();
     expect(screen.getByText('Switch to Balanced')).toBeTruthy();
     expect(screen.getByText(/Only your most urgent track/)).toBeTruthy();
-  });
-
-  it('shows processing rows for pending ingest', async () => {
-    setState({ tracks: [{ id: 1, title: 'Rust' }], trackPending: [{ trackId: 1, trackTitle: 'Rust', label: 'https://a.com' }] });
-    render(<TracksPage />);
-    expect(await screen.findByTestId('processing-row')).toBeTruthy();
-    expect(screen.queryByText('Nothing scheduled today')).toBeNull();
   });
 
   it('Mark done collapses the row out and toasts "Done"', async () => {
@@ -90,7 +81,7 @@ describe('TodayTab', () => {
         setState({ todayItems: h.state.todayItems.filter(i => i.itemId !== id) });
       }),
     });
-    render(<TracksPage />);
+    render(<TodayPlan onCreateTrack={onCreate} onManage={onManage} />);
     await screen.findByText('Ch 1');
     fireEvent.click(screen.getAllByText('Mark done')[0]);
     await waitFor(() => expect(h.state.completeTrackItem).toHaveBeenCalledWith(1, false));
@@ -105,7 +96,7 @@ describe('TodayTab', () => {
       todayItems: [{ itemId: 1, trackId: 1, trackTitle: 'Rust', title: 'Ch 1', notePath: 'a.md' }],
       completeTrackItem: vi.fn().mockResolvedValue({}),
     });
-    render(<TracksPage />);
+    render(<TodayPlan onCreateTrack={onCreate} onManage={onManage} />);
     fireEvent.click(await screen.findByLabelText('Add to spaced review'));
     expect(localStorage.getItem('tracks:addToReview:1')).toBe('1');
     fireEvent.click(screen.getByText('Mark done'));

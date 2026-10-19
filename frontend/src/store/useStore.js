@@ -239,7 +239,6 @@ const initialDataState = () => ({
   trackItems: {},
   trackSchedules: {},
   trackCapacity: {}, // weekday(0=Mon..6=Sun) -> items/day ceiling (Phase 1c)
-  trackPending: [], // [{ trackId, trackTitle, label }] — captures still ingesting; shown as "processing" rows on Today
   trackProgress: [], // Phase 1d — [{ id, title, type, itemsDone, itemsTotal, deadline, onTrack }]
 
   // Failures slice: open pipeline failures + failed captures (null = not loaded yet). Drives the nav badge.
@@ -517,9 +516,6 @@ const useStore = create((set, get) => ({
     }
   },
 
-  addTrackPending: (entries) => set(s => ({ trackPending: [...s.trackPending, ...entries] })),
-  shiftTrackPending: (n) => set(s => ({ trackPending: s.trackPending.slice(n) })),
-  clearTrackPending: () => set({ trackPending: [] }),
 
   createTrack: async (title, type, extra = {}) => {
     const track = await apiCreateTrack(title, type, extra);

@@ -14,8 +14,10 @@
 
 .viewBody {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
 }
+
+.todayStack { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-4); }
 
 .loading { padding: var(--sp-4); max-width: 520px; }
 

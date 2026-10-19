@@ -4,7 +4,6 @@ import CapturePage from './CapturePage';
 import SyncPage from './SyncPage';
 import ReviewPage from '../pages/ReviewPage';
 import LearnPage from '../pages/LearnPage';
-import TracksPage from '../pages/TracksPage';
 import MobileNotesPage from './MobileNotesPage';
 import MobileSearchPage from './MobileSearchPage';
 import PageTransition from '../components/motion/PageTransition';
@@ -35,7 +34,7 @@ export default function PwaApp() {
           <Route path="/review" element={page(<ReviewPage />)} />
           <Route path="/learn" element={page(<LearnPage />)} />
           <Route path="/capture" element={page(<CapturePage />)} />
-          <Route path="/tracks" element={page(<TracksPage />)} />
+          <Route path="/tracks" element={<Navigate to="/learn" replace />} />
           <Route path="/notes" element={page(<MobileNotesPage />)} />
           <Route path="/search" element={page(<MobileSearchPage />)} />
           <Route path="/sync" element={page(<SyncPage />)} />
