@@ -24,16 +24,18 @@ public class DeviceIdentityService {
     }
 
     /**
-     * Returns a stable 16-char device ID derived from the MAC address.
-     * Computed once on first call and persisted in app_settings.
+     * Returns a stable 16-char device ID for {@code vaultId}. Vault 1 keeps the MAC-derived
+     * id (migrated from the old global setting); every other vault derives its own from
+     * MAC + vault id so each Drive folder sees a distinct device. Persisted in vault_settings.
      */
-    public String getDeviceId() {
-        String stored = settingsRepo.getOrDefault(SETTINGS_KEY, "");
+    public String getDeviceId(long vaultId) {
+        String stored = settingsRepo.getForVault(vaultId, SETTINGS_KEY, "");
         if (!stored.isBlank()) return stored;
 
-        String id = computeDeviceId();
-        settingsRepo.set(SETTINGS_KEY, id);
-        log.info("[DeviceIdentityService] assigned device_id={}", id);
+        String base = computeDeviceId();
+        String id = vaultId == 1 ? base : ContentHashing.sha256(base + "#" + vaultId).substring(0, 16);
+        settingsRepo.setForVault(vaultId, SETTINGS_KEY, id);
+        log.info("[DeviceIdentityService] assigned device_id={} for vault {}", id, vaultId);
         return id;
     }
 

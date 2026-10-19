@@ -299,7 +299,7 @@ token is stale, reconnect Drive after restore.
 
 `VaultEncryptionService`:
 - Key: `PBKDF2WithHmacSHA256(passphrase, "ObsidianSyncSalt", 310_000 iter)` → 256-bit AES key
-- Passphrase source: `app_settings.syncPassphrase` (Settings UI), fallback env `sync.passphrase`;
+- Passphrase source: `vault_settings.syncPassphrase` per vault (Settings UI), fallback env `sync.passphrase` for vault 1 only;
   `reload()` re-derives after a Settings save — no restart
 - Fixed salt means any device with the same passphrase derives the same key — multi-device compatible
 - Per-file IV: 12B random, prepended to ciphertext
@@ -315,7 +315,7 @@ To rotate the key: change the passphrase in Settings — all existing Drive file
 `DeviceIdentityService.getDeviceId()`:
 - First call: enumerate network interfaces → first non-loopback MAC → SHA-256 → first 16 hex chars
 - Fallback chain: hostname hash → "unknown-device" hash
-- Stored in `app_settings` under `sync.device_id` after first computation
+- Stored in `vault_settings` (`sync.device_id`, per vault) after first computation; vault 1 = MAC hash, other vaults = hash(MAC#vaultId)
 - Included as `device_id` in every uploaded file's Drive `appProperties`
 
 ---
@@ -435,6 +435,12 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 
 ---
 
+## Multi-vault notes (M4)
+- Keys are derived lazily and cached per vault (`VaultEncryptionService.keys`); `reload(v)` after a passphrase change.
+- The 3am DB backup dumps the WHOLE database and uploads it to each sync-enabled vault's folder (encrypted with that vault's passphrase): other vaults' rows ride along. Restore is whole-DB.
+- PWA phone link + offline bundles + mailbox (`PwaController`, `OfflineExportService`, `MailboxConsumeService`) use the ACTIVE vault's folder/passphrase, captured once per call; true per-vault PWA is M4b/M7.
+- `sync.janitor_last` is now written per vault (`vault_settings`).
+
 ## Change Index
 
 | Thing to change | Where |
@@ -469,8 +475,8 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 | Janitor grace period | `SyncService.GRACE_DAYS` (30) |
 | Tombstone lifecycle | `SyncQueueRepository.tombstone()` + `SyncService.processTombstones()` |
 | OAuth redirect override | `.env GOOGLE_OAUTH_REDIRECT_URI` → `sync.oauth.redirect_uri` setting |
-| Auto-sync on/off | Settings UI toggle → `app_settings.syncEnabled` (gates `SyncWorker` only) |
-| Encryption passphrase | Settings UI → `app_settings.syncPassphrase` (env `SYNC_PASSPHRASE` = first-boot seed) |
+| Auto-sync on/off | Settings UI toggle → `vault_settings.syncEnabled` of the active vault (gates `SyncWorker` for that vault only) |
+| Encryption passphrase | Settings UI → `vault_settings.syncPassphrase` of the active vault (env `SYNC_PASSPHRASE` seeds vault 1 only) |
 | OAuth client id/secret | Settings UI → `app_settings.syncClientId` / `syncClientSecret` |
 | Connected account | Settings UI Connect/Disconnect → `sync.refresh_token` / `sync.account_email` |
 | Drive root folder | `app_settings sync.drive.folder_id` (env `GOOGLE_DRIVE_FOLDER_ID` seed; auto-created "ObsidianOptimizer" in OAuth mode) |
@@ -489,4 +495,11 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 | Drive path validation | `SyncService.downloadAll()` `target.startsWith(vaultRootPath)` |
 | Initial vault scan | `SyncService.initialScan()` |
 | Folder ID cache invalidation | `DriveService.folderCache.clear()` |
-| Vault scoping (M3) | `SyncQueueRepository` methods take `long vaultId` first; `SyncService`/`SyncController` act on the ACTIVE vault only (root = `ActiveVault.root()`) — all-vaults sync is M4 |
+| Vault scoping (M3) | `SyncQueueRepository` methods take `long vaultId` first |
+| Symmetric per-vault sync (M4) | Every sync-stack method takes `long vaultId` first: `SyncService.*`, `DriveService.*` (client per vault, `drives` map), `VaultEncryptionService.*` (key per vault), `DeviceIdentityService.getDeviceId(v)`, `DbBackupService.*`, `SyncOAuthService.*`. Root = `ActiveVault.rootFor(v)` |
+| Which vaults sync | `SyncWorker.forEachSyncEnabledVault()` <- `SettingsRepository.syncEnabledVaultIds()` (syncEnabled=true, not archived; active or not). Manual endpoints/triggers (`SyncController`, `triggerManualUpload`, ...) act on the ACTIVE vault captured at call time |
+| Per-vault Drive folder / token / passphrase / device id | `vault_settings` keys `sync.drive.folder_id`, `sync.refresh_token`, `syncPassphrase`, `sync.device_id` (see `vaults/FLOWS.md`) |
+| Folder uniqueness (cross-vault push guard) | `SettingsRepository.setSyncDriveFolderId()` (throws), `SettingsController.updateSettings()` syncEnabled=true -> 400, runtime re-check in `DriveService.rootFolderId()` |
+| Auto-created Drive root name | `DriveService.rootFolderId()`: vault 1 `ObsidianOptimizer`, others `ObsidianOptimizer-v<id>` |
+| Rabbit sync-upload vault | `SyncService.onSyncUploadMessage()` reads `vaultId` from payload (absent = 1), skips if that vault's sync is off |
+| OAuth connect target vault | `SyncOAuthService.buildAuthUrl(vaultId, origin)` stores it in the pending state; `handleCallback` writes the token to that vault |

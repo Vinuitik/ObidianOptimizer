@@ -52,16 +52,16 @@ class DbBackupServiceTest {
     }
 
     private void configuredAndEmpty() {
-        when(encryptionService.isConfigured()).thenReturn(true);
-        when(driveService.isConfigured()).thenReturn(true);
+        when(encryptionService.isConfigured(1L)).thenReturn(true);
+        when(driveService.isConfigured(1L)).thenReturn(true);
         when(jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class)).thenReturn(0);
     }
 
     @Test
     void restoreBlockedReason_noPassphrase_blocksBeforeCheckingAnythingElse() {
-        when(encryptionService.isConfigured()).thenReturn(false);
+        when(encryptionService.isConfigured(1L)).thenReturn(false);
 
-        String reason = backupService.restoreBlockedReason(false);
+        String reason = backupService.restoreBlockedReason(1L, false);
 
         assertThat(reason).isEqualTo("Encryption passphrase not set — set it first");
         verifyNoInteractions(driveService);
@@ -69,33 +69,33 @@ class DbBackupServiceTest {
 
     @Test
     void restoreBlockedReason_driveNotConnected_blocked() {
-        when(encryptionService.isConfigured()).thenReturn(true);
-        when(driveService.isConfigured()).thenReturn(false);
+        when(encryptionService.isConfigured(1L)).thenReturn(true);
+        when(driveService.isConfigured(1L)).thenReturn(false);
 
-        String reason = backupService.restoreBlockedReason(false);
+        String reason = backupService.restoreBlockedReason(1L, false);
 
         assertThat(reason).isEqualTo("Google Drive not connected");
     }
 
     @Test
     void restoreBlockedReason_nonEmptyDbWithoutForce_blocked() {
-        when(encryptionService.isConfigured()).thenReturn(true);
-        when(driveService.isConfigured()).thenReturn(true);
+        when(encryptionService.isConfigured(1L)).thenReturn(true);
+        when(driveService.isConfigured(1L)).thenReturn(true);
         when(jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class)).thenReturn(42);
 
-        String reason = backupService.restoreBlockedReason(false);
+        String reason = backupService.restoreBlockedReason(1L, false);
 
         assertThat(reason).isEqualTo("Database is not empty — confirm to overwrite");
     }
 
     @Test
     void restoreBlockedReason_nonEmptyDbWithForce_skipsEmptyCheck() throws Exception {
-        when(encryptionService.isConfigured()).thenReturn(true);
-        when(driveService.isConfigured()).thenReturn(true);
-        when(driveService.latestDbBackup()).thenReturn(Optional.of(
+        when(encryptionService.isConfigured(1L)).thenReturn(true);
+        when(driveService.isConfigured(1L)).thenReturn(true);
+        when(driveService.latestDbBackup(1L)).thenReturn(Optional.of(
             new DbBackupInfo("id1", "dump.enc", 1735689600000L, 100L)));
 
-        String reason = backupService.restoreBlockedReason(true);
+        String reason = backupService.restoreBlockedReason(1L, true);
 
         assertThat(reason).isNull();
         // force=true must never even query emptiness — it's irrelevant to the decision.
@@ -105,9 +105,9 @@ class DbBackupServiceTest {
     @Test
     void restoreBlockedReason_noBackupInDrive_blocked() throws Exception {
         configuredAndEmpty();
-        when(driveService.latestDbBackup()).thenReturn(Optional.empty());
+        when(driveService.latestDbBackup(1L)).thenReturn(Optional.empty());
 
-        String reason = backupService.restoreBlockedReason(false);
+        String reason = backupService.restoreBlockedReason(1L, false);
 
         assertThat(reason).isEqualTo("No DB backup found in Drive");
     }
@@ -115,9 +115,9 @@ class DbBackupServiceTest {
     @Test
     void restoreBlockedReason_driveLookupThrows_reportedNotSilentlyAllowed() throws Exception {
         configuredAndEmpty();
-        when(driveService.latestDbBackup()).thenThrow(new java.io.IOException("quota exceeded"));
+        when(driveService.latestDbBackup(1L)).thenThrow(new java.io.IOException("quota exceeded"));
 
-        String reason = backupService.restoreBlockedReason(false);
+        String reason = backupService.restoreBlockedReason(1L, false);
 
         assertThat(reason).isEqualTo("Could not reach Drive: quota exceeded");
     }
@@ -125,39 +125,39 @@ class DbBackupServiceTest {
     @Test
     void restoreBlockedReason_allClear_returnsNull() throws Exception {
         configuredAndEmpty();
-        when(driveService.latestDbBackup()).thenReturn(Optional.of(
+        when(driveService.latestDbBackup(1L)).thenReturn(Optional.of(
             new DbBackupInfo("id1", "dump.enc", 1735689600000L, 100L)));
 
-        assertThat(backupService.restoreBlockedReason(false)).isNull();
+        assertThat(backupService.restoreBlockedReason(1L, false)).isNull();
     }
 
     // ── statusFragment() / progressFragment() ────────────────────────────────────
 
     @Test
     void statusFragment_driveNotConfigured_reportsNoBackupWithoutCallingDrive() throws Exception {
-        when(driveService.isConfigured()).thenReturn(false);
+        when(driveService.isConfigured(1L)).thenReturn(false);
         when(jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class)).thenReturn(0);
 
         @SuppressWarnings("unchecked")
-        java.util.Map<String, Object> status = backupService.statusFragment();
+        java.util.Map<String, Object> status = backupService.statusFragment(1L);
 
         assertThat(status.get("dbEmpty")).isEqualTo(true);
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> backup = (java.util.Map<String, Object>) status.get("dbBackup");
         assertThat(backup.get("exists")).isEqualTo(false);
-        verify(driveService, never()).listDbBackups();
+        verify(driveService, never()).listDbBackups(1L);
     }
 
     @Test
     void statusFragment_driveConfiguredWithBackups_exposesLatestBackupMetadata() throws Exception {
-        when(driveService.isConfigured()).thenReturn(true);
+        when(driveService.isConfigured(1L)).thenReturn(true);
         when(jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class)).thenReturn(5);
-        when(driveService.listDbBackups()).thenReturn(List.of(
+        when(driveService.listDbBackups(1L)).thenReturn(List.of(
             new DbBackupInfo("newest", "b2.enc", 1738368000000L, 200L),
             new DbBackupInfo("older",  "b1.enc", 1735689600000L, 100L)));
 
         @SuppressWarnings("unchecked")
-        java.util.Map<String, Object> status = backupService.statusFragment();
+        java.util.Map<String, Object> status = backupService.statusFragment(1L);
 
         assertThat(status.get("dbEmpty")).isEqualTo(false);
         @SuppressWarnings("unchecked")

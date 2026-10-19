@@ -35,9 +35,9 @@ public class SettingsController {
     public SettingsResponse getSettings() {
         return new SettingsResponse(
             activeVault.root().toString(),
-            settingsRepo.getResourcePath(),
+            settingsRepo.getResourcePath(activeVault.id()),
             settingsRepo.getReviewPageSize(),
-            settingsRepo.getStartupSyncMode(),
+            settingsRepo.getStartupSyncMode(activeVault.id()),
             settingsRepo.getMaxDailyReviews(),
             settingsRepo.getMaxDailyFlashcards(),
             settingsRepo.getBankruptcyLimit(),
@@ -46,11 +46,11 @@ public class SettingsController {
             settingsRepo.isFlashcardsEnabled(),
             settingsRepo.isTracksEnabled(),
             settingsRepo.isFeedAutoAccept(),
-            settingsRepo.isSyncEnabled(),
+            settingsRepo.isSyncEnabled(activeVault.id()),
             settingsRepo.getSyncClientId(),
             // Secrets never leave the server — the UI only needs "is it saved?"
             !settingsRepo.getSyncClientSecret().isBlank(),
-            !settingsRepo.getSyncPassphrase().isBlank()
+            !settingsRepo.getSyncPassphrase(activeVault.id()).isBlank()
         );
     }
 
@@ -61,7 +61,7 @@ public class SettingsController {
                 return ResponseEntity.badRequest().body("use /api/vaults");
             }
             if (req.resourcePath() != null) {
-                settingsRepo.set("resourcePath", req.resourcePath());
+                settingsRepo.setResourcePath(activeVault.id(), req.resourcePath());
             }
             if (req.reviewPageSize() != null) {
                 if (req.reviewPageSize() < 1 || req.reviewPageSize() > 500) {
@@ -73,7 +73,7 @@ public class SettingsController {
                 if (!req.startupSyncMode().equals("blocking") && !req.startupSyncMode().equals("async")) {
                     return ResponseEntity.badRequest().body("startupSyncMode must be 'blocking' or 'async'");
                 }
-                settingsRepo.set("startupSyncMode", req.startupSyncMode());
+                settingsRepo.setStartupSyncMode(activeVault.id(), req.startupSyncMode());
             }
             if (req.maxDailyReviews() != null) {
                 if (req.maxDailyReviews() < 1) {
@@ -117,21 +117,31 @@ public class SettingsController {
                 settingsRepo.set("ollamaEmbedModel", model);
             }
             if (req.syncEnabled() != null) {
-                settingsRepo.set("syncEnabled", String.valueOf(req.syncEnabled()));
+                long vid = activeVault.id();
+                if (req.syncEnabled()) {
+                    // A folder already bound to another vault would mean a cross-vault push.
+                    String folder = settingsRepo.getSyncDriveFolderId(vid);
+                    Long other = settingsRepo.otherVaultUsingDriveFolder(vid, folder);
+                    if (other != null) {
+                        return ResponseEntity.badRequest().body(
+                            "Drive folder " + folder + " is already used by vault " + other);
+                    }
+                }
+                settingsRepo.setSyncEnabled(vid, req.syncEnabled());
             }
             if (req.syncClientId() != null) {
                 settingsRepo.set("syncClientId", req.syncClientId().trim());
-                driveService.reset();
+                driveService.reset(activeVault.id());
             }
             // Secret fields: blank means "leave as is" (the form shows a saved-marker
             // placeholder, not the value). Disconnect clears the token, not these.
             if (req.syncClientSecret() != null && !req.syncClientSecret().isBlank()) {
                 settingsRepo.set("syncClientSecret", req.syncClientSecret().trim());
-                driveService.reset();
+                driveService.reset(activeVault.id());
             }
             if (req.syncPassphrase() != null && !req.syncPassphrase().isBlank()) {
-                settingsRepo.set("syncPassphrase", req.syncPassphrase().trim());
-                encryptionService.reload();
+                settingsRepo.setSyncPassphrase(activeVault.id(), req.syncPassphrase().trim());
+                encryptionService.reload(activeVault.id());
             }
             return ResponseEntity.ok(getSettings());
         } catch (Exception e) {

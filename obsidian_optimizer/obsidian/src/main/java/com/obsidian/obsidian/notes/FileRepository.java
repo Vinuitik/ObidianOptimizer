@@ -65,9 +65,21 @@ public class FileRepository {
 
     @PostConstruct
     public void init() {
+        startupSync();
+    }
+
+    /** Switch to another vault: rerun the startup disk sync + image scan for the NEW root
+     *  (async — the PUT /vaults/active request must not wait for a full vault walk). */
+    @org.springframework.context.event.EventListener
+    public void onVaultSwitched(com.obsidian.obsidian.vaults.VaultSwitchedEvent e) {
+        log.info("[FileRepository] vault switched {} -> {}: rescanning", e.oldVaultId(), e.newVaultId());
+        CompletableFuture.runAsync(this::startupSync);
+    }
+
+    private void startupSync() {
         List<File> diskFiles = bfsDiskFiles();
 
-        String syncMode = settingsRepo.getStartupSyncMode();
+        String syncMode = settingsRepo.getStartupSyncMode(vid());
         if ("async".equals(syncMode)) {
             log.info("[init] async sync started for {}", root());
             CompletableFuture.runAsync(() -> {

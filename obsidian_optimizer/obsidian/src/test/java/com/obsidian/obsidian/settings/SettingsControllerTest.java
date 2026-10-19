@@ -42,14 +42,14 @@ class SettingsControllerTest {
 
     private void stubSettings() {
         activeVault.set(1L, java.nio.file.Path.of("/v"));
-        when(settingsRepository.getResourcePath()).thenReturn("/v/r");
+        when(settingsRepository.getResourcePath(1L)).thenReturn("/v/r");
         when(settingsRepository.getReviewPageSize()).thenReturn(20);
-        when(settingsRepository.getStartupSyncMode()).thenReturn("blocking");
+        when(settingsRepository.getStartupSyncMode(1L)).thenReturn("blocking");
         when(settingsRepository.getMaxDailyReviews()).thenReturn(30);
         when(settingsRepository.getBankruptcyLimit()).thenReturn(200);
         // getSettings() masks the secrets via .isBlank() — must not be null on mocks
         when(settingsRepository.getSyncClientSecret()).thenReturn("");
-        when(settingsRepository.getSyncPassphrase()).thenReturn("");
+        when(settingsRepository.getSyncPassphrase(1L)).thenReturn("");
     }
 
     @Test
@@ -66,13 +66,13 @@ class SettingsControllerTest {
     @Test
     void getSettings_returns200WithAllFields() throws Exception {
         activeVault.set(1L, java.nio.file.Path.of("/vault"));
-        when(settingsRepository.getResourcePath()).thenReturn("/vault/resources/images");
+        when(settingsRepository.getResourcePath(1L)).thenReturn("/vault/resources/images");
         when(settingsRepository.getReviewPageSize()).thenReturn(20);
-        when(settingsRepository.getStartupSyncMode()).thenReturn("blocking");
+        when(settingsRepository.getStartupSyncMode(1L)).thenReturn("blocking");
         when(settingsRepository.getMaxDailyReviews()).thenReturn(30);
         when(settingsRepository.getBankruptcyLimit()).thenReturn(200);
         when(settingsRepository.getSyncClientSecret()).thenReturn("s3cret");
-        when(settingsRepository.getSyncPassphrase()).thenReturn("");
+        when(settingsRepository.getSyncPassphrase(1L)).thenReturn("");
         mvc.perform(get("/settings"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.vaultPath").value("/vault"))
@@ -94,8 +94,8 @@ class SettingsControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(mapper.writeValueAsString(Map.of("syncPassphrase", "hunter2"))))
             .andExpect(status().isOk());
-        org.mockito.Mockito.verify(settingsRepository).set("syncPassphrase", "hunter2");
-        org.mockito.Mockito.verify(encryptionService).reload();
+        org.mockito.Mockito.verify(settingsRepository).setSyncPassphrase(1L, "hunter2");
+        org.mockito.Mockito.verify(encryptionService).reload(1L);
     }
 
     @Test
@@ -117,7 +117,32 @@ class SettingsControllerTest {
                 .content(mapper.writeValueAsString(Map.of("syncClientId", "abc.apps.googleusercontent.com"))))
             .andExpect(status().isOk());
         org.mockito.Mockito.verify(settingsRepository).set("syncClientId", "abc.apps.googleusercontent.com");
-        org.mockito.Mockito.verify(driveService).reset();
+        org.mockito.Mockito.verify(driveService).reset(1L);
+    }
+
+    // ── PUT /settings — syncEnabled vs per-vault Drive folder ─────────────────
+
+    @Test
+    void updateSettings_enableSync_withFolderUsedByAnotherVault_is400() throws Exception {
+        when(settingsRepository.getSyncDriveFolderId(1L)).thenReturn("shared-folder");
+        when(settingsRepository.otherVaultUsingDriveFolder(1L, "shared-folder")).thenReturn(2L);
+        mvc.perform(put("/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("syncEnabled", true))))
+            .andExpect(status().isBadRequest());
+        org.mockito.Mockito.verify(settingsRepository, org.mockito.Mockito.never()).setSyncEnabled(1L, true);
+    }
+
+    @Test
+    void updateSettings_enableSync_withOwnFolder_savesPerVault() throws Exception {
+        stubSettings();
+        when(settingsRepository.getSyncDriveFolderId(1L)).thenReturn("my-folder");
+        when(settingsRepository.otherVaultUsingDriveFolder(1L, "my-folder")).thenReturn(null);
+        mvc.perform(put("/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("syncEnabled", true))))
+            .andExpect(status().isOk());
+        org.mockito.Mockito.verify(settingsRepository).setSyncEnabled(1L, true);
     }
 
     // ── PUT /settings — reviewPageSize ────────────────────────────────────────

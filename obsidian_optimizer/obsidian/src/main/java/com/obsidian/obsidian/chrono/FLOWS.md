@@ -35,7 +35,7 @@ ChronoService.runAllJobs()
      (chrono rewrites from steps 2-3 AND external Obsidian edits):
      imageScanService.registerImages() + syncQueueRepo.markPending()
      — without the markPending, the 2am run's changes never reached Drive until restart
-  6. SettingsRepository.set("chronoLastRunDate", today)
+  6. SettingsRepository.setChronoLastRunDate(vaultId, today)   (per vault, vault_settings)
 ```
 
 The old FileChecker step is gone — it only fixed the Obsidian-SR "Invalid date"
@@ -157,3 +157,4 @@ Files without a frontmatter block are skipped entirely.
 | Bankruptcy limit (mass gate) | Settings UI → `SettingsRepository.getBankruptcyLimit()` |
 | FileMover extensions | `FileMoverService.*_EXTS` sets |
 | Vault scoping (M3) | `ChronoService.runAllJobs()` pins `activeVault.id()/root()` for the whole run; `BankruptcyService.run`/`SpreadService.run` take `vaultId` first |
+| Per-vault last-run date (M4) | `SettingsRepository.get/setChronoLastRunDate(vaultId)` (`vault_settings.chronoLastRunDate`); run + guard are ACTIVE vault only (D5), so an inactive vault's date is simply stale until it is switched to and chrono next fires |

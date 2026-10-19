@@ -114,14 +114,15 @@ public class MailboxConsumeService {
 
     /** Drain the mailbox. Returns the number of events applied. Single-flight. */
     public synchronized int consumeAll() {
-        if (!drive.isConfigured() || !encryption.isConfigured()) return 0;
+        final long vid = activeVault.id();   // one pass = one vault's mailbox
+        if (!drive.isConfigured(vid) || !encryption.isConfigured(vid)) return 0;
 
         int applied = 0;
         try {
-            List<MailboxFile> files = drive.listMailbox();
+            List<MailboxFile> files = drive.listMailbox(vid);
             for (MailboxFile f : files) {
                 try {
-                    applied += consumeFile(f);
+                    applied += consumeFile(vid, f);
                 } catch (Exception e) {
                     log.warn("[Mailbox] file {} failed, left for retry: {}", f.name(), e.getMessage());
                 }
@@ -144,12 +145,12 @@ public class MailboxConsumeService {
     }
 
     /** Apply one file's events; delete it only if ALL of them are supported + committed. */
-    private int consumeFile(MailboxFile f) throws Exception {
-        byte[] plain = encryption.decrypt(drive.downloadFile(f.fileId()));
+    private int consumeFile(long vid, MailboxFile f) throws Exception {
+        byte[] plain = encryption.decrypt(vid, drive.downloadFile(vid, f.fileId()));
         JsonNode root = mapper.readTree(plain);
         JsonNode events = root.get("events");
         if (events == null || !events.isArray()) {
-            drive.deleteFile(f.fileId()); // malformed/empty → drop it
+            drive.deleteFile(vid, f.fileId()); // malformed/empty → drop it
             return 0;
         }
 
@@ -187,7 +188,7 @@ public class MailboxConsumeService {
         }
 
         if (allCommitted) {
-            drive.deleteFile(f.fileId());
+            drive.deleteFile(vid, f.fileId());
             log.info("[Mailbox] consumed {} ({} events)", f.name(), applied);
         }
         return applied;

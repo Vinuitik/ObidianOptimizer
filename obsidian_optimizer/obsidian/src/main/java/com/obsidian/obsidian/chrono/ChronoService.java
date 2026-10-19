@@ -82,7 +82,7 @@ public class ChronoService {
             log.info("[ChronoService] chrono.enabled=false — skipping startup run (quiet mode).");
             return;
         }
-        String lastRun = settingsRepo.getChronoLastRunDate();
+        String lastRun = settingsRepo.getChronoLastRunDate(activeVault.id());   // active vault only (D5)
         boolean neverRun = lastRun.isBlank();
         boolean stale    = !neverRun && LocalDate.parse(lastRun).isBefore(LocalDate.now());
         if (neverRun || stale) {
@@ -156,7 +156,7 @@ public class ChronoService {
         }
 
         String today = LocalDate.now().toString();
-        settingsRepo.set("chronoLastRunDate", today);
+        settingsRepo.setChronoLastRunDate(vaultId, today);
         log.info("[ChronoService] Complete for {}. moved={} chronic={} bankrupt={} shifted={} cardsRefilled={}/{}",
             today, filesMoved, bankruptcyResult.chronicNeglected(),
             bankruptcyResult.declared(), spreadResult.moved(), regen.stored(), regen.replacementsRequested());
@@ -165,6 +165,6 @@ public class ChronoService {
     }
 
     public String getLastRunDate() {
-        return settingsRepo.getChronoLastRunDate();
+        return settingsRepo.getChronoLastRunDate(activeVault.id());
     }
 }

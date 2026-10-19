@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -63,5 +64,55 @@ public class VaultRepository {
 
     public String containerPath(long id) {
         return jdbc.queryForObject("SELECT container_path FROM vaults WHERE id = ?", String.class, id);
+    }
+
+    private static final String VIEW_COLS =
+        "id, name, host_path, container_path, active, is_primary, archived_at, created_at";
+
+    public List<Map<String, Object>> listAll() {
+        return jdbc.queryForList("SELECT " + VIEW_COLS + " FROM vaults ORDER BY id");
+    }
+
+    public Map<String, Object> getView(long id) {
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT " + VIEW_COLS + " FROM vaults WHERE id = ?", id);
+        if (rows.isEmpty()) throw VaultException.notFound(id);
+        return rows.get(0);
+    }
+
+    private Map<String, Object> require(long id) {
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT * FROM vaults WHERE id = ?", id);
+        if (rows.isEmpty()) throw VaultException.notFound(id);
+        return rows.get(0);
+    }
+
+    /** Moves the single active flag to {@code id} in one transaction. 404 unknown, 409 archived. */
+    @Transactional
+    public void activate(long id) {
+        Map<String, Object> v = require(id);
+        if (v.get("archived_at") != null) throw VaultException.conflict("vault " + id + " is archived");
+        jdbc.update("UPDATE vaults SET active = false WHERE active AND id <> ?", id);
+        jdbc.update("UPDATE vaults SET active = true WHERE id = ?", id);
+    }
+
+    public void rename(long id, String name) {
+        require(id);
+        jdbc.update("UPDATE vaults SET name = ? WHERE id = ?", name, id);
+    }
+
+    /** Soft-hide. The active vault and the last non-archived vault can't be archived (409). */
+    @Transactional
+    public void archive(long id) {
+        Map<String, Object> v = require(id);
+        if (v.get("archived_at") != null) return;
+        if (Boolean.TRUE.equals(v.get("active"))) throw VaultException.conflict("can't archive the active vault");
+        Integer others = jdbc.queryForObject(
+            "SELECT count(*) FROM vaults WHERE id <> ? AND archived_at IS NULL", Integer.class, id);
+        if (others == null || others == 0) throw VaultException.conflict("can't archive the last vault");
+        jdbc.update("UPDATE vaults SET archived_at = now() WHERE id = ?", id);
+    }
+
+    public void restore(long id) {
+        require(id);
+        jdbc.update("UPDATE vaults SET archived_at = NULL WHERE id = ?", id);
     }
 }

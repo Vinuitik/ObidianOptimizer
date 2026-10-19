@@ -58,10 +58,10 @@ public class DriveService {
 
     private final SettingsRepository settingsRepo;
 
-    // Built lazily so credentials added via the Settings UI take effect without a
-    // restart. reset() drops it after connect/disconnect/credential edits.
-    private volatile Drive drive;
-    private volatile String activeMode = "none"; // oauth | service-account | none
+    // One Drive client PER VAULT (own refresh token), built lazily so credentials added via
+    // the Settings UI take effect without a restart. reset(vaultId) drops it after
+    // connect/disconnect/credential edits.
+    private final Map<Long, Drive> drives = new ConcurrentHashMap<>();
 
     /** Cache: "parentFolderId/name" → child folder ID. Avoids redundant list API calls. */
     private final Map<String, String> folderCache = new ConcurrentHashMap<>();
@@ -78,10 +78,12 @@ public class DriveService {
      * Settings page — files land in THEIR Drive/quota) → service-account env JSON
      * (headless fallback, 15GB service-account quota) → null (sync disabled).
      */
-    private synchronized Drive ensureClient() {
-        if (drive != null) return drive;
+    private synchronized Drive ensureClient(long vaultId) {
+        Drive existing = drives.get(vaultId);
+        if (existing != null) return existing;
+        String activeMode;
         try {
-            String refreshToken = settingsRepo.getSyncRefreshToken();
+            String refreshToken = settingsRepo.getSyncRefreshToken(vaultId);
             String clientId     = settingsRepo.getSyncClientId();
             String clientSecret = settingsRepo.getSyncClientSecret();
 
@@ -101,36 +103,34 @@ public class DriveService {
                 adapter = new HttpCredentialsAdapter(creds);
                 activeMode = "service-account";
             } else {
-                activeMode = "none";
                 return null;
             }
 
-            drive = new Drive.Builder(
+            Drive drive = new Drive.Builder(
                 GoogleNetHttpTransport.newTrustedTransport(),
                 GsonFactory.getDefaultInstance(),
                 adapter)
                 .setApplicationName("ObsidianOptimizer")
                 .build();
-            log.info("[DriveService] Google Drive client initialised ({})", activeMode);
+            drives.put(vaultId, drive);
+            log.info("[DriveService] Google Drive client initialised for vault {} ({})", vaultId, activeMode);
             return drive;
         } catch (Exception e) {
-            log.error("[DriveService] client init failed: {}", e.getMessage());
-            activeMode = "none";
+            log.error("[DriveService] client init failed for vault {}: {}", vaultId, e.getMessage());
             return null;
         }
     }
 
     /** Drop the client + caches so the next call rebuilds from current settings. */
-    public synchronized void reset() {
-        drive = null;
-        activeMode = "none";
+    public synchronized void reset(long vaultId) {
+        drives.remove(vaultId);
         folderCache.clear();
         folderLocks.clear();
     }
 
     /** oauth | service-account | none — which credential source WOULD be used. */
-    public String mode() {
-        String refreshToken = settingsRepo.getSyncRefreshToken();
+    public String mode(long vaultId) {
+        String refreshToken = settingsRepo.getSyncRefreshToken(vaultId);
         if (!refreshToken.isBlank()
             && !settingsRepo.getSyncClientId().isBlank()
             && !settingsRepo.getSyncClientSecret().isBlank()) return "oauth";
@@ -138,10 +138,10 @@ public class DriveService {
         return "none";
     }
 
-    public boolean isConfigured() {
-        String m = mode();
+    public boolean isConfigured(long vaultId) {
+        String m = mode(vaultId);
         if ("oauth".equals(m)) return true;                     // root folder is auto-created
-        return "service-account".equals(m) && !settingsRepo.getSyncDriveFolderId().isBlank();
+        return "service-account".equals(m) && !settingsRepo.getSyncDriveFolderId(vaultId).isBlank();
     }
 
     /**
@@ -150,42 +150,52 @@ public class DriveService {
      * sees app-created files, so the by-name lookup cannot collide with user files)
      * and persisted so every device reuses the same ID.
      */
-    private String rootFolderId() throws IOException {
-        String configured = settingsRepo.getSyncDriveFolderId();
-        if (!configured.isBlank()) return configured;
-        if (!"oauth".equals(mode())) throw new IOException("Drive root folder not configured");
+    private String rootFolderId(long vaultId) throws IOException {
+        String configured = settingsRepo.getSyncDriveFolderId(vaultId);
+        if (!configured.isBlank()) {
+            // Hard stop on a cross-vault push: never write into a folder another vault owns.
+            Long other = settingsRepo.otherVaultUsingDriveFolder(vaultId, configured);
+            if (other != null) {
+                throw new IOException("Drive folder " + configured + " of vault " + vaultId
+                    + " is also bound to vault " + other + " — refusing to sync");
+            }
+            return configured;
+        }
+        if (!"oauth".equals(mode(vaultId))) throw new IOException("Drive root folder not configured");
 
-        Drive d = requireClient();
+        // Vault 1 keeps the historical name; others get their own so they never share a folder.
+        String rootName = vaultId == 1 ? DEFAULT_ROOT_NAME : DEFAULT_ROOT_NAME + "-v" + vaultId;
+        Drive d = requireClient(vaultId);
         FileList found = d.files().list()
-            .setQ("name = '" + DEFAULT_ROOT_NAME + "' and mimeType = '" + FOLDER_MIME + "' and trashed = false")
+            .setQ("name = '" + rootName + "' and mimeType = '" + FOLDER_MIME + "' and trashed = false")
             .setFields("files(id)").setPageSize(1).execute();
         String id;
         if (!found.getFiles().isEmpty()) {
             id = found.getFiles().get(0).getId();
         } else {
-            File folder = new File().setName(DEFAULT_ROOT_NAME).setMimeType(FOLDER_MIME);
+            File folder = new File().setName(rootName).setMimeType(FOLDER_MIME);
             id = d.files().create(folder).setFields("id").execute().getId();
-            log.info("[DriveService] created sync root folder '{}' ({})", DEFAULT_ROOT_NAME, id);
+            log.info("[DriveService] created sync root folder '{}' ({}) for vault {}", rootName, id, vaultId);
         }
-        settingsRepo.set("sync.drive.folder_id", id);
+        settingsRepo.setSyncDriveFolderId(vaultId, id);
         return id;
     }
 
-    private Drive requireClient() throws IOException {
-        Drive d = ensureClient();
+    private Drive requireClient(long vaultId) throws IOException {
+        Drive d = ensureClient(vaultId);
         if (d == null) throw new IOException("Google Drive not configured");
         return d;
     }
 
     /** Email of the connected account (OAuth) — used for the Settings status line. */
-    public String fetchAccountEmail() throws IOException {
-        return requireClient().about().get().setFields("user(emailAddress)")
+    public String fetchAccountEmail(long vaultId) throws IOException {
+        return requireClient(vaultId).about().get().setFields("user(emailAddress)")
             .execute().getUser().getEmailAddress();
     }
 
     /** Drive storage quota {usedBytes, limitBytes} — limitBytes null = unlimited. */
-    public Map<String, Long> fetchQuota() throws IOException {
-        var q = requireClient().about().get().setFields("storageQuota").execute().getStorageQuota();
+    public Map<String, Long> fetchQuota(long vaultId) throws IOException {
+        var q = requireClient(vaultId).about().get().setFields("storageQuota").execute().getStorageQuota();
         Map<String, Long> out = new HashMap<>();
         out.put("usedBytes",  q.getUsage());
         out.put("limitBytes", q.getLimit());
@@ -196,9 +206,9 @@ public class DriveService {
      * Move a Drive file to TRASH (30-day recovery), never a hard delete —
      * {@code files().delete()} would bypass the trash entirely.
      */
-    public void trashFile(String fileId) throws IOException {
+    public void trashFile(long vaultId, String fileId) throws IOException {
         try {
-            requireClient().files().update(fileId, new File().setTrashed(true))
+            requireClient(vaultId).files().update(fileId, new File().setTrashed(true))
                 .setFields("id").execute();
         } catch (GoogleJsonResponseException e) {
             if (e.getStatusCode() != 404) throw e;   // already gone = done
@@ -212,11 +222,11 @@ public class DriveService {
      * The Drive file is stored as {@code relativePath + ".enc"} under the sync root folder.
      * Returns the Drive file ID.
      */
-    public String uploadFile(String relativePath, byte[] bytes,
+    public String uploadFile(long vaultId, String relativePath, byte[] bytes,
                              String contentHash, String deviceId,
                              String existingFileId) throws IOException {
         String encName  = leafName(relativePath) + ".enc";
-        String folderId = ensureFolderPath(relativePath);
+        String folderId = ensureFolderPath(vaultId, relativePath);
 
         Map<String, String> props = new HashMap<>();
         props.put("vault_path",   relativePath);
@@ -225,7 +235,7 @@ public class DriveService {
         props.put("uploaded_at",  String.valueOf(System.currentTimeMillis()));
 
         ByteArrayContent content = new ByteArrayContent("application/octet-stream", bytes);
-        Drive d = requireClient();
+        Drive d = requireClient(vaultId);
 
         if (existingFileId != null) {
             try {
@@ -321,12 +331,12 @@ public class DriveService {
 
     // ── Download ──────────────────────────────────────────────────────────────
 
-    public byte[] downloadFile(String fileId) throws IOException {
+    public byte[] downloadFile(long vaultId, String fileId) throws IOException {
         // Same transient-retry policy as uploads: a 429/5xx/burst-403 during a bulk pull
         // (e.g. a restore of thousands of files) no longer strands that file permanently.
         return withRetry(() -> {
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            requireClient().files().get(fileId).executeMediaAndDownloadTo(bos);
+            requireClient(vaultId).files().get(fileId).executeMediaAndDownloadTo(bos);
             return bos.toByteArray();
         });
     }
@@ -334,16 +344,16 @@ public class DriveService {
     // ── List ──────────────────────────────────────────────────────────────────
 
     /** Recursively list all .enc files under the sync root, returning their metadata. */
-    public List<DriveFileInfo> listAllFiles() throws IOException {
+    public List<DriveFileInfo> listAllFiles(long vaultId) throws IOException {
         List<DriveFileInfo> result = new ArrayList<>();
-        listRecursive(rootFolderId(), result);
+        listRecursive(vaultId, rootFolderId(vaultId), result);
         return result;
     }
 
-    private void listRecursive(String folderId, List<DriveFileInfo> acc) throws IOException {
+    private void listRecursive(long vaultId, String folderId, List<DriveFileInfo> acc) throws IOException {
         String pageToken = null;
         do {
-            Drive.Files.List req = requireClient().files().list()
+            Drive.Files.List req = requireClient(vaultId).files().list()
                 .setQ("'" + folderId + "' in parents and trashed = false")
                 .setFields("nextPageToken, files(id, name, mimeType, size, appProperties)")
                 .setPageSize(1000);
@@ -358,7 +368,7 @@ public class DriveService {
                     if (DB_BACKUP_FOLDER.equals(f.getName())
                         || OFFLINE_FOLDER.equals(f.getName())
                         || MAILBOX_FOLDER.equals(f.getName())) continue;
-                    listRecursive(f.getId(), acc);
+                    listRecursive(vaultId, f.getId(), acc);
                 } else if (f.getName().endsWith(".enc")) {
                     Map<String, String> props = f.getAppProperties();
                     if (props != null && props.containsKey("vault_path")) {
@@ -380,9 +390,9 @@ public class DriveService {
     // ── DB backups (_db/) ───────────────────────────────────────────────────────
 
     /** Upload an encrypted pg_dump into the _db/ folder. Returns the Drive file ID. */
-    public String uploadDbBackup(byte[] bytes, String name, String pgVersion, String deviceId)
+    public String uploadDbBackup(long vaultId, byte[] bytes, String name, String pgVersion, String deviceId)
             throws IOException {
-        String folderId = getOrCreateFolder(DB_BACKUP_FOLDER, rootFolderId());
+        String folderId = getOrCreateFolder(vaultId, DB_BACKUP_FOLDER, rootFolderId(vaultId));
         Map<String, String> props = new HashMap<>();
         props.put("type",        "db-dump");
         props.put("pg_version",  pgVersion == null ? "" : pgVersion);
@@ -393,17 +403,17 @@ public class DriveService {
             .setParents(Collections.singletonList(folderId))
             .setAppProperties(props);
         ByteArrayContent content = new ByteArrayContent("application/octet-stream", bytes);
-        Drive d = requireClient();
+        Drive d = requireClient(vaultId);
         return withRetry(() -> d.files().create(meta, content).setFields("id").execute()).getId();
     }
 
     /** All DB dumps in _db/, newest first (by created_at appProperty, then name). */
-    public List<DbBackupInfo> listDbBackups() throws IOException {
+    public List<DbBackupInfo> listDbBackups(long vaultId) throws IOException {
         List<DbBackupInfo> out = new ArrayList<>();
-        String folderId = getOrCreateFolder(DB_BACKUP_FOLDER, rootFolderId());
+        String folderId = getOrCreateFolder(vaultId, DB_BACKUP_FOLDER, rootFolderId(vaultId));
         String pageToken = null;
         do {
-            Drive.Files.List req = requireClient().files().list()
+            Drive.Files.List req = requireClient(vaultId).files().list()
                 .setQ("'" + folderId + "' in parents and trashed = false")
                 .setFields("nextPageToken, files(id, name, size, appProperties)")
                 .setPageSize(1000);
@@ -425,15 +435,15 @@ public class DriveService {
         return out;
     }
 
-    public java.util.Optional<DbBackupInfo> latestDbBackup() throws IOException {
-        List<DbBackupInfo> all = listDbBackups();
+    public java.util.Optional<DbBackupInfo> latestDbBackup(long vaultId) throws IOException {
+        List<DbBackupInfo> all = listDbBackups(vaultId);
         return all.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(all.get(0));
     }
 
     /** Hard-delete an old dump (rotation) — bypasses trash so retention actually frees quota. */
-    public void deleteDbBackup(String fileId) throws IOException {
+    public void deleteDbBackup(long vaultId, String fileId) throws IOException {
         try {
-            requireClient().files().delete(fileId).execute();
+            requireClient(vaultId).files().delete(fileId).execute();
         } catch (GoogleJsonResponseException e) {
             if (e.getStatusCode() != 404) throw e;
         }
@@ -451,12 +461,12 @@ public class DriveService {
     /**
      * Ensures all intermediate folders exist and returns the immediate parent's ID.
      */
-    private String ensureFolderPath(String relativePath) throws IOException {
+    private String ensureFolderPath(long vaultId, String relativePath) throws IOException {
         String[] parts = relativePath.split("/");
-        String current = rootFolderId();
+        String current = rootFolderId(vaultId);
         for (int i = 0; i < parts.length - 1; i++) {
             if (!parts[i].isBlank()) {
-                current = getOrCreateFolder(parts[i], current);
+                current = getOrCreateFolder(vaultId, parts[i], current);
             }
         }
         return current;
@@ -469,7 +479,7 @@ public class DriveService {
      * hit (the common case) is lock-free; only a first miss for a given folder blocks, and
      * only other threads wanting that same folder.
      */
-    private String getOrCreateFolder(String name, String parentId) throws IOException {
+    private String getOrCreateFolder(long vaultId, String name, String parentId) throws IOException {
         String cacheKey = parentId + "/" + name;
         String cached = folderCache.get(cacheKey);
         if (cached != null) return cached;
@@ -480,7 +490,7 @@ public class DriveService {
             String again = folderCache.get(cacheKey);
             if (again != null) return again;
 
-            Drive d = requireClient();
+            Drive d = requireClient(vaultId);
             String q = "name = '" + name.replace("'", "\\'") + "'"
                 + " and '" + parentId + "' in parents"
                 + " and mimeType = '" + FOLDER_MIME + "'"
@@ -506,11 +516,11 @@ public class DriveService {
     // ── PWA offline sync (_offline/ exports, _mailbox/ events) ──────────────────
 
     /** Upsert a singleton file into _offline/ (overwrite so exports don't accumulate). */
-    public String uploadOffline(String name, byte[] bytes) throws IOException {
-        String folderId = getOrCreateFolder(OFFLINE_FOLDER, rootFolderId());
-        String existingId = findInFolder(folderId, name);
+    public String uploadOffline(long vaultId, String name, byte[] bytes) throws IOException {
+        String folderId = getOrCreateFolder(vaultId, OFFLINE_FOLDER, rootFolderId(vaultId));
+        String existingId = findInFolder(vaultId, folderId, name);
         ByteArrayContent content = new ByteArrayContent("application/octet-stream", bytes);
-        Drive d = requireClient();
+        Drive d = requireClient(vaultId);
         if (existingId != null) {
             return withRetry(() -> d.files().update(existingId, new File(), content).setFields("id").execute()).getId();
         }
@@ -519,12 +529,12 @@ public class DriveService {
     }
 
     /** List encrypted event files the phone dropped in _mailbox/, oldest name first. */
-    public List<MailboxFile> listMailbox() throws IOException {
-        String folderId = getOrCreateFolder(MAILBOX_FOLDER, rootFolderId());
+    public List<MailboxFile> listMailbox(long vaultId) throws IOException {
+        String folderId = getOrCreateFolder(vaultId, MAILBOX_FOLDER, rootFolderId(vaultId));
         List<MailboxFile> out = new ArrayList<>();
         String pageToken = null;
         do {
-            Drive.Files.List req = requireClient().files().list()
+            Drive.Files.List req = requireClient(vaultId).files().list()
                 .setQ("'" + folderId + "' in parents and trashed = false")
                 .setFields("nextPageToken, files(id, name)")
                 .setPageSize(1000);
@@ -540,16 +550,16 @@ public class DriveService {
     }
 
     /** HARD delete (not trash) a consumed mailbox file — these are transient, not vault data. */
-    public void deleteFile(String fileId) throws IOException {
+    public void deleteFile(long vaultId, String fileId) throws IOException {
         try {
-            requireClient().files().delete(fileId).execute();
+            requireClient(vaultId).files().delete(fileId).execute();
         } catch (GoogleJsonResponseException e) {
             if (e.getStatusCode() != 404) throw e; // already gone = done
         }
     }
 
-    private String findInFolder(String folderId, String name) throws IOException {
-        FileList result = requireClient().files().list()
+    private String findInFolder(long vaultId, String folderId, String name) throws IOException {
+        FileList result = requireClient(vaultId).files().list()
             .setQ("name = '" + name.replace("'", "\\'") + "' and '" + folderId
                 + "' in parents and trashed = false")
             .setFields("files(id)").setPageSize(1).execute();

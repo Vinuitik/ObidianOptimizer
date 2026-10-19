@@ -104,6 +104,12 @@ public class ImageProcessingWorker {
         pool.shutdownNow();
     }
 
+    /** Switch: process the new vault's pending image jobs now instead of at the next tick. */
+    @org.springframework.context.event.EventListener
+    public void onVaultSwitched(com.obsidian.obsidian.vaults.VaultSwitchedEvent e) {
+        processPendingImages();
+    }
+
     /** Tick: hand the drain to the image lane and return immediately. Now the SAFETY
      *  NET (default 1h, was 30s) — the outbox+RabbitMQ path from ImageScanService's
      *  chokepoint is the primary trigger, delivering within seconds instead of waiting
