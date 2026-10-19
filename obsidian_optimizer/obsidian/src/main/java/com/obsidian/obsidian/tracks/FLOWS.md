@@ -86,8 +86,14 @@ else:  // normal mode, or lock-in with nothing on a deadline (falls back to norm
       pro-rata scale the musts too -> overBudget = true (never a silent drop)
   take reserved[track] (rounded, capped at itemsRemaining) from each deadline track
   remainingCap = todayCap - Σtaken
-  manual tracks fill remainingCap per track_schedule budget (Phase 1's flat logic, now capped)
+  manual tracks WITH a track_schedule entry for today: take min(budget, pending, remainingCap)
+  manual tracks with NO schedule entry for today (L1 fallback): greedily soak up what's left,
+      sorted must>should>could (null = should), ties keep listActive() order (created_at DESC);
+      each takes min(pending, remainingCap) -> never exceeds todayCap
 ```
+The whole thing lives in the pure `TodayPlanService.allocate(date, mode, cap, capacityOf, active,
+pending, scheduleBudget)` (no repo access, no mutation) — Today and Week both call it.
+To change fallback order: `TodayPlanService.allocate()` (the `unscheduled.sort`).
 
 Two design decisions were resolved before implementing this (see
 `learning-tracks-phase1-2026-08-16.md` memory for the reasoning):
@@ -171,7 +177,26 @@ watch. `FsrsStateWriter.mirror()` no-ops silently if the note has no frontmatter
 (common for a fresh AI-generated/captured note) — the DB row (`note_reviews`) is what
 `/reviews/due` actually queries, so the note surfaces for review regardless.
 
-## Capture-time track tagging (Phase 1b)
+### Week Flow (L1, IMPLEMENTED)
+```
+GET /api/tracks/week → TrackController.week() → TodayPlanService.week(start)
+  pending[track] = countPendingItems for every active track (copy, working set)
+  for i in 0..6: d = start+i; cap = getCapacity(weekday(d))
+      a = allocate(d, mode, cap, ...pending)            // same allocator as Today
+      pending[track] -= a.take                          // assume no completions, consume day by day
+  -> [{date, weekday("Mon"..), capacity, items:[{trackId, trackTitle, trackType, count}]}]
+```
+Frontend: `api/tracks.js fetchWeekPlan()` (no UI yet). Projection only: no persisted plan, mode applies
+to every projected day, deadline pace is recomputed per day from the consumed pending counts.
+
+## Capture-time track tagging (Phase 1b) — REMOVED (L1)
+
+Backend no longer writes `capture.track_id` from capture requests: `CaptureController.capture()` /
+`captureFile()` / `enqueueCapture()` / `captureFileBytes()` and the mailbox replay ignore any
+`trackId`/`newTrackTitle`/`newTrackType`. The column, `CaptureRepository.setTrackId()` (still used by
+`FeedService.accept()`) and the note->track fan-out (`InternalAgentController.linkToTrack()`) remain.
+Extension / PWA pickers still send these fields until their UI is dropped (L3); they are now ignored.
+The text below is historical.
 
 Goal: tag a capture to a track at the moment of capture, on any surface, without slowing
 the default "just capture it" path. Three surfaces (extension, mobile PWA, MCP) converge
@@ -325,9 +350,11 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 | Nav visibility toggle | `SettingsRepository.isTracksEnabled()` / `NavBar.jsx` `tracksOnly` filter |
 | Frontend Tracks state | `useStore.js` — `tracks`, `todayItems`, `trackItems`, `trackSchedules` (wiped on logout via `initialDataState()`) |
 | Track item drag-reorder (Manage tab) | `TracksPage.jsx` `TrackItemsEditor` — native HTML5 DnD, position = array index |
+| Unscheduled-track fallback order / capacity math (Today+Week) | `TodayPlanService.allocate()` |
+| 7-day projection | `TodayPlanService.week()`; `GET /api/tracks/week` -> `TrackController.week()`; `api/tracks.js fetchWeekPlan()` |
 | Weekly schedule editor | `TracksPage.jsx` `TrackScheduleEditor` — full-replace PUT, budget='' means "not scheduled" |
 | **Phase 1b** — capture.track_id column | `CaptureRepository.initSchema()` / `setTrackId()` |
-| **Phase 1b** — resolve trackId or create-on-the-fly | `CaptureController.resolveTrackId()` (used by `capture()` and `captureFile()`) |
+| **Phase 1b** — resolve trackId or create-on-the-fly | [REMOVED in L1] `CaptureController.resolveTrackId()` deleted; request params dropped |
 | **Phase 1b** — capture-queue note→track fan-out | `InternalAgentController.createNote()` → `linkToTrack()`; Python side threads `capture_id` through `publish.create_note()` (`ingest/jobs.py` `_synthesize_and_publish[_v2]`) |
 | **Phase 1b** — MCP track creation/item-append (internal, token-gated) | `InternalAgentController.createTrack()` / `addTrackItem()`; Python `publish.create_track()` / `publish.add_track_item()` |
 | **Phase 1b** — MCP tools | `embedder/mcp_tools/write.py` `create_track`, `ingest_resource(track_id=)`, `create_note(track_id=)`; job-side fan-out in `ingest/jobs.py` `_link_track_item()` |

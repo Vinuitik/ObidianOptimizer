@@ -110,6 +110,13 @@ export async function fetchTodayPlan() {
   return res.json();
 }
 
+// 7-day projection starting today (assumes no completions; items consumed day by day):
+// [{ date, weekday, capacity, items: [{ trackId, trackTitle, trackType, count }] }]
+export async function fetchWeekPlan() {
+  const res = await req(`${BASE}/tracks/week`);
+  return res.json();
+}
+
 // weekday(0=Mon..6=Sun) -> items/day ceiling for that day (Normal mode only).
 export async function fetchCapacity() {
   const res = await req(`${BASE}/tracks/capacity`);

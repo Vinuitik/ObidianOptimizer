@@ -174,6 +174,7 @@ class TodayPlanServiceTest {
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
         when(trackRepo.countPendingItems(1)).thenReturn(7); // reserved == 7 (window==capacity trick)
         when(trackRepo.getScheduleBudget(2, 0)).thenReturn(5); // wants 5, only 3 left
+        when(trackRepo.countPendingItems(2)).thenReturn(20);
 
         TodayPlan plan = service.today(today);
 
@@ -221,6 +222,8 @@ class TodayPlanServiceTest {
         when(trackRepo.getCapacity(0)).thenReturn(4.0); // default weekday capacity — plenty of headroom
         when(trackRepo.getScheduleBudget(1, 0)).thenReturn(2);
         when(trackRepo.getScheduleBudget(2, 0)).thenReturn(2);
+        when(trackRepo.countPendingItems(1)).thenReturn(10);
+        when(trackRepo.countPendingItems(2)).thenReturn(10);
 
         TodayPlan plan = service.today(mon);
 
@@ -245,6 +248,7 @@ class TodayPlanServiceTest {
         stubItems(1); stubItems(2);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
         when(trackRepo.countPendingItems(1)).thenReturn(7);
+        when(trackRepo.countPendingItems(2)).thenReturn(20);
         when(trackRepo.getScheduleBudget(2, 0)).thenReturn(5);
 
         TodayPlan plan = service.today(today);
@@ -339,7 +343,108 @@ class TodayPlanServiceTest {
         when(repo.listActive()).thenReturn(List.of(t));
         when(repo.getCapacity(anyInt())).thenReturn(10.0);
         when(repo.getScheduleBudget(1, 0)).thenReturn(items.size());
+        when(repo.countPendingItems(1)).thenReturn(items.size());
         when(repo.nextPendingItems(eq(1L), anyInt())).thenReturn(items);
         return new TodayPlanService(repo, settings).today(date);
+    }
+
+    // ── L1: unscheduled no-deadline fallback ─────────────────────────────────────
+
+    private Track prioTrack(long id, String priority, long createdSecs) {
+        return new Track(id, "T" + id, "book", "active", "manual", null, priority, true,
+            Instant.ofEpochSecond(createdSecs), null, null, null);
+    }
+
+    @Test
+    void fallback_unscheduledFillLeftover_priorityOrder_cappedAtCapacity() {
+        LocalDate mon = LocalDate.of(2026, 8, 17);
+        Track could = prioTrack(1, "could", 3);
+        Track must = prioTrack(2, "must", 2);
+        Track should = prioTrack(3, "should", 1);
+        when(trackRepo.listActive()).thenReturn(List.of(could, must, should));
+        stubItems(1); stubItems(2); stubItems(3);
+        when(trackRepo.getCapacity(0)).thenReturn(6.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(10);
+        when(trackRepo.countPendingItems(2)).thenReturn(4);
+        when(trackRepo.countPendingItems(3)).thenReturn(10);
+
+        TodayPlan plan = service.today(mon);
+
+        assertThat(countFor(plan, 2)).isEqualTo(4); // must first, all it has
+        assertThat(countFor(plan, 3)).isEqualTo(2); // should gets the rest
+        assertThat(countFor(plan, 1)).isZero();     // could starved, capacity spent
+        assertThat(plan.items()).hasSize(6);        // never exceeds capacity
+        assertThat(plan.items().get(0).trackId()).isEqualTo(2);
+    }
+
+    @Test
+    void fallback_afterDeadlineAndScheduled_andScheduledKeepsBudget() {
+        LocalDate mon = LocalDate.of(2026, 8, 17);
+        Track deadline = deadlineTrack(1, "D", mon.plusDays(1), "should");
+        Track sched = manualTrack(2, "S");
+        Track free = manualTrack(3, "F");
+        when(trackRepo.listActive()).thenReturn(List.of(deadline, sched, free));
+        stubItems(1); stubItems(2); stubItems(3);
+        when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(4);
+        when(trackRepo.countPendingItems(2)).thenReturn(50);
+        when(trackRepo.countPendingItems(3)).thenReturn(50);
+        when(trackRepo.getScheduleBudget(2, 0)).thenReturn(2);
+
+        TodayPlan plan = service.today(mon);
+
+        assertThat(countFor(plan, 1)).isEqualTo(4);
+        assertThat(countFor(plan, 2)).isEqualTo(2); // budget semantics kept
+        assertThat(countFor(plan, 3)).isEqualTo(4); // 10-4-2 leftover
+    }
+
+    @Test
+    void fallback_lockInUnchanged_unscheduledIgnored() {
+        when(settingsRepo.getOrDefault(TodayPlanService.MODE_KEY, TodayPlanService.MODE_NORMAL))
+            .thenReturn(TodayPlanService.MODE_LOCKIN);
+        LocalDate mon = LocalDate.of(2026, 8, 17);
+        Track d = deadlineTrack(1, "D", mon.plusDays(1), "must");
+        Track free = manualTrack(2, "F");
+        when(trackRepo.listActive()).thenReturn(List.of(d, free));
+        stubItems(1);
+        when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(3);
+        when(trackRepo.countPendingItems(2)).thenReturn(50);
+
+        TodayPlan plan = service.today(mon);
+
+        assertThat(countFor(plan, 1)).isEqualTo(3);
+        assertThat(countFor(plan, 2)).isZero();
+    }
+
+    // ── L1: week projection ──────────────────────────────────────────────────────
+
+    @Test
+    void week_consumesItemsAcrossDays_noRepeatBeyondPending() {
+        LocalDate mon = LocalDate.of(2026, 8, 17);
+        Track small = prioTrack(1, "must", 2);   // 3 items total
+        Track big = prioTrack(2, "should", 1);   // plenty
+        when(trackRepo.listActive()).thenReturn(List.of(small, big));
+        when(trackRepo.getCapacity(anyInt())).thenReturn(2.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(3);
+        when(trackRepo.countPendingItems(2)).thenReturn(100);
+
+        List<TodayPlanService.WeekDay> week = service.week(mon);
+
+        assertThat(week).hasSize(7);
+        assertThat(week.get(0).date()).isEqualTo(mon);
+        assertThat(week.get(0).weekday()).isEqualTo("Mon");
+        assertThat(week.get(0).capacity()).isEqualTo(2);
+        int smallTotal = 0;
+        long smallDays = 0;
+        for (var day : week) {
+            int dayTotal = day.items().stream().mapToInt(TodayPlanService.WeekTrackCount::count).sum();
+            assertThat(dayTotal).isLessThanOrEqualTo(2);
+            for (var c : day.items()) if (c.trackId() == 1) { smallTotal += c.count(); smallDays++; }
+        }
+        assertThat(smallTotal).isEqualTo(3); // consumed exactly once, not 2/day x 7
+        assertThat(smallDays).isEqualTo(2);  // day1: 2, day2: 1
+        assertThat(week.get(0).items().get(0).trackTitle()).isEqualTo("T1");
+        assertThat(week.get(2).items().get(0).trackId()).isEqualTo(2); // small exhausted
     }
 }

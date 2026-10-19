@@ -3,7 +3,6 @@ package com.obsidian.obsidian.capture;
 import com.obsidian.obsidian.common.OutboxRepository;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
-import com.obsidian.obsidian.tracks.TrackRepository;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +42,6 @@ class CaptureControllerTest {
     @Mock CaptureRepository captureRepo;
     @Mock CaptureIngestWorker ingestWorker;
     @Mock SettingsRepository settingsRepo;
-    @Mock TrackRepository trackRepo;
     @Mock OutboxRepository outboxRepo;
     @Mock com.obsidian.obsidian.common.PipelineFailureRepository pipelineFailureRepo;
     @Mock PlatformTransactionManager txManager;
@@ -56,7 +54,7 @@ class CaptureControllerTest {
     @BeforeEach
     void setUp() {
         controller = new CaptureController(repository, captureRepo, ingestWorker, settingsRepo,
-            trackRepo, outboxRepo, pipelineFailureRepo, txManager);
+            outboxRepo, pipelineFailureRepo, txManager);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

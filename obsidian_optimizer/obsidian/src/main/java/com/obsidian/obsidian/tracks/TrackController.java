@@ -157,6 +157,11 @@ public class TrackController {
         return todayPlan.today();
     }
 
+    @GetMapping("week")
+    public List<TodayPlanService.WeekDay> week() {
+        return todayPlan.week();
+    }
+
     // ── Progress (Phase 1d) ────────────────────────────────────────────────────
 
     @GetMapping("progress")
