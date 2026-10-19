@@ -6,8 +6,9 @@ Subsystem docs live next to the code they describe.
 |---|---|---|
 | **store** | [src/store/FLOWS.md](src/store/FLOWS.md) | useStore.js — all Zustand state, tab management, sync/cancel |
 | **api** | [src/api/FLOWS.md](src/api/FLOWS.md) | notes.js, stats.js — all API calls, ApiError, endpoint table |
-| **utils** | [src/utils/FLOWS.md](src/utils/FLOWS.md) | diff.js, frontmatter.js, markdownCleanup.js, all Milkdown plugins |
-| **components** | [src/components/FLOWS.md](src/components/FLOWS.md) | MilkdownEditor, FolderTree, TabBar, SplitLayout, NavBar, LoginModal |
+| **utils** | [src/utils/FLOWS.md](src/utils/FLOWS.md) | diff.js, frontmatter.js, markdown.js (markdown-it pipeline), media.js |
+| **editor** | [src/editor/FLOWS.md](src/editor/FLOWS.md) | CmEditor (CodeMirror 6), livePreview, wikiLinks, embeds, math, tables, hashtags, codeBlocks |
+| **components** | [src/components/FLOWS.md](src/components/FLOWS.md) | FolderTree, TabBar, SplitLayout, NavBar, LoginModal |
 | **pages** | [src/pages/FLOWS.md](src/pages/FLOWS.md) | MainPage startup, SettingsPage SECTIONS pattern, Chrono panel |
 
 ## Config

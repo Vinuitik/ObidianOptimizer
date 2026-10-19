@@ -45,7 +45,7 @@ import { allocateTracks } from '../pwa/reviewPlan';
 import { getMeta } from '../pwa/db';
 import { doneNotePaths, markNoteDone } from './flashSessionPersist';
 import { readPrefs, writePrefs } from '../pwa/prefsSync';
-import { setPendingBlobs } from '../utils/obsidianImagePlugin';
+import { setPendingBlobs } from '../utils/media';
 import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
 
@@ -106,6 +106,35 @@ function bumpFlashcardsDone() {
 }
 
 // ── Tree helpers ──────────────────────────────────────────────────────────────
+
+// Unsaved = body, title or pasted files differ from what is on disk.
+export function selectDirty(s) {
+  if (!s.currentNotePath) return false;
+  const base = s.currentNotePath.split(/[/\\]/).pop().replace(/\.md$/, '');
+  return s.pendingRaw !== s.currentNoteRaw
+    || s.pendingTitle !== base
+    || Object.keys(s.pendingFiles ?? {}).length > 0;
+}
+
+// Autosave machinery (module-level: one editor, one save pipeline).
+export const AUTOSAVE_MS = 1500;
+let autosaveTimer = null;
+let saveInFlight = null;   // Promise while a save loop runs; never two syncNote calls at once
+let saveAgain = false;     // a flush was requested during the in-flight save -> save once more
+let editorFlush = null;    // CmEditor registers its debounce flush here
+
+// CmEditor calls this on mount (fn) / unmount (null) so the store can force the 120 ms
+// updatePending debounce out before any save.
+export function setEditorFlush(fn) { editorFlush = fn; }
+
+// "Untitled", "Untitled 2", ... first one not in the basename index (vault-wide, lowercased).
+export function nextUntitledName(noteIndex) {
+  const taken = (n) => noteIndex?.has(n.toLowerCase());
+  if (!taken('Untitled')) return 'Untitled';
+  let i = 2;
+  while (taken(`Untitled ${i}`)) i += 1;
+  return `Untitled ${i}`;
+}
 
 function getParentPath(fullPath) {
   const sep = fullPath.includes('\\') ? '\\' : '/';
@@ -190,10 +219,9 @@ const initialDataState = () => ({
   isMutable: false,
 
   // Center panel mode: 'view' | 'new'
-  // 'edit' is now conveyed by isMutable; centerMode only distinguishes new-note form
   centerMode: 'view',
-  newNoteFolder: null,
-  newNoteName: '',
+  saveStatus: null,         // 'saving' | 'saved' | 'error' | null (autosave indicator)
+  titleFocusNonce: 0,       // bumped by startNewNote -> SplitLayout focuses + selects the title input
 
   // Review
   reviewNotes: [],
@@ -247,7 +275,7 @@ const DELETE_UNDO_MS = 7000;
 const useStore = create((set, get) => ({
   ...initialDataState(),
 
-  // Incremented on cancel to force Milkdown remount with clean content
+  // Incremented on cancel to force the CM6 editor to remount with clean content
   editorResetKey: 0,
 
   // Auth — seed from the persisted flag so an offline cold boot isn't walled (checkAuth
@@ -590,51 +618,77 @@ const useStore = create((set, get) => ({
       pendingRaw: raw,
       pendingFrontmatter: frontmatter,
       pendingTitle: noteBasename(fullPath),
-      isMutable: false,
+      isMutable: true,
       centerMode: 'view',
       pendingFiles: {},
+      saveStatus: null,
     });
     setPendingBlobs({});
-    // Suppress unused body — it's stored in pendingRaw; Milkdown reads it via splitFrontmatter
+    // Suppress unused body — it's stored in pendingRaw; CmEditor reads it via splitFrontmatter
     void body;
   },
 
-  // ── WYSIWYG: live update from Milkdown onChange ───────────────────────────
+  // ── WYSIWYG: live update from the CM6 editor ───────────────────────────
 
-  // Called by Milkdown's markdownUpdated listener with the serialized body (no frontmatter).
+  // Called by CmEditor (debounced) with the document body (no frontmatter).
   updatePending: (body) => {
     const { pendingFrontmatter } = get();
     set({ pendingRaw: joinFrontmatter(pendingFrontmatter, body) });
+    if (get().isMutable) get().scheduleAutosave();
   },
 
   setPendingTitle: (title) => set({ pendingTitle: title }),
 
   // ── WYSIWYG: enter/exit edit mode ────────────────────────────────────────
 
-  toggleMutable: () => set(s => ({ isMutable: !s.isMutable })),
+  // Edit <-> reading view. Leaving edit mode saves first (flushSave pulls the editor's
+  // debounced text synchronously, before the editor unmounts).
+  toggleMutable: () => {
+    if (get().isMutable) get().flushSave().catch(() => {});
+    set(s => ({ isMutable: !s.isMutable }));
+  },
 
-  // Cancel edit — discard all pending changes and force Milkdown remount
-  cancelEdit: () => {
-    const { currentNoteRaw, currentNotePath, tabs, activeTabIndex, pendingFiles } = get();
-    // Revoke blob URLs for pasted files that won't be saved
-    for (const { blobURL } of Object.values(pendingFiles)) {
-      URL.revokeObjectURL(blobURL);
-    }
-    const updates = {
-      pendingRaw: currentNoteRaw,
-      pendingTitle: noteBasename(currentNotePath),
-      isMutable: false,
-      editorResetKey: get().editorResetKey + 1,
-      pendingFiles: {},
-    };
-    setPendingBlobs({});
-    // Clear hunks on the active tab so dirty indicator resets
-    if (activeTabIndex >= 0 && tabs[activeTabIndex]) {
-      const updated = [...tabs];
-      updated[activeTabIndex] = { ...updated[activeTabIndex], isMutable: false, hunks: [], pendingFiles: {} };
-      updates.tabs = updated;
-    }
-    set(updates);
+  // Title rename is applied only on field blur/Enter (never per keystroke).
+  commitTitle: (title) => {
+    const t = (title ?? '').trim();
+    if (!t || t === get().pendingTitle) return;
+    set({ pendingTitle: t });
+    get().flushSave().catch(() => {});
+  },
+
+  scheduleAutosave: () => {
+    if (autosaveTimer != null) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = null;
+      get().flushSave().catch(() => {});
+    }, AUTOSAVE_MS);
+  },
+
+  // Save now (idempotent, coalescing). Resolves when the note is clean; rejects on failure
+  // (state stays dirty; the next edit or a click on the indicator retries).
+  flushSave: () => {
+    editorFlush?.();   // first: it re-arms the timer via updatePending, cleared just below
+    if (autosaveTimer != null) { clearTimeout(autosaveTimer); autosaveTimer = null; }
+    if (saveInFlight) { saveAgain = true; return saveInFlight; }
+    if (!selectDirty(get())) return Promise.resolve();
+    saveInFlight = (async () => {
+      try {
+        do {
+          saveAgain = false;
+          set({ saveStatus: 'saving' });
+          await get().syncNote();
+        } while (saveAgain && selectDirty(get()));
+        set({ saveStatus: 'saved' });
+      } catch (e) {
+        set({ saveStatus: 'error' });
+        get().showToast({ message: `Couldn't save — ${e?.message ?? e}. Your changes are still here.`, tone: 'error' });
+        throw e;
+      } finally {
+        saveInFlight = null;
+        saveAgain = false;
+      }
+    })();
+    return saveInFlight;
   },
 
   // ── WYSIWYG: sync pendingRaw → disk ──────────────────────────────────────
@@ -678,18 +732,19 @@ const useStore = create((set, get) => ({
         await apiPatch(savePath, hunks);
       }
 
-      set({
+      // Edits may have landed during the awaits above: only the saved snapshot becomes
+      // "disk"; a title typed meanwhile is kept.
+      set(s => ({
         currentNoteRaw: pendingRaw,
         currentNotePath: savePath,
-        pendingTitle: noteBasename(savePath),
-        isMutable: false,
-      });
+        pendingTitle: s.pendingTitle === pendingTitle ? noteBasename(savePath) : s.pendingTitle,
+      }));
 
       // Update the active tab entry to reflect the new path and clear hunks
       const { tabs, activeTabIndex } = get();
       if (activeTabIndex >= 0 && tabs[activeTabIndex]) {
         const updated = [...tabs];
-        updated[activeTabIndex] = { ...updated[activeTabIndex], path: savePath, pendingTitle: noteBasename(savePath), isMutable: false, hunks: [], pendingFiles: {} };
+        updated[activeTabIndex] = { ...updated[activeTabIndex], path: savePath, pendingTitle: noteBasename(savePath), hunks: [], pendingFiles: {} };
         set({ tabs: updated });
       }
 
@@ -792,11 +847,15 @@ const useStore = create((set, get) => ({
 
   // ── Create ────────────────────────────────────────────────────────────────
 
-  startNewNote: (folderPath) => set({ centerMode: 'new', newNoteFolder: folderPath, newNoteName: '' }),
-
-  cancelNewNote: () => set({ centerMode: 'view', newNoteName: '' }),
-
-  setNewNoteName: (name) => set({ newNoteName: name }),
+  // Instant create: no form. Folder = explicit arg (the + that was clicked) -> open note's
+  // folder -> vault root. Name = "Untitled" / "Untitled N". Opens in edit mode with the
+  // title field focused + selected (titleFocusNonce).
+  startNewNote: async (folderPath) => {
+    const { currentNotePath, vaultRoot, noteIndex } = get();
+    const folder = folderPath ?? (currentNotePath ? getParentPath(currentNotePath) : vaultRoot);
+    await get().createNote(folder, nextUntitledName(noteIndex));
+    set(s => ({ titleFocusNonce: s.titleFocusNonce + 1 }));
+  },
 
   createNote: async (folder, name) => {
     try {
@@ -956,6 +1015,7 @@ const useStore = create((set, get) => ({
 
   // Open a note in a tab. If already open, switch to it. Otherwise add new tab.
   openTab: async (fullPath) => {
+    await get().flushSave().catch(() => {});   // never leave the previous note unsaved
     const { tabs, activeTabIndex } = get();
     const existingIndex = tabs.findIndex(t => t.path === fullPath);
 
@@ -967,13 +1027,17 @@ const useStore = create((set, get) => ({
     get()._snapshotTab();
     await get().openNote(fullPath);
 
-    const newTab = { path: fullPath, pendingTitle: noteBasename(fullPath), isMutable: false, hunks: [], pendingFiles: {} };
+    const newTab = { path: fullPath, pendingTitle: noteBasename(fullPath), isMutable: true, hunks: [], pendingFiles: {} };
     const newTabs = [...get().tabs, newTab];
     set({ tabs: newTabs, activeTabIndex: newTabs.length - 1 });
   },
 
   // Switch to tab at index, restoring its pending state.
   switchTab: async (index) => {
+    if (index === get().activeTabIndex) return;
+    // flushSave pulls the editor's debounced keystrokes synchronously (before any await),
+    // then saves; a failed save keeps the dirty state in the tab snapshot below.
+    await get().flushSave().catch(() => {});
     const { tabs, activeTabIndex } = get();
     if (index === activeTabIndex) return;
 
@@ -1002,6 +1066,7 @@ const useStore = create((set, get) => ({
       pendingTitle: tab.pendingTitle,
       isMutable: tab.isMutable,
       centerMode: 'view',
+      saveStatus: null,
       activeTabIndex: index,
       pendingFiles: restoredFiles,
     });
@@ -1009,6 +1074,7 @@ const useStore = create((set, get) => ({
 
   // Close tab at index. If it was active, switch to nearest remaining tab.
   closeTab: async (index) => {
+    if (index === get().activeTabIndex) await get().flushSave().catch(() => {});
     const { tabs, activeTabIndex } = get();
     // Revoke any pending blob URLs for the tab being closed
     const closingTab = tabs[index];

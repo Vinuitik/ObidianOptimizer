@@ -104,14 +104,16 @@
   background: transparent;
   border: none;
   border-bottom: 2px solid var(--accent);
+  border-radius: 0;
   padding: var(--sp-1) 0;
   width: 100%;
   min-width: 0;
   max-width: 480px;
-  resize: none;
-  overflow: hidden;
-  line-height: var(--lh-reading);
-  field-sizing: content;
+  /* One compact line. (The old <textarea> inherited base.css min-height:80px.) */
+  height: auto;
+  min-height: 0;
+  line-height: 1.3;
+  text-align: center;
 }
 
 .headerTitleInput:focus {
@@ -296,14 +298,19 @@
   color: var(--danger);
 }
 
-.discardPrompt {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-13);
-  color: var(--text-2);
-  flex-wrap: wrap;
-  justify-content: flex-end;
+.saveRetry {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.reading {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-5) var(--sp-6);
 }
 
 @media (max-width: 768px) {

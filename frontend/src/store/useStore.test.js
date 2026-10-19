@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── API mock ─────────────────────────────────────────────────────────────────
 
@@ -22,9 +22,9 @@ vi.mock('../api/notes', () => ({
   ApiError:         class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } },
 }));
 
-// ── obsidianImagePlugin mock ──────────────────────────────────────────────────
+// ── media mock ──────────────────────────────────────────────────
 
-vi.mock('../utils/obsidianImagePlugin', () => ({
+vi.mock('../utils/media', () => ({
   setPendingBlobs: vi.fn(),
 }));
 
@@ -48,10 +48,10 @@ vi.mock('../api/tracks', () => ({
   setTrackMode:       vi.fn(),
 }));
 
-import useStore from './useStore';
+import useStore, { setEditorFlush, nextUntitledName, AUTOSAVE_MS } from './useStore';
 import * as api from '../api/notes';
 import * as tracksApi from '../api/tracks';
-import * as imagePlugin from '../utils/obsidianImagePlugin';
+import * as imagePlugin from '../utils/media';
 
 // Global browser API stubs
 global.URL.revokeObjectURL = vi.fn();
@@ -137,10 +137,10 @@ describe('openTab', () => {
     expect(getState().activeTabIndex).toBe(0);
   });
 
-  it('sets isMutable false on new tab', async () => {
+  it('opens a new tab in edit mode (edit by default)', async () => {
     api.fetchNoteContent.mockResolvedValue('# Note');
     await getState().openTab('/vault/Note.md');
-    expect(getState().isMutable).toBe(false);
+    expect(getState().isMutable).toBe(true);
   });
 });
 
@@ -189,6 +189,7 @@ describe('switchTab', () => {
     await getState().openTab('/vault/A.md');
     // Edit tab 0 then open tab 1 — this snapshots tab 0's edits
     useStore.setState({ pendingRaw: 'line1\nline2\nADDED' });
+    api.patchNote.mockRejectedValue(new Error('offline'));   // switch autosaves; failed save keeps hunks
     api.fetchNoteContent.mockResolvedValue('# B');
     await getState().openTab('/vault/B.md');
     // Switch back — should re-apply the stored hunk
@@ -284,46 +285,8 @@ describe('closeTab', () => {
 
     expect(getState().tabs[0].path).toBe('/vault/B.md');
     expect(getState().tabs[0].hunks).toHaveLength(0);
-    expect(getState().tabs[0].isMutable).toBe(false);
+    expect(getState().tabs[0].isMutable).toBe(true);
     expect(getState().pendingRaw).toBe('# B');
-  });
-});
-
-// ── cancelEdit ────────────────────────────────────────────────────────────────
-
-describe('cancelEdit', () => {
-  it('resets pendingRaw to currentNoteRaw', async () => {
-    api.fetchNoteContent.mockResolvedValue('original content');
-    await getState().openTab('/vault/Note.md');
-    useStore.setState({ pendingRaw: 'edited content', isMutable: true });
-    getState().cancelEdit();
-    expect(getState().pendingRaw).toBe('original content');
-  });
-
-  it('sets isMutable to false', async () => {
-    api.fetchNoteContent.mockResolvedValue('# Note');
-    await getState().openTab('/vault/Note.md');
-    useStore.setState({ isMutable: true });
-    getState().cancelEdit();
-    expect(getState().isMutable).toBe(false);
-  });
-
-  it('increments editorResetKey', async () => {
-    api.fetchNoteContent.mockResolvedValue('# Note');
-    await getState().openTab('/vault/Note.md');
-    const before = getState().editorResetKey;
-    getState().cancelEdit();
-    expect(getState().editorResetKey).toBe(before + 1);
-  });
-
-  it('clears hunks on the active tab', async () => {
-    api.fetchNoteContent.mockResolvedValue('line1\nline2');
-    await getState().openTab('/vault/Note.md');
-    useStore.setState({ pendingRaw: 'line1\nline2\nextra' });
-    getState()._snapshotTab();
-    expect(getState().tabs[0].hunks.length).toBeGreaterThan(0);
-    getState().cancelEdit();
-    expect(getState().tabs[0].hunks).toHaveLength(0);
   });
 });
 
@@ -363,7 +326,7 @@ describe('syncNote', () => {
     expect(api.renameNote).toHaveBeenCalledWith('/vault/Note.md', 'NewName');
   });
 
-  it('sets isMutable to false after save', async () => {
+  it('keeps edit mode after save (autosave must not leave the editor)', async () => {
     api.fetchNoteContent.mockResolvedValue('# Note');
     api.fetchChildren.mockResolvedValue({ parentPath: '/vault', folderPaths: [], filePaths: [] });
     api.fetchNames.mockResolvedValue([]);
@@ -371,7 +334,7 @@ describe('syncNote', () => {
     await getState().openTab('/vault/Note.md');
     useStore.setState({ isMutable: true, settings: { reviewPageSize: 20 } });
     await getState().syncNote();
-    expect(getState().isMutable).toBe(false);
+    expect(getState().isMutable).toBe(true);
   });
 });
 
@@ -411,6 +374,7 @@ describe('switchTab restores pendingFiles', () => {
     await getState().openTab('/vault/A.md');
     const files = { 'img-abc.png': { file: {}, blobURL: 'blob:x' } };
     useStore.setState({ pendingFiles: files });
+    api.uploadFile.mockRejectedValue(new Error('offline'));  // switch autosaves; failed save keeps files
 
     api.fetchNoteContent.mockResolvedValue('# B');
     await getState().openTab('/vault/B.md'); // snapshots A's pendingFiles into tab 0
@@ -453,32 +417,6 @@ describe('closeTab revokes blob URLs', () => {
     await getState().openTab('/vault/Only.md');
     useStore.setState({ pendingFiles: { 'x.png': { file: {}, blobURL: 'blob:x' } } });
     await getState().closeTab(0);
-    expect(getState().pendingFiles).toEqual({});
-  });
-});
-
-// ── cancelEdit revokes blob URLs ──────────────────────────────────────────────
-
-describe('cancelEdit revokes blob URLs', () => {
-  it('calls revokeObjectURL for each pending file', async () => {
-    api.fetchNoteContent.mockResolvedValue('# Note');
-    await getState().openTab('/vault/Note.md');
-    useStore.setState({
-      pendingFiles: {
-        'a.png': { file: {}, blobURL: 'blob:a' },
-        'b.mp4': { file: {}, blobURL: 'blob:b' },
-      },
-    });
-    getState().cancelEdit();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:a');
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:b');
-  });
-
-  it('clears pendingFiles after cancel', async () => {
-    api.fetchNoteContent.mockResolvedValue('# Note');
-    await getState().openTab('/vault/Note.md');
-    useStore.setState({ pendingFiles: { 'x.png': { file: {}, blobURL: 'blob:x' } } });
-    getState().cancelEdit();
     expect(getState().pendingFiles).toEqual({});
   });
 });
@@ -777,5 +715,128 @@ describe('tracks: wiped on logout', () => {
     expect(getState().todayItems).toEqual([]);
     expect(getState().trackItems).toEqual({});
     expect(getState().trackSchedules).toEqual({});
+  });
+});
+
+// ── autosave ──────────────────────────────────────────────────────────────────
+
+describe('autosave', () => {
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    api.fetchNoteContent.mockResolvedValue('line1');
+    api.patchNote.mockResolvedValue();
+    useStore.setState({ settings: { reviewPageSize: 20 } });
+    await getState().openTab('/vault/A.md');
+  });
+  afterEach(() => { setEditorFlush(null); vi.useRealTimers(); });
+
+  it('saves AUTOSAVE_MS after the last edit, not before', async () => {
+    getState().updatePending('line1 a');
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS - 100);
+    getState().updatePending('line1 ab');          // resets the timer
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS - 100);
+    expect(api.patchNote).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(api.patchNote).toHaveBeenCalledTimes(1);
+    expect(getState().currentNoteRaw).toBe('line1 ab');
+    expect(getState().saveStatus).toBe('saved');
+    expect(getState().isMutable).toBe(true);
+  });
+
+  it('never runs two syncNote calls at once; edits during a save trigger one more save', async () => {
+    let release;
+    api.patchNote.mockImplementationOnce(() => new Promise(r => { release = r; }));
+    getState().updatePending('line1 a');
+    const first = getState().flushSave();
+    expect(api.patchNote).toHaveBeenCalledTimes(1);
+    getState().updatePending('line1 ab');          // typed during the save
+    const second = getState().flushSave();         // requested during the save -> coalesced
+    expect(api.patchNote).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+    expect(api.patchNote).toHaveBeenCalledTimes(2);
+    expect(getState().currentNoteRaw).toBe('line1 ab');
+  });
+
+  it('flushSave pulls the editor debounce first (tab switch cannot lose keystrokes)', async () => {
+    api.fetchNoteContent.mockResolvedValue('other');
+    await getState().openTab('/vault/B.md');
+    api.fetchNoteContent.mockResolvedValue('line1');
+    setEditorFlush(() => getState().updatePending('typed just now'));  // text not yet in store
+    await getState().switchTab(0);
+    expect(api.patchNote).toHaveBeenCalledWith('/vault/B.md', expect.any(Array));
+    expect(getState().tabs[1].hunks).toHaveLength(0);
+  });
+
+  it('failed save keeps dirty state, toasts, and retries on next edit', async () => {
+    api.patchNote.mockRejectedValueOnce(new Error('disk full'));
+    getState().updatePending('line1 a');
+    await expect(getState().flushSave()).rejects.toThrow('disk full');
+    expect(getState().saveStatus).toBe('error');
+    expect(getState().toast.tone).toBe('error');
+    expect(getState().currentNoteRaw).toBe('line1');
+    getState().updatePending('line1 ab');
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS + 10);
+    expect(api.patchNote).toHaveBeenCalledTimes(2);
+    expect(getState().saveStatus).toBe('saved');
+  });
+
+  it('clean note: flushSave is a no-op', async () => {
+    await getState().flushSave();
+    expect(api.patchNote).not.toHaveBeenCalled();
+  });
+
+  it('toggleMutable saves when leaving edit mode and switches to reading view', async () => {
+    getState().updatePending('line1 a');
+    getState().toggleMutable();
+    expect(getState().isMutable).toBe(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.patchNote).toHaveBeenCalledTimes(1);
+    getState().toggleMutable();
+    expect(getState().isMutable).toBe(true);
+  });
+
+  it('commitTitle renames via the save pipeline; blank/unchanged is ignored', async () => {
+    api.renameNote.mockResolvedValue({ path: '/vault/New.md' });
+    getState().commitTitle('   ');
+    getState().commitTitle('A');
+    expect(api.renameNote).not.toHaveBeenCalled();
+    getState().commitTitle('New');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.renameNote).toHaveBeenCalledWith('/vault/A.md', 'New');
+    expect(getState().currentNotePath).toBe('/vault/New.md');
+  });
+});
+
+// ── instant new note ──────────────────────────────────────────────────────────
+
+describe('instant new note', () => {
+  it('nextUntitledName skips taken names (case-insensitive, vault-wide)', () => {
+    expect(nextUntitledName(new Map())).toBe('Untitled');
+    expect(nextUntitledName(new Map([['untitled', '/v/Untitled.md']]))).toBe('Untitled 2');
+    expect(nextUntitledName(new Map([['untitled', 'x'], ['untitled 2', 'y']]))).toBe('Untitled 3');
+  });
+
+  it('startNewNote(folder) creates Untitled there, opens it editable, requests title focus', async () => {
+    api.createNote.mockResolvedValue({ path: '/vault/F/Untitled 2.md' });
+    api.fetchNoteContent.mockResolvedValue('');
+    useStore.setState({ noteIndex: new Map([['untitled', '/vault/Untitled.md']]), vaultRoot: '/vault' });
+    const before = getState().titleFocusNonce;
+    await getState().startNewNote('/vault/F');
+    expect(api.createNote).toHaveBeenCalledWith('/vault/F', 'Untitled 2');
+    expect(getState().currentNotePath).toBe('/vault/F/Untitled 2.md');
+    expect(getState().isMutable).toBe(true);
+    expect(getState().titleFocusNonce).toBe(before + 1);
+  });
+
+  it('folder fallback: open note folder, then vault root', async () => {
+    api.createNote.mockResolvedValue({ path: '/vault/Sub/Untitled.md' });
+    api.fetchNoteContent.mockResolvedValue('');
+    useStore.setState({ currentNotePath: '/vault/Sub/N.md', vaultRoot: '/vault' });
+    await getState().startNewNote();
+    expect(api.createNote).toHaveBeenLastCalledWith('/vault/Sub', 'Untitled');
+    useStore.setState({ currentNotePath: null, tabs: [], activeTabIndex: -1 });
+    await getState().startNewNote();
+    expect(api.createNote).toHaveBeenLastCalledWith('/vault', 'Untitled');
   });
 });

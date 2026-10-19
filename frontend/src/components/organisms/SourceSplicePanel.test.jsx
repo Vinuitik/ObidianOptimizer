@@ -6,7 +6,7 @@ import SourceSplicePanel from './SourceSplicePanel';
 // the platform blocks third-party iframing (X-Frame-Options/CSP) and the embed used to
 // render as a dead blank iframe. These hosts now get an "open original" link instead.
 
-vi.mock('../molecules/NoteRenderer', () => ({ default: () => null }));
+vi.mock('../molecules/MarkdownView', () => ({ default: () => null }));
 
 describe('SourceSplicePanel — blocked embed hosts', () => {
   it('an Instagram source with no local copy shows an "Open original" link, not an iframe', () => {

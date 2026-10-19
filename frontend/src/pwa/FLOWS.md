@@ -248,7 +248,7 @@ the existing `GET /names` — no new endpoint), and match on filename substring 
    fails the review sync, and the cached list just goes stale until the next sync (drift
    accepted, by design).
 2. **Offline search/linking fallback**: `useSearch.js` (the ONE hook behind both
-   `SearchBar` and `MilkdownEditor`'s `WikiLinkSuggest`) catches a server-unreachable
+   `SearchBar` and the CM6 `[[` popup) catches a server-unreachable
    error and calls `offlineSearch.offlineKeywordSearch()`, which substring-matches the
    query against `cachedNoteNames` — filename only, not content, not semantic.
 3. **Offline Learn destination-folder picker (2026-08-24)**: `InboxReview.jsx` (the

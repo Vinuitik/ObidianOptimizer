@@ -152,3 +152,14 @@
   border: 1px solid var(--line);
   cursor: zoom-in;   /* tap/click opens the fullscreen zoom lightbox */
 }
+
+/* Table + math look shared with the CM6 widgets (editor/tables.js, editor/math.js). */
+.markdown-body tbody tr:nth-child(even) td { background: var(--accent-tint); }
+.markdown-body .math-error {
+  color: var(--danger);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  text-align: left;
+  background: none;
+  border: none;
+}

@@ -4,9 +4,9 @@
 // caches them; retention evicts anything not in the current scope.
 //
 // URL shapes mirror SourceSplicePanel.mediaUrl / nginx: vault `resources/…` → `/vault-media/…`,
-// `_workspace/…` → `/workspace/…`, and image embeds `![[name]]` → `/api/images/name`.
+// `_workspace/…` → `/workspace/…`, and image embeds `![[name]]` → `/vault-media/<subdir>/name` (media.mediaUrl).
 import { parseSourceRegion } from './inboxParse';
-import { mediaUrl as embedUrl } from './obsidianImagePlugin';
+import { mediaUrl as embedUrl } from './media';
 
 const VIDEO_AUDIO_RE = /\.(mp4|mkv|webm|mov|m4v|mp3|m4a|wav|ogg|flac)$/i;
 const PDF_RE = /\.pdf$/i;
@@ -51,7 +51,7 @@ export function vaultMediaUrl(path) {
   return null;
 }
 
-// Embeds `![[name]]` → the SAME URL the Milkdown renderer (obsidianImagePlugin) requests:
+// Embeds `![[name]]` → the SAME URL the renderers (markdown.js embed rule + CM6 embeds) request:
 // `/vault-media/<subdir>/name`. This MUST match the renderer exactly — caching under the old
 // `/api/images/name` (a different endpoint the review view never hits) is what left images
 // blank offline despite a "successful" sync. `embedUrl` handles image/video/audio/pdf subdirs.
@@ -66,7 +66,7 @@ function imageUrls(content) {
 // Media a note needs offline as {key, fetch} entries: `key` is the canonical URL the player
 // requests (and the cache is keyed by); `fetch` is what the warm actually downloads. We cache
 // EVERYTHING a note sources, so review works fully offline:
-//   • image embeds ![[x]]  → /api/images/x            (fetch == key)
+//   • image embeds ![[x]]  → /vault-media/images/x     (fetch == key)
 //   • A/V source           → /media-rendition (≤480p) cached under the /vault-media player URL
 //   • PDF source           → the referenced page(s) as /pdf-page PNGs (+ bbox-highlight variant)
 //   • any other local file → the file itself under /vault-media|/workspace

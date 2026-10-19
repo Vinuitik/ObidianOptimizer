@@ -1,94 +1,17 @@
 # Components Flows
 
-Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, atoms/RefreshButton.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, organisms/MilkdownEditor.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/NewNoteForm.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/QuitGuard.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx, organisms/FeedView.jsx, organisms/FeedSources.jsx
+Files: atoms/Button.jsx, atoms/Icon.jsx, atoms/ObsidianMark.jsx, atoms/Chip.jsx, atoms/Ring.jsx, atoms/Toast.jsx, atoms/RefreshButton.jsx, molecules/SearchBar.jsx, molecules/FrontmatterTable.jsx, molecules/PanelHeader.jsx, molecules/NavItem.jsx, molecules/ReviewRating.jsx, molecules/TabBar.jsx, organisms/FolderTree.jsx, ../editor/CmEditor.jsx (see editor/FLOWS.md), molecules/MarkdownView.jsx, organisms/NoteEditor.jsx, organisms/NoteViewer.jsx, organisms/ReviewList.jsx, organisms/NavBar.jsx, organisms/LoginModal.jsx, organisms/SyncBanner.jsx, organisms/QuitGuard.jsx, organisms/EditorErrorBoundary.jsx, templates/SplitLayout.jsx, organisms/FeedView.jsx, organisms/FeedSources.jsx
 
 ---
 
-## MilkdownEditor
+## Note editor (CM6) and read-only renderer
 
-`MilkdownEditor` (outer) → reads store → renders:
-```
-FrontmatterTable           — read-only frontmatter display
-MilkdownProvider           — key={currentNotePath}-{editorResetKey} → full context teardown on note change OR cancel
-  MilkdownEditorInner      — stateless; remounts with provider
-    Milkdown               — [data-milkdown-root] → .milkdown → .ProseMirror
-```
+The main note surface is CodeMirror 6: `frontend/src/editor/CmEditor.jsx` — all flows (load, debounced save path,
+live preview, `[[` suggest, attachments, math/tables, CRLF) live in **`frontend/src/editor/FLOWS.md`**.
+Read-only views (Review, Inbox, SourceSplicePanel, PWA notes) use `molecules/MarkdownView.jsx`
+(markdown-it via `utils/markdown.js`, NOT contentEditable) — see `utils/FLOWS.md`.
 
-**Key must be on `MilkdownProvider`** (not `MilkdownEditorInner`) — keying only the inner lets the schema context persist, causing `doc` node collision on second init.
-
-### Editor Plugin Chain
-
-```js
-Editor.make()
-  .config(ctx → { rootCtx, defaultValueCtx (body only), editorViewOptionsCtx, listenerCtx.markdownUpdated })
-  .use(commonmark)        // REQUIRED: doc + all base ProseMirror nodes
-  .use(gfm)              // REQUIRED alongside commonmark: tables/strikethrough/tasks
-  .use(history)
-  .use(listener)
-  .use(prism)            // syntax highlighting for fenced code blocks
-  .use(mathPlugin)       // before wikiLinkPlugin: \[...\] consumed first
-  .use(obsidianImagePlugin) // before wikiLinkPlugin: ![[]] consumed first
-  .use(wikiLinkPlugin)
-  .use(hashtagPlugin)    // after wikiLink: [[#heading]] already consumed
-  .use(livePreviewPlugin)
-```
-
-`gfm` alone → `Schema is missing top node type ('doc')` — both presets required.
-
-`markdownUpdated` → `cleanMilkdownOutput(md)` → `updatePending(body)` → `joinFrontmatter(fm, body)` → `pendingRaw`
-
-### Toggle Editable After Mount
-
-```js
-useEffect(() => {
-  getInstance()?.action(ctx => ctx.get(editorViewCtx)?.setProps({ editable: () => isMutable }));
-}, [isMutable, loading]);
-```
-
-### Wiki-link Click (view mode)
-
-`MilkdownEditor` outer `onClick` → `e.target.closest('[data-wiki-link]')` → `noteIndex` lookup → `openTab(fullPath)`  
-`isMutable` = true: clicks pass through to ProseMirror.
-
-### File Attach — Paste, Drag-and-Drop, File Picker
-
-All three paths call the same `insertFiles(files)` function inside `MilkdownEditorInner`:
-
-```
-insertFiles(files)
-  → filter by isWhitelisted()
-  → generateFilename(file) + createObjectURL → addPendingBlob (module registry)
-  → onFilePaste(filename, file, blobURL)  — persists in store for tab switching
-  → getInstance().action → obsidianImageNode$.create({ filename }) → replaceSelectionWith
-```
-
-**Paste**: `view.dom.addEventListener('paste')` → reads `e.clipboardData.files`  
-**Drag-drop**: `dragover` → `preventDefault` if files present + `setIsDragOver(true)`; `dragleave` → clears only when leaving editor; `drop` → reads `e.dataTransfer.files`  
-**File picker button**: hidden `<input type="file" multiple accept={ACCEPT}>` triggered by `📎` button (edit mode only, bottom-right of editor). `ACCEPT` built from `WHITELISTED_EXTS`.
-
-Drag-over shows `.dragOverlay` — dashed accent border + semi-transparent bg (`pointer-events: none`).  
-To change accepted file types: `obsidianImagePlugin.js *_EXTS + WHITELISTED_MIME_TYPES`
-
-### Wiki-link Suggest (`[[` autocomplete)
-
-Triggered when the cursor is inside `[[query` text in the editor:
-
-```
-input / selectionchange event on view.dom
-  → window.getSelection().focusNode.textContent.slice(0, offset)
-  → match /\[\[([^\]]{0,80})$/
-  → setWikiQuery(match[1]), setWikiRect(range.getBoundingClientRect())
-  → WikiLinkSuggest portal: useSearch(query, minLength=1) → results dropdown
-  → onMouseDown on result → e.preventDefault() (keeps editor focused)
-      → insertWikiLink(displayName)
-          → getInstance().action → state.doc.textBetween(blockFrom, cursor)
-          → lastIndexOf('[[') → replaceWith(wikiLinkNode$.create({ target: displayName }))
-```
-
-Escape closes without inserting. `onMouseDown` + `preventDefault` is critical — prevents blur before click registers.
-
-To change trigger minimum length: `WikiLinkSuggest` → `useSearch(query, minLength)`  
-To change result count: `searchNotes` limit param
+To change the editor: `editor/FLOWS.md` Change Index. To change read-only rendering: `utils/markdown.js`.
 
 ---
 
@@ -165,18 +88,21 @@ Left and right panels resizable via 4px `.resizeHandle`.
 Constants: `MIN_PANEL_WIDTH=160`, `MAX_PANEL_WIDTH=480`, `DEFAULT_WIDTH=290`.
 
 Center panel routing (from store `centerMode`):
-- `centerMode: 'view'` → `MilkdownEditor` (read-only or editable per `isMutable`)
-- `centerMode: 'new'` → `NewNoteForm`
+- `isMutable` → `editor/CmEditor` (live preview); not mutable + note open → `.reading` div with `MarkdownView` of `pendingRaw`
+- No new-note screen: the `+` actions call `store.startNewNote()` (instant create, see store/FLOWS.md)
 
 To change default panel width: `SplitLayout.jsx DEFAULT_WIDTH`  
 To change center panel routing: `SplitLayout.jsx` center panel conditional
 
-### Save / Cancel (edit mode)
-Cmd/Ctrl+S (window keydown, only while `isMutable`) or Save → `SplitLayout.handleSave()` → `store.syncNote()`; throw → `showToast({tone:'error'})` + "Save failed" label.
-Save state label (`saveLabel`): Saving… / Save failed / Unsaved changes / No changes / Saved (2.5s after success). Dirty = `selectDirty()` (pendingRaw differs from currentNoteRaw, title changed, or pendingFiles).
-Cancel when dirty → inline "Discard unsaved changes?" (`confirmDiscard`) → Discard = `store.cancelEdit()`. Clean Cancel exits at once.
-No note open → header title blank; the single "Select a note" message is `MilkdownEditor`'s empty pane. Mobile: collapsed-Files opener is a full-width 44px row (`.filesBtn`).
-To change: `SplitLayout.jsx handleSave / handleCancel / selectDirty`
+### Edit toggle, autosave status, title
+Notes open in edit mode. ONE toggle button (`Reading view` ↔ `Edit`) + window Ctrl/Cmd+E → `store.toggleMutable()` (saves on leaving edit). No Save/Cancel/discard; Ctrl+Z is the undo.
+Window listeners (while a note is open): Ctrl/Cmd+S, `blur`, `beforeunload`, `visibilitychange`(hidden) → `store.flushSave()`. Idle autosave lives in the store (1500 ms).
+Status (`saveLabel`): "Saving…" (saving or dirty) / "Saved" / button "Save failed — retry" (`saveStatus==='error' && dirty`, click = `flushSave`). Toast on failure comes from `store.flushSave`.
+Title (edit mode) is a single-line `<input>` with local `titleDraft`; Enter/blur → `store.commitTitle()`, Esc reverts. `titleFocusNonce` change → input `.focus()+.select()` (new note).
+No note open → header title blank; the single "Select a note" message is `CmEditor`'s empty pane. Mobile: collapsed-Files opener is a full-width 44px row (`.filesBtn`).
+To change: `SplitLayout.jsx` (listeners effect, `saveLabel`, `submitTitle`); look: `SplitLayout.module.css .headerTitleInput / .saveState / .reading`
+
+Technology Notes: autosave is store-level and in-memory; a hard crash/`beforeunload` mid-request can lose the last <=1.5 s (beforeunload save is best effort, async fetch may be cancelled). Title input height bug (fixed): the old `<textarea>` inherited `base.css :where(textarea){min-height:80px}` -> use `min-height:0` on any compact field.
 
 ---
 
@@ -282,13 +208,8 @@ Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so ev
 
 | Thing to change | Where |
 |---|---|
-| Milkdown plugin chain | `organisms/MilkdownEditor.jsx useEditor` |
-| Wiki-link navigation | `organisms/MilkdownEditor.jsx handleClick` |
-| Editor CSS / height | `organisms/MilkdownEditor.module.css` |
-| File attach accepted types | `obsidianImagePlugin.js *_EXTS + WHITELISTED_MIME_TYPES` |
-| Drag-over overlay style | `organisms/MilkdownEditor.module.css .dragOverlay` |
-| File attach button style | `organisms/MilkdownEditor.module.css .uploadBtn` |
-| Wiki-link suggest min length | `WikiLinkSuggest` → `useSearch(query, minLength)` |
+| Note editor internals | `editor/FLOWS.md` Change Index |
+| Read-only markdown rendering | `utils/markdown.js` |
 | Semantic search dropdown style | `molecules/SearchBar.module.css .dropdown*` |
 | FolderTree drag type | `organisms/FolderTree.jsx DRAG_TYPE` |
 | Drop highlight style | `molecules/NavItem.module.css .dragOver` |
@@ -303,10 +224,10 @@ Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so ev
 | PWA auto sign-in prompt | `pwa/MobileLayout.jsx` `gate()` effect (`setShowLogin`) |
 | App-level crash boundary (PWA) | `organisms/RouteErrorBoundary.jsx` wraps `<Outlet>` in `pwa/MobileLayout.jsx` — catches leaf throws so a bad screen (e.g. Learn) can't blank the app / kill the nav; resets per route (`key=pathname`) |
 | Review mobile pane switch | `pages/ReviewPage.jsx hasSession` + `.module.css` `@media` |
-| Center panel routing | `templates/SplitLayout.jsx` center conditional |
+| Center panel routing / reading view | `templates/SplitLayout.jsx` center conditional |
 | Streak display | `organisms/NavBar.jsx` hardcoded string |
 | Toast dismiss timing | `atoms/Toast.jsx` + `store/useStore.js showToast()` |
-| New note form | `organisms/NewNoteForm.jsx` |
+| New note (instant) | `store.startNewNote()`; `+` in `organisms/FolderTree.jsx` |
 | Frontmatter display | `molecules/FrontmatterTable.jsx` |
 | Ingest-review source panel | `organisms/SourceSplicePanel.jsx` — kind (`sourceKind`) → viewer: youtube iframe / `ClipVideo` (local) / `PdfPages` (local pdf) / web iframe / RSVP·Read (text). Region from `utils/inboxParse.parseSourceRegion` |
 | PDF source: page render + crop toggle | `SourceSplicePanel.PdfPages` → `<img src=/pdf-page?path=&page=[&box=][&crop=1]>`. **Default now CROPS to the sourced region** (`crop=1`, needs bbox) so a mid-page chapter isn't drowned in the rest of the page. "Crop to region" checkbox (`cropRegion`, on by default) → unchecked shows the full page + highlight box. "⤢ Full PDF" (`fullDoc`) = scrollable whole-doc `<embed>` escape hatch. Server crop = `get_pixmap(clip=…)` in `embedder/main.py pdf_page()` (`crop` param). `pdfPageUrl(path,page,box,crop)` in `utils/noteMedia.js` — shared with the offline warm (warms clean+crop+highlight variants). `vaultPdfPath()` gates local-vs-external; v1 notes = clean page (no bbox) |

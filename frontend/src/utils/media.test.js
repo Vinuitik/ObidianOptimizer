@@ -1,11 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// obsidianImagePlugin imports ProseMirror/milkdown internals; mock them out
-vi.mock('@milkdown/utils', () => ({
-  $node: vi.fn(() => ({})),
-  $remark: vi.fn(() => [{}]),  // $remark returns an array; plugin spreads it
-}));
-
 import {
   setPendingBlobs,
   addPendingBlob,
@@ -15,7 +9,7 @@ import {
   generateFilename,
   WHITELISTED_EXTS,
   WHITELISTED_MIME_TYPES,
-} from './obsidianImagePlugin';
+} from './media';
 
 // ── setPendingBlobs / addPendingBlob / removePendingBlob ─────────────────────
 

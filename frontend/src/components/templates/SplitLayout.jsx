@@ -1,10 +1,10 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import useStore from '../../store/useStore';
+import useStore, { selectDirty } from '../../store/useStore';
 import PanelHeader from '../molecules/PanelHeader';
 import FolderTree from '../organisms/FolderTree';
 import ReviewList from '../organisms/ReviewList';
-import MilkdownEditor from '../organisms/MilkdownEditor';
-import NewNoteForm from '../organisms/NewNoteForm';
+import CmEditor from '../../editor/CmEditor';
+import MarkdownView from '../molecules/MarkdownView';
 import Button from '../atoms/Button';
 import Chip from '../atoms/Chip';
 import IconButton from '../atoms/IconButton';
@@ -27,15 +27,6 @@ function noteFolderHint(fullPath) {
   if (!fullPath) return null;
   const parts = fullPath.split(/[/\\]/);
   return parts.length >= 2 ? parts[parts.length - 2] : null;
-}
-
-// Unsaved = body, title or pasted files differ from what is on disk.
-function selectDirty(s) {
-  if (!s.currentNotePath || !s.isMutable) return false;
-  const base = s.currentNotePath.split(/[/\\]/).pop().replace(/\.md$/, '');
-  return s.pendingRaw !== s.currentNoteRaw
-    || s.pendingTitle !== base
-    || Object.keys(s.pendingFiles ?? {}).length > 0;
 }
 
 function useResize(initialWidth) {
@@ -86,71 +77,58 @@ export default function SplitLayout() {
   const flashcardsEnabled = useStore(s => s.settings.flashcardsEnabled ?? true);
   const showRight      = !flashcardsEnabled;
   const currentNotePath = useStore(s => s.currentNotePath);
-  const centerMode     = useStore(s => s.centerMode);
   const isMutable      = useStore(s => s.isMutable);
   const toggleMutable  = useStore(s => s.toggleMutable);
-  const cancelEdit     = useStore(s => s.cancelEdit);
-  const syncNote       = useStore(s => s.syncNote);
+  const flushSave      = useStore(s => s.flushSave);
+  const commitTitle    = useStore(s => s.commitTitle);
   const deleteNote     = useStore(s => s.deleteNote);
   const reviewNotes    = useStore(s => s.reviewNotes);
-  const newNoteName    = useStore(s => s.newNoteName);
-  const setNewNoteName = useStore(s => s.setNewNoteName);
-  const newNoteFolder  = useStore(s => s.newNoteFolder);
-  const createNote     = useStore(s => s.createNote);
-  const cancelNewNote  = useStore(s => s.cancelNewNote);
   const pendingTitle   = useStore(s => s.pendingTitle);
-  const setPendingTitle = useStore(s => s.setPendingTitle);
-  const showToast      = useStore(s => s.showToast);
+  const pendingRaw     = useStore(s => s.pendingRaw);
+  const saveStatus     = useStore(s => s.saveStatus);
+  const titleFocusNonce = useStore(s => s.titleFocusNonce);
   const dirty          = useStore(selectDirty);
 
-  // 'saving' | 'saved' | 'error' | null — visible save state next to the Save button
-  const [saveStatus, setSaveStatus] = useState(null);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
-
-  const handleSave = useCallback(async () => {
-    setSaveStatus('saving');
-    setConfirmDiscard(false);
-    try {
-      await syncNote();
-      setSaveStatus('saved');
-    } catch (e) {
-      setSaveStatus('error');
-      showToast({ message: `Couldn't save — ${e?.message ?? e}. Your changes are still here.`, tone: 'error' });
-    }
-  }, [syncNote, showToast]);
-
-  const handleCancel = () => {
-    if (dirty) setConfirmDiscard(true);
-    else cancelEdit();
+  // Title field: local draft, applied (rename) only on blur / Enter.
+  const [titleDraft, setTitleDraft] = useState(pendingTitle);
+  const titleRef = useRef(null);
+  useEffect(() => { setTitleDraft(pendingTitle); }, [pendingTitle, currentNotePath]);
+  const submitTitle = () => {
+    if (titleDraft.trim() && titleDraft.trim() !== pendingTitle) commitTitle(titleDraft);
+    else setTitleDraft(pendingTitle);
   };
-
-  // Cmd/Ctrl+S saves while editing (and swallows the browser's "save page").
+  // New note: focus the title with "Untitled" selected so typing replaces it.
   useEffect(() => {
-    if (!isMutable) return undefined;
+    if (titleFocusNonce > 0) { titleRef.current?.focus(); titleRef.current?.select(); }
+  }, [titleFocusNonce, currentNotePath]);
+
+  const save = useCallback(() => { flushSave().catch(() => {}); }, [flushSave]);
+
+  // Autosave triggers beyond the 1.5 s idle timer (store.updatePending): Mod-s, window blur,
+  // tab hidden, page unload (best effort). Mod-e toggles edit <-> reading view.
+  useEffect(() => {
+    if (!currentNotePath) return undefined;
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        handleSave();
-      }
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 's') { e.preventDefault(); save(); }
+      else if (k === 'e') { e.preventDefault(); toggleMutable(); }
     };
+    const onHidden = () => { if (document.visibilityState === 'hidden') save(); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isMutable, handleSave]);
+    window.addEventListener('blur', save);
+    window.addEventListener('beforeunload', save);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', save);
+      window.removeEventListener('beforeunload', save);
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, [currentNotePath, save, toggleMutable]);
 
-  useEffect(() => {
-    if (saveStatus !== 'saved') return undefined;
-    const t = setTimeout(() => setSaveStatus(null), 2500);
-    return () => clearTimeout(t);
-  }, [saveStatus]);
-
-  // Switching note / leaving edit mode drops any open discard prompt.
-  useEffect(() => { setConfirmDiscard(false); }, [currentNotePath, isMutable]);
-  useEffect(() => { if (dirty && saveStatus === 'error') setSaveStatus(null); }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const saveLabel = saveStatus === 'saving' ? 'Saving…'
-    : saveStatus === 'error' && isMutable ? 'Save failed'
-    : isMutable ? (dirty ? 'Unsaved changes' : 'No changes')
-    : saveStatus === 'saved' ? 'Saved'
+  const saveLabel = saveStatus === 'saving' || (isMutable && dirty) ? 'Saving…'
+    : isMutable && saveStatus === 'saved' ? 'Saved'
     : null;
 
   const [leftWidth, onLeftHandleDown] = useResize(DEFAULT_WIDTH);
@@ -175,11 +153,11 @@ export default function SplitLayout() {
 
   const title = noteTitle(currentNotePath);
   const folderHint = noteFolderHint(currentNotePath);
-  const titleIsPlaceholder = centerMode === 'view' && !title;
+  const titleIsPlaceholder = !title;
   const isInReview = reviewNotes.some(n => n.fullPath === currentNotePath);
 
   // No note open -> the editor pane carries the ONE "Select a note" message; header stays quiet.
-  const centerTitle = centerMode === 'new' ? 'New Note' : title ?? '';
+  const centerTitle = title ?? '';
 
   const dueSlot = reviewNotes.length > 0
     ? <span className={styles.dueCount}>{reviewNotes.length} due</span>
@@ -221,29 +199,19 @@ export default function SplitLayout() {
 
           {/* Center — title, always visually centered */}
           <div className={styles.headerCenter}>
-            {centerMode === 'new' ? (
-              <textarea
+            {isMutable && title ? (
+              <input
+                ref={titleRef}
                 className={styles.headerTitleInput}
+                value={titleDraft}
+                aria-label="Note title"
                 placeholder="Note name"
-                value={newNoteName}
-                rows={1}
-                onChange={e => setNewNoteName(e.target.value)}
+                onChange={e => setTitleDraft(e.target.value)}
+                onBlur={submitTitle}
                 onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey && newNoteName.trim()) {
-                    e.preventDefault();
-                    createNote(newNoteFolder, newNoteName.trim());
-                  }
-                  if (e.key === 'Escape') cancelNewNote();
+                  if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+                  if (e.key === 'Escape') { setTitleDraft(pendingTitle); e.currentTarget.blur(); }
                 }}
-                autoFocus
-              />
-            ) : isMutable ? (
-              <textarea
-                className={styles.headerTitleInput}
-                value={pendingTitle}
-                rows={1}
-                onChange={e => setPendingTitle(e.target.value)}
-                placeholder="Note name"
               />
             ) : (
               <div className={styles.titleBlock}>
@@ -259,7 +227,7 @@ export default function SplitLayout() {
 
           {/* Right edge — action buttons */}
           <div className={`${styles.headerEdge} ${styles.headerEdgeRight}`}>
-            {centerMode !== 'new' && title && (
+            {title && (
               <>
                 {!isMutable && isInReview && <ReviewRating fullPath={currentNotePath} />}
                 {!isMutable && (
@@ -268,40 +236,25 @@ export default function SplitLayout() {
                     Optimize
                   </Chip>
                 )}
-                {saveLabel && (
-                  <span
-                    className={`${styles.saveState} ${saveStatus === 'error' && isMutable ? styles.saveError : ''}`}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {saveLabel}
-                  </span>
+                {saveStatus === 'error' && dirty ? (
+                  <button type="button" className={`${styles.saveState} ${styles.saveError} ${styles.saveRetry}`} onClick={save}>
+                    Save failed — retry
+                  </button>
+                ) : saveLabel && (
+                  <span className={styles.saveState} role="status" aria-live="polite">{saveLabel}</span>
                 )}
-                {isMutable ? (
-                  confirmDiscard ? (
-                    <div className={styles.discardPrompt} role="alertdialog" aria-label="Discard unsaved changes">
-                      <span>Discard unsaved changes?</span>
-                      <Button variant="danger" size="sm" onClick={() => { setConfirmDiscard(false); cancelEdit(); }}>Discard</Button>
-                      <Button variant="ghost" size="sm" onClick={() => setConfirmDiscard(false)}>Keep editing</Button>
-                    </div>
-                  ) : (
-                    <>
-                      <Button variant="primary" onClick={handleSave} loading={saveStatus === 'saving'}>Save</Button>
-                      <Button variant="ghost" onClick={handleCancel}>Cancel</Button>
-                    </>
-                  )
-                ) : (
-                  <>
-                    <Button variant="secondary" onClick={toggleMutable}>Edit</Button>
-                    <IconButton
-                      icon="x"
-                      variant="danger"
-                      aria-label="Move to trash"
-                      onClick={() => {
-                        if (window.confirm(`Move "${title}" to trash?`)) deleteNote(currentNotePath);
-                      }}
-                    />
-                  </>
+                <Button variant="secondary" onClick={toggleMutable} title="Toggle edit / reading view (Ctrl+E)">
+                  {isMutable ? 'Reading view' : 'Edit'}
+                </Button>
+                {!isMutable && (
+                  <IconButton
+                    icon="x"
+                    variant="danger"
+                    aria-label="Move to trash"
+                    onClick={() => {
+                      if (window.confirm(`Move "${title}" to trash?`)) deleteNote(currentNotePath);
+                    }}
+                  />
                 )}
               </>
             )}
@@ -311,7 +264,9 @@ export default function SplitLayout() {
           </div>
         </div>
 
-        {centerMode === 'new' ? <NewNoteForm /> : <MilkdownEditor />}
+        {!isMutable && currentNotePath
+          ? <div className={styles.reading}><MarkdownView content={pendingRaw} /></div>
+          : <CmEditor />}
       </div>
 
       {/* Right resize handle */}

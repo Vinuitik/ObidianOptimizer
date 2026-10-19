@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import Button from '../components/atoms/Button';
 import FolderTree from '../components/organisms/FolderTree';
-import { renderMarkdown } from '../utils/markdown';
+import MarkdownView from '../components/molecules/MarkdownView';
 import styles from './MobilePages.module.css';
 
 // Notes tab (page title comes from TopBar): full-width FolderTree → tap a note → full-screen read-only render.
-// Mobile v1 is view-only (no Milkdown editing on a phone — deliberate scope cut),
+// Mobile v1 is view-only (no editing on a phone — deliberate scope cut),
 // so we render currentNoteRaw with the shared renderMarkdown() instead of the
 // desktop WYSIWYG editor. Wiki-links and ![[image]] embeds reuse the same markup.
 export default function MobileNotesPage() {
@@ -39,13 +39,7 @@ export default function MobileNotesPage() {
     }
   }
 
-  const html = useMemo(() => renderMarkdown(currentNoteRaw || ''), [currentNoteRaw]);
-
-  function handleWikiClick(e) {
-    const anchor = e.target.closest('[data-wiki-link]');
-    if (!anchor) return;
-    e.preventDefault();
-    const target = anchor.getAttribute('data-wiki-link');
+  function handleWikiOpen(target) {
     const basename = target.split(/[/\\]/).pop().toLowerCase();
     const fullPath = noteIndex.get(target.toLowerCase()) ?? noteIndex.get(basename);
     if (fullPath) openNote(fullPath);
@@ -63,11 +57,9 @@ export default function MobileNotesPage() {
           <Button variant="ghost" size="sm" onClick={() => setViewing(false)}>← Notes</Button>
           <span className={styles.readerTitle}>{title}</span>
         </header>
-        <article
-          className={`${styles.readerBody} markdown-body`}
-          dangerouslySetInnerHTML={{ __html: html }}
-          onClick={handleWikiClick}
-        />
+        <article className={styles.readerBody}>
+          <MarkdownView content={currentNoteRaw || ''} onOpenNote={handleWikiOpen} />
+        </article>
       </div>
     );
   }
