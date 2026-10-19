@@ -31,11 +31,10 @@ Edit a simple field → `useAutosaveSettings.setDraft()` → select: `commit()` 
 → `store.settings` updated → inline "Saved ✓" (2s; `SAVED_MS`). Failure → inline "Couldn't save" under the field.
 To change validation: `parseField()` · save delay/UX: `useAutosaveSettings.js`.
 
-Explicit buttons only: **Vault folder → Change…** (host picker → `saveVaultHostPath` → `RecreatingOverlay` polls health → reload)
-and Drive **credentials** (`DriveSyncPanel.saveCreds()`). Resources folder: Browse… autosaves on pick.
-Long paths/URIs wrap (`.mono`, `.uri`) with a `CopyButton`. Host-only items (vault picker, embedding model) carry a one-sentence reason.
+Explicit buttons only: **Drive **credentials** (`DriveSyncPanel.saveCreds()`). Resources folder: Browse… autosaves on pick.
+Long paths/URIs wrap (`.mono`, `.uri`) with a `CopyButton`. Host-only items (embedding model) carry a one-sentence reason.
 
-`vaultPath` change: backend re-indexes (TRUNCATE + full BFS) — may be slow on large vaults.
+Vault folder is read-only here; vault switching REMOVED pending multi-vault (architecture_plans/VAULTS_PLAN.md).
 
 To add a new setting:
 1. Field in `SettingsPage.F` + `renderField(F.x)` in the right group

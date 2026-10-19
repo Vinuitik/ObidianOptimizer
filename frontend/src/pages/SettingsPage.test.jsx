@@ -10,8 +10,6 @@ vi.mock('../api/notes', () => ({
   fetchChildren: vi.fn().mockResolvedValue({ parentPath: '/vault', folderPaths: [] }),
   fetchHostChildren: vi.fn(),
   fetchVaultHostPath: vi.fn().mockResolvedValue({ path: '/home/me/vault' }),
-  saveVaultHostPath: vi.fn(),
-  pingHealth: vi.fn(),
 }));
 vi.mock('../api/sync', () => ({
   fetchSyncStatus: vi.fn().mockResolvedValue({ connected: false }),

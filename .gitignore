@@ -34,3 +34,6 @@ ext-dist/
 test-results/
 .stopped
 .ext-deployed-hash
+
+# pg_dump backups (linux_scripts/pg-backup.sh)
+backups/

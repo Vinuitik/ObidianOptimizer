@@ -33,7 +33,6 @@ for each dbPath not in diskMap:     → DELETE (removed externally)
   delete() + deleteSource()
 ```
 
-`forceResync(diskFiles)` — TRUNCATE notes + TRUNCATE note_links → full syncWithDisk  
 To trigger full re-index at runtime: `PUT /api/settings { vaultPath }` (same path re-accepted)
 
 ---
@@ -80,7 +79,6 @@ INDEX idx_notes_sr_due ON notes(sr_due)
 
 Key methods:
 - `syncWithDisk(diskFiles)` — delta sync (see above)
-- `forceResync(diskFiles)` — TRUNCATE notes + note_links → full syncWithDisk
 - `getAllPaths()` — `SELECT path FROM notes ORDER BY path`
 - `getReviewNotesPaged(offset, limit)` — `WHERE sr_due <= CURRENT_DATE ORDER BY sr_due, path LIMIT limit+1 OFFSET offset` (limit+1 avoids COUNT). Returns paths (used by offline/capture bundle export).
 - `getReviewNotesPagedWithCards(offset, limit)` — same query + `EXISTS(...active cards...) AS has_cards` per note; feeds `GET /review` so the client can split flashcard vs read tracks (hybrid review — see cards/FLOWS.md)
@@ -100,7 +98,6 @@ INDEX ON target_name   -- O(k) rename lookups
 `updateLinks(path, targets)` — DELETE existing rows for source + INSERT new targets  
 `findSourcesByTarget(name)` — backlink lookup for rename  
 `renameTarget(old, new)` / `renameSource(oldPath, newPath)` — sync after rename  
-`truncateLinks()` — used before `forceResync`
 
 **Staleness note:** external Obsidian edits caught at next startup sync only. Docker volume mounts on Windows don't propagate inotify events.
 

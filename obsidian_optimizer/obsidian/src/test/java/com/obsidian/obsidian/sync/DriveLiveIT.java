@@ -269,7 +269,8 @@ class DriveLiveIT {
                   .forEach(p -> p.toFile().delete());
         }
         jdbc.execute("TRUNCATE sync_queue");
-        noteIndex.forceResync(List.of());
+        jdbc.execute("TRUNCATE notes");
+        jdbc.execute("TRUNCATE note_links");
 
         syncService.downloadAll();
 

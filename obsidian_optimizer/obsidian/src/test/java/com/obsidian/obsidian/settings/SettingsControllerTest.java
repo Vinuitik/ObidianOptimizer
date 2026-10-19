@@ -50,6 +50,15 @@ class SettingsControllerTest {
         when(settingsRepository.getSyncPassphrase()).thenReturn("");
     }
 
+    @Test
+    void putSettings_withVaultPath_returns400UseVaultsApi() throws Exception {
+        mvc.perform(put("/settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"vaultPath\":\"/somewhere\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string("use /api/vaults"));
+    }
+
     // ── GET /settings ─────────────────────────────────────────────────────────
 
     @Test

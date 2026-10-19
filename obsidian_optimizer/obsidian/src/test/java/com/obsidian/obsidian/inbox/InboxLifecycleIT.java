@@ -80,7 +80,8 @@ class InboxLifecycleIT {
                   .filter(p -> !p.equals(VAULT))
                   .forEach(p -> p.toFile().delete());
         }
-        noteIndex.forceResync(List.<File>of());
+        jdbc.execute("TRUNCATE notes");
+        jdbc.execute("TRUNCATE note_links");
         jdbc.execute("TRUNCATE capture");
     }
 

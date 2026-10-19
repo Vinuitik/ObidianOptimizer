@@ -157,50 +157,6 @@ def get_vault_path():
     return jsonify({"path": _norm(VAULT_HOST_PATH)})
 
 
-@app.route("/vault-path", methods=["PUT"])
-def put_vault_path():
-    data = request.json or {}
-    new_path = (data.get("path") or "").strip()
-    if not new_path:
-        return jsonify({"error": "path required"}), 422
-    if not Path(new_path).is_dir():
-        return jsonify({"error": f"not a directory: {new_path}"}), 400
-
-    norm = _norm(new_path)
-    _write_env_vault(norm)
-    _trigger_recreate()
-    return jsonify({"path": norm, "recreating": True})
-
-
-def _write_env_vault(path: str):
-    """Rewrite HOST_VAULT_PATH in the repo-root .env, preserving every other line."""
-    global VAULT_HOST_PATH
-    lines = _ROOT_ENV.read_text(encoding="utf-8").splitlines() if _ROOT_ENV.exists() else []
-    found = False
-    for i, line in enumerate(lines):
-        stripped = line.lstrip()
-        if stripped.startswith("HOST_VAULT_PATH=") and not stripped.startswith("#"):
-            lines[i] = f"HOST_VAULT_PATH={path}"
-            found = True
-            break
-    if not found:
-        lines.append(f"HOST_VAULT_PATH={path}")
-    _ROOT_ENV.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    VAULT_HOST_PATH = path
-
-
-def _trigger_recreate():
-    """Recreate the bind-mounted containers so the new vault is mounted. Detached:
-    `up -d` recreates THIS request's backend, so we must not wait on it."""
-    try:
-        subprocess.Popen(
-            ["docker", "compose", "-f", str(_COMPOSE_FILE), "up", "-d"],
-            cwd=str(_REPO_ROOT),
-        )
-    except Exception as e:  # docker missing / Desktop not running
-        app.logger.warning("vault recreate failed to launch: %s", e)
-
-
 @app.route("/providers")
 def providers():
     """Router introspection: configured providers, cooldowns, ok/fail counts."""

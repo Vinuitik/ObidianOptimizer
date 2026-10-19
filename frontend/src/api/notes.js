@@ -204,30 +204,6 @@ export async function fetchVaultHostPath() {
   return res.json();
 }
 
-// Writes HOST_VAULT_PATH to .env and triggers a detached `docker compose up -d`
-// to recreate the mounted services. Returns { path, recreating }.
-export async function saveVaultHostPath(path) {
-  const res = await req(`${BASE}/host/vault`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
-  });
-  return res.json();
-}
-
-// Liveness probe used while the backend is being recreated. "Up" means the
-// backend itself answered — a 401/403 (session lost on container recreate) still
-// counts, but a network error or nginx 502/503/504 (backend not yet listening)
-// means it's still down.
-export async function pingHealth() {
-  try {
-    const res = await fetch(`${BASE}/settings`, { cache: 'no-store' });
-    return res.ok || res.status === 401 || res.status === 403;
-  } catch {
-    return false;
-  }
-}
-
 // ── Upload ───────────────────────────────────────────────────────────────────
 
 // Returns { filename, url }.

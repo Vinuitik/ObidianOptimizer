@@ -175,12 +175,6 @@ public class NoteIndexRepository {
             inserted, updated, deleted, diskMap.size(), dbMap.size());
     }
 
-    public void forceResync(List<File> diskFiles) {
-        jdbc.execute("TRUNCATE notes");
-        noteLinkRepo.truncateLinks();
-        syncWithDisk(diskFiles);
-    }
-
     public ArrayList<String> getAllPaths() {
         return new ArrayList<>(
             jdbc.queryForList("SELECT path FROM notes ORDER BY path", String.class));

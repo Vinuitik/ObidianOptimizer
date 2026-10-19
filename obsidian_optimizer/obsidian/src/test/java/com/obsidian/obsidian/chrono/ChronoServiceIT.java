@@ -56,6 +56,7 @@ class ChronoServiceIT {
     @Autowired ChronoService      chronoService;
     @Autowired FileRepository     fileRepo;
     @Autowired NoteIndexRepository noteIndex;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Autowired SettingsRepository  settingsRepo;
 
     @BeforeEach
@@ -70,7 +71,8 @@ class ChronoServiceIT {
                   .filter(p -> !p.equals(VAULT))
                   .forEach(p -> p.toFile().delete());
         }
-        noteIndex.forceResync(List.<File>of());
+        jdbc.execute("TRUNCATE notes");
+        jdbc.execute("TRUNCATE note_links");
     }
 
     @Test

@@ -109,26 +109,6 @@ class HostFsControllerTest {
     }
 
     @Test
-    void setVault_forwardsBodyAndMethodToWrapperAsPut() throws Exception {
-        String[] seenMethod = new String[1];
-        String[] seenBody = new String[1];
-        startWrapper(ex -> {
-            seenMethod[0] = ex.getRequestMethod();
-            seenBody[0] = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            byte[] resp = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
-            ex.sendResponseHeaders(200, resp.length);
-            ex.getResponseBody().write(resp);
-            ex.close();
-        });
-
-        mvc.perform(put("/host/vault").content("{\"path\":\"/mnt/vault\"}"))
-            .andExpect(status().isOk());
-
-        org.assertj.core.api.Assertions.assertThat(seenMethod[0]).isEqualTo("PUT");
-        org.assertj.core.api.Assertions.assertThat(seenBody[0]).isEqualTo("{\"path\":\"/mnt/vault\"}");
-    }
-
-    @Test
     void getVault_propagatesNon200StatusFromWrapper() throws Exception {
         startWrapper(ex -> {
             byte[] body = "{\"error\":\"not found\"}".getBytes(StandardCharsets.UTF_8);
