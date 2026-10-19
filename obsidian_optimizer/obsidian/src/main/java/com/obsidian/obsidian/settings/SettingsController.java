@@ -54,7 +54,7 @@ public class SettingsController {
     public ResponseEntity<?> updateSettings(@RequestBody UpdateSettingsRequest req) {
         try {
             if (req.vaultPath() != null) {
-                repository.updateVaultPath(req.vaultPath());
+                return ResponseEntity.badRequest().body("use /api/vaults");
             }
             if (req.resourcePath() != null) {
                 settingsRepo.set("resourcePath", req.resourcePath());

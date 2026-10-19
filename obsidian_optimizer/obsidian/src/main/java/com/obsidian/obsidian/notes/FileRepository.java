@@ -77,18 +77,6 @@ public class FileRepository {
         }
     }
 
-    // ── Vault path change ────────────────────────────────────────────────────
-
-    public void updateVaultPath(String newPath) throws IOException {
-        File dir = new File(newPath);
-        if (!dir.exists() || !dir.isDirectory()) {
-            throw new IOException("Directory not found: " + newPath);
-        }
-        settingsRepo.set("vaultPath", newPath);
-        ROOT_FILE = newPath;
-        noteIndex.forceResync(bfsDiskFiles());
-    }
-
     // ── Read ─────────────────────────────────────────────────────────────────
 
     public ArrayList<String> getNoteNames() {

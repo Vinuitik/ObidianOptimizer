@@ -30,28 +30,10 @@ root: `SettingsPage.loadVaultDir()` sets `parent=null` once `current === vaultRo
 (root learned via `fetchChildren(null)` on mount). No restart — resourcePath is a normal
 saveable setting (PUT /settings). See [../settings/FLOWS.md](../settings/FLOWS.md).
 
-## Switch the vault (the expensive path)
+## Switch the vault [REMOVED]
 
-`FolderPicker` confirm → `SettingsPage.switchVault(path)` → `saveVaultHostPath(path)` →
-`PUT /api/host/vault` → `HostFsController.setVault()` → `PUT {wrapper.url}/vault-path` →
-`main.py put_vault_path()`:
-1. validate `path` is a directory (on the host)
-2. `_write_env_vault()` — rewrite the `HOST_VAULT_PATH=` line in repo-root `.env`, preserving every other line
-3. `_trigger_recreate()` — detached `docker compose -f <repo>/docker-compose.yml up -d`
-
-`up -d` (NOT `restart`) is required: a bind-mount change only takes effect on container
-**recreation**. The wrapper survives (it's not a container); the obsidian backend +
-embedder are recreated.
-
-Because the recreate kills the very backend proxying the PUT, the response may never
-arrive — by design. The UI fires it and forgets: `SettingsPage` shows `<RecreatingOverlay>`,
-which polls `notes.js pingHealth()` (GET /settings; 2xx **or 401/403** = backend answered;
-502/503/504/network-error = still down) and `window.location.reload()`s once it sees
-down→up, or after a ~30s fallback (15 ticks).
-
-To change the recreate command: `main.py _trigger_recreate()`.
-To change which services recreate: they're whatever interpolates `${HOST_VAULT_PATH}` in
-`docker-compose.yml` (backend + embedder).
+Unsafe switch (`PUT /api/host/vault`, wrapper `PUT /vault-path`, `_write_env_vault`, `RecreatingOverlay`) deleted in VAULTS_PLAN.md M0.
+Safe replacement = `POST /vaults` on the wrapper [NOT IMPLEMENTED, planned M6]. Only `GET /api/host/vault` remains.
 
 ---
 

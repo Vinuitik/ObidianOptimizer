@@ -57,12 +57,11 @@ Field validation:
   saved-marker placeholder, not the value). Passphrase save → `VaultEncryptionService.reload()`;
   client id/secret save → `DriveService.reset()` (next Drive call rebuilds the client).
 
-`vaultPath` change → `FileRepository.updateVaultPath()` → validates dir exists → saves to DB → sets `ROOT_FILE` → `NoteIndexRepository.forceResync()` (TRUNCATE notes + note_links → full delta sync)
+`vaultPath` in PUT body → 400 "use /api/vaults" (`SettingsController.updateSettings()`). Vault switching REMOVED pending multi-vault (VAULTS_PLAN.md M0); `FileRepository.updateVaultPath` / `NoteIndexRepository.forceResync` deleted.
 
 > **Note (settings UI):** the settings page no longer edits `vaultPath` via this endpoint.
 > The in-container `vaultPath` stays `/vault`; the user-facing "vault folder" is the host
-> path in `.env` (`HOST_VAULT_PATH`), switched through the host picker which recreates the
-> containers. `resourcePath` is still a normal PUT /settings field, now with a browse button.
+> path in `.env` (`HOST_VAULT_PATH`), changed by hand (switching removed pending multi-vault). `resourcePath` is still a normal PUT /settings field, now with a browse button.
 > See [../hostfs/FLOWS.md](../hostfs/FLOWS.md). This PUT path still exists for the agent/internal API.
 
 ---
@@ -71,7 +70,6 @@ Field validation:
 
 - **Sessions**: Spring Security in-memory session — settings survive app restart (persisted in `app_settings`), but session cookies do not.
 - **Settings are per-instance**: no multi-node sharing. If running behind a load balancer, each node has its own `app_settings`.
-- **`vaultPath` change cost**: triggers full re-index — TRUNCATE + BFS + parse all notes. Slow on large vaults.
 
 ---
 
@@ -81,5 +79,5 @@ Field validation:
 |---|---|
 | Add a new setting | `SettingsRepository` typed getter + `SettingsController.SettingsResponse` + `UpdateSettingsRequest` + `updateSettings()` |
 | Default value for any key | `SettingsRepository` seed block |
-| `vaultPath` change handling | `FileRepository.updateVaultPath()` |
+| `vaultPath` rejection (400) | `SettingsController.updateSettings()` |
 | Validate a new field | `SettingsController.updateSettings()` validation block |

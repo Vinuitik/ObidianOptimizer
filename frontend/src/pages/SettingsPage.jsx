@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import useStore from '../store/useStore';
 import {
   fetchChronoStatus, runChronoNow,
-  fetchChildren, fetchHostChildren, fetchVaultHostPath, saveVaultHostPath, pingHealth,
+  fetchChildren, fetchVaultHostPath,
 } from '../api/notes';
 import {
   fetchSyncStatus, fetchOAuthUrl, disconnectDrive,
@@ -13,7 +13,6 @@ import Button from '../components/atoms/Button';
 import Badge from '../components/atoms/Badge';
 import Input from '../components/atoms/Input';
 import Select from '../components/atoms/Select';
-import Spinner from '../components/atoms/Spinner';
 import Card from '../components/molecules/Card';
 import Field from '../components/molecules/Field';
 import PageHeader from '../components/molecules/PageHeader';
@@ -142,7 +141,6 @@ export default function SettingsPage() {
   const [vaultRoot, setVaultRoot]   = useState(null);
   const [hostPath, setHostPath]     = useState(null);
   const [hostError, setHostError]   = useState(false);
-  const [recreating, setRecreating] = useState(false);
 
   useEffect(() => {
     fetchChronoStatus().then(setChronoStatus).catch(() => {});
@@ -163,12 +161,6 @@ export default function SettingsPage() {
     return { current, parent, dirs: r.folderPaths.map(p => ({ path: p, name: baseName(p) })) };
   }, [vaultRoot]);
 
-  // Browse the real host filesystem (vault root) via the host helper.
-  const loadHostDir = useCallback(async (path) => {
-    const r = await fetchHostChildren(path);
-    return { current: r.path, parent: r.parent ?? null, dirs: r.dirs };
-  }, []);
-
   function openResourcePicker(field) {
     setPicker({
       title: 'Select resources folder',
@@ -177,29 +169,6 @@ export default function SettingsPage() {
       onSelect: (p) => { setDraft(field.key, p); commit(field, p); setPicker(null); },
       onClose: () => setPicker(null),
     });
-  }
-
-  function openVaultPicker() {
-    setPicker({
-      title: 'Select your vault folder',
-      loadPath: loadHostDir,
-      initialPath: hostPath || null,
-      confirmLabel: 'Switch vault & restart',
-      note: 'Switching the vault recreates the backend containers so the new folder can be mounted. The app will be unavailable for a few seconds and then reload.',
-      onSelect: switchVault,
-      onClose: () => setPicker(null),
-    });
-  }
-
-  async function switchVault(path) {
-    setPicker(null);
-    setRecreating(true);
-    try {
-      await saveVaultHostPath(path);
-      setHostPath(path);
-    } catch {
-      // The recreate may tear the backend down before it answers — the overlay polls health and reloads.
-    }
   }
 
   async function handleChronoRun() {
@@ -292,8 +261,8 @@ export default function SettingsPage() {
             <Field
               label="Vault folder"
               hint={hostError
-                ? 'Changing the vault from here needs the helper app running on your computer, and it isn’t right now. You can still point to another folder by editing HOST_VAULT_PATH in .env and restarting.'
-                : 'The folder on your computer that the app reads and writes. Switching it restarts the backend for a few seconds.'}
+                ? 'Needs the helper app running on your computer, and it isn’t right now.'
+                : 'The folder on your computer that the app reads and writes. To change it, edit HOST_VAULT_PATH in .env and restart.'}
             >
               <Input
                 className={styles.mono} readOnly value={hostPath ?? ''}
@@ -301,7 +270,6 @@ export default function SettingsPage() {
               />
             </Field>
             <div className={styles.pathActions}>
-              <Button size="sm" disabled={hostError || hostPath == null} onClick={openVaultPicker}>Change…</Button>
               <CopyButton text={hostPath ?? ''} />
             </div>
           </div>
@@ -358,7 +326,6 @@ export default function SettingsPage() {
       </div>
 
       {picker && <FolderPicker {...picker} />}
-      {recreating && <RecreatingOverlay />}
     </div>
   );
 }
@@ -673,34 +640,3 @@ function dbAgo(ts) {
   return `${Math.round(hrs / 24)} d ago`;
 }
 
-// ── Vault recreation overlay ────────────────────────────────────────────────────
-// Blocks the UI while `docker compose up -d` recreates the backend, polling until
-// it returns, then reloads. Falls back to reloading after a grace period.
-
-function RecreatingOverlay() {
-  useEffect(() => {
-    let cancelled = false;
-    let sawDown = false;
-    let ticks = 0;
-    const id = setInterval(async () => {
-      ticks += 1;
-      const ok = await pingHealth();
-      if (cancelled) return;
-      if (!ok) { sawDown = true; return; }
-      if (sawDown || ticks >= 15) { clearInterval(id); window.location.reload(); }
-    }, 2000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, []);
-
-  return (
-    <div className={styles.recreateOverlay} role="alert">
-      <div className={styles.recreateBox}>
-        <Spinner size={34} label="Restarting" />
-        <p className={styles.recreateText}>Switching vault &amp; restarting…</p>
-        <p className={styles.recreateSub}>
-          Reconnecting once the backend is back. This page reloads automatically.
-        </p>
-      </div>
-    </div>
-  );
-}

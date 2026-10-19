@@ -156,3 +156,9 @@ def test_complete_503_when_router_exhausted(client, monkeypatch):
         raise llm_router.RouterError("exhausted")
     monkeypatch.setattr(main.router, "complete_text", exhausted)
     assert client.post("/complete", json={"prompt": "x"}).status_code == 503
+
+
+def test_vault_path_put_removed(client):
+    """Unsafe vault switch removed (VAULTS_PLAN M0): PUT must not exist; GET still does."""
+    assert client.put("/vault-path", json={"path": "/tmp"}).status_code in (404, 405)
+    assert client.get("/vault-path").status_code == 200

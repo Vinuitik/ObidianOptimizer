@@ -18,12 +18,10 @@ import java.time.Duration;
 /**
  * Thin proxy to the host-wrapper's filesystem endpoints. The wrapper runs on the
  * host (outside Docker), so it — and only it — can browse the user's real drives
- * and switch which folder docker-compose mounts as the vault.
+ * and read which folder docker-compose mounts as the vault.
  *
  * Frontend hits /api/host/* → nginx strips /api/ → here → wrapper.url (/fs/list,
- * /vault-path). Switching the vault makes the wrapper rewrite .env and run
- * `docker compose up -d`, which recreates THIS container — so the PUT may not get
- * a clean response. The frontend handles that by polling and reloading.
+ * /vault-path). Vault switching was removed (see VAULTS_PLAN.md).
  */
 @RestController
 public class HostFsController {
@@ -59,16 +57,6 @@ public class HostFsController {
             .timeout(Duration.ofSeconds(5))
             .GET()
             .build(), "getVault");
-    }
-
-    @PutMapping("host/vault")
-    public ResponseEntity<String> setVault(@RequestBody String body) {
-        return proxy(HttpRequest.newBuilder()
-            .uri(URI.create(wrapperUrl + "/vault-path"))
-            .timeout(Duration.ofSeconds(20))
-            .header("Content-Type", "application/json")
-            .PUT(HttpRequest.BodyPublishers.ofString(body))
-            .build(), "setVault");
     }
 
     private ResponseEntity<String> proxy(HttpRequest req, String tag) {
