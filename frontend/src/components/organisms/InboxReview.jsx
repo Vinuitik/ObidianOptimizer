@@ -14,7 +14,7 @@ import { markLearnTaskDone } from '../../utils/dailyDuty';
 import useStore from '../../store/useStore';
 import { useIsMobile } from '../../utils/useMediaQuery';
 import LearnLayout from '../templates/LearnLayout';
-import NoteRenderer from '../molecules/NoteRenderer';
+import MarkdownView from '../molecules/MarkdownView';
 import SourceSplicePanel from './SourceSplicePanel';
 import FolderPicker from './FolderPicker';
 import Button from '../atoms/Button';
@@ -464,7 +464,7 @@ export default function InboxReview({ onCount }) {
       </div>
       {preview
         ? <div className={styles.previewBox}>
-            <NoteRenderer content={stripLeadingTitle(draft, current?.title)} resetKey={selected} />
+            <MarkdownView content={stripLeadingTitle(draft, current?.title)} resetKey={selected} />
           </div>
         : <textarea className={styles.editor} value={draft}
                     onChange={e => setDraft(e.target.value)} spellCheck={false} />}

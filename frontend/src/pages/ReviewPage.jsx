@@ -4,7 +4,7 @@ import useStore from '../store/useStore';
 import { gradeNoteOffline as gradeNote, fetchNoteContentOffline as fetchNoteContent, isDriveMode } from '../pwa/offlineApi';
 import useOffline from '../pwa/useOffline';
 import FlashcardSession from '../components/organisms/FlashcardSession';
-import NoteRenderer from '../components/molecules/NoteRenderer';
+import MarkdownView from '../components/molecules/MarkdownView';
 import Button from '../components/atoms/Button';
 import Badge from '../components/atoms/Badge';
 import Skeleton from '../components/atoms/Skeleton';
@@ -318,7 +318,7 @@ function InlineNoteReview({ note, onBack, onClose, onGraded }) {
         <span className={styles.inlineNoteTitle}>{note.title}</span>
       </div>
       <div className={styles.inlineNoteBody}>
-        <NoteRenderer content={note.raw} resetKey={note.fullPath || note.title} />
+        <MarkdownView content={note.raw} resetKey={note.fullPath || note.title} />
       </div>
 
       {/* Grade bar — only when this note is the grading surface (no test done).

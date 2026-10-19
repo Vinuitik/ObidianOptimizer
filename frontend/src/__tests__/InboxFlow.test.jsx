@@ -16,7 +16,7 @@ vi.mock('../api/notes', () => ({
 vi.mock('../api/inbox', () => ({ splitInboxNote: vi.fn(), moveInboxNote: vi.fn(), createInboxFolder: vi.fn() }));
 vi.mock('../pwa/db', () => ({ getMeta: vi.fn(async () => null), setMeta: vi.fn(async () => {}) }));
 vi.mock('../utils/dailyDuty', () => ({ markLearnTaskDone: vi.fn() }));
-vi.mock('../components/molecules/NoteRenderer', () => ({ default: ({ content }) => <pre data-testid="preview">{content}</pre> }));
+vi.mock('../components/molecules/MarkdownView', () => ({ default: ({ content }) => <pre data-testid="preview">{content}</pre> }));
 vi.mock('../components/organisms/SourceSplicePanel', () => ({ default: () => <div /> }));
 vi.mock('../components/templates/LearnLayout', () => ({ default: ({ slotA, slotB }) => <div>{slotA}{slotB}</div> }));
 

@@ -11,7 +11,7 @@ vi.mock('../pwa/offlineApi', () => ({
   flagCardOffline: vi.fn(),
 }));
 vi.mock('../pwa/useOffline', () => ({ default: () => true }));
-vi.mock('../components/molecules/NoteRenderer', () => ({
+vi.mock('../components/molecules/MarkdownView', () => ({
   default: ({ content }) => <div data-testid="note-body">{content}</div>,
 }));
 

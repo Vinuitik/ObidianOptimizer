@@ -3,7 +3,7 @@ import { parseSourceRegion } from '../../utils/inboxParse';
 import { pdfPageUrl } from '../../utils/noteMedia';   // shared so offline warm caches identical keys
 import RsvpReader from '../molecules/RsvpReader';
 import SegmentedTabs from '../molecules/SegmentedTabs';
-import NoteRenderer from '../molecules/NoteRenderer';
+import MarkdownView from '../molecules/MarkdownView';
 import styles from './SourceSplicePanel.module.css';
 
 // Left panel of the review: the source, spliced to the region THIS note came from
@@ -111,7 +111,7 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
   // text / unknown → 'read' (default) renders the note (read-only Milkdown, the real
   // renderer); 'rsvp' flashes it a word at a time.
   if (textMode === 'read') {
-    return <div className={styles.readbox}><NoteRenderer content={item.content} resetKey={item.path} /></div>;
+    return <div className={styles.readbox}><MarkdownView content={item.content} resetKey={item.path} /></div>;
   }
   return <RsvpReader text={item.content} />;
 }

@@ -3,7 +3,7 @@ import useStore from '../../store/useStore';
 import PanelHeader from '../molecules/PanelHeader';
 import FolderTree from '../organisms/FolderTree';
 import ReviewList from '../organisms/ReviewList';
-import MilkdownEditor from '../organisms/MilkdownEditor';
+import CmEditor from '../../editor/CmEditor';
 import NewNoteForm from '../organisms/NewNoteForm';
 import Button from '../atoms/Button';
 import Chip from '../atoms/Chip';
@@ -311,7 +311,7 @@ export default function SplitLayout() {
           </div>
         </div>
 
-        {centerMode === 'new' ? <NewNoteForm /> : <MilkdownEditor />}
+        {centerMode === 'new' ? <NewNoteForm /> : <CmEditor />}
       </div>
 
       {/* Right resize handle */}
