@@ -22,9 +22,9 @@ vi.mock('../api/notes', () => ({
   ApiError:         class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } },
 }));
 
-// ── obsidianImagePlugin mock ──────────────────────────────────────────────────
+// ── media mock ──────────────────────────────────────────────────
 
-vi.mock('../utils/obsidianImagePlugin', () => ({
+vi.mock('../utils/media', () => ({
   setPendingBlobs: vi.fn(),
 }));
 
@@ -51,7 +51,7 @@ vi.mock('../api/tracks', () => ({
 import useStore from './useStore';
 import * as api from '../api/notes';
 import * as tracksApi from '../api/tracks';
-import * as imagePlugin from '../utils/obsidianImagePlugin';
+import * as imagePlugin from '../utils/media';
 
 // Global browser API stubs
 global.URL.revokeObjectURL = vi.fn();

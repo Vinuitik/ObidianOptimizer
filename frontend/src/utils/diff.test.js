@@ -58,8 +58,8 @@ describe('computeHunks', () => {
     expect(hunks[0].insertLines).toEqual(['']); // inserts the implicit empty line
   });
 
-  it('zero hunks when Milkdown serializes identical content (round-trip guard)', () => {
-    // This is the critical test: if Milkdown serializes back to the exact same
+  it('zero hunks when the editor serializes identical content (round-trip guard)', () => {
+    // This is the critical test: if the editor serializes back to the exact same
     // string we fed it, computeHunks must return [].
     const body = '# My Note\n\nSome paragraph.\n\n- item one\n- item two\n';
     expect(computeHunks(body, body)).toEqual([]);

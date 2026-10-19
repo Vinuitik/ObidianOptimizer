@@ -12,7 +12,7 @@ const L_LAST = line('cm-md-codeblock cm-md-codeblock-last');
 const L_ONLY = line('cm-md-codeblock cm-md-codeblock-first cm-md-codeblock-last');
 const FENCE_DIM = line('cm-md-fence');
 
-// prism-tomorrow palette (literals on purpose: matches the previous Milkdown/prism look).
+// prism-tomorrow palette (literals on purpose: matches the prism-tomorrow look used by MarkdownView).
 const highlightStyle = HighlightStyle.define([
   { tag: [t.comment, t.blockComment, t.lineComment, t.docComment], color: '#999' },
   { tag: [t.punctuation, t.separator, t.bracket, t.paren, t.brace, t.squareBracket], color: '#ccc' },

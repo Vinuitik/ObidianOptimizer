@@ -24,7 +24,7 @@ const MANAGED_RE = /^\/(vault-media|workspace|api\/images|pdf-page)(\/|$)/;
 const idOf = (urlStr) => { const u = new URL(urlStr); return u.pathname + u.search; };
 
 // Which progress bucket a key belongs to (drives the "images 3/12 → PDF 1/4" UI label).
-// NB image embeds actually resolve to /vault-media/... (obsidianImagePlugin.mediaUrl), not
+// NB image embeds actually resolve to /vault-media/... (media.mediaUrl), not
 // /api/images/... (that prefix is stale here — dead code, never matches) — so today image
 // embeds fall into the 'media' bucket alongside A/V. Left as-is rather than reclassifying
 // mid-fix; isRawVaultResource below is what actually distinguishes them for the Drive

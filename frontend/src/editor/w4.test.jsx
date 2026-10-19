@@ -80,6 +80,21 @@ describe('hashtags', () => {
   });
 });
 
+describe('codeBlocks highlighting (ported from the Milkdown prism test)', () => {
+  it('lazy-loads the fence language and emits token spans inside the block', async () => {
+    const view = mount('```python\ndef f(x):\n    return "s"\n```\n', [codeBlocksExtension()]);
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    const spans = () => view.dom.querySelectorAll('.cm-md-codeblock span[class]').length;
+    for (let i = 0; i < 80 && !spans(); i++) {
+      await new Promise(r => setTimeout(r, 50));
+      ensureSyntaxTree(view.state, view.state.doc.length, 5000);
+      view.dispatch({});
+    }
+    expect(spans()).toBeGreaterThan(0);
+    view.destroy();
+  });
+});
+
 describe('codeBlocks', () => {
   it('styles fenced block lines and dims fences off-cursor', () => {
     const view = mount('para\n\n```js\nconst a = 1;\n```\n');

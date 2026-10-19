@@ -7,7 +7,7 @@ import 'prismjs/themes/prism-tomorrow.css';
 import ImageLightbox from './ImageLightbox';
 
 // Read-only markdown renderer (markdown-it via utils/markdown.js) — NOT contentEditable.
-// Props: content (raw note incl. frontmatter), resetKey (NoteRenderer parity, unused),
+// Props: content (raw note incl. frontmatter), resetKey (accepted for call-site compatibility, unused),
 // onOpenNote(target) optional override for wiki-link clicks (default: store openTab).
 // W1/W2 hooks: add wikilink / embed rules in utils/markdown.js; click behaviours live in handleClick.
 // Note: utils/markdown.js does no HTML sanitising (markdown-it html:true) — same as before.

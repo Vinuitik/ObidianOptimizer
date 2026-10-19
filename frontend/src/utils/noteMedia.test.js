@@ -15,7 +15,7 @@ describe('vaultMediaUrl', () => {
 describe('mediaUrlsForNote', () => {
   it('collects image embeds', () => {
     const urls = mediaUrlsForNote('text ![[diagram.png]] more ![[b.jpg]]');
-    // Must be the SAME URL the Milkdown renderer requests (obsidianImagePlugin.mediaUrl),
+    // Must be the SAME URL the renderers request (media.mediaUrl),
     // else the offline warm caches a key the review view never asks for → blank images.
     expect(urls).toContain('/vault-media/images/diagram.png');
     expect(urls).toContain('/vault-media/images/b.jpg');

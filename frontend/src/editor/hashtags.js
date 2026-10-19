@@ -1,5 +1,5 @@
 // `#tag` mark decoration (.md-tag). Display only; viewport-only; syntax-tree aware.
-// Tag charset matches the old utils/hashtagPlugin.js: letters, digits, `_`, `/`, `-`.
+// Tag charset matches the markdown-it md_tag rule in utils/markdown.js: letters, digits, `_`, `/`, `-`.
 import { Decoration, ViewPlugin } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 

@@ -1,4 +1,4 @@
-// Milkdown-free media helpers shared by the Milkdown plugin, CM6 embeds and MarkdownView.
+// Media helpers shared by CM6 embeds, markdown.js and the offline warm.
 
 // ── Module-level blob registry: filename → blobURL (for pre-save rendering) ──
 

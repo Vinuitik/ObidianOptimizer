@@ -108,7 +108,7 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
     }
     return <iframe className={styles.frame} src={region.ref} title="source page" />;
   }
-  // text / unknown → 'read' (default) renders the note (read-only Milkdown, the real
+  // text / unknown → 'read' (default) renders the note (MarkdownView, the real
   // renderer); 'rsvp' flashes it a word at a time.
   if (textMode === 'read') {
     return <div className={styles.readbox}><MarkdownView content={item.content} resetKey={item.path} /></div>;

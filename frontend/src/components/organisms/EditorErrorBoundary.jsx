@@ -12,7 +12,7 @@ export default class EditorErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
-    console.error('[EditorErrorBoundary] Milkdown render error:', error);
+    console.error('[EditorErrorBoundary] editor render error:', error);
     console.error('[EditorErrorBoundary] Component stack:', info.componentStack);
   }
 

@@ -1,4 +1,4 @@
-// frontmatter.js — strip/restore YAML frontmatter before passing to Milkdown.
+// frontmatter.js — strip/restore YAML frontmatter before passing to the editor.
 //
 // Contract:
 //   splitFrontmatter(raw) → { frontmatter, body }
@@ -8,7 +8,7 @@
 //   joinFrontmatter(frontmatter, body) → raw
 //     Simple concat — separator lives inside frontmatter, so this is always correct.
 //
-// This means body passed to Milkdown is clean, and on save we just concat.
+// This means body passed to the editor is clean, and on save we just concat.
 
 const FM_OPEN  = /^---[ \t]*\r?\n/;
 const FM_CLOSE = /\n---[ \t]*(\r?\n|$)/;

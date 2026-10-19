@@ -45,7 +45,7 @@ import { allocateTracks } from '../pwa/reviewPlan';
 import { getMeta } from '../pwa/db';
 import { doneNotePaths, markNoteDone } from './flashSessionPersist';
 import { readPrefs, writePrefs } from '../pwa/prefsSync';
-import { setPendingBlobs } from '../utils/obsidianImagePlugin';
+import { setPendingBlobs } from '../utils/media';
 import { computeHunks, applyHunks } from '../utils/diff';
 import { splitFrontmatter, joinFrontmatter } from '../utils/frontmatter';
 
@@ -247,7 +247,7 @@ const DELETE_UNDO_MS = 7000;
 const useStore = create((set, get) => ({
   ...initialDataState(),
 
-  // Incremented on cancel to force Milkdown remount with clean content
+  // Incremented on cancel to force the CM6 editor to remount with clean content
   editorResetKey: 0,
 
   // Auth — seed from the persisted flag so an offline cold boot isn't walled (checkAuth
@@ -595,13 +595,13 @@ const useStore = create((set, get) => ({
       pendingFiles: {},
     });
     setPendingBlobs({});
-    // Suppress unused body — it's stored in pendingRaw; Milkdown reads it via splitFrontmatter
+    // Suppress unused body — it's stored in pendingRaw; CmEditor reads it via splitFrontmatter
     void body;
   },
 
-  // ── WYSIWYG: live update from Milkdown onChange ───────────────────────────
+  // ── WYSIWYG: live update from the CM6 editor ───────────────────────────
 
-  // Called by Milkdown's markdownUpdated listener with the serialized body (no frontmatter).
+  // Called by CmEditor (debounced) with the document body (no frontmatter).
   updatePending: (body) => {
     const { pendingFrontmatter } = get();
     set({ pendingRaw: joinFrontmatter(pendingFrontmatter, body) });
@@ -613,7 +613,7 @@ const useStore = create((set, get) => ({
 
   toggleMutable: () => set(s => ({ isMutable: !s.isMutable })),
 
-  // Cancel edit — discard all pending changes and force Milkdown remount
+  // Cancel edit — discard all pending changes and force CM6 remount
   cancelEdit: () => {
     const { currentNoteRaw, currentNotePath, tabs, activeTabIndex, pendingFiles } = get();
     // Revoke blob URLs for pasted files that won't be saved

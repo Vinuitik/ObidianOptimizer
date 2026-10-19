@@ -7,7 +7,7 @@ import MarkdownView from '../components/molecules/MarkdownView';
 import styles from './MobilePages.module.css';
 
 // Notes tab (page title comes from TopBar): full-width FolderTree → tap a note → full-screen read-only render.
-// Mobile v1 is view-only (no Milkdown editing on a phone — deliberate scope cut),
+// Mobile v1 is view-only (no editing on a phone — deliberate scope cut),
 // so we render currentNoteRaw with the shared renderMarkdown() instead of the
 // desktop WYSIWYG editor. Wiki-links and ![[image]] embeds reuse the same markup.
 export default function MobileNotesPage() {

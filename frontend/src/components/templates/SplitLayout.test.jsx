@@ -5,7 +5,6 @@ import useStore from '../../store/useStore';
 
 vi.mock('../organisms/FolderTree', () => ({ default: () => <div /> }));
 vi.mock('../organisms/ReviewList', () => ({ default: () => <div /> }));
-vi.mock('../organisms/MilkdownEditor', () => ({ default: () => <div /> }));
 vi.mock('../organisms/NewNoteForm', () => ({ default: () => <div /> }));
 vi.mock('../molecules/TabBar', () => ({ default: () => null }));
 vi.mock('../molecules/ReviewRating', () => ({ default: () => null }));
