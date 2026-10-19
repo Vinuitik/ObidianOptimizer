@@ -168,6 +168,7 @@ def ensure_schema(conn) -> None:
           status        TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED','FLAGGED')),
           drawn_cycle   INT NOT NULL DEFAULT 0,
           created_at    TIMESTAMP NOT NULL DEFAULT now(),
+          vault_id      BIGINT NOT NULL DEFAULT 1,
           UNIQUE (note_path, card_hash)
         )""")
     # The FLAGGED status widening is migrated on an existing table by the Java side

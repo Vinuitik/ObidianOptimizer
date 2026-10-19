@@ -2,6 +2,7 @@ package com.obsidian.obsidian.cards;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
@@ -14,6 +15,7 @@ import java.util.Map;
  * the next review delivers its delayed reward.
  */
 @Repository
+@DependsOn("vaultRepository")
 public class NoteReviewRepository {
 
     private final JdbcTemplate jdbc;
@@ -38,6 +40,7 @@ public class NoteReviewRepository {
             )
             """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_note_reviews_due ON note_reviews(due)");
+        jdbc.execute("ALTER TABLE note_reviews ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     public record ReviewRow(String notePath, double stability, double difficulty, int reps,

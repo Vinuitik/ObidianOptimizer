@@ -4,6 +4,7 @@ import com.obsidian.obsidian.common.OutboxRepository;
 import com.obsidian.obsidian.common.RabbitQueueConfig;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Repository;
 
 import java.util.LinkedHashMap;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 @Repository
+@DependsOn("vaultRepository")
 public class SyncQueueRepository {
 
     private final JdbcTemplate jdbc;
@@ -40,6 +42,7 @@ public class SyncQueueRepository {
             ALTER TABLE sync_queue ADD CONSTRAINT sync_queue_status_check
                 CHECK (status IN ('PENDING','DONE','FAILED','DELETE_PENDING'))
             """);
+        jdbc.execute("ALTER TABLE sync_queue ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     /**

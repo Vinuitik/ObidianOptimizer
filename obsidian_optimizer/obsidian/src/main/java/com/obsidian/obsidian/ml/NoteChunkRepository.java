@@ -3,6 +3,7 @@ package com.obsidian.obsidian.ml;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import java.sql.ResultSet;
@@ -11,6 +12,7 @@ import java.util.Arrays;
 import java.util.List;
 
 @Component
+@DependsOn("vaultRepository")
 public class NoteChunkRepository {
 
     private final JdbcTemplate jdbc;
@@ -56,6 +58,7 @@ public class NoteChunkRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_chunks_fts ON note_chunks USING GIN(fts_vector)");
         // ivfflat index requires rows to exist first; created lazily by EmbeddingService after bulk insert
+        jdbc.execute("ALTER TABLE note_chunks ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     public void upsertChunk(String notePath, int chunkIndex, String source, String text,

@@ -3,6 +3,7 @@ package com.obsidian.obsidian.ml;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import java.sql.ResultSet;
@@ -13,6 +14,7 @@ import java.util.Map;
 import java.util.Optional;
 
 @Component
+@DependsOn("vaultRepository")
 public class PendingImageJobRepository {
 
     private final JdbcTemplate jdbc;
@@ -37,6 +39,7 @@ public class PendingImageJobRepository {
             """);
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_pending_image_status ON pending_image_jobs(status) WHERE status = 'PENDING'");
+        jdbc.execute("ALTER TABLE pending_image_jobs ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     /** Result of {@link #upsertPending}: the row's id, and whether it actually needs

@@ -2,12 +2,14 @@ package com.obsidian.obsidian.cards;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Map;
 
 @Repository
+@DependsOn("vaultRepository")
 public class CardRepository {
 
     private final JdbcTemplate jdbc;
@@ -70,6 +72,17 @@ public class CardRepository {
               attempted_at TIMESTAMP NOT NULL DEFAULT now()
             )
             """);
+        jdbc.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        // Python may have created the column (no FK) before the registry existed.
+        jdbc.execute("""
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cards_vault_id_fkey') THEN
+                ALTER TABLE cards ADD CONSTRAINT cards_vault_id_fkey FOREIGN KEY (vault_id) REFERENCES vaults(id);
+              END IF;
+            END $$
+            """);
+        jdbc.execute("ALTER TABLE card_flags ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE card_gen_attempts ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     /**

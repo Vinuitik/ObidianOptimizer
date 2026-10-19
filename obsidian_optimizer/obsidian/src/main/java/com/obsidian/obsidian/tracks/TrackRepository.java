@@ -2,6 +2,7 @@ package com.obsidian.obsidian.tracks;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Repository;
 
 import java.sql.ResultSet;
@@ -20,6 +21,7 @@ import java.util.Map;
  * for additive migrations. See tracks/FLOWS.md.
  */
 @Repository
+@DependsOn("vaultRepository")
 public class TrackRepository {
 
     private final JdbcTemplate jdbc;
@@ -105,6 +107,8 @@ public class TrackRepository {
             """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_track_items_group ON track_items(group_id)");
         seedDefaultCapacity();
+        jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE track_item_groups ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     /** Mon-Fri=4, Sat/Sun=6 ("weekends 1.5x") — plain per-day numbers, hand-tunable later

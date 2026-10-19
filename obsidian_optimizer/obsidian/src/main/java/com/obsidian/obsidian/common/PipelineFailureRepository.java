@@ -5,6 +5,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import java.sql.ResultSet;
@@ -24,6 +25,7 @@ import java.util.Map;
  * regardless of which pipeline wrote the row.
  */
 @Component
+@DependsOn("vaultRepository")
 public class PipelineFailureRepository {
 
     private static final Logger log = LoggerFactory.getLogger(PipelineFailureRepository.class);
@@ -53,6 +55,15 @@ public class PipelineFailureRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS pipeline_failures_open_idx " +
             "ON pipeline_failures (stage) WHERE resolved_at IS NULL");
+        jdbc.execute("ALTER TABLE pipeline_failures ADD COLUMN IF NOT EXISTS vault_id BIGINT DEFAULT 1 REFERENCES vaults(id)");
+        // Python may have created the column (no FK) before the registry existed.
+        jdbc.execute("""
+            DO $$ BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pipeline_failures_vault_id_fkey') THEN
+                ALTER TABLE pipeline_failures ADD CONSTRAINT pipeline_failures_vault_id_fkey FOREIGN KEY (vault_id) REFERENCES vaults(id);
+              END IF;
+            END $$
+            """);
     }
 
     /** Best-effort, like {@code embedder/failures.py}'s record_failure — recording a
