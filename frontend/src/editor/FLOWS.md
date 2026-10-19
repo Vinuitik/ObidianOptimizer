@@ -22,7 +22,7 @@ isMutable change → readOnlyCompartment.reconfigure(readOnlyExt)   — no remou
 ```
 
 First load is never dirty: nothing calls `updatePending` until a real `docChanged` transaction.
-To change what is rebuilt on cancel/reset: `store.editorResetKey` (bumped by `cancelEdit`, `logout`).
+To change what is rebuilt on reset: `store.editorResetKey` (bumped by `logout`).
 To change extension order/list: `CmEditor.featureExtensions()` (one line per feature) / `baseExtensions()`.
 
 ## Edit → debounced updatePending → save hunks
@@ -33,7 +33,8 @@ keystroke → transaction → updateListener (docChanged) → onDocChange()
 flush() → store.updatePending(view.state.sliceDoc())
   → joinFrontmatter(pendingFrontmatter, body) → pendingRaw
 blur / Mod-s keymap → flush() immediately (Mod-s returns false so SplitLayout's window Ctrl+S handler then saves)
-Save → store.syncNote() → computeHunks(currentNoteRaw, pendingRaw)   — exact; no cleanup pass
+mount → store.setEditorFlush(flush); unmount → setEditorFlush(null)   — store.flushSave() calls it first
+updatePending → store.scheduleAutosave() (1500 ms) → flushSave() → store.syncNote() → computeHunks(currentNoteRaw, pendingRaw)   — exact; no cleanup pass
 ```
 
 Dirty = `selectDirty()` on `pendingRaw` vs `currentNoteRaw` in the store (computed on `updatePending`, never per keystroke in the view).
@@ -86,7 +87,7 @@ paste files | drop files | 📎 picker (edit mode)  → embeds.insertFiles(view,
   → view.dispatch(replaceSelection("![[filename]]"))
 embed widget: resolveMediaSrc(filename) = pending blobURL, else mediaUrl() = /vault-media/<subdir>/<name>
 registry change (tab switch/paste) → onPendingBlobsChange → refreshEffect → rebuild widgets
-Save → store.syncNote uploads pendingFiles, then removes them; cancelEdit revokes blob URLs
+Save → store.syncNote uploads pendingFiles, then removes them
 HTML paste containing <a> → htmlLinksToMarkdown → `[text](href)`
 ```
 Widgets: img / video / audio (kept alive via `eq()`), pdf & other → link; raw text while the cursor is on the line (edit mode); never rendered inside code (`inCode`). Read-only image click → `ImageLightbox`.
@@ -124,7 +125,7 @@ Frontmatter keeps its own endings (split/join is string-based). To change: `CmEd
 - **Atomic ranges**: any `Decoration.replace` that hides text must be in `EditorView.atomicRanges`, else the caret can sit inside hidden markers. Backspace over an atomic range deletes the whole range.
 - **Lezer incremental parse**: `syntaxTree(state)` can be partial on big docs (parse continues in the background; extensions re-run when the tree identity changes). Tests that need the full tree call `ensureSyntaxTree`. Code detection (`inCode`, math masking) is only as good as the tree parsed so far.
 - **KaTeX is synchronous**: cached by source string (500-entry FIFO, per page load, lost on refresh). A note with thousands of distinct formulas pays the render once each. 5k-line note with ~2000 math items: full `findMath` scan ~2-3 ms, only run on math-ish edits; ordinary typing ≈ +1-2 ms (jsdom).
-- **Debounce / flush / drop-on-destroy**: `pendingRaw` lags the view by up to 120 ms. Blur and Ctrl+S flush. On note switch / cancel the pending timer is DROPPED (a flush after `cancelEdit` would resurrect discarded text); tab switches rely on the blur flush (a switch with no preceding blur can drop the last <=120 ms of typing - unverified). A hard crash inside the 120 ms window loses those keystrokes (store is in-memory anyway).
+- **Debounce / flush / drop-on-destroy**: `pendingRaw` lags the view by up to 120 ms. Blur and Ctrl+S flush. On unmount the pending timer is DROPPED, but every navigation path (tab/note switch, toggle, title commit, window blur) first calls `store.flushSave()` which pulls the text through `setEditorFlush` (tested: `autosave.test.jsx`). A hard crash inside the 120 ms window loses those keystrokes (store is in-memory anyway).
 - **CRLF rule**: CRLF is preserved only when EVERY newline in the body is CRLF. A mixed-ending note is opened as LF-normalised, so the first edit saves with all line endings converted to LF (large hunk, content otherwise identical). Lone `\r` is treated as a line break.
 - **`[[` popup source**: must be ONE stable function (`autocompletion({ override: [...] })`). A languageData factory returning a new function per call makes CM drop every result and re-query forever. Only one `autocompletion()` may be configured (it lives in `wikiLinks.js`).
 - **Pending blobs**: module-level registry (`utils/media.js`), in-memory, keyed by generated filename; blob URLs are revoked on cancel/logout and die on refresh (unsaved attachments are lost with the unsaved text).
@@ -136,7 +137,8 @@ Frontmatter keeps its own endings (split/join is string-based). To change: `CmEd
 | Thing to change | Where |
 |---|---|
 | Extension list / order | `CmEditor.featureExtensions()`, `baseExtensions()` |
-| Save debounce | `CmEditor.jsx DEBOUNCE_MS` |
+| Editor→store debounce | `CmEditor.jsx DEBOUNCE_MS` |
+| Autosave delay / flush hook | `store.AUTOSAVE_MS`, `store.setEditorFlush` |
 | Load / remount rules | `CmEditor` effect deps; `store.editorResetKey` |
 | CRLF detection | `CmEditor.detectLineSeparator()` |
 | Read-only vs edit | `CmEditor.readOnlyExt`, `store.isMutable` |

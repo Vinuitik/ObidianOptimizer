@@ -16,8 +16,9 @@ Files: useStore.js, flashSessionPersist.js
   pendingTitle: string,
   isMutable: boolean,
   editorResetKey: number,        // increment to force CmEditor remount
-  centerMode: 'view' | 'new',
-  newNoteName: string,
+  centerMode: 'view',            // vestigial (the 'new' form is gone)
+  saveStatus: 'saving' | 'saved' | 'error' | null,
+  titleFocusNonce: number,       // bump -> SplitLayout focuses+selects the title input
 
   // Tab state
   tabs: Tab[],
@@ -56,11 +57,12 @@ Each `Tab`:
 ## openTab(fullPath)
 
 ```
+await flushSave()                    — previous note never left unsaved
 Already in tabs[]? → switchTab(existingIndex)
 New tab:
   _snapshotTab()
   openNote(fullPath)                   — fetch disk content
-  push { path, pendingTitle, isMutable: false, hunks: [], pendingFiles: {} }
+  push { path, pendingTitle, isMutable: true, hunks: [], pendingFiles: {} }   — edit by default
   activeTabIndex = newTabs.length - 1
 ```
 
@@ -81,6 +83,7 @@ No-op if `activeTabIndex < 0`.
 ## switchTab(index)
 
 ```
+await flushSave()                    — editor debounce pulled synchronously, then saved; failure keeps hunks in the snapshot
 _snapshotTab()
 raw = fetchNoteContent(tab.path)     — always re-fetches from disk
 if tab.hunks.length > 0:
@@ -106,7 +109,7 @@ If was active + no tabs remain   → clear all editor state
 If was not active                → adjust activeTabIndex
 ```
 
-No disk write — unsaved changes are discarded silently.
+Closing the ACTIVE tab runs `flushSave()` first (autosave); a non-active tab's unsaved hunks are discarded.
 
 The `activeTabIndex: -1` reset before switchTab is load-bearing: switchTab
 early-returns when `index === activeTabIndex` (closing a non-last active tab
@@ -115,32 +118,39 @@ must not write the closed tab's dirty state onto the tab taking its slot.
 
 ---
 
-## syncNote()
+## Autosave: flushSave() / scheduleAutosave() / syncNote()
 
 ```
-1. Upload each pendingFile → POST /api/upload → revokeObjectURL → clear pendingFiles
-2. pendingTitle changed? → PATCH /api/notes/rename → get newPath
-3. computeHunks(currentNoteRaw, pendingRaw)
-4. hunks non-empty? → PATCH /api/notes/content
-5. currentNoteRaw = pendingRaw, isMutable = false
-6. Update tab: path, hunks=[], isMutable=false
-7. Refresh: fetchChildrenOf + fetchNoteNames + fetchReviewNotes
+keystroke → CmEditor 120 ms debounce → updatePending(body) → (isMutable) scheduleAutosave()
+  → 1500 ms idle (AUTOSAVE_MS) → flushSave()
+flushSave() (also: tab/note switch, toggle→reading, window blur, visibilitychange hidden,
+             beforeunload, Mod-s, title commit, "Save failed — retry" click)
+  → editorFlush()            — CmEditor's debounce, registered via setEditorFlush(); runs FIRST, synchronously
+  → clear idle timer
+  → save in flight? saveAgain = true; return same promise      (never two syncNote at once)
+  → not dirty (selectDirty)? resolve
+  → loop { saveStatus='saving'; syncNote() } while (saveAgain && dirty) → saveStatus='saved'
+  → throw: saveStatus='error', toast, state stays dirty, REJECTS (callers swallow with .catch)
+syncNote():
+  1. Upload each pendingFile → POST /api/upload → revokeObjectURL → clear pendingFiles
+  2. pendingTitle changed? → PATCH /api/notes/rename → newPath
+  3. computeHunks(currentNoteRaw, pendingRaw) non-empty? → PATCH /api/notes/content
+  4. currentNoteRaw = the SAVED snapshot (edits typed meanwhile stay dirty); isMutable untouched
+  5. Update tab: path, hunks=[]; refresh fetchChildrenOf + fetchNoteNames + fetchReviewNotes
 ```
+`toggleMutable()` leaving edit mode calls `flushSave()` before flipping. `commitTitle(t)` (title blur/Enter) sets `pendingTitle` then `flushSave()`; blank/unchanged ignored. Rename changes `currentNotePath` → CmEditor remounts (cursor/undo reset).
+To change idle delay: `useStore.js AUTOSAVE_MS`. Dirty rule: `useStore.js selectDirty()`.
 
----
-
-## cancelEdit()
+## startNewNote(folder?) — instant create
 
 ```
-Revoke all blob URLs; clear pendingFiles; setPendingBlobs({})
-pendingRaw = currentNoteRaw
-pendingTitle = noteBasename(currentNotePath)
-isMutable = false
-tabs[activeTabIndex].hunks = []
-editorResetKey += 1              — forces CmEditor remount with clean body
+folder = arg (clicked +) → dirname(currentNotePath) → vaultRoot
+name   = nextUntitledName(noteIndex)         — "Untitled", "Untitled 2"… vault-wide basename check
+createNote(folder, name) → apiCreate → fetchChildrenOf → fetchNoteNames → openTab (edit mode)
+titleFocusNonce += 1                         — SplitLayout focuses + selects the title
 ```
-
-No disk fetch needed — `currentNoteRaw` is still the saved version.
+No "selected folder" state exists in FolderTree: the folder is the `+` that was clicked; header-level New note passes vaultRoot.
+To change naming: `useStore.js nextUntitledName()`.
 
 ---
 
@@ -183,7 +193,7 @@ To change toast timing: `showToast` duration / `DELETE_UNDO_MS`. To change swipe
 ## Technology Notes
 
 - **Zustand state is in-memory**: all tab state, pending edits, and blob URLs are lost on page refresh. There is no localStorage or sessionStorage persistence.
-- **`editorResetKey`**: the only reliable way to force the CM6 editor to rebuild its `EditorView` without a navigation (`CmEditor` effect deps `[currentNotePath, editorResetKey]`). A pending debounce timer is dropped on teardown, so a late flush can't resurrect text that `cancelEdit` just discarded.
+- **`editorResetKey`**: the only reliable way to force the CM6 editor to rebuild its `EditorView` without a navigation (`CmEditor` effect deps `[currentNotePath, editorResetKey]`). A pending debounce timer is dropped on teardown; callers (`flushSave`) pull it via `setEditorFlush` BEFORE anything unmounts the editor.
 - **`setPendingBlobs` timing**: called in `CmEditor`'s `useLayoutEffect` (before the view-creating `useEffect`) so the blob registry is populated before embed widgets' `toDOM` runs.
 
 - **Feed state is in-memory and optimistic**: lost on refresh (re-fetched from the server by `fetchFeed()`); a decision whose request is still in flight is rolled back only if the request fails — close the tab mid-flight and the server may or may not have it.
@@ -197,11 +207,13 @@ To change toast timing: `showToast` duration / `DELETE_UNDO_MS`. To change swipe
 | Thing to change | Where |
 |---|---|
 | Tab open / switch / close | `useStore.js openTab() / switchTab() / closeTab()` |
-| Save flow | `useStore.js syncNote()` |
-| Cancel / discard | `useStore.js cancelEdit()` |
-| Dirty detection | `useStore.js syncNote()` `computeHunks` call |
+| Save pipeline | `useStore.js flushSave() / syncNote()` |
+| Autosave delay | `useStore.js AUTOSAVE_MS` |
+| Dirty detection | `useStore.js selectDirty()` |
+| Edit/reading toggle | `useStore.js toggleMutable()` |
+| Title rename | `useStore.js commitTitle()` |
 | Drag-and-drop move | `useStore.js moveNote()` |
-| New note mode | `useStore.js startNewNote() / cancelNewNote()` |
+| New note (instant) | `useStore.js startNewNote() / nextUntitledName()` |
 | Logout wipe list | `useStore.js initialDataState()` |
 | Toast display timing | `useStore.js showToast()` (4 s timeout) |
 | Persist tabs on refresh | Add Zustand persist middleware (not implemented) |

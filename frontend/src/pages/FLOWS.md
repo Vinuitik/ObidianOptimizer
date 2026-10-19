@@ -13,7 +13,7 @@ loadSettings() → GET /api/settings → store.settings
 parallel: checkAuth() / fetchRootChildren() / fetchNoteNames()
 ```
 
-`MainPage` renders `SplitLayout` (left: FolderTree, center: CmEditor or NewNoteForm, right: ReviewList) + `LoginModal` (shown when `showLogin` is true).
+`MainPage` renders `SplitLayout` (left: FolderTree, center: CmEditor or reading-view MarkdownView, right: ReviewList) + `LoginModal` (shown when `showLogin` is true).
 
 To change startup data-fetch order: `MainPage useEffect`
 
