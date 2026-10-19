@@ -1,12 +1,32 @@
 import MarkdownIt from 'markdown-it';
 import { fileTypeFor, resolveMediaSrc } from './media';
 import katex from 'katex';
+import Prism from 'prismjs';
+// Light set only (core already ships markup/css/clike/javascript).
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-java';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-yaml';
+import 'prismjs/components/prism-sql';
+
+const LANG_ALIAS = { js: 'javascript', ts: 'typescript', py: 'python', sh: 'bash', shell: 'bash', zsh: 'bash', yml: 'yaml', html: 'markup', xml: 'markup' };
+
+function highlight(str, info) {
+  const raw = (info || '').trim().split(/\s+/)[0].toLowerCase();
+  const lang = LANG_ALIAS[raw] ?? raw;
+  const grammar = lang && Prism.languages[lang];
+  if (!grammar) return ''; // markdown-it falls back to escaped plain <pre><code>
+  return `<pre class="language-${lang}"><code class="language-${lang}">${Prism.highlight(str, grammar, lang)}</code></pre>`;
+}
 
 const md = new MarkdownIt({
   html: true,
   linkify: true,
   typographer: true,
   breaks: true,
+  highlight,
 });
 
 // ── Math (KaTeX): $..$ inline, $$..$$ and \[..\] block. markdown-it never feeds code spans /
@@ -64,6 +84,26 @@ md.block.ruler.before('fence', 'math_block', (state, startLine, endLine, silent)
 });
 md.renderer.rules.math_inline = (tokens, i) => mathHtml(tokens[i].content, false);
 md.renderer.rules.math_block = (tokens, i) => `${mathHtml(tokens[i].content, true)}\n`;
+// #tag inline rule (isolated). Charset: letters, digits, _ / - (at least one non-digit).
+// Runs inside inline parsing, so code spans / fences / URLs are never touched.
+const TAG_AT = /^#([A-Za-z0-9_/-]*[A-Za-z_/-][A-Za-z0-9_/-]*)/;
+md.inline.ruler.push('md_tag', (state, silent) => {
+  const pos = state.pos;
+  if (state.src.charCodeAt(pos) !== 0x23) return false;
+  if (pos > 0 && /[\w#&/[]/.test(state.src[pos - 1])) return false;
+  const last = state.tokens[state.tokens.length - 1];
+  if (last && last.type === 'html_inline' && /^<a\b/.test(last.content)) return false; // [[#heading]] label
+  const m = TAG_AT.exec(state.src.slice(pos, pos + 200));
+  if (!m) return false;
+  if (!silent) {
+    const tok = state.push('md_tag', 'span', 0);
+    tok.content = m[0];
+  }
+  state.pos += m[0].length;
+  return true;
+});
+md.renderer.rules.md_tag = (tokens, i) =>
+  `<span class="md-tag">${md.utils.escapeHtml(tokens[i].content)}</span>`;
 
 function parseFrontmatter(content) {
   const trimmed = content.trimStart();
@@ -123,11 +163,6 @@ export function renderMarkdown(content) {
 
   // [[link|alias]] or [[link]] → clickable wiki-link anchor
   processed = renderWikiLinks(processed);
-
-  // #hashtag → styled span (skip #headings at line start)
-  processed = processed.replace(/(?<![#\w])#([a-zA-Z]\w*)/g, (_, tag) =>
-    `<span class="md-tag">#${tag}</span>`
-  );
 
   return table + md.render(processed);
 }

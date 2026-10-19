@@ -34,6 +34,13 @@ export function editorTheme() {
     '.cm-md-link': { color: 'var(--accent-text)', textDecoration: 'underline', textDecorationColor: 'var(--accent-line)' },
     '.cm-md-quote-line': { borderLeft: '3px solid var(--accent-line)', paddingLeft: 'var(--sp-3)', color: 'var(--text-2)' },
     '.cm-md-quote-mark': { color: 'var(--text-3)' },
+    '.cm-md-codeblock': {
+      fontFamily: 'var(--font-mono)', fontSize: '0.88em', lineHeight: '1.6',
+      backgroundColor: 'var(--raised)', padding: '0 var(--sp-3)',
+    },
+    '.cm-md-codeblock-first': { borderTopLeftRadius: '6px', borderTopRightRadius: '6px', paddingTop: 'var(--sp-1)' },
+    '.cm-md-codeblock-last': { borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px', paddingBottom: 'var(--sp-1)' },
+    '.cm-md-fence': { color: 'var(--text-3)', opacity: '0.45', fontSize: '0.75em' },
     '.cm-md-list-mark': { color: 'var(--accent-text)' },
   }, { dark: true });
 }

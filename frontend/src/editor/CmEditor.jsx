@@ -15,9 +15,20 @@ import { setPendingBlobs, WHITELISTED_EXTS } from '../utils/media';
 import ImageLightbox from '../components/molecules/ImageLightbox';
 import { mathExtension } from './math';
 import { tablesExtension } from './tables';
+import { hashtagsExtension } from './hashtags';
+import { codeBlocksExtension } from './codeBlocks';
 import styles from './CmEditor.module.css';
 
 const DEBOUNCE_MS = 120;
+
+// CM6 would normalise CRLF to LF; keep the note's separator so saves round-trip byte-identically
+// (computeHunks must only see real edits). CRLF only if EVERY newline is CRLF; mixed/LF → default.
+export function detectLineSeparator(body) {
+  const lf = (body.match(/\n/g) || []).length;
+  if (lf === 0) return null;
+  const crlf = (body.match(/\r\n/g) || []).length;
+  return crlf === lf ? '\r\n' : null;
+}
 
 const readOnlyCompartment = new Compartment();
 const readOnlyExt = (isMutable) => (isMutable
@@ -32,8 +43,8 @@ export function featureExtensions(opts = {}) {
     ...embedsExtension(opts),
     ...mathExtension(),
     ...tablesExtension(),
-    // W4: ...hashtagsExtension(opts),
-    // W4: ...codeBlocksExtension(opts),
+    ...hashtagsExtension(),
+    ...codeBlocksExtension(),
   ];
 }
 
@@ -87,13 +98,14 @@ function CmEditorInner({ currentNotePath, editorResetKey }) {
   // Create the view once per note / reset — never per keystroke.
   useEffect(() => {
     const body = splitFrontmatter(useStore.getState().pendingRaw).body;
+    const sep = detectLineSeparator(body);
     let timer = null;
     let view = null;
     const flush = () => {
       if (timer == null) return;
       clearTimeout(timer);
       timer = null;
-      useStore.getState().updatePending(view.state.doc.toString());
+      useStore.getState().updatePending(view.state.sliceDoc());
     };
     const onDocChange = () => {
       if (timer != null) clearTimeout(timer);
@@ -103,10 +115,13 @@ function CmEditorInner({ currentNotePath, editorResetKey }) {
       parent: hostRef.current,
       state: EditorState.create({
         doc: body,
-        extensions: baseExtensions({ onDocChange, onFlush: flush, isMutable: useStore.getState().isMutable,
-          onImageClick: (src, alt) => setZoom({ src, alt }),
-          onDragOver: setIsDragOver,
-        }),
+        extensions: [
+          ...(sep ? [EditorState.lineSeparator.of(sep)] : []),
+          baseExtensions({ onDocChange, onFlush: flush, isMutable: useStore.getState().isMutable,
+            onImageClick: (src, alt) => setZoom({ src, alt }),
+            onDragOver: setIsDragOver,
+          }),
+        ],
       }),
     });
     viewRef.current = view;

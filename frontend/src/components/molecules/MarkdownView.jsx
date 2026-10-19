@@ -3,6 +3,7 @@ import useStore from '../../store/useStore';
 import { splitFrontmatter } from '../../utils/frontmatter';
 import { renderMarkdown } from '../../utils/markdown';
 import { resolveWikiTarget } from '../../utils/wikiResolve';
+import 'prismjs/themes/prism-tomorrow.css';
 import ImageLightbox from './ImageLightbox';
 
 // Read-only markdown renderer (markdown-it via utils/markdown.js) — NOT contentEditable.
