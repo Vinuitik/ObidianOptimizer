@@ -4,7 +4,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import useStore from '../store/useStore';
+import useStore, { setEditorFlush } from '../store/useStore';
 import { splitFrontmatter } from '../utils/frontmatter';
 import EditorErrorBoundary from '../components/organisms/EditorErrorBoundary';
 import { editorTheme, readOnlyTheme } from './theme';
@@ -125,9 +125,11 @@ function CmEditorInner({ currentNotePath, editorResetKey }) {
       }),
     });
     viewRef.current = view;
+    setEditorFlush(flush);   // store.flushSave() pulls the debounced text through this
     return () => {
-      // Pending timer is dropped, not flushed: on cancel the store was just reset and a late
-      // flush would resurrect discarded text. Blur/Ctrl+S already flush before any switch.
+      setEditorFlush(null);
+      // Pending timer is dropped, not flushed: store.flushSave() (tab/note switch, toggle,
+      // title rename) already pulled the text through setEditorFlush before this unmount.
       if (timer != null) clearTimeout(timer);
       view.destroy();
       viewRef.current = null;

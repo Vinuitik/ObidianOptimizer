@@ -5,74 +5,116 @@ import useStore from '../../store/useStore';
 
 vi.mock('../organisms/FolderTree', () => ({ default: () => <div /> }));
 vi.mock('../organisms/ReviewList', () => ({ default: () => <div /> }));
-vi.mock('../organisms/NewNoteForm', () => ({ default: () => <div /> }));
+vi.mock('../../editor/CmEditor', () => ({ default: () => <div data-testid="cm" /> }));
 vi.mock('../molecules/TabBar', () => ({ default: () => null }));
 vi.mock('../molecules/ReviewRating', () => ({ default: () => null }));
 
-const syncNote = vi.fn();
-const cancelEdit = vi.fn();
-const showToast = vi.fn();
+const flushSave = vi.fn();
+const toggleMutable = vi.fn();
+const commitTitle = vi.fn();
 
-function openEditing({ dirty }) {
+function open({ mutable = true, dirty = false, saveStatus = null } = {}) {
   useStore.setState({
     currentNotePath: '/vault/Note.md',
     currentNoteRaw: 'old',
     pendingRaw: dirty ? 'new' : 'old',
     pendingTitle: 'Note',
     pendingFiles: {},
-    isMutable: true,
-    centerMode: 'view',
+    isMutable: mutable,
+    saveStatus,
+    titleFocusNonce: 0,
     leftCollapsed: false,
     rightCollapsed: true,
     reviewNotes: [],
     settings: { flashcardsEnabled: true },
-    syncNote, cancelEdit, showToast,
+    flushSave, toggleMutable, commitTitle,
   });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  syncNote.mockResolvedValue();
+  flushSave.mockResolvedValue();
 });
 
 describe('SplitLayout note editing', () => {
-  it('Ctrl+S saves', async () => {
-    openEditing({ dirty: true });
+  it('Ctrl+S flushes the save', () => {
+    open({ dirty: true });
     render(<SplitLayout />);
     fireEvent.keyDown(window, { key: 's', ctrlKey: true });
-    await waitFor(() => expect(syncNote).toHaveBeenCalledTimes(1));
+    expect(flushSave).toHaveBeenCalledTimes(1);
   });
 
-  it('shows Unsaved changes when dirty', () => {
-    openEditing({ dirty: true });
+  it('Ctrl+E toggles edit / reading view', () => {
+    open();
     render(<SplitLayout />);
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'e', ctrlKey: true });
+    expect(toggleMutable).toHaveBeenCalledTimes(1);
   });
 
-  it('Cancel with unsaved changes asks inline instead of discarding', () => {
-    openEditing({ dirty: true });
+  it('has ONE toggle button and no Save / Cancel', () => {
+    open();
     render(<SplitLayout />);
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(cancelEdit).not.toHaveBeenCalled();
-    expect(screen.getByText('Discard unsaved changes?')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
-    expect(cancelEdit).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Reading view' }));
+    expect(toggleMutable).toHaveBeenCalledTimes(1);
   });
 
-  it('Cancel with no changes cancels immediately', () => {
-    openEditing({ dirty: false });
+  it('reading view renders MarkdownView of pending content with an Edit button', () => {
+    open({ mutable: false, dirty: true });
+    useStore.setState({ pendingRaw: '# Hello pending' });
     render(<SplitLayout />);
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(cancelEdit).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('heading', { name: 'Hello pending' })).toBeInTheDocument();
+    expect(screen.queryByTestId('cm')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(toggleMutable).toHaveBeenCalledTimes(1);
   });
 
-  it('save errors are caught and toasted', async () => {
-    syncNote.mockRejectedValue(new Error('disk full'));
-    openEditing({ dirty: true });
+  it('status: Saving… while dirty/saving, Saved after', () => {
+    open({ dirty: true });
+    const { unmount } = render(<SplitLayout />);
+    expect(screen.getByText('Saving…')).toBeInTheDocument();
+    unmount();
+    open({ dirty: false, saveStatus: 'saved' });
     render(<SplitLayout />);
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(showToast).toHaveBeenCalled());
-    expect(showToast.mock.calls[0][0].tone).toBe('error');
-    expect(screen.getByText('Save failed')).toBeInTheDocument();
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+  });
+
+  it('failed save shows a retry button that saves again', () => {
+    open({ dirty: true, saveStatus: 'error' });
+    render(<SplitLayout />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save failed — retry' }));
+    expect(flushSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('window blur and hidden tab flush the save', () => {
+    open({ dirty: true });
+    render(<SplitLayout />);
+    fireEvent.blur(window);
+    expect(flushSave).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    fireEvent(document, new Event('visibilitychange'));
+    expect(flushSave).toHaveBeenCalledTimes(2);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+
+  it('title is a single-line input; rename only on blur / Enter, never per keystroke', () => {
+    open();
+    render(<SplitLayout />);
+    const input = screen.getByLabelText('Note title');
+    expect(input.tagName).toBe('INPUT');
+    input.focus();
+    fireEvent.change(input, { target: { value: 'Renamed' } });
+    expect(commitTitle).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    input.blur();
+    expect(commitTitle).toHaveBeenCalledWith('Renamed');
+  });
+
+  it('titleFocusNonce focuses and selects the title', async () => {
+    open();
+    render(<SplitLayout />);
+    useStore.setState({ titleFocusNonce: 1 });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Note title')));
   });
 });
