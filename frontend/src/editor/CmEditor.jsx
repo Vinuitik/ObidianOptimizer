@@ -13,6 +13,8 @@ import { wikiLinksExtension } from './wikiLinks';
 import { embedsExtension, insertFiles } from './embeds';
 import { setPendingBlobs, WHITELISTED_EXTS } from '../utils/media';
 import ImageLightbox from '../components/molecules/ImageLightbox';
+import { mathExtension } from './math';
+import { tablesExtension } from './tables';
 import styles from './CmEditor.module.css';
 
 const DEBOUNCE_MS = 120;
@@ -28,8 +30,8 @@ export function featureExtensions(opts = {}) {
     livePreviewExtension(),
     ...wikiLinksExtension(opts),
     ...embedsExtension(opts),
-    // W3: ...mathExtension(opts),
-    // W3: ...tablesExtension(opts),
+    ...mathExtension(),
+    ...tablesExtension(),
     // W4: ...hashtagsExtension(opts),
     // W4: ...codeBlocksExtension(opts),
   ];

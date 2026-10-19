@@ -1,5 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import { fileTypeFor, resolveMediaSrc } from './media';
+import katex from 'katex';
 
 const md = new MarkdownIt({
   html: true,
@@ -7,6 +8,62 @@ const md = new MarkdownIt({
   typographer: true,
   breaks: true,
 });
+
+// ── Math (KaTeX): $..$ inline, $$..$$ and \[..\] block. markdown-it never feeds code spans /
+// fences to these rules, so `$` in code is untouched.
+function mathHtml(src, displayMode) {
+  try {
+    return katex.renderToString(src, { throwOnError: true, displayMode });
+  } catch {
+    const tag = displayMode ? 'pre' : 'code';
+    const raw = displayMode ? `$$\n${src}\n$$` : `$${src}$`;
+    return `<${tag} class="math-error">${md.utils.escapeHtml(raw)}</${tag}>`;
+  }
+}
+const INLINE_MATH = /^\$(?!\$)(?=[^\s`])([^$\n`]*?[^\s`])\$(?![$\d])/;
+md.inline.ruler.before('escape', 'math_inline', (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x24) return false;
+  const m = INLINE_MATH.exec(state.src.slice(state.pos));
+  if (!m) return false;
+  if (!silent) state.push('math_inline', '', 0).content = m[1];
+  state.pos += m[0].length;
+  return true;
+});
+md.block.ruler.before('fence', 'math_block', (state, startLine, endLine, silent) => {
+  const lineText = (n) => state.src.slice(state.bMarks[n] + state.tShift[n], state.eMarks[n]).trimEnd();
+  const first = lineText(startLine);
+  const close = first.startsWith('$$') ? '$$' : first.startsWith('\\[') ? '\\]' : null;
+  if (!close) return false;
+  const rest = first.slice(2);
+  const parts = [];
+  let last = startLine;
+  if (rest.endsWith(close) && rest.length > 2) {
+    parts.push(rest.slice(0, -2));
+  } else {
+    if (rest.includes(close)) return false;
+    parts.push(rest);
+    let closed = false;
+    for (let n = startLine + 1; n < endLine; n++) {
+      const l = lineText(n);
+      last = n;
+      if (l.endsWith(close)) { parts.push(l.slice(0, -2)); closed = true; break; }
+      if (l.includes(close)) return false;
+      parts.push(l);
+    }
+    if (!closed) return false;
+  }
+  const body = parts.join('\n').trim();
+  if (!body) return false;
+  if (silent) return true;
+  const t = state.push('math_block', '', 0);
+  t.content = body;
+  t.block = true;
+  t.map = [startLine, last + 1];
+  state.line = last + 1;
+  return true;
+});
+md.renderer.rules.math_inline = (tokens, i) => mathHtml(tokens[i].content, false);
+md.renderer.rules.math_block = (tokens, i) => `${mathHtml(tokens[i].content, true)}\n`;
 
 function parseFrontmatter(content) {
   const trimmed = content.trimStart();
