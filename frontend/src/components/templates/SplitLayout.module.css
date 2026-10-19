@@ -109,10 +109,12 @@
   width: 100%;
   min-width: 0;
   max-width: 480px;
-  /* One compact line. (The old <textarea> inherited base.css min-height:80px.) */
-  height: auto;
+  /* One compact line; JS sizes height to scrollHeight so long titles wrap.
+     min-height:0 overrides base.css textarea min-height:80px (the old "too tall" bug). */
   min-height: 0;
   line-height: 1.3;
+  resize: none;
+  overflow: hidden;
   text-align: center;
 }
 

@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
 import useStore, { selectDirty } from '../../store/useStore';
 import PanelHeader from '../molecules/PanelHeader';
 import FolderTree from '../organisms/FolderTree';
@@ -97,6 +97,13 @@ export default function SplitLayout() {
     if (titleDraft.trim() && titleDraft.trim() !== pendingTitle) commitTitle(titleDraft);
     else setTitleDraft(pendingTitle);
   };
+  // One line by default; grows to more lines only once a long title wraps.
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [titleDraft, isMutable]);
   // New note: focus the title with "Untitled" selected so typing replaces it.
   useEffect(() => {
     if (titleFocusNonce > 0) { titleRef.current?.focus(); titleRef.current?.select(); }
@@ -200,13 +207,14 @@ export default function SplitLayout() {
           {/* Center — title, always visually centered */}
           <div className={styles.headerCenter}>
             {isMutable && title ? (
-              <input
+              <textarea
                 ref={titleRef}
+                rows={1}
                 className={styles.headerTitleInput}
                 value={titleDraft}
                 aria-label="Note title"
                 placeholder="Note name"
-                onChange={e => setTitleDraft(e.target.value)}
+                onChange={e => setTitleDraft(e.target.value.replace(/[\r\n]+/g, ' '))}
                 onBlur={submitTitle}
                 onKeyDown={e => {
                   if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }

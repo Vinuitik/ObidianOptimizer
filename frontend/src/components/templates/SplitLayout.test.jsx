@@ -98,11 +98,12 @@ describe('SplitLayout note editing', () => {
     Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
   });
 
-  it('title is a single-line input; rename only on blur / Enter, never per keystroke', () => {
+  it('title is a 1-row auto-growing field; rename only on blur / Enter, never per keystroke', () => {
     open();
     render(<SplitLayout />);
     const input = screen.getByLabelText('Note title');
-    expect(input.tagName).toBe('INPUT');
+    expect(input.tagName).toBe('TEXTAREA');
+    expect(input.getAttribute('rows')).toBe('1');
     input.focus();
     fireEvent.change(input, { target: { value: 'Renamed' } });
     expect(commitTitle).not.toHaveBeenCalled();
