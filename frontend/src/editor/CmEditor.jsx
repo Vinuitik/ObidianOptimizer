@@ -35,7 +35,7 @@ const readOnlyExt = (isMutable) => (isMutable
   ? [EditorState.readOnly.of(false), EditorView.editable.of(true)]
   : [EditorState.readOnly.of(true), EditorView.editable.of(false), readOnlyTheme()]);
 
-// Feature extensions. Each W-milestone agent adds exactly ONE line here.
+// Feature extensions (one line per feature; see editor/FLOWS.md).
 export function featureExtensions(opts = {}) {
   return [
     livePreviewExtension(),
@@ -178,7 +178,7 @@ export default function CmEditor() {
     );
   }
 
-  // Attachments (📎, paste, drop) layout slot: W2 adds its UI inside this wrapper.
+  // Wrapper hosts the editor plus the 📎 / drag overlay UI.
   return (
     <div className={styles.wrapper}>
       <EditorErrorBoundary>

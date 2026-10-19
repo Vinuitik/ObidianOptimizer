@@ -15,7 +15,7 @@ Files: useStore.js, flashSessionPersist.js
   pendingFrontmatter: object,
   pendingTitle: string,
   isMutable: boolean,
-  editorResetKey: number,        // increment to force Milkdown remount
+  editorResetKey: number,        // increment to force CmEditor remount
   centerMode: 'view' | 'new',
   newNoteName: string,
 
@@ -137,7 +137,7 @@ pendingRaw = currentNoteRaw
 pendingTitle = noteBasename(currentNotePath)
 isMutable = false
 tabs[activeTabIndex].hunks = []
-editorResetKey += 1              — forces Milkdown remount with clean body
+editorResetKey += 1              — forces CmEditor remount with clean body
 ```
 
 No disk fetch needed — `currentNoteRaw` is still the saved version.
@@ -183,8 +183,8 @@ To change toast timing: `showToast` duration / `DELETE_UNDO_MS`. To change swipe
 ## Technology Notes
 
 - **Zustand state is in-memory**: all tab state, pending edits, and blob URLs are lost on page refresh. There is no localStorage or sessionStorage persistence.
-- **`editorResetKey`**: the only reliable way to force Milkdown to remount without a navigation. Incrementing it changes the `key` on `MilkdownProvider`, causing a full schema context teardown.
-- **`setPendingBlobs` timing**: called in `useLayoutEffect` (before Milkdown's `useEffect`) to guarantee the blob registry is populated before `toDOM` runs during editor init.
+- **`editorResetKey`**: the only reliable way to force the CM6 editor to rebuild its `EditorView` without a navigation (`CmEditor` effect deps `[currentNotePath, editorResetKey]`). A pending debounce timer is dropped on teardown, so a late flush can't resurrect text that `cancelEdit` just discarded.
+- **`setPendingBlobs` timing**: called in `CmEditor`'s `useLayoutEffect` (before the view-creating `useEffect`) so the blob registry is populated before embed widgets' `toDOM` runs.
 
 - **Feed state is in-memory and optimistic**: lost on refresh (re-fetched from the server by `fetchFeed()`); a decision whose request is still in flight is rolled back only if the request fails — close the tab mid-flight and the server may or may not have it.
 - **Undo is last-decision only**: `feedLastDecision` holds one item; a second swipe replaces it. Accept-undo works only while the capture is still QUEUED (else 409).

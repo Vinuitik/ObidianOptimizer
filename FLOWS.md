@@ -54,7 +54,8 @@ Naming: `FLOWS.md` = a folder's main flows; `FLOWS_<topic>.md` = a focused sub-f
 | [Workspace FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/workspace/FLOWS.md) | Flows | `_workspace/` manual media shelf (legacy Learn library) |
 | [Frontend API FLOWS](frontend/src/api/FLOWS.md) | Flows | API client layer, ApiError |
 | [Frontend Pages FLOWS](frontend/src/pages/FLOWS.md) | Flows | MainPage, Learn (= Inbox review), Review, Dashboard, Settings |
-| [Frontend Components FLOWS](frontend/src/components/FLOWS.md) | Flows | Milkdown editor, InboxReview, LearnLayout, etc. |
+| [Frontend Components FLOWS](frontend/src/components/FLOWS.md) | Flows | Components overview (InboxReview, LearnLayout, SplitLayout, ...); points to editor/FLOWS.md |
+| [Frontend Editor FLOWS](frontend/src/editor/FLOWS.md) | Flows | CM6 note editor: live preview, wiki-links, embeds/attachments, math/tables, save path |
 | [Frontend Store FLOWS](frontend/src/store/FLOWS.md) | Flows | Zustand state shape + actions |
 | [Frontend Utils FLOWS](frontend/src/utils/FLOWS.md) | Flows | diff/patch, search, misc helpers |
 | [Extension FLOWS](extension/FLOWS.md) | Flows | Chrome extension capture into the Learn queue (incl. Subscribe button) |

@@ -13,7 +13,7 @@ loadSettings() → GET /api/settings → store.settings
 parallel: checkAuth() / fetchRootChildren() / fetchNoteNames()
 ```
 
-`MainPage` renders `SplitLayout` (left: FolderTree, center: MilkdownEditor or NewNoteForm, right: ReviewList) + `LoginModal` (shown when `showLogin` is true).
+`MainPage` renders `SplitLayout` (left: FolderTree, center: CmEditor or NewNoteForm, right: ReviewList) + `LoginModal` (shown when `showLogin` is true).
 
 To change startup data-fetch order: `MainPage useEffect`
 
@@ -109,8 +109,8 @@ components stay in-tree, unimported (restore by reinstating the view toggle in `
   - **ORIGINAL** = `SourceSplicePanel` (read-only): `parseSourceRegion` reads the note's `##
     Source` footer → YouTube embed seeked to the timestamp / `<video>#t=` / PDF `#page=` /
     **text → `RsvpReader`** (fast one-word ORP reading, §7).
-  - **NEW** = the editable note: Edit/Preview, Preview = `NoteRenderer` (shared **read-only
-    Milkdown** — GFM tables, `![[images]]`, math, code; identical to the main editor).
+  - **NEW** = the editable note: Edit/Preview, Preview = `MarkdownView` (read-only markdown-it —
+    GFM tables, `![[images]]`, math, code, wiki-links).
   - **Bottom bar**: the **proposed** folder (find_home), re-picked from an animated folder
     tree (`FolderPicker` modal) → **Save & file** / **Discard**, or **Save & acknowledge**
     for in-place notes. Filing moves the note into its folder + the FSRS queue.
@@ -158,15 +158,12 @@ To change auto-advance delay: `ADVANCE_MS`. To change keys: `BANDS` + `InlineNot
 
 Flashcard tests vs self-rated slideshow (see cards FLOWS + frontend/FLOWS.md). The inline
 "Review note directly →" view (`InlineNoteReview`, shown when a note has no cards yet)
-renders through the shared `molecules/NoteRenderer` (read-only Milkdown — the SAME pipeline
-as the main editor, so tables/images/math/code render identically), not raw `<pre>`, AND
+renders through the shared `molecules/MarkdownView` (read-only markdown-it: tables/images/math/code), not raw `<pre>`, AND
 carries a bottom grade bar: the four FSRS bands (`BANDS`: HARD/GOOD/EASY/VERY_EASY) →
 `gradeNote()` → `POST /api/reviews/grade` → `dismissFromReview` — so a note with no
 generated cards is still actually rescheduled, not just read. `inlineNote` must carry
 `fullPath` (set in `handleReviewNote`) for the grade call.
-(`molecules/MarkdownContent` is the older markdown-it renderer — kept for the mobile/lightweight
-path; the rich Milkdown reuse is `NoteRenderer`, since the main note surface is Milkdown, not
-markdown-it. `NoteViewer.jsx` is legacy/unused.)
+(`molecules/MarkdownContent` is the older markdown-it renderer; `NoteViewer.jsx` is legacy/unused.)
 
 **One review system (`settings.flashcardsEnabled`)** — mutually exclusive, replaces the old
 local `reviewMode` pref:

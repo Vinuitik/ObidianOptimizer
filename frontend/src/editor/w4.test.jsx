@@ -80,7 +80,7 @@ describe('hashtags', () => {
   });
 });
 
-describe('codeBlocks highlighting (ported from the Milkdown prism test)', () => {
+describe('codeBlocks highlighting', () => {
   it('lazy-loads the fence language and emits token spans inside the block', async () => {
     const view = mount('```python\ndef f(x):\n    return "s"\n```\n', [codeBlocksExtension()]);
     view.dispatch({ selection: { anchor: view.state.doc.length } });
