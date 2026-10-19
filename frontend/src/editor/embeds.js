@@ -1,5 +1,7 @@
 import { RangeSetBuilder, StateEffect } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
+import { syntaxTree } from '@codemirror/language';
+import { inCode } from './inCode';
 import useStore from '../store/useStore';
 import {
   addPendingBlob, fileTypeFor, generateFilename, isWhitelisted, onPendingBlobsChange,
@@ -62,7 +64,7 @@ function build(view) {
           let m;
           while ((m = EMBED_RE.exec(line.text)) !== null) {
             const filename = m[1].trim();
-            if (!filename) continue;
+            if (!filename || inCode(view.state, line.from + m.index)) continue;
             b.add(line.from + m.index, line.from + m.index + m[0].length, Decoration.replace({
               widget: new EmbedWidget(filename, resolveMediaSrc(filename)),
             }));
@@ -87,6 +89,7 @@ const embedPlugin = ViewPlugin.fromClass(class {
   }
   update(u) {
     if (u.docChanged || u.selectionSet || u.viewportChanged
+      || syntaxTree(u.state) !== syntaxTree(u.startState)
       || u.startState.facet(EditorView.editable) !== u.state.facet(EditorView.editable)
       || u.transactions.some(t => t.effects.some(e => e.is(refreshEffect)))) {
       this.decorations = build(u.view);

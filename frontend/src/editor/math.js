@@ -108,13 +108,54 @@ function build(state, matches) {
   return Decoration.set(decos, true);
 }
 
+// Per-keystroke cost: a full-doc rescan only when the edit can change math detection. Otherwise
+// the previous matches are position-mapped (cheap). See needsRescan for the exact triggers.
+const SPECIAL = /[$\\`~\n]/;
+function needsRescan(prev, tr) {
+  let hit = false;
+  tr.changes.iterChanges((fA, tA, fB, tB, ins) => {
+    if (hit) return;
+    if (SPECIAL.test(ins.toString()) || SPECIAL.test(tr.startState.sliceDoc(fA, tA))) { hit = true; return; }
+    // a lone `$` / `\` on the edited line can pair up with the new character
+    const doc = tr.state.doc;
+    for (let n = doc.lineAt(fB).number, e = doc.lineAt(tB).number; n <= e; n++) {
+      const t = doc.line(n).text;
+      if (t.includes('$') || t.includes('\\')) { hit = true; return; }
+    }
+    if (prev.some((m) => m.from <= tA && m.to >= fA)) hit = true; // edit touches an existing match
+  });
+  return hit;
+}
+
+// Which matches the selection touches (those show raw source). Decorations only need a rebuild
+// when this key changes, so ordinary typing/cursor moves outside math cost nothing.
+function activeKey(matches, selection) {
+  let key = '';
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    if (selection.ranges.some((r) => r.from <= m.to && r.to >= m.from)) key += i + ',';
+  }
+  return key;
+}
+
+function value(state, matches) {
+  return { matches, decos: build(state, matches), active: activeKey(matches, state.selection) };
+}
+
 const mathField = StateField.define({
-  create(state) { const matches = findMath(state); return { matches, decos: build(state, matches) }; },
+  create(state) { return value(state, findMath(state)); },
   update(v, tr) {
     const treeChanged = syntaxTree(tr.state) !== syntaxTree(tr.startState);
     if (!tr.docChanged && !tr.selection && !treeChanged) return v;
-    const matches = tr.docChanged || treeChanged ? findMath(tr.state) : v.matches;
-    return { matches, decos: build(tr.state, matches) };
+    if (tr.docChanged && needsRescan(v.matches, tr)) return value(tr.state, findMath(tr.state));
+    if (!tr.docChanged && treeChanged) return value(tr.state, findMath(tr.state));
+    // Fast path: same math, positions mapped; rebuild widgets only if the cursor entered/left one.
+    const matches = tr.docChanged
+      ? v.matches.map((m) => ({ ...m, from: tr.changes.mapPos(m.from, 1), to: tr.changes.mapPos(m.to, -1) }))
+      : v.matches;
+    const active = activeKey(matches, tr.state.selection);
+    if (active === v.active) return { matches, decos: tr.docChanged ? v.decos.map(tr.changes) : v.decos, active };
+    return { matches, decos: build(tr.state, matches), active };
   },
   provide: (f) => [
     EditorView.decorations.from(f, (v) => v.decos),

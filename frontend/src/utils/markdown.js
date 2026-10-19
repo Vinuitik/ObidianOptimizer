@@ -91,8 +91,6 @@ md.inline.ruler.push('md_tag', (state, silent) => {
   const pos = state.pos;
   if (state.src.charCodeAt(pos) !== 0x23) return false;
   if (pos > 0 && /[\w#&/[]/.test(state.src[pos - 1])) return false;
-  const last = state.tokens[state.tokens.length - 1];
-  if (last && last.type === 'html_inline' && /^<a\b/.test(last.content)) return false; // [[#heading]] label
   const m = TAG_AT.exec(state.src.slice(pos, pos + 200));
   if (!m) return false;
   if (!silent) {
@@ -131,15 +129,40 @@ function parseFrontmatter(content) {
   return { table: `<table><tbody>${rows}</tbody></table>\n`, body };
 }
 
-const escAttr = (t) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escAttr = (t) => md.utils.escapeHtml(t);
 
-// [[t]] / [[t|a]] -> <span class="wiki-link" data-wiki-link="t">a-or-t</span>; skips ![[embed]].
-export function renderWikiLinks(text) {
-  return text.replace(/(?<!!)\[\[([^\[\]|\n]+)(?:\|([^\[\]\n]+))?\]\]/g, (_, target, alias) => {
-    const t = target.trim();
-    return `<span class="wiki-link" data-wiki-link="${escAttr(t)}">${alias ?? t}</span>`;
-  });
-}
+// ── Wiki links + embeds as inline rules (never fire inside code spans / fences / math, and
+// `[[#heading]]` is consumed whole so md_tag never sees its `#`). Registered before the
+// built-in link/image rules, which also start at `[` / `!`.
+const WIKI_AT = /^\[\[([^\[\]|\n]+)(?:\|([^\[\]\n]+))?\]\]/;
+const EMBED_AT = /^!\[\[([^\]\n]+?)\]\]/;
+const baseName = (t) => t.split(/[/\\]/).pop();
+
+md.inline.ruler.before('image', 'embed', (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x21) return false;
+  const m = EMBED_AT.exec(state.src.slice(state.pos, state.pos + 400));
+  if (!m || !m[1].trim()) return false;
+  if (!silent) state.push('embed', '', 0).content = m[1].trim();
+  state.pos += m[0].length;
+  return true;
+});
+md.inline.ruler.before('link', 'wiki_link', (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x5b) return false;
+  const m = WIKI_AT.exec(state.src.slice(state.pos, state.pos + 400));
+  if (!m) return false;
+  if (!silent) {
+    const t = state.push('wiki_link', '', 0);
+    t.content = m[1].trim();
+    t.meta = { alias: m[2] };
+  }
+  state.pos += m[0].length;
+  return true;
+});
+// No alias -> show the basename only (matches the editor).
+md.renderer.rules.wiki_link = (tokens, i) => {
+  const { content, meta } = tokens[i];
+  return `<span class="wiki-link" data-wiki-link="${escAttr(content)}">${escAttr(meta.alias ?? baseName(content))}</span>`;
+};
 
 // ![[file]] -> element by extension; src identical to the editor (mediaUrl / pending blob).
 function embedHtml(filename) {
@@ -153,16 +176,9 @@ function embedHtml(filename) {
   }
   return `<img class="embedded-image" src="${src}" alt="${name}" data-obsidian-image="${name}" />`;
 }
+md.renderer.rules.embed = (tokens, i) => embedHtml(tokens[i].content);
 
 export function renderMarkdown(content) {
   const { table, body } = parseFrontmatter(content);
-  let processed = body;
-
-  // ![[image.png]] → <img>
-  processed = processed.replace(/!\[\[(.*?)\]\]/gs, (_, p1) => embedHtml(p1.trim()));
-
-  // [[link|alias]] or [[link]] → clickable wiki-link anchor
-  processed = renderWikiLinks(processed);
-
-  return table + md.render(processed);
+  return table + md.render(body);
 }

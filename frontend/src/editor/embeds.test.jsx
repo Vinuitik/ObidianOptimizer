@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, act, fireEvent } from '@testing-library/react';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { ensureSyntaxTree } from '@codemirror/language';
 import useStore from '../store/useStore';
 import { setPendingBlobs, mediaUrl } from '../utils/media';
 import { embedsExtension, htmlLinksToMarkdown } from './embeds';
@@ -23,6 +25,18 @@ function mk(doc, { editable = false, cursor, opts } = {}) {
     }),
   });
 }
+
+describe('embeds inside code', () => {
+  it('stay raw in fenced and inline code, render elsewhere', () => {
+    const doc = '![[a.png]]\n\n```\n![[b.png]]\n```\n\n`![[c.png]]`';
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    const view = new EditorView({ parent, state: EditorState.create({ doc, selection: { anchor: doc.length }, extensions: [markdown({ base: markdownLanguage }), embedsExtension(), EditorView.editable.of(false)] }) });
+    ensureSyntaxTree(view.state, doc.length, 1000);
+    view.dispatch({});
+    expect([...view.dom.querySelectorAll('img.embedded-image')].map(i => i.alt)).toEqual(['a.png']);
+  });
+});
 
 describe('embed widgets', () => {
   beforeEach(() => setPendingBlobs({}));

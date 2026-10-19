@@ -42,6 +42,17 @@ export function editorTheme() {
     '.cm-md-codeblock-last': { borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px', paddingBottom: 'var(--sp-1)' },
     '.cm-md-fence': { color: 'var(--text-3)', opacity: '0.45', fontSize: '0.75em' },
     '.cm-md-list-mark': { color: 'var(--accent-text)' },
+
+    // `[[` autocomplete popup (wikiLinks.js)
+    '.cm-tooltip': {
+      backgroundColor: 'var(--raised)', border: '1px solid var(--line-strong)',
+      borderRadius: 'var(--r-md)', boxShadow: 'var(--shadow-2)',
+      color: 'var(--text)', fontFamily: 'var(--font-ui)', fontSize: 'var(--fs-14)', overflow: 'hidden',
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-ui)', maxHeight: '16em' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li': { padding: 'var(--sp-1) var(--sp-3)', color: 'var(--text)' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: 'var(--accent-tint)', color: 'var(--accent-text)' },
+    '.cm-completionDetail': { color: 'var(--text-3)', marginLeft: 'var(--sp-2)', fontStyle: 'normal' },
   }, { dark: true });
 }
 

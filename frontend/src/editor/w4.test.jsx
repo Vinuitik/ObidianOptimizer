@@ -10,6 +10,10 @@ import { languages } from '@codemirror/language-data';
 import { livePreviewExtension } from './livePreview';
 import { hashtagsExtension } from './hashtags';
 import { codeBlocksExtension } from './codeBlocks';
+import { mathExtension, findMath } from './math';
+import { tablesExtension } from './tables';
+import { wikiLinksExtension } from './wikiLinks';
+import { embedsExtension } from './embeds';
 import CmEditor, { baseExtensions, detectLineSeparator } from './CmEditor';
 
 const mount = (doc, extra = []) => {
@@ -96,7 +100,7 @@ function bigNote(lines = 5000) {
     out.push(`## Section ${i} #topic${i % 7}`, '', `Paragraph with **bold**, *em*, \`code\`, [link](http://e.com/${i}) and [[Note ${i}]] #tag${i % 5}.`, '',
       '- item one', '- item two with ~~strike~~', '  - nested', '', '> quote line', '',
       '```js', `const x${i} = ${i}; // comment`, 'function f() { return "s"; }', '```', '',
-      '| a | b |', '|---|---|', `| ${i} | y |`, '');
+      '| a | b |', '|---|---|', `| ${i} | y |`, '', `Inline math $x_${i}^2 + y$ and ![[img${i}.png]] done.`, '', '$$', `\\sum_{k=0}^{${i}} k`, '$$', '');
   }
   return out.slice(0, lines).join('\n');
 }
@@ -129,12 +133,49 @@ describe('perf (5k-line note)', () => {
     run('+livePreview', doc, [livePreviewExtension()]);
     run('+hashtags', doc, [hashtagsExtension()]);
     run('+codeBlocks', doc, [codeBlocksExtension()]);
-    const avg = run('all', doc, [livePreviewExtension(), hashtagsExtension(), codeBlocksExtension()]);
+    run('+math', doc, [mathExtension()]);
+    run('+tables', doc, [tablesExtension()]);
+    run('+wiki', doc, [wikiLinksExtension()]);
+    run('+embeds', doc, [embedsExtension()]);
+    const avg = run('all', doc, [livePreviewExtension(), hashtagsExtension(), codeBlocksExtension(), mathExtension(), tablesExtension(), wikiLinksExtension(), embedsExtension()]);
     expect(avg).toBeLessThan(50);
     const a = doc + '', b = (doc + '').slice();
     const s3 = performance.now();
     let n = 0;
     for (let i = 0; i < 1000; i++) if (a !== b) n++;
     console.log(`PERF dirty compare 5k lines: ${((performance.now() - s3) / 1000).toFixed(5)}ms/compare (${n})`);
+  }, 120000);
+});
+
+describe('perf: math field on prose lines (5k-line note)', () => {
+  it('per-keystroke cost with vs without mathExtension, plus one full findMath scan', () => {
+    const doc = bigNote();
+    const typing = (exts) => {
+      const parent = document.createElement('div');
+      document.body.appendChild(parent);
+      const view = new EditorView({ parent, state: EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage, codeLanguages: languages }), ...exts] }) });
+      ensureSyntaxTree(view.state, view.state.doc.length, 20000);
+      view.dispatch({});
+      const prose = [];
+      for (let n = 1; n <= view.state.doc.lines && prose.length < 300; n++) if (view.state.doc.line(n).text.startsWith('Paragraph')) prose.push(n);
+      const times = [];
+      for (const n of prose) {
+        const pos = view.state.doc.line(n).from;
+        const s = performance.now();
+        view.dispatch({ changes: { from: pos, insert: 'x' }, selection: { anchor: pos + 1 } });
+        times.push(performance.now() - s);
+      }
+      view.destroy();
+      return times.reduce((a, b) => a + b, 0) / times.length;
+    };
+    typing([]); // warm up
+    const base = typing([]);
+    const withMath = typing([mathExtension()]);
+    const st = EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage })] });
+    ensureSyntaxTree(st, st.doc.length, 20000);
+    const t0 = performance.now();
+    findMath(st);
+    console.log(`PERF math prose-line keystroke: base=${base.toFixed(2)}ms +math=${withMath.toFixed(2)}ms; full findMath scan=${(performance.now() - t0).toFixed(1)}ms`);
+    expect(withMath - base).toBeLessThan(10); // loose: CI noise; real delta is ~0 (see PERF log)
   }, 120000);
 });

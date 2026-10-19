@@ -1,8 +1,7 @@
 // [[wiki-links]] for CM6: decorations (brackets hidden off the active line), `[[` autocomplete,
 // click / Ctrl+click navigation. Unclosed `[[foo` stays plain text. `![[embed]]` is skipped (W2).
 import { Decoration, ViewPlugin, EditorView } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
-import { syntaxTree } from '@codemirror/language';
+import { inCode } from './inCode';
 import { autocompletion } from '@codemirror/autocomplete';
 import useStore from '../store/useStore';
 import { searchWithFallback } from '../utils/useSearch';
@@ -14,12 +13,6 @@ const wikiMark = (target) => Decoration.mark({
   class: 'wiki-link', attributes: { 'data-wiki-link': target },
 });
 
-function inCode(state, pos) {
-  for (let n = syntaxTree(state).resolveInner(pos, 1); n; n = n.parent) {
-    if (/Code/.test(n.name)) return true;
-  }
-  return false;
-}
 
 function build(view) {
   const { state } = view;
@@ -49,7 +42,12 @@ function build(view) {
         const isActive = active.has(line.number);
         const innerFrom = s + 2;
         const innerTo = e - 2;
-        const textFrom = isActive || m[2] == null ? innerFrom : innerFrom + m[1].length + 1;
+        // Off the active line: alias -> show alias only; no alias -> show basename only.
+        let textFrom = innerFrom;
+        if (!isActive) {
+          if (m[2] != null) textFrom = innerFrom + m[1].length + 1;
+          else { const slash = Math.max(m[1].lastIndexOf('/'), m[1].lastIndexOf('\\')); if (slash >= 0) textFrom = innerFrom + slash + 1; }
+        }
         all.push(wikiMark(target).range(textFrom, innerTo));
         if (!isActive) {
           for (const r of [hide.range(s, textFrom), hide.range(innerTo, e)]) { all.push(r); atomic.push(r); }
@@ -138,7 +136,8 @@ export function wikiLinksExtension(opts = {}) {
   return [
     plugin,
     EditorView.domEventHandlers({ click: clickHandler(opts) }),
-    autocompletion({ icons: false }),
-    EditorState.languageData.of(() => [{ autocomplete: wikiCompletionSource() }]),
+    // `override` with ONE stable source function: a languageData factory returning a fresh
+    // function per call made CM treat every transaction as a new source and drop each result.
+    autocompletion({ icons: false, override: [wikiCompletionSource()] }),
   ];
 }

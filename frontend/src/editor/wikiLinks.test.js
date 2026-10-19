@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { EditorState } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { CompletionContext } from '@codemirror/autocomplete';
+import { CompletionContext, completionStatus } from '@codemirror/autocomplete';
 
 vi.mock('../api/notes', () => {
   class ApiError extends Error { constructor(status) { super(String(status)); this.status = status; } }
@@ -37,6 +37,15 @@ describe('wiki-link decorations', () => {
     expect(links.map(l => l.textContent)).toEqual(['Foo', 'the bar']);
     expect(links.map(l => l.getAttribute('data-wiki-link'))).toEqual(['Foo', 'Bar']);
     expect(view.dom.querySelector('.cm-line:nth-child(2)').textContent).toBe('Foo and the bar');
+  });
+
+  it('no alias: shows basename only off the cursor line, full path on it', () => {
+    const view = mount('x\n[[dir/sub/Note]] end', 0);
+    const line = () => view.dom.querySelector('.cm-line:nth-child(2)').textContent;
+    expect(line()).toBe('Note end');
+    expect(view.dom.querySelector('.wiki-link').getAttribute('data-wiki-link')).toBe('dir/sub/Note');
+    view.dispatch({ selection: { anchor: 4 } });
+    expect(line()).toBe('[[dir/sub/Note]] end');
   });
 
   it('reveals brackets and alias target on the active line', () => {
@@ -124,7 +133,30 @@ describe('markdown rule', () => {
     const html = renderMarkdown('[[A b]] [[T|al]] ![[pic.png]] [[open');
     expect(html).toContain('<span class="wiki-link" data-wiki-link="A b">A b</span>');
     expect(html).toContain('<span class="wiki-link" data-wiki-link="T">al</span>');
-    expect(html).toContain('/api/images/pic.png');
+    expect(html).toContain('/vault-media/images/pic.png');
     expect(html).toContain('[[open');
+  });
+});
+
+describe('[[ popup keyboard (real autocompletion config)', () => {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const until = async (fn) => { for (let i = 0; i < 60 && !fn(); i++) await sleep(50); };
+  const key = (view, k) => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  it('ArrowDown + Enter picks the second suggestion; Escape closes', async () => {
+    searchNotes.mockResolvedValue([{ notePath: 'One.md', snippet: '' }, { notePath: 'Two.md', snippet: '' }]);
+    const view = mount('[[o', 3);
+    view.focus();
+    view.dispatch({ changes: { from: 3, insert: 'n' }, selection: { anchor: 4 }, userEvent: 'input.type' });
+    await until(() => completionStatus(view.state) === 'active');
+    expect(completionStatus(view.state)).toBe('active');
+    expect(view.dom.querySelector('.cm-tooltip-autocomplete')).toBeTruthy();
+    await sleep(120);
+    key(view, 'ArrowDown');
+    key(view, 'Enter');
+    expect(view.state.doc.toString()).toBe('[[Two]]');
+    view.dispatch({ changes: { from: 7, insert: ' [[x' }, selection: { anchor: 11 }, userEvent: 'input.type' });
+    await until(() => completionStatus(view.state) === 'active');
+    key(view, 'Escape');
+    expect(completionStatus(view.state)).toBe(null);
   });
 });
