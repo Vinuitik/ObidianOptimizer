@@ -7,7 +7,6 @@ import com.obsidian.obsidian.common.PipelineFailureRepository;
 import com.obsidian.obsidian.common.RabbitQueueConfig;
 import com.obsidian.obsidian.notes.FileRepository;
 import com.obsidian.obsidian.settings.SettingsRepository;
-import com.obsidian.obsidian.tracks.TrackRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -73,7 +72,6 @@ public class CaptureController {
     private final CaptureRepository captureRepo;
     private final CaptureIngestWorker ingestWorker;
     private final SettingsRepository settingsRepo;
-    private final TrackRepository trackRepo;
     private final OutboxRepository outboxRepo;
     private final PipelineFailureRepository pipelineFailureRepo;
     private final TransactionTemplate txTemplate;
@@ -91,29 +89,16 @@ public class CaptureController {
 
     public CaptureController(FileRepository repository, CaptureRepository captureRepo,
                              CaptureIngestWorker ingestWorker, SettingsRepository settingsRepo,
-                             TrackRepository trackRepo, OutboxRepository outboxRepo,
+                             OutboxRepository outboxRepo,
                              PipelineFailureRepository pipelineFailureRepo,
                              PlatformTransactionManager txManager) {
         this.repository = repository;
         this.captureRepo = captureRepo;
         this.ingestWorker = ingestWorker;
         this.settingsRepo = settingsRepo;
-        this.trackRepo = trackRepo;
         this.outboxRepo = outboxRepo;
         this.pipelineFailureRepo = pipelineFailureRepo;
         this.txTemplate = new TransactionTemplate(txManager);
-    }
-
-    /** Resolve the Learning Track a fresh capture should tag its resulting notes into
-     *  (tracks/FLOWS.md Phase 1b): an explicit trackId wins; a non-blank newTrackTitle
-     *  creates the track on the fly (source='manual', same as the Tracks UI) and uses its
-     *  id. Neither set → null (today's exact untagged behavior). */
-    private Long resolveTrackId(Long trackId, String newTrackTitle, String newTrackType) {
-        if (newTrackTitle != null && !newTrackTitle.isBlank()) {
-            String type = (newTrackType == null || newTrackType.isBlank()) ? "custom" : newTrackType.trim();
-            return trackRepo.create(newTrackTitle.trim(), type, "manual").id();
-        }
-        return trackId;
     }
 
     // ── Capture ────────────────────────────────────────────────────────────────
@@ -130,8 +115,7 @@ public class CaptureController {
             return capturePlaylist(url.trim());
         }
         try {
-            String captureId = enqueueCapture(url, text, body.title(),
-                body.trackId(), body.newTrackTitle(), body.newTrackType());
+            String captureId = enqueueCapture(url, text, body.title());
             return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
         } catch (DuplicateCaptureException e) {
             log.info("[Capture] duplicate ignored: {}", e.getMessage());
@@ -156,8 +140,7 @@ public class CaptureController {
      *  created); any other exception marks the just-created row "failed" before rethrowing,
      *  so a mailbox-drain failure doesn't leave a capture silently stuck "processing"
      *  forever. */
-    public String enqueueCapture(String url, String text, String title, Long trackId,
-                                 String newTrackTitle, String newTrackType) throws Exception {
+    public String enqueueCapture(String url, String text, String title) throws Exception {
         boolean hasText = text != null && !text.isBlank();
         if ((url == null || url.isBlank()) && !hasText) {
             throw new IllegalArgumentException("url or text required");
@@ -168,7 +151,6 @@ public class CaptureController {
 
         String captureId = UUID.randomUUID().toString().substring(0, 12);
         try {
-            Long resolvedTrackId = resolveTrackId(trackId, newTrackTitle, newTrackType);
             // Persist the resource into the durable ingest queue, then nudge the worker.
             // Enqueue-and-drain (not fire-and-forget HTTP) means a resource captured while
             // the embedder is down survives a restart and is submitted once it returns —
@@ -184,7 +166,6 @@ public class CaptureController {
                 String ref = url.trim();
                 enqueueAndPublish(captureId, classifyUrl(ref), ref, null, ref);
             }
-            if (resolvedTrackId != null) captureRepo.setTrackId(captureId, resolvedTrackId);
             ingestWorker.nudge();
             log.info("[Capture] enqueued {} ({})", captureId, hasText ? "text" : url);
             return captureId;
@@ -314,16 +295,13 @@ public class CaptureController {
     @PostMapping("capture/file")
     public ResponseEntity<Map<String, Object>> captureFile(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "title", required = false) String title,
-            @RequestParam(value = "trackId", required = false) Long trackId,
-            @RequestParam(value = "newTrackTitle", required = false) String newTrackTitle,
-            @RequestParam(value = "newTrackType", required = false) String newTrackType) {
+            @RequestParam(value = "title", required = false) String title) {
         if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "file required"));
         }
         try {
             String captureId = captureFileBytes(file.getBytes(), file.getOriginalFilename(),
-                title, trackId, newTrackTitle, newTrackType);
+                title);
             return ResponseEntity.ok(Map.of("status", "queued", "captureId", captureId));
         } catch (UnsupportedFileTypeException e) {
             return ResponseEntity.status(415).body(Map.of(
@@ -338,8 +316,7 @@ public class CaptureController {
     /** Same as the {@code capture/file} HTTP handler, callable directly — used by
      *  MailboxConsumeService to replay a captureFile event pushed to Drive (base64) because
      *  the phone was online but the SERVER was unreachable at share time. @return captureId. */
-    public String captureFileBytes(byte[] bytes, String filename, String title,
-            Long trackId, String newTrackTitle, String newTrackType) throws Exception {
+    public String captureFileBytes(byte[] bytes, String filename, String title) throws Exception {
         String ext = fileExt(filename);
         String sourceType = classifyFile(ext);
         if (sourceType == null) throw new UnsupportedFileTypeException(ext);
@@ -352,8 +329,6 @@ public class CaptureController {
             String display = (title != null && !title.isBlank()) ? title.trim()
                 : (filename != null && !filename.isBlank() ? filename : sourcePath);
             enqueueAndPublish(captureId, sourceType, sourcePath, sourcePath, display);
-            Long resolvedTrackId = resolveTrackId(trackId, newTrackTitle, newTrackType);
-            if (resolvedTrackId != null) captureRepo.setTrackId(captureId, resolvedTrackId);
             ingestWorker.nudge();
             log.info("[Capture] enqueued file {} ({}, {} bytes)", captureId, sourceType, bytes.length);
             return captureId;
@@ -562,11 +537,7 @@ public class CaptureController {
         return out;
     }
 
-    // trackId tags the resulting note(s) to an existing Learning Track; newTrackTitle
-    // (with optional newTrackType) creates the track on the fly instead — see
-    // resolveTrackId(). Both null/blank ⇒ today's exact untagged behavior.
-    public record CaptureRequest(String url, String text, String title,
-                                 Long trackId, String newTrackTitle, String newTrackType) {}
+    public record CaptureRequest(String url, String text, String title) {}
 
     public record DownloadRequest(String url) {}
 }

@@ -231,16 +231,12 @@ public class MailboxConsumeService {
      *  it'll always be "already captured"; here it's just already-applied, so it's dropped
      *  the same way a truly-committed event is. */
     private void applyCapture(JsonNode ev) throws Exception {
-        JsonNode trackOpts = ev.path("trackOpts");
-        Long trackId = trackOpts.hasNonNull("trackId") ? trackOpts.get("trackId").asLong() : null;
-        String newTrackTitle = trackOpts.hasNonNull("newTrackTitle") ? trackOpts.get("newTrackTitle").asText() : null;
-        String newTrackType  = trackOpts.hasNonNull("newTrackType")  ? trackOpts.get("newTrackType").asText()  : null;
         boolean isText = "captureText".equals(ev.path("kind").asText(""));
         String url   = isText ? null : ev.path("url").asText(null);
         String text  = isText ? ev.path("text").asText(null) : null;
         String title = ev.hasNonNull("title") ? ev.path("title").asText() : null;
         try {
-            captureController.enqueueCapture(url, text, title, trackId, newTrackTitle, newTrackType);
+            captureController.enqueueCapture(url, text, title);
         } catch (CaptureController.DuplicateCaptureException e) {
             log.info("[Mailbox] capture already in pipeline, treating as consumed: {}", e.getMessage());
         }
@@ -258,14 +254,10 @@ public class MailboxConsumeService {
                 ev.path("filename").asText(""), bytes.length, mailboxFileMaxBytes);
             return;
         }
-        JsonNode trackOpts = ev.path("trackOpts");
-        Long trackId = trackOpts.hasNonNull("trackId") ? trackOpts.get("trackId").asLong() : null;
-        String newTrackTitle = trackOpts.hasNonNull("newTrackTitle") ? trackOpts.get("newTrackTitle").asText() : null;
-        String newTrackType  = trackOpts.hasNonNull("newTrackType")  ? trackOpts.get("newTrackType").asText()  : null;
         String filename = ev.path("filename").asText("shared");
         String title = ev.hasNonNull("title") ? ev.path("title").asText() : null;
         try {
-            captureController.captureFileBytes(bytes, filename, title, trackId, newTrackTitle, newTrackType);
+            captureController.captureFileBytes(bytes, filename, title);
         } catch (CaptureController.UnsupportedFileTypeException e) {
             log.warn("[Mailbox] captureFile {} unsupported type, dropping: {}", filename, e.getMessage());
         }
