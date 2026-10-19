@@ -69,9 +69,9 @@ public class DbBackupService {
 
     /** pg_dump → encrypt → upload to _db/ → prune to `keep`. Best-effort file drain first
      *  so the dump ≈ what's on Drive. Meant to run on the sync lane (single-flight). */
-    public void backupNow() {
-        if (!encryptionService.isConfigured()) { log.warn("[DbBackup] encryption not configured — skipping"); return; }
-        if (!driveService.isConfigured())      { log.warn("[DbBackup] Drive not configured — skipping"); return; }
+    public void backupNow(long vaultId) {
+        if (!encryptionService.isConfigured(vaultId)) { log.warn("[DbBackup] encryption not configured — skipping"); return; }
+        if (!driveService.isConfigured(vaultId))      { log.warn("[DbBackup] Drive not configured — skipping"); return; }
 
         backupRunning = true;
         Path tmp = null;
@@ -85,12 +85,12 @@ public class DbBackupService {
             runPg(List.of("pg_dump", "-Fc", "-h", db.host, "-p", db.port,
                           "-U", dbUser, "-d", db.name, "-f", tmp.toString()), "pg_dump");
 
-            byte[] enc = encryptionService.encrypt(Files.readAllBytes(tmp));
+            byte[] enc = encryptionService.encrypt(vaultId, Files.readAllBytes(tmp));
             String name = "obsidian-db-" + TS.format(ZonedDateTime.now(ZoneOffset.UTC)) + ".pgdump.enc";
-            String id = driveService.uploadDbBackup(enc, name, serverVersion(), deviceIdentityService.getDeviceId());
+            String id = driveService.uploadDbBackup(vaultId, enc, name, serverVersion(), deviceIdentityService.getDeviceId(vaultId));
             log.info("[DbBackup] uploaded {} ({} bytes encrypted, driveId={})", name, enc.length, id);
 
-            prune();
+            prune(vaultId);
         } catch (Exception e) {
             log.error("[DbBackup] backup failed: {}", e.getMessage());
             throw new RuntimeException(e);
@@ -101,11 +101,11 @@ public class DbBackupService {
     }
 
     /** Keep only the newest `keep` dumps; hard-delete the rest. */
-    private void prune() throws IOException {
-        List<DbBackupInfo> all = driveService.listDbBackups(); // newest first
+    private void prune(long vaultId) throws IOException {
+        List<DbBackupInfo> all = driveService.listDbBackups(vaultId); // newest first
         for (int i = keep; i < all.size(); i++) {
             try {
-                driveService.deleteDbBackup(all.get(i).fileId());
+                driveService.deleteDbBackup(vaultId, all.get(i).fileId());
                 log.info("[DbBackup] pruned old dump {}", all.get(i).name());
             } catch (Exception e) {
                 log.warn("[DbBackup] prune failed for {}: {}", all.get(i).name(), e.getMessage());
@@ -120,22 +120,22 @@ public class DbBackupService {
      * Guarded: refuses on a non-empty DB unless {@code force} (restore is destructive —
      * pg_restore --clean drops existing objects). Meant to run on the sync lane.
      */
-    public void restore(boolean force) {
-        if (!encryptionService.isConfigured()) throw new IllegalStateException("Encryption passphrase not set — set it before restoring");
-        if (!driveService.isConfigured())      throw new IllegalStateException("Google Drive not connected");
+    public void restore(long vaultId, boolean force) {
+        if (!encryptionService.isConfigured(vaultId)) throw new IllegalStateException("Encryption passphrase not set — set it before restoring");
+        if (!driveService.isConfigured(vaultId))      throw new IllegalStateException("Google Drive not connected");
         if (!force && !isDbEmpty())            throw new IllegalStateException("Database is not empty — pass force=true to overwrite");
 
         restoring = true;
         Path tmp = null;
         try {
             restorePhase = "locating backup";
-            Optional<DbBackupInfo> latest = driveService.latestDbBackup();
+            Optional<DbBackupInfo> latest = driveService.latestDbBackup(vaultId);
             if (latest.isEmpty()) throw new IllegalStateException("No DB backup found in Drive _db/");
             DbBackupInfo backup = latest.get();
 
             restorePhase = "downloading";
-            byte[] enc = driveService.downloadFile(backup.fileId());
-            byte[] dump = encryptionService.decrypt(enc);
+            byte[] enc = driveService.downloadFile(vaultId, backup.fileId());
+            byte[] dump = encryptionService.decrypt(vaultId, enc);
             tmp = Files.createTempFile("obsidian-restore", ".pgdump");
             Files.write(tmp, dump);
             log.info("[DbBackup] restoring from {} ({} bytes)", backup.name(), dump.length);
@@ -147,8 +147,8 @@ public class DbBackupService {
                           tmp.toString()), "pg_restore");
 
             restorePhase = "materializing vault files";
-            encryptionService.reload();               // passphrase may live in restored settings
-            int files = syncService.downloadAllQuiet();
+            encryptionService.reload(vaultId);               // passphrase may live in restored settings
+            int files = syncService.downloadAllQuiet(vaultId);
             log.info("[DbBackup] restore complete — {} vault file(s) materialized. Restart recommended.", files);
             restorePhase = "done — restart recommended";
         } catch (Exception e) {
@@ -162,12 +162,12 @@ public class DbBackupService {
     }
 
     /** Null if a restore may proceed now, else a human-readable reason (for a synchronous 400). */
-    public String restoreBlockedReason(boolean force) {
-        if (!encryptionService.isConfigured()) return "Encryption passphrase not set — set it first";
-        if (!driveService.isConfigured())      return "Google Drive not connected";
+    public String restoreBlockedReason(long vaultId, boolean force) {
+        if (!encryptionService.isConfigured(vaultId)) return "Encryption passphrase not set — set it first";
+        if (!driveService.isConfigured(vaultId))      return "Google Drive not connected";
         if (!force && !isDbEmpty())            return "Database is not empty — confirm to overwrite";
         try {
-            if (driveService.latestDbBackup().isEmpty()) return "No DB backup found in Drive";
+            if (driveService.latestDbBackup(vaultId).isEmpty()) return "No DB backup found in Drive";
         } catch (Exception e) {
             return "Could not reach Drive: " + e.getMessage();
         }
@@ -186,7 +186,7 @@ public class DbBackupService {
     }
 
     /** Fields merged into GET /sync/status. */
-    public Map<String, Object> statusFragment() {
+    public Map<String, Object> statusFragment(long vaultId) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("dbEmpty",       isDbEmpty());
         m.put("dbBackupRunning", backupRunning);
@@ -194,7 +194,7 @@ public class DbBackupService {
         m.put("dbRestorePhase", restorePhase);
         Map<String, Object> backup = new LinkedHashMap<>();
         try {
-            List<DbBackupInfo> all = driveService.isConfigured() ? driveService.listDbBackups() : List.of();
+            List<DbBackupInfo> all = driveService.isConfigured(vaultId) ? driveService.listDbBackups(vaultId) : List.of();
             backup.put("exists", !all.isEmpty());
             backup.put("count",  all.size());
             if (!all.isEmpty()) {

@@ -47,7 +47,7 @@ class FileRepositoryPatchTest {
         doNothing().when(noteLinkRepo).updateLinks(org.mockito.ArgumentMatchers.eq(1L), anyString(), any());
         // requireInsideVault needs a vault root — init() against the temp dir
         activeVault.set(1L, java.nio.file.Path.of(tmp.toString()));
-        org.mockito.Mockito.when(settingsRepo.getStartupSyncMode()).thenReturn("blocking");
+        org.mockito.Mockito.when(settingsRepo.getStartupSyncMode(1L)).thenReturn("blocking");
         repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex, imageScanService, syncQueueRepo, activeVault);
         repo.init();
     }

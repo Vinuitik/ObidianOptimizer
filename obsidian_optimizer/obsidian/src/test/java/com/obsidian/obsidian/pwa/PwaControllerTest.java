@@ -33,7 +33,7 @@ class PwaControllerTest {
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.standaloneSetup(
-            new PwaController(settings, deviceIdentity, offlineExport, mailboxConsume)).build();
+            new PwaController(settings, deviceIdentity, offlineExport, mailboxConsume, com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault")))).build();
     }
 
     @Test

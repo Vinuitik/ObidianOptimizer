@@ -28,33 +28,33 @@ class DeviceIdentityServiceTest {
 
     @Test
     void getDeviceId_returnsStoredValue_withoutRecomputing() {
-        when(settingsRepo.getOrDefault("sync.device_id", "")).thenReturn("already-assigned-id");
+        when(settingsRepo.getForVault(1L, "sync.device_id", "")).thenReturn("already-assigned-id");
 
-        String id = service.getDeviceId();
+        String id = service.getDeviceId(1L);
 
         assertThat(id).isEqualTo("already-assigned-id");
-        verify(settingsRepo, never()).set(anyString(), anyString());
+        verify(settingsRepo, never()).setForVault(org.mockito.ArgumentMatchers.anyLong(), anyString(), anyString());
     }
 
     @Test
     void getDeviceId_firstCall_computesAndPersistsExactlyOnce() {
-        when(settingsRepo.getOrDefault("sync.device_id", "")).thenReturn("");
+        when(settingsRepo.getForVault(1L, "sync.device_id", "")).thenReturn("");
 
-        String id = service.getDeviceId();
+        String id = service.getDeviceId(1L);
 
         assertThat(id).isNotBlank();
         assertThat(id).hasSize(16); // sha256(...).substring(0, 16)
-        verify(settingsRepo).set(eq("sync.device_id"), eq(id));
+        verify(settingsRepo).setForVault(eq(1L), eq("sync.device_id"), eq(id));
     }
 
     @Test
     void getDeviceId_isDeterministic_sameMachineProducesSameIdAcrossInstances() {
-        when(settingsRepo.getOrDefault("sync.device_id", "")).thenReturn("");
-        String first = service.getDeviceId();
+        when(settingsRepo.getForVault(1L, "sync.device_id", "")).thenReturn("");
+        String first = service.getDeviceId(1L);
 
         SettingsRepository secondRepo = mock(SettingsRepository.class);
-        when(secondRepo.getOrDefault("sync.device_id", "")).thenReturn("");
-        String second = new DeviceIdentityService(secondRepo).getDeviceId();
+        when(secondRepo.getForVault(1L, "sync.device_id", "")).thenReturn("");
+        String second = new DeviceIdentityService(secondRepo).getDeviceId(1L);
 
         // Same host → same MAC/hostname fallback chain → same derived id. If this
         // ever used something per-process-random (e.g. a fresh UUID), the two
@@ -66,10 +66,22 @@ class DeviceIdentityServiceTest {
     void getDeviceId_blankStoredValue_treatedAsUnassigned_recomputes() {
         // SettingsRepository.getOrDefault can return "" for a key that exists but was
         // never set — must not be treated as "already assigned".
-        when(settingsRepo.getOrDefault("sync.device_id", "")).thenReturn("   ");
+        when(settingsRepo.getForVault(1L, "sync.device_id", "")).thenReturn("   ");
 
-        service.getDeviceId();
+        service.getDeviceId(1L);
 
-        verify(settingsRepo).set(eq("sync.device_id"), anyString());
+        verify(settingsRepo).setForVault(eq(1L), eq("sync.device_id"), anyString());
+    }
+
+    @Test
+    void getDeviceId_otherVault_getsItsOwnDistinctId() {
+        when(settingsRepo.getForVault(1L, "sync.device_id", "")).thenReturn("");
+        when(settingsRepo.getForVault(2L, "sync.device_id", "")).thenReturn("");
+
+        String v1 = service.getDeviceId(1L);
+        String v2 = service.getDeviceId(2L);
+
+        assertThat(v2).hasSize(16).isNotEqualTo(v1);
+        verify(settingsRepo).setForVault(eq(2L), eq("sync.device_id"), eq(v2));
     }
 }

@@ -38,8 +38,12 @@ public class PwaController {
     private final OfflineExportService offlineExport;
     private final MailboxConsumeService mailboxConsume;
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     public PwaController(SettingsRepository settings, DeviceIdentityService deviceIdentity,
-                         OfflineExportService offlineExport, MailboxConsumeService mailboxConsume) {
+                         OfflineExportService offlineExport, MailboxConsumeService mailboxConsume,
+                         com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.settings = settings;
         this.deviceIdentity = deviceIdentity;
         this.offlineExport = offlineExport;
@@ -64,9 +68,10 @@ public class PwaController {
     public ResponseEntity<?> setup() {
         String clientId     = settings.getSyncClientId();
         String clientSecret = settings.getSyncClientSecret();
-        String refreshToken = settings.getSyncRefreshToken();
-        String passphrase   = settings.getSyncPassphrase();
-        String folderId     = settings.getSyncDriveFolderId();
+        long vid = activeVault.id();     // the phone links to the active vault's Drive folder
+        String refreshToken = settings.getSyncRefreshToken(vid);
+        String passphrase   = settings.getSyncPassphrase(vid);
+        String folderId     = settings.getSyncDriveFolderId(vid);
 
         if (isBlank(clientId) || isBlank(clientSecret) || isBlank(refreshToken)) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -85,7 +90,7 @@ public class PwaController {
         }
 
         return ResponseEntity.ok(new PwaSetup(
-            clientId, clientSecret, refreshToken, folderId, passphrase, deviceIdentity.getDeviceId()));
+            clientId, clientSecret, refreshToken, folderId, passphrase, deviceIdentity.getDeviceId(vid)));
     }
 
     /** "Prep offline set" — rebuild ALL THREE encrypted bundles on Drive now (review, cards,

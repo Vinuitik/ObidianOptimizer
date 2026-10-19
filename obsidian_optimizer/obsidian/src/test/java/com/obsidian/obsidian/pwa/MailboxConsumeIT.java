@@ -103,7 +103,7 @@ class MailboxConsumeIT {
 
     @BeforeEach
     void driveUp() {
-        when(drive.isConfigured()).thenReturn(true);
+        when(drive.isConfigured(1L)).thenReturn(true);
     }
 
     @AfterEach
@@ -155,10 +155,10 @@ class MailboxConsumeIT {
 
     /** Encrypt a phone-shaped mailbox envelope and serve it as the only Drive file. */
     private void stageMailbox(String json) throws Exception {
-        byte[] enc = encryption.encrypt(json.getBytes());
-        when(drive.listMailbox()).thenReturn(
+        byte[] enc = encryption.encrypt(1L, json.getBytes());
+        when(drive.listMailbox(1L)).thenReturn(
             new ArrayList<>(List.of(new MailboxFile("f1", "1700000000-phone.enc"))));
-        when(drive.downloadFile("f1")).thenReturn(enc);
+        when(drive.downloadFile(1L, "f1")).thenReturn(enc);
     }
 
     private String gradeEvent(String eventId, String notePath, String band) {
@@ -188,7 +188,7 @@ class MailboxConsumeIT {
         assertThat(rows).isEqualTo(1);
         assertThat(Files.readString(note)).contains("fsrs-s:");
         // hinge: every event committed → the mailbox file is deleted
-        verify(drive).deleteFile("f1");
+        verify(drive).deleteFile(1L, "f1");
         assertThat(ledger.alreadyConsumed("e-1")).isTrue();
         // The phone's next pull must reflect this grade — and, since a drain can apply any
         // mix of grade/assignment/file/discard/acknowledge events, ALL THREE bundles get
@@ -214,7 +214,7 @@ class MailboxConsumeIT {
 
         assertThat(replayApplied).isZero();
         assertThat(Files.readString(note)).isEqualTo(stateAfterFirst); // no double-grade
-        verify(drive, times(2)).deleteFile("f1"); // fully-skipped file still cleans up
+        verify(drive, times(2)).deleteFile(1L, "f1"); // fully-skipped file still cleans up
     }
 
     // ── partial failure: file survives, committed events don't reapply ───────
@@ -231,7 +231,7 @@ class MailboxConsumeIT {
         int applied = consume.consumeAll();
 
         assertThat(applied).isEqualTo(1);                    // good event committed
-        verify(drive, never()).deleteFile(anyString());      // bad event → file retained
+        verify(drive, never()).deleteFile(org.mockito.ArgumentMatchers.eq(1L), anyString());      // bad event → file retained
         assertThat(ledger.alreadyConsumed("e-good")).isTrue();
         assertThat(ledger.alreadyConsumed("e-bad")).isFalse();
 
@@ -240,7 +240,7 @@ class MailboxConsumeIT {
         stageMailbox(envelope(gradeEvent("e-good", good.toString(), "EASY"), bad));
         assertThat(consume.consumeAll()).isZero();
         assertThat(Files.readString(good)).isEqualTo(stateAfterFirst);
-        verify(drive, never()).deleteFile(anyString());      // still looping — the known P6 gap
+        verify(drive, never()).deleteFile(org.mockito.ArgumentMatchers.eq(1L), anyString());      // still looping — the known P6 gap
     }
 
     // ── forward compatibility: unknown kinds preserve the file ───────────────
@@ -255,7 +255,7 @@ class MailboxConsumeIT {
         int applied = consume.consumeAll();
 
         assertThat(applied).isZero();
-        verify(drive, never()).deleteFile(anyString());
+        verify(drive, never()).deleteFile(org.mockito.ArgumentMatchers.eq(1L), anyString());
         assertThat(ledger.alreadyConsumed("e-future")).isFalse();
     }
 
@@ -264,7 +264,7 @@ class MailboxConsumeIT {
         stageMailbox("{\"deviceId\":\"phone\",\"nope\":true}");
 
         assertThat(consume.consumeAll()).isZero();
-        verify(drive).deleteFile("f1"); // junk is not retried forever
+        verify(drive).deleteFile(1L, "f1"); // junk is not retried forever
     }
 
     // ── P5 kinds: inbox triage rides the same pipe ───────────────────────────
@@ -302,7 +302,7 @@ class MailboxConsumeIT {
         assertThat(VAULT.resolve("Topic/FromPhone.md")).exists();
         assertThat(staged).doesNotExist();
         assertThat(captureRepo.get("cap-mb").status()).isEqualTo("filed");
-        verify(drive).deleteFile("f1");
+        verify(drive).deleteFile(1L, "f1");
     }
 
     // ── capture/captureText: the Drive-mailbox plan-B for online-but-server-down ─────
@@ -319,7 +319,7 @@ class MailboxConsumeIT {
 
         assertThat(applied).isEqualTo(1);
         assertThat(captureRepo.existsLiveForSource(1L, url)).isTrue();
-        verify(drive).deleteFile("f1");
+        verify(drive).deleteFile(1L, "f1");
         assertThat(ledger.alreadyConsumed("e-cap")).isTrue();
         verify(captureIngestWorker, times(1)).nudge();
     }
@@ -334,7 +334,7 @@ class MailboxConsumeIT {
         int applied = consume.consumeAll();
 
         assertThat(applied).isEqualTo(1);
-        verify(drive).deleteFile("f1");
+        verify(drive).deleteFile(1L, "f1");
         assertThat(ledger.alreadyConsumed("e-cap-text")).isTrue();
     }
 
@@ -356,7 +356,7 @@ class MailboxConsumeIT {
         // switch completes normally — it's counted as committed (applied), the file is
         // deleted, and the eventId is marked so it isn't retried forever.
         assertThat(applied).isEqualTo(1);
-        verify(drive).deleteFile("f1");
+        verify(drive).deleteFile(1L, "f1");
         assertThat(ledger.alreadyConsumed("e-cap-dup")).isTrue();
     }
 
@@ -375,7 +375,7 @@ class MailboxConsumeIT {
         assertThat(applied).isEqualTo(1);
         assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("accepted");
         assertThat(feedRepo.get(1L, itemId).captureId()).isNotNull();
-        verify(drive).deleteFile("f1");
+        verify(drive).deleteFile(1L, "f1");
         assertThat(ledger.alreadyConsumed("e-fa")).isTrue();
     }
 
@@ -408,7 +408,7 @@ class MailboxConsumeIT {
 
         assertThat(consume.consumeAll()).isEqualTo(1);
         assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("binned");
-        verify(drive).deleteFile("f1");
+        verify(drive).deleteFile(1L, "f1");
 
         stageMailbox(envelope(ev));
         assertThat(consume.consumeAll()).isZero(); // eventId already consumed
@@ -428,7 +428,7 @@ class MailboxConsumeIT {
 
         assertThat(applied).isEqualTo(1);
         assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("pending");
-        verify(drive).deleteFile("f1");
+        verify(drive).deleteFile(1L, "f1");
     }
 
     // A restore queued offline AFTER the server already let the ingest worker claim the
@@ -450,7 +450,7 @@ class MailboxConsumeIT {
 
         assertThat(applied).isZero();
         assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("accepted");
-        verify(drive, never()).deleteFile(anyString());
+        verify(drive, never()).deleteFile(org.mockito.ArgumentMatchers.eq(1L), anyString());
         assertThat(ledger.alreadyConsumed("e-fr-409")).isFalse();
     }
 }

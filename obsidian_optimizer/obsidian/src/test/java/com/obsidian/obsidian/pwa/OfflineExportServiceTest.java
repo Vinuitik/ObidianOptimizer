@@ -49,9 +49,9 @@ class OfflineExportServiceTest {
      *  passphrase is the way to get a real, working instance. */
     private static VaultEncryptionService realEncryption(String passphrase) {
         SettingsRepository settings = mock(SettingsRepository.class);
-        when(settings.getSyncPassphrase()).thenReturn(passphrase);
+        when(settings.getSyncPassphrase(1L)).thenReturn(passphrase);
         VaultEncryptionService s = new VaultEncryptionService(settings);
-        s.init();
+        s.reload(1L);
         return s;
     }
 
@@ -66,7 +66,7 @@ class OfflineExportServiceTest {
         encryption = realEncryption("offline-export-test-passphrase");
         service = new OfflineExportService(fileRepo, encryption, drive, assignmentService, inbox,
             settingsRepo, feedRepo, activeVault);
-        when(drive.isConfigured()).thenReturn(true);
+        when(drive.isConfigured(1L)).thenReturn(true);
     }
 
     @Test
@@ -82,9 +82,9 @@ class OfflineExportServiceTest {
 
         assertThat(count).isEqualTo(2);
         ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
-        verify(drive).uploadOffline(eq("feed.json.enc"), captor.capture());
+        verify(drive).uploadOffline(eq(1L), eq("feed.json.enc"), captor.capture());
 
-        byte[] decrypted = encryption.decrypt(captor.getValue());
+        byte[] decrypted = encryption.decrypt(1L, captor.getValue());
         JsonNode bundle = mapper.readTree(decrypted);
         assertThat(bundle.get("generatedAt").asLong()).isGreaterThan(0);
         JsonNode items = bundle.get("items");
@@ -112,7 +112,7 @@ class OfflineExportServiceTest {
 
     @Test
     void exportFeed_driveNotConnected_throwsAndNeverTouchesFeedRepo() {
-        when(drive.isConfigured()).thenReturn(false);
+        when(drive.isConfigured(1L)).thenReturn(false);
 
         assertThatThrownBy(() -> service.exportFeed()).isInstanceOf(IllegalStateException.class);
     }

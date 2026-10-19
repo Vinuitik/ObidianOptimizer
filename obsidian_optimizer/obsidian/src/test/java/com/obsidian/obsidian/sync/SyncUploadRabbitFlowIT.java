@@ -95,7 +95,7 @@ class SyncUploadRabbitFlowIT {
     @BeforeEach
     void cleanState() {
         reset(driveService);
-        when(driveService.isConfigured()).thenReturn(true);
+        when(driveService.isConfigured(1L)).thenReturn(true);
         jdbc.execute("TRUNCATE sync_queue");
         jdbc.execute("TRUNCATE outbox_events");
     }
@@ -121,7 +121,7 @@ class SyncUploadRabbitFlowIT {
         String content = "# hello from the sync-upload fast path";
         String hash = ContentHashing.sha256(content.getBytes(StandardCharsets.UTF_8));
         writeVaultFile("phase6/note.md", content);
-        when(driveService.uploadFile(anyString(), any(), anyString(), anyString(), any()))
+        when(driveService.uploadFile(eq(1L), anyString(), any(), anyString(), anyString(), any()))
             .thenReturn("drive-id-phase6");
 
         syncQueueRepo.markPending(1L, "phase6/note.md", hash);
@@ -133,8 +133,7 @@ class SyncUploadRabbitFlowIT {
 
         SyncEntry done = syncQueueRepo.findByPath(1L, "phase6/note.md");
         assertThat(done.driveFileId()).isEqualTo("drive-id-phase6");
-        org.mockito.Mockito.verify(driveService).uploadFile(
-            eq("phase6/note.md"), any(), eq(hash), anyString(), any());
+        org.mockito.Mockito.verify(driveService).uploadFile(eq(1L), eq("phase6/note.md"), any(), eq(hash), anyString(), any());
     }
 
     @Test
@@ -142,7 +141,7 @@ class SyncUploadRabbitFlowIT {
         String content = "# this upload always fails";
         String hash = ContentHashing.sha256(content.getBytes(StandardCharsets.UTF_8));
         writeVaultFile("phase6/broken.md", content);
-        when(driveService.uploadFile(anyString(), any(), anyString(), anyString(), any()))
+        when(driveService.uploadFile(eq(1L), anyString(), any(), anyString(), anyString(), any()))
             .thenThrow(new IOException("simulated persistent Drive failure"));
 
         syncQueueRepo.markPending(1L, "phase6/broken.md", hash);

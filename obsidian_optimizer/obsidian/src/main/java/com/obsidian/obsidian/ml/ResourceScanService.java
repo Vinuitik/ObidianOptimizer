@@ -79,6 +79,12 @@ public class ResourceScanService {
         appReady = true;
     }
 
+    /** Switch: rescan now for the new vault (claimBatch reads the active vault per pass). */
+    @EventListener
+    public void onVaultSwitched(com.obsidian.obsidian.vaults.VaultSwitchedEvent e) {
+        if (appReady) pollingWorker.tick();
+    }
+
     private record PendingNote(long vaultId, String absPath) {}
 
     private final PollingQueueWorker<PendingNote> pollingWorker;

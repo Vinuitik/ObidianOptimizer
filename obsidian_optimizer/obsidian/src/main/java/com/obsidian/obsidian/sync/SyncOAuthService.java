@@ -48,7 +48,7 @@ public class SyncOAuthService {
     private static final Pattern ORIGIN_OK =
         Pattern.compile("^(https://[^/\\s]+|http://localhost(:\\d+)?|http://127\\.0\\.0\\.1(:\\d+)?)$");
 
-    private record Pending(String state, String redirectUri, long expiresAt) {}
+    private record Pending(String state, String redirectUri, long expiresAt, long vaultId) {}
 
     private final SettingsRepository settingsRepo;
     private final DriveService driveService;
@@ -69,8 +69,8 @@ public class SyncOAuthService {
             && !settingsRepo.getSyncClientSecret().isBlank();
     }
 
-    public boolean isConnected() {
-        return !settingsRepo.getSyncRefreshToken().isBlank();
+    public boolean isConnected(long vaultId) {
+        return !settingsRepo.getSyncRefreshToken(vaultId).isBlank();
     }
 
     /**
@@ -78,7 +78,7 @@ public class SyncOAuthService {
      * {@code window.location.origin}; the derived redirect URI must be registered on
      * the OAuth client in Google Cloud Console.
      */
-    public String buildAuthUrl(String origin) {
+    public String buildAuthUrl(long vaultId, String origin) {
         if (!isClientConfigured()) {
             throw new IllegalStateException("Save the OAuth client id and secret first");
         }
@@ -94,7 +94,7 @@ public class SyncOAuthService {
         byte[] nonce = new byte[16];
         new SecureRandom().nextBytes(nonce);
         String state = HexFormat.of().formatHex(nonce);
-        pending = new Pending(state, redirectUri, System.currentTimeMillis() + STATE_TTL_MS);
+        pending = new Pending(state, redirectUri, System.currentTimeMillis() + STATE_TTL_MS, vaultId);
 
         // access_type=offline + prompt=consent → Google always returns a refresh token.
         return AUTH_ENDPOINT
@@ -130,27 +130,29 @@ public class SyncOAuthService {
             throw new IOException("Google returned no refresh token: " + tokens.path("error_description").asText(tokens.toString()));
         }
 
-        settingsRepo.set("sync.refresh_token", refreshToken);
+        // The token lands in the vault that started the flow (stored in the pending state).
+        long vaultId = p.vaultId();
+        settingsRepo.setForVault(vaultId, "sync.refresh_token", refreshToken);
         // The seeded GOOGLE_DRIVE_FOLDER_ID (service-account era) is NOT visible to this
         // OAuth client under the drive.file scope — keeping it would 404 every upload.
         // Clear it; DriveService auto-creates/finds the app's own root folder instead.
-        settingsRepo.set("sync.drive.folder_id", "");
-        driveService.reset();
+        settingsRepo.setSyncDriveFolderId(vaultId, "");
+        driveService.reset(vaultId);
 
         String email = "";
         try {
-            email = driveService.fetchAccountEmail();
+            email = driveService.fetchAccountEmail(vaultId);
         } catch (Exception e) {
             log.warn("[SyncOAuth] connected but could not read account email: {}", e.getMessage());
         }
-        settingsRepo.set("sync.account_email", email);
+        settingsRepo.setForVault(vaultId, "sync.account_email", email);
         log.info("[SyncOAuth] Google Drive connected{}", email.isBlank() ? "" : " as " + email);
         return email;
     }
 
     /** Revoke (best-effort) and forget the stored token. */
-    public void disconnect() {
-        String token = settingsRepo.getSyncRefreshToken();
+    public void disconnect(long vaultId) {
+        String token = settingsRepo.getSyncRefreshToken(vaultId);
         if (!token.isBlank()) {
             try {
                 postForm(REVOKE_ENDPOINT, "token=" + url(token));
@@ -158,9 +160,9 @@ public class SyncOAuthService {
                 log.warn("[SyncOAuth] revoke failed (token forgotten anyway): {}", e.getMessage());
             }
         }
-        settingsRepo.set("sync.refresh_token", "");
-        settingsRepo.set("sync.account_email", "");
-        driveService.reset();
+        settingsRepo.setForVault(vaultId, "sync.refresh_token", "");
+        settingsRepo.setForVault(vaultId, "sync.account_email", "");
+        driveService.reset(vaultId);
         log.info("[SyncOAuth] Google Drive disconnected");
     }
 
@@ -192,12 +194,12 @@ public class SyncOAuthService {
     }
 
     /** For the status endpoint. */
-    public Map<String, Object> statusFragment() {
+    public Map<String, Object> statusFragment(long vaultId) {
         return Map.of(
-            "mode",             driveService.mode(),
+            "mode",             driveService.mode(vaultId),
             "clientConfigured", isClientConfigured(),
-            "connected",        isConnected(),
-            "accountEmail",     settingsRepo.getSyncAccountEmail()
+            "connected",        isConnected(vaultId),
+            "accountEmail",     settingsRepo.getSyncAccountEmail(vaultId)
         );
     }
 }

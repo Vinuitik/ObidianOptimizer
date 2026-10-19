@@ -19,21 +19,21 @@ class VaultEncryptionServiceTest {
     void setUp() {
         service = new VaultEncryptionService();
         ReflectionTestUtils.setField(service, "passphrase", "correct horse battery staple");
-        service.init();
+        service.reload(1L);
     }
 
     private static VaultEncryptionService withPassphrase(String passphrase) {
         VaultEncryptionService s = new VaultEncryptionService();
         ReflectionTestUtils.setField(s, "passphrase", passphrase);
-        s.init();
+        s.reload(1L);
         return s;
     }
 
     @Test
     void roundTrip_recoversExactPlaintext() throws Exception {
         byte[] plaintext = "# Note\n\nSome content with unicode: ééé 日本語\n".getBytes(StandardCharsets.UTF_8);
-        byte[] encrypted = service.encrypt(plaintext);
-        byte[] decrypted = service.decrypt(encrypted);
+        byte[] encrypted = service.encrypt(1L, plaintext);
+        byte[] decrypted = service.decrypt(1L, encrypted);
         assertThat(decrypted).isEqualTo(plaintext);
     }
 
@@ -41,20 +41,20 @@ class VaultEncryptionServiceTest {
     void roundTrip_binaryContent() throws Exception {
         byte[] plaintext = new byte[4096];
         new java.util.Random(7).nextBytes(plaintext);
-        assertThat(service.decrypt(service.encrypt(plaintext))).isEqualTo(plaintext);
+        assertThat(service.decrypt(1L, service.encrypt(1L, plaintext))).isEqualTo(plaintext);
     }
 
     @Test
     void roundTrip_emptyContent() throws Exception {
         byte[] plaintext = new byte[0];
-        assertThat(service.decrypt(service.encrypt(plaintext))).isEqualTo(plaintext);
+        assertThat(service.decrypt(1L, service.encrypt(1L, plaintext))).isEqualTo(plaintext);
     }
 
     @Test
     void encrypt_producesDifferentCiphertextEachTime_freshIvPerFile() throws Exception {
         byte[] plaintext = "same content".getBytes(StandardCharsets.UTF_8);
-        byte[] first  = service.encrypt(plaintext);
-        byte[] second = service.encrypt(plaintext);
+        byte[] first  = service.encrypt(1L, plaintext);
+        byte[] second = service.encrypt(1L, plaintext);
         assertThat(first).isNotEqualTo(second);
         // IVs (first 12 bytes) must differ — IV reuse breaks GCM completely
         assertThat(Arrays.copyOfRange(first, 0, 12))
@@ -63,25 +63,25 @@ class VaultEncryptionServiceTest {
 
     @Test
     void decrypt_tamperedCiphertext_failsAuthentication() throws Exception {
-        byte[] encrypted = service.encrypt("secret".getBytes(StandardCharsets.UTF_8));
+        byte[] encrypted = service.encrypt(1L, "secret".getBytes(StandardCharsets.UTF_8));
         encrypted[encrypted.length - 1] ^= 0x01; // flip one bit in the auth tag region
-        assertThatThrownBy(() -> service.decrypt(encrypted))
+        assertThatThrownBy(() -> service.decrypt(1L, encrypted))
             .isInstanceOf(AEADBadTagException.class);
     }
 
     @Test
     void decrypt_withWrongPassphrase_failsAuthentication() throws Exception {
-        byte[] encrypted = service.encrypt("secret".getBytes(StandardCharsets.UTF_8));
+        byte[] encrypted = service.encrypt(1L, "secret".getBytes(StandardCharsets.UTF_8));
         VaultEncryptionService other = withPassphrase("wrong passphrase");
-        assertThatThrownBy(() -> other.decrypt(encrypted))
+        assertThatThrownBy(() -> other.decrypt(1L, encrypted))
             .isInstanceOf(AEADBadTagException.class);
     }
 
     @Test
     void samePassphraseOnAnotherDevice_decrypts_fixedSaltCompatibility() throws Exception {
-        byte[] encrypted = service.encrypt("multi-device".getBytes(StandardCharsets.UTF_8));
+        byte[] encrypted = service.encrypt(1L, "multi-device".getBytes(StandardCharsets.UTF_8));
         VaultEncryptionService otherDevice = withPassphrase("correct horse battery staple");
-        assertThat(otherDevice.decrypt(encrypted))
+        assertThat(otherDevice.decrypt(1L, encrypted))
             .isEqualTo("multi-device".getBytes(StandardCharsets.UTF_8));
     }
 
@@ -89,12 +89,12 @@ class VaultEncryptionServiceTest {
     void isConfigured_falseWhenPassphraseBlank() {
         VaultEncryptionService unconfigured = new VaultEncryptionService();
         ReflectionTestUtils.setField(unconfigured, "passphrase", "");
-        unconfigured.init();
-        assertThat(unconfigured.isConfigured()).isFalse();
+        unconfigured.reload(1L);
+        assertThat(unconfigured.isConfigured(1L)).isFalse();
     }
 
     @Test
     void isConfigured_trueAfterInit() {
-        assertThat(service.isConfigured()).isTrue();
+        assertThat(service.isConfigured(1L)).isTrue();
     }
 }

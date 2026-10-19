@@ -76,8 +76,9 @@ public class OfflineExportService {
 
     /** Build + encrypt + upload the due-notes bundle. Returns the note count. */
     public int exportReviewBundle(int limit) throws Exception {
-        if (!drive.isConfigured())      throw new IllegalStateException("Drive not connected");
-        if (!encryption.isConfigured()) throw new IllegalStateException("Sync passphrase not set");
+        final long vid = activeVault.id();
+        if (!drive.isConfigured(vid))      throw new IllegalStateException("Drive not connected");
+        if (!encryption.isConfigured(vid)) throw new IllegalStateException("Sync passphrase not set");
 
         FileRepository.ReviewPage page = repository.getReviewNotesPaged(0, Math.min(limit, 500));
         List<Map<String, Object>> notes = new ArrayList<>();
@@ -99,8 +100,8 @@ public class OfflineExportService {
             "maxDailyFlashcards", settingsRepo.getMaxDailyFlashcards(),
             "flashcardsEnabled",  settingsRepo.isFlashcardsEnabled()));
 
-        byte[] encrypted = encryption.encrypt(mapper.writeValueAsBytes(bundle));
-        drive.uploadOffline(REVIEW_BUNDLE, encrypted);
+        byte[] encrypted = encryption.encrypt(vid, mapper.writeValueAsBytes(bundle));
+        drive.uploadOffline(vid, REVIEW_BUNDLE, encrypted);
         log.info("[OfflineExport] exported {} due notes → _offline/{}", notes.size(), REVIEW_BUNDLE);
         return notes.size();
     }
@@ -109,8 +110,9 @@ public class OfflineExportService {
      *  grading on consume is identical) → _offline/cards.json.enc. The phone runs these tests
      *  offline and records answers; the server grades them on mailbox consume (deferred). */
     public int exportCards(int noteLimit) throws Exception {
-        if (!drive.isConfigured())      throw new IllegalStateException("Drive not connected");
-        if (!encryption.isConfigured()) throw new IllegalStateException("Sync passphrase not set");
+        final long vid = activeVault.id();
+        if (!drive.isConfigured(vid))      throw new IllegalStateException("Drive not connected");
+        if (!encryption.isConfigured(vid)) throw new IllegalStateException("Sync passphrase not set");
 
         FileRepository.ReviewPage page = repository.getReviewNotesPaged(0, Math.min(noteLimit, 200));
         List<Map<String, Object>> assignments = new ArrayList<>();
@@ -133,8 +135,8 @@ public class OfflineExportService {
         bundle.put("generatedAt", System.currentTimeMillis());
         bundle.put("assignments", assignments);
 
-        byte[] encrypted = encryption.encrypt(mapper.writeValueAsBytes(bundle));
-        drive.uploadOffline(CARDS_BUNDLE, encrypted);
+        byte[] encrypted = encryption.encrypt(vid, mapper.writeValueAsBytes(bundle));
+        drive.uploadOffline(vid, CARDS_BUNDLE, encrypted);
         log.info("[OfflineExport] exported {} assignments → _offline/{}", assignments.size(), CARDS_BUNDLE);
         return assignments.size();
     }
@@ -142,16 +144,17 @@ public class OfflineExportService {
     /** The Learn inbox → _offline/inbox.json.enc, so triage works offline. Reuses the
      *  same list the desktop Learn view shows (InboxController.listItems). */
     public int exportInbox() throws Exception {
-        if (!drive.isConfigured())      throw new IllegalStateException("Drive not connected");
-        if (!encryption.isConfigured()) throw new IllegalStateException("Sync passphrase not set");
+        final long vid = activeVault.id();
+        if (!drive.isConfigured(vid))      throw new IllegalStateException("Drive not connected");
+        if (!encryption.isConfigured(vid)) throw new IllegalStateException("Sync passphrase not set");
 
         List<?> items = inbox.listItems();
         Map<String, Object> bundle = new LinkedHashMap<>();
         bundle.put("generatedAt", System.currentTimeMillis());
         bundle.put("items", items == null ? List.of() : items);
 
-        byte[] encrypted = encryption.encrypt(mapper.writeValueAsBytes(bundle));
-        drive.uploadOffline(INBOX_BUNDLE, encrypted);
+        byte[] encrypted = encryption.encrypt(vid, mapper.writeValueAsBytes(bundle));
+        drive.uploadOffline(vid, INBOX_BUNDLE, encrypted);
         int n = items == null ? 0 : items.size();
         log.info("[OfflineExport] exported {} inbox items → _offline/{}", n, INBOX_BUNDLE);
         return n;
@@ -162,8 +165,9 @@ public class OfflineExportService {
      *  no offline thumbnail cache yet, so shipping them would just be dead weight in the
      *  bundle; FeedCard already renders fine with a missing thumbUrl. */
     public int exportFeed() throws Exception {
-        if (!drive.isConfigured())      throw new IllegalStateException("Drive not connected");
-        if (!encryption.isConfigured()) throw new IllegalStateException("Sync passphrase not set");
+        final long vid = activeVault.id();
+        if (!drive.isConfigured(vid))      throw new IllegalStateException("Drive not connected");
+        if (!encryption.isConfigured(vid)) throw new IllegalStateException("Sync passphrase not set");
 
         List<FeedItem> pending = feedRepo.list(activeVault.id(), "pending", FEED_ITEM_LIMIT);
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -184,8 +188,8 @@ public class OfflineExportService {
         bundle.put("generatedAt", System.currentTimeMillis());
         bundle.put("items", rows);
 
-        byte[] encrypted = encryption.encrypt(mapper.writeValueAsBytes(bundle));
-        drive.uploadOffline(FEED_BUNDLE, encrypted);
+        byte[] encrypted = encryption.encrypt(vid, mapper.writeValueAsBytes(bundle));
+        drive.uploadOffline(vid, FEED_BUNDLE, encrypted);
         log.info("[OfflineExport] exported {} feed items → _offline/{}", rows.size(), FEED_BUNDLE);
         return rows.size();
     }
@@ -212,7 +216,8 @@ public class OfflineExportService {
     }
 
     private void tryExport(String why) {
-        if (!drive.isConfigured() || !encryption.isConfigured()) return;
+        final long vid = activeVault.id();
+        if (!drive.isConfigured(vid) || !encryption.isConfigured(vid)) return;
         try {
             exportAll();
         } catch (Exception e) {

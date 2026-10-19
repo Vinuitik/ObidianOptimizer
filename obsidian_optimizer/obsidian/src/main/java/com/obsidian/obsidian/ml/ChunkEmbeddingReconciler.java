@@ -99,6 +99,13 @@ public class ChunkEmbeddingReconciler {
         pollingWorker.tick();
     }
 
+    /** Switch: kick the safety-net pass now so the new vault's NULL-vector chunks drain without
+     *  waiting for the next hourly tick (claimBatch reads the active vault per pass). */
+    @org.springframework.context.event.EventListener
+    public void onVaultSwitched(com.obsidian.obsidian.vaults.VaultSwitchedEvent e) {
+        pollingWorker.tick();
+    }
+
     /** Runs on the embed-reconcile lane. Drains NULL-vector chunks in batches,
      *  continuing while a batch comes back full AND progress is made; stops on a
      *  partial batch (drained) or zero progress (embedder down → next tick retries). */

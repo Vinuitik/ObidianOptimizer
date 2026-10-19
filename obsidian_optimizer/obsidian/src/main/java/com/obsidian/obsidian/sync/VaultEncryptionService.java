@@ -43,7 +43,8 @@ public class VaultEncryptionService {
     // constructing the service bare and drive it via the `passphrase` field.
     private final SettingsRepository settingsRepo;
 
-    private volatile SecretKey key;
+    // One AES key per vault (own passphrase); null entry = not configured.
+    private final java.util.concurrent.ConcurrentHashMap<Long, SecretKey> keys = new java.util.concurrent.ConcurrentHashMap<>();
 
     @org.springframework.beans.factory.annotation.Autowired
     public VaultEncryptionService(SettingsRepository settingsRepo) {
@@ -54,51 +55,61 @@ public class VaultEncryptionService {
         this.settingsRepo = null;
     }
 
-    @PostConstruct
-    public synchronized void init() {
+    /** Derives (and caches) the key of one vault from its stored passphrase. The env
+     *  `sync.passphrase` fallback applies to vault 1 only, so vaults never share a key by accident. */
+    private synchronized SecretKey derive(long vaultId) {
         String effective = null;
         if (settingsRepo != null) {
-            try { effective = settingsRepo.getSyncPassphrase(); } catch (Exception ignored) {}
+            try { effective = settingsRepo.getSyncPassphrase(vaultId); } catch (Exception ignored) {}
         }
-        if (effective == null || effective.isBlank()) effective = passphrase;
+        if ((effective == null || effective.isBlank()) && vaultId == 1) effective = passphrase;
 
         if (effective == null || effective.isBlank()) {
-            key = null;
-            log.warn("[VaultEncryptionService] sync passphrase not set — encryption disabled");
-            return;
+            keys.remove(vaultId);
+            log.warn("[VaultEncryptionService] sync passphrase not set for vault {} — encryption disabled", vaultId);
+            return null;
         }
         try {
             KeySpec spec = new PBEKeySpec(effective.toCharArray(), PBKDF2_SALT, PBKDF2_ITERATIONS, KEY_BITS);
             SecretKeyFactory skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-            key = new SecretKeySpec(skf.generateSecret(spec).getEncoded(), "AES");
-            log.info("[VaultEncryptionService] AES-256-GCM key derived from passphrase");
+            SecretKey k = new SecretKeySpec(skf.generateSecret(spec).getEncoded(), "AES");
+            keys.put(vaultId, k);
+            log.info("[VaultEncryptionService] AES-256-GCM key derived for vault {}", vaultId);
+            return k;
         } catch (Exception e) {
-            key = null;
+            keys.remove(vaultId);
             log.error("[VaultEncryptionService] key derivation failed: {}", e.getMessage());
+            return null;
         }
     }
 
-    /** Re-derive the key after the passphrase setting changed. */
-    public void reload() {
-        init();
+    private SecretKey keyFor(long vaultId) {
+        SecretKey k = keys.get(vaultId);
+        return k != null ? k : derive(vaultId);
     }
 
-    public boolean isConfigured() {
-        return key != null;
+    /** Re-derive the key after the passphrase setting changed. */
+    public void reload(long vaultId) {
+        keys.remove(vaultId);
+        derive(vaultId);
+    }
+
+    public boolean isConfigured(long vaultId) {
+        return keyFor(vaultId) != null;
     }
 
     /**
      * Compress (gzip) then encrypt (AES-256-GCM).
      * Output format: [12B IV][GCM ciphertext + 16B auth tag]
      */
-    public byte[] encrypt(byte[] plaintext) throws Exception {
+    public byte[] encrypt(long vaultId, byte[] plaintext) throws Exception {
         byte[] compressed = gzip(plaintext);
 
         byte[] iv = new byte[IV_BYTES];
         new SecureRandom().nextBytes(iv);
 
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+        cipher.init(Cipher.ENCRYPT_MODE, requireKey(vaultId), new GCMParameterSpec(GCM_TAG_BITS, iv));
         byte[] ciphertext = cipher.doFinal(compressed);
 
         byte[] out = new byte[IV_BYTES + ciphertext.length];
@@ -111,15 +122,21 @@ public class VaultEncryptionService {
      * Decrypt then decompress.
      * Expects the format produced by {@link #encrypt}.
      */
-    public byte[] decrypt(byte[] encryptedBytes) throws Exception {
+    public byte[] decrypt(long vaultId, byte[] encryptedBytes) throws Exception {
         byte[] iv         = Arrays.copyOfRange(encryptedBytes, 0,        IV_BYTES);
         byte[] ciphertext = Arrays.copyOfRange(encryptedBytes, IV_BYTES, encryptedBytes.length);
 
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(GCM_TAG_BITS, iv));
+        cipher.init(Cipher.DECRYPT_MODE, requireKey(vaultId), new GCMParameterSpec(GCM_TAG_BITS, iv));
         byte[] compressed = cipher.doFinal(ciphertext);
 
         return ungzip(compressed);
+    }
+
+    private SecretKey requireKey(long vaultId) {
+        SecretKey k = keyFor(vaultId);
+        if (k == null) throw new IllegalStateException("sync passphrase not set for vault " + vaultId);
+        return k;
     }
 
     private static byte[] gzip(byte[] data) throws Exception {

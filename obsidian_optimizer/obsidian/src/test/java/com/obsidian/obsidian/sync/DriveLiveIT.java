@@ -152,11 +152,11 @@ class DriveLiveIT {
         settings.set("sync.refresh_token", refresh);
         settings.set("syncPassphrase", pass);
         settings.set("sync.drive.folder_id", testRootId);   // NEVER the prod mirror
-        driveService.reset();
-        encryption.reload();
+        driveService.reset(1L);
+        encryption.reload(1L);
 
-        assertThat(driveService.isConfigured()).isTrue();
-        assertThat(encryption.isConfigured()).isTrue();
+        assertThat(driveService.isConfigured(1L)).isTrue();
+        assertThat(encryption.isConfigured(1L)).isTrue();
     }
 
     @AfterAll
@@ -235,12 +235,12 @@ class DriveLiveIT {
         new java.util.Random(42).nextBytes(png);
         write("resources/images/pic.png", png);
 
-        syncService.initialScan();   // .md rows already PENDING (createNote); queues the png
+        syncService.initialScan(1L);   // .md rows already PENDING (createNote); queues the png
         long t0 = System.currentTimeMillis();
-        syncService.uploadPending();
+        syncService.uploadPending(1L);
         uploadMillis = System.currentTimeMillis() - t0;
 
-        List<DriveService.DriveFileInfo> remote = driveService.listAllFiles();
+        List<DriveService.DriveFileInfo> remote = driveService.listAllFiles(1L);
         uploadCount = remote.size();
         assertThat(remote).hasSize(5);
         for (DriveService.DriveFileInfo f : remote) {
@@ -277,7 +277,7 @@ class DriveLiveIT {
         jdbc.execute("TRUNCATE notes");
         jdbc.execute("TRUNCATE note_links");
 
-        syncService.downloadAll();
+        syncService.downloadAll(1L);
 
         for (Map.Entry<String, String> e : uploadedHashes.entrySet()) {
             Path local = VAULT.resolve(e.getKey());
@@ -297,11 +297,11 @@ class DriveLiveIT {
         String edited = noteBody("Alpha") + "\nLOCAL EDIT not yet uploaded.\n";
         fileRepo.updateNote(alpha, edited);   // marks the queue row PENDING
 
-        syncService.downloadAll();            // Drive still has the old version
+        syncService.downloadAll(1L);            // Drive still has the old version
 
         assertThat(Files.readString(Path.of(alpha))).contains("LOCAL EDIT not yet uploaded");
         // …and the next upload pass publishes it
-        syncService.uploadPending();
+        syncService.uploadPending(1L);
         assertThat(syncQueue.findByStatus(1L, "PENDING")).isEmpty();
     }
 
@@ -313,12 +313,12 @@ class DriveLiveIT {
         String doomed = VAULT.resolve("Doomed.md").toString();
         fileRepo.softDeleteNote(doomed);      // tombstones the queue row
 
-        syncService.uploadPending();          // processes tombstones before uploads
+        syncService.uploadPending(1L);          // processes tombstones before uploads
 
-        assertThat(driveService.listAllFiles())
+        assertThat(driveService.listAllFiles(1L))
             .noneMatch(f -> "Doomed.md".equals(f.vaultPath()));
 
-        syncService.downloadAll();            // must NOT bring Doomed.md back
+        syncService.downloadAll(1L);            // must NOT bring Doomed.md back
         assertThat(Path.of(doomed)).doesNotExist();
     }
 
@@ -334,19 +334,19 @@ class DriveLiveIT {
         String offlineFolder = findFolder("_offline");
         String bundleId = findInFolder(offlineFolder, "review-bundle.json.enc");
         assertThat(bundleId).isNotNull();
-        byte[] bundle = encryption.decrypt(driveService.downloadFile(bundleId));
+        byte[] bundle = encryption.decrypt(1L, driveService.downloadFile(1L, bundleId));
         String json = new String(bundle, StandardCharsets.UTF_8);
         assertThat(json).contains("Alpha.md");
 
         // the phone's write contract: drop an encrypted grade envelope in _mailbox/
-        driveService.listMailbox();  // ensures the _mailbox folder exists
+        driveService.listMailbox(1L);  // ensures the _mailbox folder exists
         String mailboxFolder = findFolder("_mailbox");
         String alpha = VAULT.resolve("Alpha.md").toString().replace("\\", "\\\\");
         String envelope = """
             {"deviceId":"live-it-phone","events":[
               {"kind":"grade","eventId":"live-e1","notePath":"%s","band":"GOOD"}
             ]}""".formatted(alpha);
-        byte[] enc = encryption.encrypt(envelope.getBytes(StandardCharsets.UTF_8));
+        byte[] enc = encryption.encrypt(1L, envelope.getBytes(StandardCharsets.UTF_8));
         raw.files().create(
                 new File().setName(System.currentTimeMillis() + "-live-it.enc")
                           .setParents(List.of(mailboxFolder)),
@@ -357,7 +357,7 @@ class DriveLiveIT {
 
         assertThat(applied).isEqualTo(1);
         assertThat(Files.readString(VAULT.resolve("Alpha.md"))).contains("fsrs-s:");
-        assertThat(driveService.listMailbox()).isEmpty();   // consumed file hard-deleted
+        assertThat(driveService.listMailbox(1L)).isEmpty();   // consumed file hard-deleted
     }
 
     // ── 6. sustainability report ─────────────────────────────────────────────
@@ -365,7 +365,7 @@ class DriveLiveIT {
     @Test
     @Order(6)
     void sustainabilityReport() throws Exception {
-        Map<String, Long> quota = driveService.fetchQuota();
+        Map<String, Long> quota = driveService.fetchQuota(1L);
         double perFileS = uploadCount == 0 ? 0 : (uploadMillis / 1000.0) / uploadCount;
         long vaultNotes = 3300;   // current production vault size
         System.out.println("── DRIVE SUSTAINABILITY ─────────────────────────────");

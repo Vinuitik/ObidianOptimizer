@@ -132,28 +132,37 @@ public class SyncService {
     /** Runs after all @PostConstruct beans are ready — populates sync_queue for existing vault files. */
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
-        CompletableFuture.runAsync(this::initialScan);
+        CompletableFuture.runAsync(() -> {
+            // Active vault always; other vaults only if they sync (each against its own root).
+            java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+            ids.add(activeVault.id());
+            ids.addAll(settingsRepo.syncEnabledVaultIds());
+            for (long id : ids) {
+                try { initialScan(id); }
+                catch (Exception e) { log.warn("[SyncService.onReady] initialScan failed for vault {}: {}", id, e.getMessage()); }
+            }
+        });
     }
 
     /**
      * Compares every vault file against sync_queue.
      * Any file missing or with a changed hash is marked PENDING.
      */
-    public void initialScan() {
-        String vaultRoot = activeVault.root().toString();
-        log.info("[SyncService.initialScan] starting for vault={}", vaultRoot);
+    public void initialScan(long vaultId) {
+        String vaultRoot = activeVault.rootFor(vaultId).toString();
+        log.info("[SyncService.initialScan] starting for vault {} ({})", vaultId, vaultRoot);
         int queued = 0;
 
         // .md files — content_hash is already maintained by ImageScanService in notes table
-        List<Map<String, Object>> notes = noteIndex.getAllPathsWithHash(activeVault.id());
+        List<Map<String, Object>> notes = noteIndex.getAllPathsWithHash(vaultId);
         for (Map<String, Object> row : notes) {
             String absPath = (String) row.get("path");
             String hash    = (String) row.get("content_hash");
             if (absPath == null || hash == null) continue;
             String rel = toRelative(vaultRoot, absPath);
-            SyncEntry existing = syncQueueRepo.findByPath(activeVault.id(), rel);
+            SyncEntry existing = syncQueueRepo.findByPath(vaultId, rel);
             if (existing == null || !hash.equals(existing.contentHash()) || !"DONE".equals(existing.status())) {
-                syncQueueRepo.markPending(activeVault.id(), rel, hash);
+                syncQueueRepo.markPending(vaultId, rel, hash);
                 queued++;
             }
         }
@@ -169,9 +178,9 @@ public class SyncService {
                             byte[] bytes = Files.readAllBytes(p);
                             String hash  = ContentHashing.sha256(bytes);
                             String rel   = toRelative(vaultRoot, p.toString());
-                            SyncEntry existing = syncQueueRepo.findByPath(activeVault.id(), rel);
+                            SyncEntry existing = syncQueueRepo.findByPath(vaultId, rel);
                             if (existing == null || !hash.equals(existing.contentHash()) || !"DONE".equals(existing.status())) {
-                                syncQueueRepo.markPending(activeVault.id(), rel, hash);
+                                syncQueueRepo.markPending(vaultId, rel, hash);
                             }
                         } catch (IOException e) {
                             log.warn("[SyncService.initialScan] skip {}: {}", p, e.getMessage());
@@ -187,22 +196,22 @@ public class SyncService {
 
     // ── Upload ────────────────────────────────────────────────────────────────
 
-    public void uploadPending() {
-        if (!encryptionService.isConfigured()) {
+    public void uploadPending(long vaultId) {
+        if (!encryptionService.isConfigured(vaultId)) {
             log.warn("[SyncService.uploadPending] encryption not configured — skipping");
             return;
         }
-        if (!driveService.isConfigured()) {
+        if (!driveService.isConfigured(vaultId)) {
             log.warn("[SyncService.uploadPending] Drive not configured — skipping");
             return;
         }
 
-        String vaultRoot = activeVault.root().toString();
-        String deviceId  = deviceIdentityService.getDeviceId();
+        String vaultRoot = activeVault.rootFor(vaultId).toString();
+        String deviceId  = deviceIdentityService.getDeviceId(vaultId);
         // PENDING plus FAILED rows still under the retry cap (self-healing).
-        List<SyncEntry> uploadable = syncQueueRepo.findUploadable(activeVault.id(), maxRetries);
+        List<SyncEntry> uploadable = syncQueueRepo.findUploadable(vaultId, maxRetries);
 
-        processTombstones();
+        processTombstones(vaultId);
 
         if (uploadable.isEmpty()) {
             log.debug("[SyncService.uploadPending] nothing to upload");
@@ -228,7 +237,7 @@ public class SyncService {
             List<Future<?>> futures = new java.util.ArrayList<>(uploadable.size());
             for (SyncEntry entry : uploadable) {
                 futures.add(pool.submit(() -> {
-                    Boolean ok = uploadOneGuarded(entry, vaultRoot, deviceId);
+                    Boolean ok = uploadOneGuarded(vaultId, entry, vaultRoot, deviceId);
                     if (ok != null) {
                         if (ok) uploaded.incrementAndGet(); else failed.incrementAndGet();
                     }
@@ -252,15 +261,16 @@ public class SyncService {
      *  never happen when uploads only ever ran serialized on one lane. Returns null
      *  (not a real outcome) if another attempt for this path is already in flight —
      *  the loser doesn't touch the row and isn't counted as a success or a failure. */
-    private Boolean uploadOneGuarded(SyncEntry entry, String vaultRoot, String deviceId) {
-        if (!uploadsInFlight.add(entry.path())) {
+    private Boolean uploadOneGuarded(long vaultId, SyncEntry entry, String vaultRoot, String deviceId) {
+        String flightKey = vaultId + ":" + entry.path();
+        if (!uploadsInFlight.add(flightKey)) {
             log.debug("[SyncService.uploadPending] {} already uploading via another path — skipping", entry.path());
             return null;
         }
         try {
-            return uploadOne(entry, vaultRoot, deviceId);
+            return uploadOne(vaultId, entry, vaultRoot, deviceId);
         } finally {
-            uploadsInFlight.remove(entry.path());
+            uploadsInFlight.remove(flightKey);
         }
     }
 
@@ -268,22 +278,22 @@ public class SyncService {
      *  thread (polling batch) or a RabbitMQ listener thread ({@link #onSyncUploadMessage}) —
      *  same method either way, so there is exactly one place this logic exists.
      *  @return true on success, false on failure (already marked FAILED internally). */
-    boolean uploadOne(SyncEntry entry, String vaultRoot, String deviceId) {
+    boolean uploadOne(long vaultId, SyncEntry entry, String vaultRoot, String deviceId) {
         try {
             String absPath   = Paths.get(vaultRoot, entry.path()).toString();
             byte[] plaintext = readFile(absPath, entry.path());
-            byte[] encrypted = encryptionService.encrypt(plaintext);
+            byte[] encrypted = encryptionService.encrypt(vaultId, plaintext);
 
             // Hash what was actually read — Drive metadata must describe the
             // uploaded bytes, not the (possibly stale) hash from queue time.
             String actualHash = ContentHashing.sha256(plaintext);
             String driveFileId = driveService.uploadFile(
-                entry.path(), encrypted, actualHash, deviceId, entry.driveFileId());
+                vaultId, entry.path(), encrypted, actualHash, deviceId, entry.driveFileId());
 
             // Conditional on the queue-time hash: if an edit re-marked the row
             // PENDING while we were uploading, it stays PENDING and the newer
             // content goes out on the next pass.
-            boolean done = syncQueueRepo.markDoneIfHashMatches(activeVault.id(), 
+            boolean done = syncQueueRepo.markDoneIfHashMatches(vaultId,
                 entry.path(), driveFileId, entry.contentHash());
             if (!done) {
                 log.info("[SyncService.uploadPending] {} changed during upload — stays PENDING", entry.path());
@@ -291,7 +301,7 @@ public class SyncService {
             return true;
         } catch (Exception e) {
             log.error("[SyncService.uploadPending] failed for {}: {}", entry.path(), e.getMessage());
-            syncQueueRepo.markFailed(activeVault.id(), entry.path());
+            syncQueueRepo.markFailed(vaultId, entry.path());
             return false;
         }
     }
@@ -321,39 +331,42 @@ public class SyncService {
                      concurrency = "${sync.upload.concurrency:3}")
     public void onSyncUploadMessage(String payloadJson) {
         String path;
+        long vaultId;
         try {
             JsonNode node = mapper.readTree(payloadJson);
             path = node.path("path").asText(null);
+            vaultId = node.path("vaultId").asLong(1L);   // pre-M3 messages carry none = vault 1
         } catch (Exception e) {
             log.warn("[SyncService] malformed sync-upload message, dropping: {}", e.getMessage());
             return;
         }
         if (path == null) return;
 
-        if (!encryptionService.isConfigured() || !driveService.isConfigured()) {
-            // Not set up yet — the row stays PENDING and the (much less frequent)
+        if (!settingsRepo.isSyncEnabled(vaultId)
+                || !encryptionService.isConfigured(vaultId) || !driveService.isConfigured(vaultId)) {
+            // Sync off for this vault, or not set up yet — the row stays PENDING and the (much less frequent)
             // polling safety net will pick it up once sync is configured.
             return;
         }
 
-        SyncEntry entry = syncQueueRepo.findByPath(activeVault.id(), path);
+        SyncEntry entry = syncQueueRepo.findByPath(vaultId, path);
         if (entry == null) return;                                    // deleted meanwhile
         if ("DONE".equals(entry.status()) || "DELETE_PENDING".equals(entry.status())) return; // superseded
         if ("FAILED".equals(entry.status()) && entry.retryCount() >= maxRetries) return;       // already dead-lettered
 
-        String vaultRoot = activeVault.root().toString();
-        String deviceId  = deviceIdentityService.getDeviceId();
+        String vaultRoot = activeVault.rootFor(vaultId).toString();
+        String deviceId  = deviceIdentityService.getDeviceId(vaultId);
 
         dbBackupLock.readLock().lock();
         Boolean ok;
         try {
-            ok = uploadOneGuarded(entry, vaultRoot, deviceId);
+            ok = uploadOneGuarded(vaultId, entry, vaultRoot, deviceId);
         } finally {
             dbBackupLock.readLock().unlock();
         }
         if (ok == null || ok) return; // success, or another path already handled it — ack
 
-        SyncEntry after = syncQueueRepo.findByPath(activeVault.id(), path);
+        SyncEntry after = syncQueueRepo.findByPath(vaultId, path);
         if (after != null && after.retryCount() < maxRetries) {
             throw new AmqpRejectAndDontRequeueException(
                 "sync-upload failed for " + path + ", riding the retry ladder");
@@ -398,19 +411,19 @@ public class SyncService {
 
     // ── Download ──────────────────────────────────────────────────────────────
 
-    public void downloadAll() throws IOException {
-        if (!encryptionService.isConfigured()) {
+    public void downloadAll(long vaultId) throws IOException {
+        if (!encryptionService.isConfigured(vaultId)) {
             log.warn("[SyncService.downloadAll] encryption not configured — skipping");
             return;
         }
-        if (!driveService.isConfigured()) {
+        if (!driveService.isConfigured(vaultId)) {
             log.warn("[SyncService.downloadAll] Drive not configured — skipping");
             return;
         }
 
-        String vaultRoot = activeVault.root().toString();
+        String vaultRoot = activeVault.rootFor(vaultId).toString();
         Path vaultRootPath = Paths.get(vaultRoot).toAbsolutePath().normalize();
-        List<DriveFileInfo> driveFiles = driveService.listAllFiles();
+        List<DriveFileInfo> driveFiles = driveService.listAllFiles(vaultId);
         int downloaded = 0, skipped = 0, kept = 0;
 
         downloadRunning = true;
@@ -438,7 +451,7 @@ public class SyncService {
                 // Local wins until uploadPending has run. DELETE_PENDING likewise:
                 // the file was deleted locally and its Drive copy is doomed —
                 // downloading would resurrect it AND cancel the tombstone.
-                SyncEntry existing = syncQueueRepo.findByPath(activeVault.id(), df.vaultPath());
+                SyncEntry existing = syncQueueRepo.findByPath(vaultId, df.vaultPath());
                 if (existing != null
                         && ("PENDING".equals(existing.status()) || "DELETE_PENDING".equals(existing.status()))) {
                     log.info("[SyncService.downloadAll] {} has a pending local {} — skipping download",
@@ -447,10 +460,10 @@ public class SyncService {
                     continue;
                 }
 
-                byte[] encrypted = driveService.downloadFile(df.fileId());
-                byte[] plaintext = encryptionService.decrypt(encrypted);
-                writeDownloaded(absPath, df.vaultPath(), plaintext);
-                syncQueueRepo.markSynced(activeVault.id(), df.vaultPath(), df.contentHash(), df.fileId());
+                byte[] encrypted = driveService.downloadFile(vaultId, df.fileId());
+                byte[] plaintext = encryptionService.decrypt(vaultId, encrypted);
+                writeDownloaded(vaultId, absPath, df.vaultPath(), plaintext);
+                syncQueueRepo.markSynced(vaultId, df.vaultPath(), df.contentHash(), df.fileId());
                 downloaded++;
 
             } catch (Exception e) {
@@ -473,17 +486,17 @@ public class SyncService {
      * everything, defeating the whole point of the backup. Idempotent: skips files
      * whose local content already matches Drive.
      */
-    public int downloadAllQuiet() throws IOException {
-        if (!encryptionService.isConfigured()) {
+    public int downloadAllQuiet(long vaultId) throws IOException {
+        if (!encryptionService.isConfigured(vaultId)) {
             log.warn("[SyncService.downloadAllQuiet] encryption not configured — skipping");
             return 0;
         }
-        if (!driveService.isConfigured()) {
+        if (!driveService.isConfigured(vaultId)) {
             log.warn("[SyncService.downloadAllQuiet] Drive not configured — skipping");
             return 0;
         }
-        Path vaultRootPath = activeVault.root().toAbsolutePath().normalize();
-        List<DriveFileInfo> driveFiles = driveService.listAllFiles();
+        Path vaultRootPath = activeVault.rootFor(vaultId).toAbsolutePath().normalize();
+        List<DriveFileInfo> driveFiles = driveService.listAllFiles(vaultId);
         int written = 0, skipped = 0;
         List<DriveFileInfo> failedFiles = new ArrayList<>();
 
@@ -494,7 +507,7 @@ public class SyncService {
       try {
         for (DriveFileInfo df : driveFiles) {
             try {
-                if (materializeQuiet(df, vaultRootPath)) written++;
+                if (materializeQuiet(vaultId, df, vaultRootPath)) written++;
                 else skipped++;
             } catch (Exception e) {
                 log.warn("[SyncService.downloadAllQuiet] failed for {} ({}), will retry", df.vaultPath(), e.getMessage());
@@ -516,7 +529,7 @@ public class SyncService {
             log.info("[SyncService.downloadAllQuiet] retry sweep {} for {} file(s)", sweep, retry.size());
             for (DriveFileInfo df : retry) {
                 try {
-                    if (materializeQuiet(df, vaultRootPath)) written++;
+                    if (materializeQuiet(vaultId, df, vaultRootPath)) written++;
                 } catch (Exception e) {
                     log.warn("[SyncService.downloadAllQuiet] retry {} failed for {}: {}", sweep, df.vaultPath(), e.getMessage());
                     failedFiles.add(df);
@@ -539,7 +552,7 @@ public class SyncService {
     /** Materialize one Drive file to disk (raw bytes, no reprocessing). Returns true if
      *  written, false if it was already present (hash match) or rejected as a bad path.
      *  Throws on a download/decrypt/write error so the caller can retry it. */
-    private boolean materializeQuiet(DriveFileInfo df, Path vaultRootPath) throws Exception {
+    private boolean materializeQuiet(long vaultId, DriveFileInfo df, Path vaultRootPath) throws Exception {
         Path target = vaultRootPath.resolve(df.vaultPath()).normalize();
         if (!target.startsWith(vaultRootPath)) {
             log.error("[SyncService.downloadAllQuiet] rejected path escaping vault: {}", df.vaultPath());
@@ -548,7 +561,7 @@ public class SyncService {
         if (df.contentHash().equals(computeLocalHash(target.toString(), df.vaultPath()))) {
             return false;   // already present
         }
-        byte[] plaintext = encryptionService.decrypt(driveService.downloadFile(df.fileId()));
+        byte[] plaintext = encryptionService.decrypt(vaultId, driveService.downloadFile(vaultId, df.fileId()));
         Files.createDirectories(target.getParent());
         Files.write(target, plaintext);
         return true;
@@ -561,14 +574,14 @@ public class SyncService {
     // ── Delete propagation (tombstones → Drive trash) ────────────────────────
 
     /** Drain DELETE_PENDING rows: move the Drive copy to trash, drop the row. */
-    private void processTombstones() {
-        List<SyncEntry> doomed = syncQueueRepo.findByStatus(activeVault.id(), "DELETE_PENDING");
+    private void processTombstones(long vaultId) {
+        List<SyncEntry> doomed = syncQueueRepo.findByStatus(vaultId, "DELETE_PENDING");
         for (SyncEntry entry : doomed) {
             try {
                 if (entry.driveFileId() != null) {
-                    driveService.trashFile(entry.driveFileId());
+                    driveService.trashFile(vaultId, entry.driveFileId());
                 }
-                syncQueueRepo.delete(activeVault.id(), entry.path());
+                syncQueueRepo.delete(vaultId, entry.path());
             } catch (Exception e) {
                 log.error("[SyncService.processTombstones] failed for {}: {}", entry.path(), e.getMessage());
                 // row stays DELETE_PENDING — retried next pass
@@ -591,14 +604,14 @@ public class SyncService {
      * so we never race an in-flight rename, deletion goes to Drive TRASH (30-day
      * recovery), and dryRun mode reports without touching anything.
      */
-    public JanitorResult janitor(boolean dryRun) throws IOException {
-        if (!driveService.isConfigured()) {
+    public JanitorResult janitor(long vaultId, boolean dryRun) throws IOException {
+        if (!driveService.isConfigured(vaultId)) {
             throw new IOException("Drive not configured");
         }
-        Path vaultRoot = activeVault.root().toAbsolutePath().normalize();
+        Path vaultRoot = activeVault.rootFor(vaultId).toAbsolutePath().normalize();
         long graceCutoff = System.currentTimeMillis() - GRACE_DAYS * 24L * 3600 * 1000;
 
-        List<DriveFileInfo> driveFiles = driveService.listAllFiles();
+        List<DriveFileInfo> driveFiles = driveService.listAllFiles(vaultId);
         List<String> deleted = new java.util.ArrayList<>();
         long freed = 0;
 
@@ -607,14 +620,14 @@ public class SyncService {
             if (!target.startsWith(vaultRoot)) continue;          // hostile metadata — not ours to judge
             if (Files.exists(target)) continue;                    // local twin alive
 
-            SyncEntry row = syncQueueRepo.findByPath(activeVault.id(), df.vaultPath());
+            SyncEntry row = syncQueueRepo.findByPath(vaultId, df.vaultPath());
             if (row != null && "PENDING".equals(row.status())) continue; // about to (re)upload
             if (df.uploadedAt() > graceCutoff) continue;            // too fresh — could be mid-rename
 
             if (!dryRun) {
                 try {
-                    driveService.trashFile(df.fileId());
-                    syncQueueRepo.delete(activeVault.id(), df.vaultPath());
+                    driveService.trashFile(vaultId, df.fileId());
+                    syncQueueRepo.delete(vaultId, df.vaultPath());
                 } catch (Exception e) {
                     log.error("[SyncService.janitor] failed for {}: {}", df.vaultPath(), e.getMessage());
                     continue;
@@ -628,7 +641,7 @@ public class SyncService {
         log.info("[SyncService.janitor] dryRun={} scanned={} orphans={} freedBytes={}",
             dryRun, result.scanned(), result.orphans(), result.freedBytes());
         if (!dryRun) {
-            settingsRepo.set("sync.janitor_last",
+            settingsRepo.setForVault(vaultId, "sync.janitor_last",
                 System.currentTimeMillis() + ":" + result.orphans() + ":" + result.freedBytes());
         }
         return result;
@@ -655,7 +668,7 @@ public class SyncService {
     }
 
     /** Write a downloaded file to disk. For .md files, also updates the notes index and image queue. */
-    private void writeDownloaded(String absPath, String relativePath, byte[] plaintext) throws IOException {
+    private void writeDownloaded(long vaultId, String absPath, String relativePath, byte[] plaintext) throws IOException {
         Files.createDirectories(Paths.get(absPath).getParent());
 
         if (relativePath.endsWith(".md")) {
@@ -664,9 +677,9 @@ public class SyncService {
             File f = new File(absPath);
             String title = f.getName().replace(".md", "");
             FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(content);
-            noteIndex.upsert(activeVault.id(), absPath, title, meta, f.lastModified());
-            noteLinkRepo.updateLinks(activeVault.id(), absPath, NoteLinkRepository.extractTargets(content));
-            imageScanService.registerImages(activeVault.id(), absPath, content);
+            noteIndex.upsert(vaultId, absPath, title, meta, f.lastModified());
+            noteLinkRepo.updateLinks(vaultId, absPath, NoteLinkRepository.extractTargets(content));
+            imageScanService.registerImages(vaultId, absPath, content);
             // No markPending here — markDone is called by the caller immediately after
         } else {
             Files.write(Paths.get(absPath), plaintext);

@@ -31,7 +31,9 @@ public class VaultHeaderFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         // nginx/Vite strip the browser's /api/ prefix, so the app's own endpoints arrive as
         // /notes, /tracks, ...; /api/internal/** is service-to-service (no browser tab behind it).
-        return request.getRequestURI().startsWith("/api/internal/");
+        String uri = request.getRequestURI();
+        // /vaults is vault-agnostic (list / switch): a stale tab must still be able to switch.
+        return uri.startsWith("/api/internal/") || uri.equals("/vaults") || uri.startsWith("/vaults/");
     }
 
     @Override

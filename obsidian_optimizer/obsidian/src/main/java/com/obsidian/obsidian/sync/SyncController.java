@@ -64,18 +64,19 @@ public class SyncController {
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getStatus() {
         Map<String, Object> body = new LinkedHashMap<>(syncQueueRepo.getStatusSummary(activeVault.id()));
-        body.put("deviceId",             deviceIdentityService.getDeviceId());
-        body.put("enabled",              settingsRepo.isSyncEnabled());
-        body.put("encryptionConfigured", encryptionService.isConfigured());
-        body.put("driveConfigured",      driveService.isConfigured());
+        long vid = activeVault.id();
+        body.put("deviceId",             deviceIdentityService.getDeviceId(vid));
+        body.put("enabled",              settingsRepo.isSyncEnabled(vid));
+        body.put("encryptionConfigured", encryptionService.isConfigured(vid));
+        body.put("driveConfigured",      driveService.isConfigured(vid));
         body.putAll(syncService.uploadProgress());   // uploading / uploadDone / uploadTotal
         body.putAll(syncService.downloadProgress()); // downloading / downloadDone / downloadTotal / downloadFailed
-        body.putAll(dbBackupService.statusFragment()); // dbBackup / dbEmpty / dbRestoring
-        body.putAll(oauthService.statusFragment());
+        body.putAll(dbBackupService.statusFragment(vid)); // dbBackup / dbEmpty / dbRestoring
+        body.putAll(oauthService.statusFragment(vid));
         // Quota is one Drive API call; the panel fetches status on mount, not on a poll.
-        if (driveService.isConfigured() && oauthService.isConnected()) {
+        if (driveService.isConfigured(vid) && oauthService.isConnected(vid)) {
             try {
-                body.put("quota", driveService.fetchQuota());
+                body.put("quota", driveService.fetchQuota(vid));
             } catch (Exception e) {
                 log.warn("[SyncController] quota fetch failed: {}", e.getMessage());
             }
@@ -107,7 +108,7 @@ public class SyncController {
     public ResponseEntity<Map<String, Object>> janitor(
             @RequestParam(defaultValue = "true") boolean dryRun) {
         try {
-            SyncService.JanitorResult r = syncService.janitor(dryRun);
+            SyncService.JanitorResult r = syncService.janitor(activeVault.id(), dryRun);
             return ResponseEntity.ok(Map.of(
                 "dryRun",       r.dryRun(),
                 "scanned",      r.scanned(),
@@ -141,7 +142,7 @@ public class SyncController {
     public ResponseEntity<Map<String, Object>> triggerDownload() {
         log.info("[SyncController] manual download triggered");
         try {
-            syncService.downloadAll();
+            syncService.downloadAll(activeVault.id());
             return ResponseEntity.ok(syncQueueRepo.getStatusSummary(activeVault.id()));
         } catch (IOException e) {
             log.error("[SyncController] download failed: {}", e.getMessage());
@@ -176,7 +177,7 @@ public class SyncController {
     @PostMapping("/db/restore")
     public ResponseEntity<Map<String, Object>> dbRestore(
             @RequestParam(defaultValue = "false") boolean force) {
-        String blocked = dbBackupService.restoreBlockedReason(force);
+        String blocked = dbBackupService.restoreBlockedReason(activeVault.id(), force);
         if (blocked != null) {
             log.warn("[SyncController] DB restore refused: {}", blocked);
             return ResponseEntity.badRequest().body(Map.of("error", blocked));
@@ -197,7 +198,7 @@ public class SyncController {
     @GetMapping("/oauth/url")
     public ResponseEntity<Map<String, Object>> oauthUrl(@RequestParam String origin) {
         try {
-            return ResponseEntity.ok(Map.of("url", oauthService.buildAuthUrl(origin)));
+            return ResponseEntity.ok(Map.of("url", oauthService.buildAuthUrl(activeVault.id(), origin)));
         } catch (IllegalStateException | IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
@@ -233,7 +234,7 @@ public class SyncController {
     /** POST /api/sync/disconnect — revoke + forget the Google connection. */
     @PostMapping("/disconnect")
     public ResponseEntity<Map<String, Object>> disconnect() {
-        oauthService.disconnect();
+        oauthService.disconnect(activeVault.id());
         return getStatus();
     }
 
