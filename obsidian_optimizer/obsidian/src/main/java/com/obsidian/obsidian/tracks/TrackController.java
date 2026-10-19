@@ -18,6 +18,8 @@ import java.util.Map;
 @RequestMapping("tracks")
 public class TrackController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private final TrackRepository trackRepo;
     private final TodayPlanService todayPlan;
     private final TrackReviewHandoff reviewHandoff;
@@ -27,7 +29,9 @@ public class TrackController {
 
     TrackController(TrackRepository trackRepo, TodayPlanService todayPlan,
                     TrackReviewHandoff reviewHandoff, TrackProgressService progressService,
-                    TrackAgentClient trackAgentClient, FeedController feedController) {
+                    TrackAgentClient trackAgentClient, FeedController feedController,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.trackRepo = trackRepo;
         this.todayPlan = todayPlan;
         this.reviewHandoff = reviewHandoff;
@@ -40,7 +44,7 @@ public class TrackController {
 
     @GetMapping
     public List<Track> list() {
-        return trackRepo.listAll();
+        return trackRepo.listAll(activeVault.id());
     }
 
     @PostMapping
@@ -55,12 +59,12 @@ public class TrackController {
                 req.sourceUrl(), req.title(), null, null));
         }
         String type = req.type() == null || req.type().isBlank() ? "custom" : req.type();
-        return ResponseEntity.ok(trackRepo.create(req.title().trim(), type, "manual"));
+        return ResponseEntity.ok(trackRepo.create(activeVault.id(), req.title().trim(), type, "manual"));
     }
 
     @PatchMapping("{id}")
     public ResponseEntity<?> update(@PathVariable long id, @RequestBody UpdateTrackRequest req) {
-        Track existing = trackRepo.get(id);
+        Track existing = trackRepo.get(activeVault.id(), id);
         if (existing == null) return ResponseEntity.notFound().build();
         LocalDate deadline = null;
         boolean clearDeadline = false;
@@ -69,13 +73,13 @@ public class TrackController {
         } else if (req.deadline() != null) {
             deadline = LocalDate.parse(req.deadline());
         }
-        return ResponseEntity.ok(trackRepo.update(id, req.title(), req.type(), req.status(),
+        return ResponseEntity.ok(trackRepo.update(activeVault.id(), id, req.title(), req.type(), req.status(),
             deadline, req.priority(), req.includeInProgress(), clearDeadline));
     }
 
     @DeleteMapping("{id}")
     public ResponseEntity<?> delete(@PathVariable long id) {
-        trackRepo.delete(id);
+        trackRepo.delete(activeVault.id(), id);
         return ResponseEntity.ok().build();
     }
 
@@ -83,13 +87,13 @@ public class TrackController {
 
     @GetMapping("{id}/items")
     public ResponseEntity<?> items(@PathVariable long id) {
-        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (trackRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(trackRepo.listItems(id));
     }
 
     @PostMapping("{id}/items")
     public ResponseEntity<?> addItem(@PathVariable long id, @RequestBody AddItemRequest req) {
-        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (trackRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         if (req.title() == null || req.title().isBlank()) {
             return ResponseEntity.badRequest().body("title is required");
         }
@@ -98,7 +102,7 @@ public class TrackController {
 
     @PatchMapping("items/{itemId}")
     public ResponseEntity<?> updateItem(@PathVariable long itemId, @RequestBody UpdateItemRequest req) {
-        TrackItem existing = trackRepo.getItem(itemId);
+        TrackItem existing = trackRepo.getItem(activeVault.id(), itemId);
         if (existing == null) return ResponseEntity.notFound().build();
         TrackItem updated = existing;
         if (req.title() != null && !req.title().isBlank()) {
@@ -112,6 +116,7 @@ public class TrackController {
 
     @DeleteMapping("items/{itemId}")
     public ResponseEntity<?> deleteItem(@PathVariable long itemId) {
+        if (trackRepo.getItem(activeVault.id(), itemId) == null) return ResponseEntity.notFound().build();
         trackRepo.deleteItem(itemId);
         return ResponseEntity.ok().build();
     }
@@ -121,27 +126,27 @@ public class TrackController {
     @PostMapping("items/{itemId}/complete")
     public ResponseEntity<?> completeItem(@PathVariable long itemId,
                                           @RequestBody(required = false) CompleteItemRequest req) {
-        TrackItem item = trackRepo.getItem(itemId);
+        TrackItem item = trackRepo.getItem(activeVault.id(), itemId);
         if (item == null) return ResponseEntity.notFound().build();
         boolean flipped = trackRepo.completeItem(itemId);
         boolean addToReview = req != null && Boolean.TRUE.equals(req.addToReview());
         if (flipped && addToReview && item.notePath() != null && !item.notePath().isBlank()) {
-            reviewHandoff.seedDueToday(item.notePath());
+            reviewHandoff.seedDueToday(activeVault.id(), item.notePath());
         }
-        return ResponseEntity.ok(trackRepo.getItem(itemId));
+        return ResponseEntity.ok(trackRepo.getItem(activeVault.id(), itemId));
     }
 
     // ── Schedule ─────────────────────────────────────────────────────────────
 
     @GetMapping("{id}/schedule")
     public ResponseEntity<?> getSchedule(@PathVariable long id) {
-        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (trackRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(trackRepo.getSchedule(id));
     }
 
     @PutMapping("{id}/schedule")
     public ResponseEntity<?> setSchedule(@PathVariable long id, @RequestBody Map<String, Integer> weekdayBudgets) {
-        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (trackRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         Map<Integer, Integer> parsed = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, Integer> e : weekdayBudgets.entrySet()) {
             parsed.put(Integer.parseInt(e.getKey()), e.getValue());
@@ -200,7 +205,7 @@ public class TrackController {
 
     @PostMapping("{id}/minicourse")
     public ResponseEntity<String> generateMinicourse(@PathVariable long id) {
-        if (trackRepo.get(id) == null) return ResponseEntity.notFound().build();
+        if (trackRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         return toResponse(trackAgentClient.submitMinicourse(id));
     }
 
@@ -237,7 +242,7 @@ public class TrackController {
         for (int i = 0; i < req.tracks().size(); i++) {
             ImportedTrack t = req.tracks().get(i);
             String type = t.type() == null || t.type().isBlank() ? "custom" : t.type();
-            Track created = trackRepo.create(t.title(), type, "excel_import");
+            Track created = trackRepo.create(activeVault.id(), t.title(), type, "excel_import");
             trackIdByIndex.put(i, created.id());
         }
         for (ImportedItem item : req.items()) {

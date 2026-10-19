@@ -22,6 +22,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class SettingsControllerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @Mock SettingsRepository     settingsRepository;
     @Mock FileRepository         fileRepository;
     @Mock VaultEncryptionService encryptionService;
@@ -34,12 +36,12 @@ class SettingsControllerTest {
     void setUp() {
         mvc = MockMvcBuilders
             .standaloneSetup(new SettingsController(settingsRepository, fileRepository,
-                                                    encryptionService, driveService))
+                                                    encryptionService, driveService, activeVault))
             .build();
     }
 
     private void stubSettings() {
-        when(settingsRepository.getVaultPath()).thenReturn("/v");
+        activeVault.set(1L, java.nio.file.Path.of("/v"));
         when(settingsRepository.getResourcePath()).thenReturn("/v/r");
         when(settingsRepository.getReviewPageSize()).thenReturn(20);
         when(settingsRepository.getStartupSyncMode()).thenReturn("blocking");
@@ -63,7 +65,7 @@ class SettingsControllerTest {
 
     @Test
     void getSettings_returns200WithAllFields() throws Exception {
-        when(settingsRepository.getVaultPath()).thenReturn("/vault");
+        activeVault.set(1L, java.nio.file.Path.of("/vault"));
         when(settingsRepository.getResourcePath()).thenReturn("/vault/resources/images");
         when(settingsRepository.getReviewPageSize()).thenReturn(20);
         when(settingsRepository.getStartupSyncMode()).thenReturn("blocking");

@@ -115,3 +115,4 @@ that SQL and embedder `publish.INBOX_FOLDER`.
 | Standalone scan (now recursive per-source subfolders) | `InboxController.list()` (`Files.walk`, was `Files.list`) |
 | Group (folder-level) find_home | `InboxController.withGroupSuggestions()` / `groupSuggestion()` → embedder `POST /placement/group` |
 | Split sibling stays in its source's subfolder | `InboxController.split()` (`Paths.get(req.path()).getParent()`, was the flat `_inbox` dir) |
+| Vault scoping (M3) | `InboxController` root = `ActiveVault.root()`; `noteIndex.findNotesByCapture/countUnfiledNotesForCapture`, `captureRepo.listAll` take `activeVault.id()` |

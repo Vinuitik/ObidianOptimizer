@@ -69,13 +69,13 @@ public class AssignmentService {
 
     // ── Build ─────────────────────────────────────────────────────────────────
 
-    public Map<String, Object> build(String scope, int requestedCap) {
+    public Map<String, Object> build(long vaultId, String scope, int requestedCap) {
         // On-demand: if this is a single note the background jobs haven't reached
         // yet (legacy state / no cards / not embedded), bring it up to date now so
         // the session has cards to draw. No-op for folders and prepared notes.
-        reviewPrep.prepare(scope);
+        reviewPrep.prepare(vaultId, scope);
 
-        List<String> notes = repo.notesInScope(scope);
+        List<String> notes = repo.notesInScope(vaultId, scope);
         if (notes.isEmpty()) {
             throw new IllegalArgumentException("no active cards in scope: " + scope);
         }
@@ -86,7 +86,7 @@ public class AssignmentService {
         for (String note : notes) {
             if (picked.size() >= sessionCap) break;
             int noteCap = Math.min(MAX_CARDS_PER_NOTE, sessionCap - picked.size());
-            pickForNote(note, noteCap, picked, variants);
+            pickForNote(vaultId, note, noteCap, picked, variants);
         }
 
         if (picked.isEmpty()) {
@@ -94,7 +94,7 @@ public class AssignmentService {
         }
         int actual = picked.stream().mapToInt(c -> ((Number) c.get("difficulty")).intValue()).sum();
         UUID[] ids = picked.stream().map(c -> (UUID) c.get("id")).toArray(UUID[]::new);
-        UUID id = repo.insertAssignment(scope, requestedCap, actual, ids, variants.toString());
+        UUID id = repo.insertAssignment(vaultId, scope, requestedCap, actual, ids, variants.toString());
         // payload arrives as PGobject — hand the frontend parsed JSON, not a JDBC wrapper
         for (Map<String, Object> c : picked) {
             try {
@@ -113,13 +113,13 @@ public class AssignmentService {
      * Tiered knapsack for one note: first one card from each tier it has
      * (coverage), then fill round-robin up to MAX_PER_TIER / the note cap.
      */
-    private void pickForNote(String note, int cap, List<Map<String, Object>> picked, ObjectNode variants) {
+    private void pickForNote(long vaultId, String note, int cap, List<Map<String, Object>> picked, ObjectNode variants) {
         List<Map<String, Object>> noteCards = new ArrayList<>();
 
         // Pass 1 — coverage: one card from each tier present.
         for (Tier t : Tier.values()) {
             if (noteCards.size() >= cap) break;
-            drawOne(note, t, picked, noteCards, variants);
+            drawOne(vaultId, note, t, picked, noteCards, variants);
         }
         // Pass 2 — fill: round-robin tiers up to MAX_PER_TIER until the cap or no progress.
         boolean progress = true;
@@ -130,22 +130,22 @@ public class AssignmentService {
                 long inTier = noteCards.stream()
                     .filter(c -> Tier.of(((Number) c.get("difficulty")).intValue()) == t).count();
                 if (inTier >= MAX_PER_TIER) continue;
-                if (drawOne(note, t, picked, noteCards, variants)) progress = true;
+                if (drawOne(vaultId, note, t, picked, noteCards, variants)) progress = true;
             }
         }
         picked.addAll(noteCards);
     }
 
     /** Draw one card from a note's tier bag (refilling once if exhausted), roll exercises. */
-    private boolean drawOne(String note, Tier tier, List<Map<String, Object>> sessionPicked,
+    private boolean drawOne(long vaultId, String note, Tier tier, List<Map<String, Object>> sessionPicked,
                             List<Map<String, Object>> noteCards, ObjectNode variants) {
         UUID[] exclude = java.util.stream.Stream.concat(sessionPicked.stream(), noteCards.stream())
             .map(c -> (UUID) c.get("id")).toArray(UUID[]::new);
-        int cycle = repo.currentCycle(note, tier.label);
-        Map<String, Object> card = repo.drawCardInTier(note, tier.min, tier.max, cycle, exclude);
+        int cycle = repo.currentCycle(vaultId, note, tier.label);
+        Map<String, Object> card = repo.drawCardInTier(vaultId, note, tier.min, tier.max, cycle, exclude);
         if (card == null) {                                  // bag exhausted — refill once
-            repo.advanceCycle(note, tier.label);
-            card = repo.drawCardInTier(note, tier.min, tier.max, repo.currentCycle(note, tier.label), exclude);
+            repo.advanceCycle(vaultId, note, tier.label);
+            card = repo.drawCardInTier(vaultId, note, tier.min, tier.max, repo.currentCycle(vaultId, note, tier.label), exclude);
         }
         if (card == null) return false;                      // tier truly empty for this note
         if ("exercise".equals(card.get("type")) && !rollExercise(card, variants)) return false;
@@ -170,8 +170,8 @@ public class AssignmentService {
 
     // ── Attempt verification ──────────────────────────────────────────────────
 
-    public Map<String, Object> submitAttempt(UUID assignmentId, UUID cardId, String answer) {
-        Map<String, Object> card = repo.findCard(cardId);
+    public Map<String, Object> submitAttempt(long vaultId, UUID assignmentId, UUID cardId, String answer) {
+        Map<String, Object> card = repo.findCard(vaultId, cardId);
         if (card == null) throw new IllegalArgumentException("unknown card: " + cardId);
         int difficulty = ((Number) card.get("difficulty")).intValue();
 
@@ -193,7 +193,7 @@ public class AssignmentService {
             switch ((String) card.get("type")) {
                 case "mcq" -> verdict = String.valueOf(payload.get("correct").asInt())
                     .equals(answer == null ? "" : answer.trim()) ? "CORRECT" : "WRONG";
-                case "exercise" -> verdict = verifyExercise(assignmentId, cardId, payload, answer);
+                case "exercise" -> verdict = verifyExercise(vaultId, assignmentId, cardId, payload, answer);
                 case "open" -> {
                     JsonNode judged = postJson("/flashcards/judge", judgeRequest(payload, answer));
                     if (judged == null) throw new IllegalStateException("judge unavailable");
@@ -217,9 +217,9 @@ public class AssignmentService {
             "maxPoints", difficulty, "feedback", feedback);
     }
 
-    private String verifyExercise(UUID assignmentId, UUID cardId, JsonNode payload, String answer)
+    private String verifyExercise(long vaultId, UUID assignmentId, UUID cardId, JsonNode payload, String answer)
             throws Exception {
-        Map<String, Object> assignment = repo.findAssignment(assignmentId);
+        Map<String, Object> assignment = repo.findAssignment(vaultId, assignmentId);
         JsonNode variants = mapper.readTree(assignment.get("variants").toString());
         JsonNode variant = variants.get(cardId.toString());
         if (variant == null) throw new IllegalStateException("no frozen variant for card");
@@ -239,15 +239,15 @@ public class AssignmentService {
 
     // ── Completion → FSRS ─────────────────────────────────────────────────────
 
-    public Map<String, Object> complete(UUID assignmentId) {
-        Map<String, Object> assignment = repo.findAssignment(assignmentId);
+    public Map<String, Object> complete(long vaultId, UUID assignmentId) {
+        Map<String, Object> assignment = repo.findAssignment(vaultId, assignmentId);
         if (assignment == null) throw new IllegalArgumentException("unknown assignment");
         List<Map<String, Object>> scores = repo.perNoteScores(assignmentId);
         List<Map<String, Object>> graded = new ArrayList<>();
         for (Map<String, Object> row : scores) {
             double score = row.get("score") == null ? 0 : ((Number) row.get("score")).doubleValue();
             ReviewService.Band band = ReviewService.Band.fromScore(score);
-            var result = reviewService.grade((String) row.get("note_path"), band);
+            var result = reviewService.grade(vaultId, (String) row.get("note_path"), band);
             graded.add(Map.of("notePath", row.get("note_path"), "score", score,
                 "band", band.name(), "due", result.due()));
         }

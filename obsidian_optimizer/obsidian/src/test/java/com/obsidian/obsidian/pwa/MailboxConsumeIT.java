@@ -54,6 +54,11 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 class MailboxConsumeIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>(org.testcontainers.utility.DockerImageName
@@ -117,9 +122,9 @@ class MailboxConsumeIT {
     }
 
     private long newFeedItem() {
-        long sid = sourceRepo.create("youtube", "https://www.youtube.com/@mbtest" + System.nanoTime(),
+        long sid = sourceRepo.create(1L, "youtube", "https://www.youtube.com/@mbtest" + System.nanoTime(),
             null, "MB Source", null, null).id();
-        return feedRepo.insertIfNew(sid, "https://www.youtube.com/watch?v=" + "mb" + System.nanoTime() % 1_000_000,
+        return feedRepo.insertIfNew(1L, sid, "https://www.youtube.com/watch?v=" + "mb" + System.nanoTime() % 1_000_000,
             "MB item", null, null, null);
     }
 
@@ -133,7 +138,7 @@ class MailboxConsumeIT {
     }
 
     private void reindex() {
-        noteIndex.syncWithDisk(fileRepo.listMdPaths().stream()
+        noteIndex.syncWithDisk(1L, fileRepo.listMdPaths().stream()
             .map(Path::toFile).collect(Collectors.toList()));
     }
 
@@ -267,7 +272,7 @@ class MailboxConsumeIT {
     @Test
     void fileAndAcknowledgeEvents_replayInboxTriage() throws Exception {
         // standalone note staged in _inbox + its capture
-        captureRepo.create("cap-mb", "url", "https://example.com/mb",
+        captureRepo.create(1L, "cap-mb", "url", "https://example.com/mb",
                            "_inbox/_sources/cap-mb.md", "MB");
         writeNote("_inbox/_sources/cap-mb.md", "snapshot");
         Path staged = writeNote("_inbox/FromPhone.md", """
@@ -313,7 +318,7 @@ class MailboxConsumeIT {
         int applied = consume.consumeAll();
 
         assertThat(applied).isEqualTo(1);
-        assertThat(captureRepo.existsLiveForSource(url)).isTrue();
+        assertThat(captureRepo.existsLiveForSource(1L, url)).isTrue();
         verify(drive).deleteFile("f1");
         assertThat(ledger.alreadyConsumed("e-cap")).isTrue();
         verify(captureIngestWorker, times(1)).nudge();
@@ -339,7 +344,7 @@ class MailboxConsumeIT {
     @Test
     void duplicateCaptureEvent_treatedAsConsumed_notRetriedForever() throws Exception {
         String url = "https://example.com/already-captured";
-        captureRepo.enqueue("existing-id", "web_dom", url, null, "Existing");
+        captureRepo.enqueue(1L, "existing-id", "web_dom", url, null, "Existing");
         String captureEvent = """
             {"kind":"capture","eventId":"e-cap-dup","url":"%s","trackOpts":{}}
             """.formatted(url).trim();
@@ -368,8 +373,8 @@ class MailboxConsumeIT {
         int applied = consume.consumeAll();
 
         assertThat(applied).isEqualTo(1);
-        assertThat(feedRepo.get(itemId).status()).isEqualTo("accepted");
-        assertThat(feedRepo.get(itemId).captureId()).isNotNull();
+        assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("accepted");
+        assertThat(feedRepo.get(1L, itemId).captureId()).isNotNull();
         verify(drive).deleteFile("f1");
         assertThat(ledger.alreadyConsumed("e-fa")).isTrue();
     }
@@ -382,15 +387,15 @@ class MailboxConsumeIT {
             """.formatted(itemId).trim();
         stageMailbox(envelope(ev));
         assertThat(consume.consumeAll()).isEqualTo(1);
-        String capId = feedRepo.get(itemId).captureId();
+        String capId = feedRepo.get(1L, itemId).captureId();
 
         // same mailbox file reprocessed (delete raced/failed last pass) → ledger short-circuits
         stageMailbox(envelope(ev));
         int replayApplied = consume.consumeAll();
 
         assertThat(replayApplied).isZero();
-        assertThat(feedRepo.get(itemId).captureId()).isEqualTo(capId); // no 2nd capture row
-        assertThat(captureRepo.listAll()).hasSize(1);
+        assertThat(feedRepo.get(1L, itemId).captureId()).isEqualTo(capId); // no 2nd capture row
+        assertThat(captureRepo.listAll(1L)).hasSize(1);
     }
 
     @Test
@@ -402,18 +407,18 @@ class MailboxConsumeIT {
         stageMailbox(envelope(ev));
 
         assertThat(consume.consumeAll()).isEqualTo(1);
-        assertThat(feedRepo.get(itemId).status()).isEqualTo("binned");
+        assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("binned");
         verify(drive).deleteFile("f1");
 
         stageMailbox(envelope(ev));
         assertThat(consume.consumeAll()).isZero(); // eventId already consumed
-        assertThat(feedRepo.get(itemId).status()).isEqualTo("binned");
+        assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("binned");
     }
 
     @Test
     void feedRestoreEvent_bannedItem_backToPending() throws Exception {
         long itemId = newFeedItem();
-        feedService.bin(itemId);
+        feedService.bin(1L, itemId);
         String ev = """
             {"kind":"feed_restore","eventId":"e-fr","itemId":%d}
             """.formatted(itemId).trim();
@@ -422,7 +427,7 @@ class MailboxConsumeIT {
         int applied = consume.consumeAll();
 
         assertThat(applied).isEqualTo(1);
-        assertThat(feedRepo.get(itemId).status()).isEqualTo("pending");
+        assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("pending");
         verify(drive).deleteFile("f1");
     }
 
@@ -434,7 +439,7 @@ class MailboxConsumeIT {
     @Test
     void feedRestoreEvent_afterCaptureClaimed_poisonsTheFile_notRetriedAsSuccess() throws Exception {
         long itemId = newFeedItem();
-        String cap = feedService.accept(itemId);
+        String cap = feedService.accept(1L, itemId);
         captureRepo.claim(cap);
         String ev = """
             {"kind":"feed_restore","eventId":"e-fr-409","itemId":%d}
@@ -444,7 +449,7 @@ class MailboxConsumeIT {
         int applied = consume.consumeAll();
 
         assertThat(applied).isZero();
-        assertThat(feedRepo.get(itemId).status()).isEqualTo("accepted");
+        assertThat(feedRepo.get(1L, itemId).status()).isEqualTo("accepted");
         verify(drive, never()).deleteFile(anyString());
         assertThat(ledger.alreadyConsumed("e-fr-409")).isFalse();
     }

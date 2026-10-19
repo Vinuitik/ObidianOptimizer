@@ -42,19 +42,22 @@ public class ChunkEmbeddingReconciler {
 
     private final NoteChunkRepository chunkRepo;
     private final EmbeddingService embeddingService;
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
     private final WorkerLane lane = new WorkerLane("embed-reconcile");
 
     private final PollingQueueWorker<PendingChunk> pollingWorker;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public ChunkEmbeddingReconciler(NoteChunkRepository chunkRepo, EmbeddingService embeddingService) {
+    public ChunkEmbeddingReconciler(NoteChunkRepository chunkRepo, EmbeddingService embeddingService,
+                                    com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.chunkRepo = chunkRepo;
         this.embeddingService = embeddingService;
 
         WorkQueue<PendingChunk> queue = new WorkQueue<>() {
             @Override
             public List<PendingChunk> claimBatch(int limit) {
-                return chunkRepo.findChunksNeedingEmbedding(limit);
+                return chunkRepo.findChunksNeedingEmbedding(activeVault.id(), limit);
             }
 
             // The vector is only known once the processor computes it, so the
@@ -66,7 +69,7 @@ public class ChunkEmbeddingReconciler {
         };
 
         PollingQueueWorker.ItemProcessor<PendingChunk> processor =
-            c -> embedChunk(c.notePath(), c.source(), c.chunkIndex(), c.text());
+            c -> embedChunk(c.vaultId(), c.notePath(), c.source(), c.chunkIndex(), c.text());
 
         PollingQueueWorker.BatchListener<PendingChunk> listener = new PollingQueueWorker.BatchListener<>() {
             @Override
@@ -115,8 +118,10 @@ public class ChunkEmbeddingReconciler {
     public void onEmbedChunkMessage(String payloadJson) {
         String notePath, source;
         int chunkIndex;
+        long vaultId;
         try {
             JsonNode node = mapper.readTree(payloadJson);
+            vaultId = node.path("vaultId").asLong(1L);   // pre-M3 messages carry none: vault 1
             notePath = node.path("notePath").asText(null);
             source = node.path("source").asText(null);
             chunkIndex = node.path("chunkIndex").asInt(-1);
@@ -125,16 +130,16 @@ public class ChunkEmbeddingReconciler {
             return;
         }
         if (notePath == null || source == null || chunkIndex < 0) return;
-        String text = chunkRepo.getChunkText(notePath, source, chunkIndex);
+        String text = chunkRepo.getChunkText(vaultId, notePath, source, chunkIndex);
         if (text == null) return; // gone or already embedded
-        embedChunk(notePath, source, chunkIndex, text);
+        embedChunk(vaultId, notePath, source, chunkIndex, text);
     }
 
     /** Shared by the polling fallback and the RabbitMQ fast path. */
-    boolean embedChunk(String notePath, String source, int chunkIndex, String text) {
+    boolean embedChunk(long vaultId, String notePath, String source, int chunkIndex, String text) {
         try {
             float[] embedding = embeddingService.embed(text);
-            if (embedding != null && chunkRepo.setChunkEmbedding(notePath, source, chunkIndex, embedding)) {
+            if (embedding != null && chunkRepo.setChunkEmbedding(vaultId, notePath, source, chunkIndex, embedding)) {
                 return true;
             }
             // embedding null → embedder unreachable; leave NULL, retry next cycle

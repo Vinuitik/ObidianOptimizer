@@ -52,31 +52,31 @@ public class ReviewPreparationService {
     }
 
     /** Prepare one note. No-op fast path when it's already FSRS + has cards. */
-    public void prepare(String notePath) {
+    public void prepare(long vaultId, String notePath) {
         // 1. Legacy → FSRS, schedule preserved. Idempotent (returns existing if already FSRS).
         try {
-            stateWriter.normalizeLegacy(notePath);
+            stateWriter.normalizeLegacy(vaultId, notePath);
         } catch (Exception e) {
             log.warn("[ReviewPrep] FSRS normalize failed for {}: {}", notePath, e.getMessage());
         }
 
         // 2/3 only matter for a note the background jobs haven't reached yet.
-        if (!cardRepo.findActiveByNote(notePath).isEmpty()) return;
+        if (!cardRepo.findActiveByNote(vaultId, notePath).isEmpty()) return;
 
-        String bodyHash = noteIndex.getBodyHash(notePath);
+        String bodyHash = noteIndex.getBodyHash(vaultId, notePath);
         if (bodyHash == null) return;  // not indexed yet — nothing safe to generate against
 
         // Respect the preprocessing order: don't JIT cards from a note whose
         // ingest/image transcription is still pending — the background worker
         // will generate them (with image text) once preprocessing lands.
-        if (!cardRepo.isReadyForCards(notePath)) {
+        if (!cardRepo.isReadyForCards(vaultId, notePath)) {
             log.info("[ReviewPrep] {} not ready for cards (ingest/images pending) — deferring to worker", notePath);
         } else {
             try {
-                JsonNode result = generationService.generateFor(notePath, bodyHash);
+                JsonNode result = generationService.generateFor(vaultId, notePath, bodyHash);
                 if (result != null) {
                     // Record against body_hash — the exact key the worker diffs on — so it skips this note.
-                    cardRepo.recordAttempt(notePath, bodyHash);
+                    cardRepo.recordAttempt(vaultId, notePath, bodyHash);
                 }
             } catch (Exception e) {
                 log.warn("[ReviewPrep] on-demand card generation failed for {}: {}", notePath, e.getMessage());
@@ -84,7 +84,7 @@ public class ReviewPreparationService {
         }
 
         try {
-            embeddingService.indexNote(notePath);  // chunk + embed (hash-gated, marks chunks done)
+            embeddingService.indexNote(vaultId, notePath);  // chunk + embed (hash-gated, marks chunks done)
         } catch (Exception e) {
             log.warn("[ReviewPrep] on-demand embed failed for {}: {}", notePath, e.getMessage());
         }

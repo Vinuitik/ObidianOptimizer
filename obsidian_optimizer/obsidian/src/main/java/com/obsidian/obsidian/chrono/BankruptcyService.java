@@ -62,7 +62,7 @@ public class BankruptcyService {
         int rescheduled
     ) {}
 
-    public BankruptcyResult run(List<Path> mdFiles, int bankruptcyLimit, int chronicNeglectDays) {
+    public BankruptcyResult run(long vaultId, List<Path> mdFiles, int bankruptcyLimit, int chronicNeglectDays) {
         LocalDate today = LocalDate.now();
         Instant now = Instant.now();
 
@@ -89,7 +89,7 @@ public class BankruptcyService {
         int chronicNeglected = 0;
         for (Path file : chronic) {
             try {
-                lapseAndReschedule(file, today, now, dayLoad);
+                lapseAndReschedule(vaultId, file, today, now, dayLoad);
                 chronicNeglected++;
             } catch (Exception e) {
                 log.warn("[BankruptcyCheck] Failed chronic lapse of {}: {}", file.getFileName(), e.getMessage());
@@ -110,7 +110,7 @@ public class BankruptcyService {
         int rescheduled = 0;
         for (Path file : standard) {
             try {
-                lapseAndReschedule(file, today, now, dayLoad);
+                lapseAndReschedule(vaultId, file, today, now, dayLoad);
                 rescheduled++;
             } catch (Exception e) {
                 log.warn("[BankruptcyCheck] Failed mass lapse of {}: {}", file.getFileName(), e.getMessage());
@@ -119,13 +119,13 @@ public class BankruptcyService {
         return new BankruptcyResult(totalOverdue, chronicNeglected, true, rescheduled);
     }
 
-    private void lapseAndReschedule(Path file, LocalDate today, Instant now,
+    private void lapseAndReschedule(long vaultId, Path file, LocalDate today, Instant now,
                                     Map<LocalDate, Integer> dayLoad) {
         FrontmatterRewriter.SrFields legacy = FrontmatterRewriter.read(file);
         if (legacy == null) return;
         String notePath = file.toAbsolutePath().toString();
 
-        ReviewRow row = stateWriter.read(notePath);
+        ReviewRow row = stateWriter.read(vaultId, notePath);
         FsrsState prior;
         Instant lastReview;
         if (row != null) {
@@ -142,7 +142,7 @@ public class BankruptcyService {
         int newInterval = fsrs.intervalDays(lapsed.stability());
         LocalDate newDue = leastLoadedDate(today, newInterval, dayLoad);
 
-        stateWriter.writeState(notePath, lapsed, now, newDue, newInterval);
+        stateWriter.writeState(vaultId, notePath, lapsed, now, newDue, newInterval);
     }
 
     /** Pick the least-loaded day within [today+1, today+interval]; ties broken randomly. */

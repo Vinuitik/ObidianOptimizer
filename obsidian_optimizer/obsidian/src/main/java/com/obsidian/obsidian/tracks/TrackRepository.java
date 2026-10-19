@@ -125,41 +125,44 @@ public class TrackRepository {
 
     // ── Tracks ───────────────────────────────────────────────────────────────
 
-    public Track create(String title, String type, String source) {
+    public Track create(long vaultId, String title, String type, String source) {
         long id = jdbc.queryForObject("""
-            INSERT INTO tracks(title, type, source) VALUES (?, ?, ?)
+            INSERT INTO tracks(title, type, source, vault_id) VALUES (?, ?, ?, ?)
             RETURNING id
-            """, Long.class, title, type, source == null ? "manual" : source);
-        return get(id);
+            """, Long.class, title, type, source == null ? "manual" : source, vaultId);
+        return get(vaultId, id);
     }
 
     /** The feed's default target: one auto-created "Passive" track (no deadline, priority
      *  could), found by source='passive-feed'. Used by feed/ accept (see feed/FLOWS.md). */
-    public Track getOrCreatePassive() {
+    public Track getOrCreatePassive(long vaultId) {
         List<Track> rows = jdbc.query(
-            "SELECT * FROM tracks WHERE source = 'passive-feed' ORDER BY id LIMIT 1", TrackRepository::mapTrack);
+            "SELECT * FROM tracks WHERE vault_id = ? AND source = 'passive-feed' ORDER BY id LIMIT 1",
+            TrackRepository::mapTrack, vaultId);
         if (!rows.isEmpty()) return rows.get(0);
-        Track t = create("Passive", "custom", "passive-feed");
-        return update(t.id(), null, null, null, null, "could", null, false);
+        Track t = create(vaultId, "Passive", "custom", "passive-feed");
+        return update(vaultId, t.id(), null, null, null, null, "could", null, false);
     }
 
-    public Track get(long id) {
-        List<Track> rows = jdbc.query("SELECT * FROM tracks WHERE id = ?", TrackRepository::mapTrack, id);
+    public Track get(long vaultId, long id) {
+        List<Track> rows = jdbc.query("SELECT * FROM tracks WHERE vault_id = ? AND id = ?",
+            TrackRepository::mapTrack, vaultId, id);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    public List<Track> listAll() {
-        return jdbc.query("SELECT * FROM tracks ORDER BY created_at DESC", TrackRepository::mapTrack);
+    public List<Track> listAll(long vaultId) {
+        return jdbc.query("SELECT * FROM tracks WHERE vault_id = ? ORDER BY created_at DESC",
+            TrackRepository::mapTrack, vaultId);
     }
 
-    public List<Track> listActive() {
+    public List<Track> listActive(long vaultId) {
         return jdbc.query(
-            "SELECT * FROM tracks WHERE status = 'active' ORDER BY created_at DESC",
-            TrackRepository::mapTrack);
+            "SELECT * FROM tracks WHERE vault_id = ? AND status = 'active' ORDER BY created_at DESC",
+            TrackRepository::mapTrack, vaultId);
     }
 
     /** Partial update — null fields are left unchanged. */
-    public Track update(long id, String title, String type, String status, LocalDate deadline,
+    public Track update(long vaultId, long id, String title, String type, String status, LocalDate deadline,
                         String priority, Boolean includeInProgress, boolean clearDeadline) {
         if (title != null) jdbc.update("UPDATE tracks SET title = ? WHERE id = ?", title, id);
         if (type != null) jdbc.update("UPDATE tracks SET type = ? WHERE id = ?", type, id);
@@ -173,11 +176,11 @@ public class TrackRepository {
         if (includeInProgress != null) {
             jdbc.update("UPDATE tracks SET include_in_progress = ? WHERE id = ?", includeInProgress, id);
         }
-        return get(id);
+        return get(vaultId, id);
     }
 
-    public void delete(long id) {
-        jdbc.update("DELETE FROM tracks WHERE id = ?", id);
+    public void delete(long vaultId, long id) {
+        jdbc.update("DELETE FROM tracks WHERE id = ? AND vault_id = ?", id, vaultId);
     }
 
     // ── Items ────────────────────────────────────────────────────────────────
@@ -201,13 +204,21 @@ public class TrackRepository {
      *  capture-queue key whether the note came from the extension, PWA, or a subscription
      *  poller. ON CONFLICT DO NOTHING + re-select makes concurrent calls for the same
      *  (trackId, captureId) converge on the same group instead of racing two inserts. */
-    public TrackItemGroup getOrCreateGroup(long trackId, String captureId, String title, String sourceUrl) {
+    public TrackItemGroup getOrCreateGroup(long vaultId, long trackId, String captureId, String title, String sourceUrl) {
         jdbc.update("""
-            INSERT INTO track_item_groups(track_id, capture_id, title, source_url) VALUES (?, ?, ?, ?)
+            INSERT INTO track_item_groups(track_id, capture_id, title, source_url, vault_id) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT (track_id, capture_id) DO NOTHING
-            """, trackId, captureId, title, sourceUrl);
+            """, trackId, captureId, title, sourceUrl, vaultId);
         return jdbc.queryForObject("SELECT * FROM track_item_groups WHERE track_id = ? AND capture_id = ?",
             TrackRepository::mapGroup, trackId, captureId);
+    }
+
+    /** Vault-checked item lookup (items inherit their vault through their track). */
+    public TrackItem getItem(long vaultId, long id) {
+        List<TrackItem> rows = jdbc.query(
+            "SELECT ti.* FROM track_items ti JOIN tracks t ON t.id = ti.track_id WHERE ti.id = ? AND t.vault_id = ?",
+            TrackRepository::mapItem, id, vaultId);
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     public TrackItem getItem(long id) {
@@ -350,18 +361,18 @@ public class TrackRepository {
     /** One row per include_in_progress+active track with its completion counts —
      *  Postgres allows GROUP BY t.id with t.* selected since id is tracks' primary key
      *  (functional dependency). */
-    public List<TrackProgressRow> listProgressRows() {
+    public List<TrackProgressRow> listProgressRows(long vaultId) {
         return jdbc.query("""
             SELECT t.*,
                    COUNT(ti.id) AS items_total,
                    COUNT(ti.id) FILTER (WHERE ti.status = 'done') AS items_done
             FROM tracks t
             LEFT JOIN track_items ti ON ti.track_id = t.id
-            WHERE t.include_in_progress = true AND t.status = 'active'
+            WHERE t.vault_id = ? AND t.include_in_progress = true AND t.status = 'active'
             GROUP BY t.id
             ORDER BY t.created_at DESC
             """, (rs, rowNum) -> new TrackProgressRow(
-                mapTrack(rs, rowNum), rs.getInt("items_done"), rs.getInt("items_total")));
+                mapTrack(rs, rowNum), rs.getInt("items_done"), rs.getInt("items_total")), vaultId);
     }
 
     // ── Mapping ──────────────────────────────────────────────────────────────

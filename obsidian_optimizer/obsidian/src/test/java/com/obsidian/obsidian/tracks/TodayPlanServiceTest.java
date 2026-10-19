@@ -28,13 +28,15 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class TodayPlanServiceTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @Mock TrackRepository trackRepo;
     @Mock SettingsRepository settingsRepo;
     TodayPlanService service;
 
     @BeforeEach
     void setUp() {
-        service = new TodayPlanService(trackRepo, settingsRepo);
+        service = new TodayPlanService(trackRepo, settingsRepo, activeVault);
         lenient().when(settingsRepo.getOrDefault(TodayPlanService.MODE_KEY, TodayPlanService.MODE_NORMAL))
             .thenReturn(TodayPlanService.MODE_NORMAL);
     }
@@ -72,7 +74,7 @@ class TodayPlanServiceTest {
         LocalDate mon = LocalDate.of(2026, 8, 17); // Monday
         LocalDate deadline = mon.plusDays(5); // window = Mon..Fri
         Track t = deadlineTrack(1, "Rust", deadline, "should");
-        when(trackRepo.listActive()).thenReturn(List.of(t));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(t));
         stubItems(1);
         // Monday capacity=2 (today's reserve multiplier), Tue-Fri=1 each (pace denominator).
         when(trackRepo.getCapacity(0)).thenReturn(2.0); // Mon
@@ -102,7 +104,7 @@ class TodayPlanServiceTest {
         LocalDate mon = LocalDate.of(2026, 8, 17);
         LocalDate deadlineNextMon = mon.plusDays(7); // window spans a full week incl. one Sat/Sun
         Track t = deadlineTrack(1, "Big Book", deadlineNextMon, "should");
-        when(trackRepo.listActive()).thenReturn(List.of(t));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(t));
         stubItems(1);
         when(trackRepo.countPendingItems(1)).thenReturn(1000); // large so reserve, not remaining, binds
         // Default seed shape: weekday=4, Sat/Sun=6.
@@ -126,7 +128,7 @@ class TodayPlanServiceTest {
         Track must = deadlineTrack(1, "Must", tomorrow, "must");
         Track should = deadlineTrack(2, "Should", tomorrow, "should");
         Track could = deadlineTrack(3, "Could", tomorrow, "could");
-        when(trackRepo.listActive()).thenReturn(List.of(must, should, could));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(must, should, could));
         stubItems(1); stubItems(2); stubItems(3);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0); // window==10, so reserved==remaining exactly
         when(trackRepo.countPendingItems(1)).thenReturn(5);
@@ -147,7 +149,7 @@ class TodayPlanServiceTest {
         LocalDate tomorrow = today.plusDays(1);
         Track must1 = deadlineTrack(1, "Must1", tomorrow, "must");
         Track must2 = deadlineTrack(2, "Must2", tomorrow, "must");
-        when(trackRepo.listActive()).thenReturn(List.of(must1, must2));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(must1, must2));
         stubItems(1); stubItems(2);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
         when(trackRepo.countPendingItems(1)).thenReturn(8);
@@ -169,7 +171,7 @@ class TodayPlanServiceTest {
         LocalDate tomorrow = today.plusDays(1);
         Track deadline = deadlineTrack(1, "Deadline", tomorrow, "should");
         Track manual = manualTrack(2, "Manual");
-        when(trackRepo.listActive()).thenReturn(List.of(deadline, manual));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(deadline, manual));
         stubItems(1); stubItems(2);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
         when(trackRepo.countPendingItems(1)).thenReturn(7); // reserved == 7 (window==capacity trick)
@@ -194,7 +196,7 @@ class TodayPlanServiceTest {
         Track must = deadlineTrack(1, "Must", tomorrow, "must");   // pace 5/10=0.5, urgency 3*0.5=1.5
         Track should = deadlineTrack(2, "Should", tomorrow, "should"); // pace 4/10=0.4, urgency 2*0.4=0.8
         Track could = deadlineTrack(3, "Could", tomorrow, "could");    // pace 3/10=0.3, urgency 1*0.3=0.3
-        when(trackRepo.listActive()).thenReturn(List.of(must, should, could));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(must, should, could));
         stubItems(1); // lock-in only ever pulls items for the ONE chosen track
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0); // would only allow ~10 items total in Normal mode
         when(trackRepo.countPendingItems(1)).thenReturn(5);
@@ -217,7 +219,7 @@ class TodayPlanServiceTest {
         LocalDate mon = LocalDate.of(2026, 8, 17);
         Track a = manualTrack(1, "A");
         Track b = manualTrack(2, "B");
-        when(trackRepo.listActive()).thenReturn(List.of(a, b));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(a, b));
         stubItems(1); stubItems(2);
         when(trackRepo.getCapacity(0)).thenReturn(4.0); // default weekday capacity — plenty of headroom
         when(trackRepo.getScheduleBudget(1, 0)).thenReturn(2);
@@ -244,7 +246,7 @@ class TodayPlanServiceTest {
         LocalDate today = LocalDate.of(2026, 8, 17); // Monday
         Track deadline = deadlineTrack(1, "Deadline", today.plusDays(1), "should"); // Tue
         Track manual = manualTrack(2, "Manual");
-        when(trackRepo.listActive()).thenReturn(List.of(deadline, manual));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(deadline, manual));
         stubItems(1); stubItems(2);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
         when(trackRepo.countPendingItems(1)).thenReturn(7);
@@ -265,7 +267,7 @@ class TodayPlanServiceTest {
             .thenReturn(TodayPlanService.MODE_LOCKIN);
         LocalDate today = LocalDate.of(2026, 8, 17);
         Track t = deadlineTrack(1, "T", today.plusDays(1), "must");
-        when(trackRepo.listActive()).thenReturn(List.of(t));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(t));
         stubItems(1);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
         when(trackRepo.countPendingItems(1)).thenReturn(3);
@@ -280,7 +282,7 @@ class TodayPlanServiceTest {
     void reason_overBudget() {
         LocalDate today = LocalDate.of(2026, 8, 17);
         LocalDate tomorrow = today.plusDays(1);
-        when(trackRepo.listActive()).thenReturn(List.of(
+        when(trackRepo.listActive(1L)).thenReturn(List.of(
             deadlineTrack(1, "M1", tomorrow, "must"), deadlineTrack(2, "M2", tomorrow, "must")));
         stubItems(1); stubItems(2);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
@@ -340,12 +342,12 @@ class TodayPlanServiceTest {
         when(settings.getOrDefault(TodayPlanService.MODE_KEY, TodayPlanService.MODE_NORMAL))
             .thenReturn(TodayPlanService.MODE_NORMAL);
         Track t = manualTrack(1, "Grouped Track");
-        when(repo.listActive()).thenReturn(List.of(t));
+        when(repo.listActive(1L)).thenReturn(List.of(t));
         when(repo.getCapacity(anyInt())).thenReturn(10.0);
         when(repo.getScheduleBudget(1, 0)).thenReturn(items.size());
         when(repo.countPendingItems(1)).thenReturn(items.size());
         when(repo.nextPendingItems(eq(1L), anyInt())).thenReturn(items);
-        return new TodayPlanService(repo, settings).today(date);
+        return new TodayPlanService(repo, settings, activeVault).today(date);
     }
 
     // ── L1: unscheduled no-deadline fallback ─────────────────────────────────────
@@ -361,7 +363,7 @@ class TodayPlanServiceTest {
         Track could = prioTrack(1, "could", 3);
         Track must = prioTrack(2, "must", 2);
         Track should = prioTrack(3, "should", 1);
-        when(trackRepo.listActive()).thenReturn(List.of(could, must, should));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(could, must, should));
         stubItems(1); stubItems(2); stubItems(3);
         when(trackRepo.getCapacity(0)).thenReturn(6.0);
         when(trackRepo.countPendingItems(1)).thenReturn(10);
@@ -383,7 +385,7 @@ class TodayPlanServiceTest {
         Track deadline = deadlineTrack(1, "D", mon.plusDays(1), "should");
         Track sched = manualTrack(2, "S");
         Track free = manualTrack(3, "F");
-        when(trackRepo.listActive()).thenReturn(List.of(deadline, sched, free));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(deadline, sched, free));
         stubItems(1); stubItems(2); stubItems(3);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
         when(trackRepo.countPendingItems(1)).thenReturn(4);
@@ -405,7 +407,7 @@ class TodayPlanServiceTest {
         LocalDate mon = LocalDate.of(2026, 8, 17);
         Track d = deadlineTrack(1, "D", mon.plusDays(1), "must");
         Track free = manualTrack(2, "F");
-        when(trackRepo.listActive()).thenReturn(List.of(d, free));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(d, free));
         stubItems(1);
         when(trackRepo.getCapacity(anyInt())).thenReturn(10.0);
         when(trackRepo.countPendingItems(1)).thenReturn(3);
@@ -424,7 +426,7 @@ class TodayPlanServiceTest {
         LocalDate mon = LocalDate.of(2026, 8, 17);
         Track small = prioTrack(1, "must", 2);   // 3 items total
         Track big = prioTrack(2, "should", 1);   // plenty
-        when(trackRepo.listActive()).thenReturn(List.of(small, big));
+        when(trackRepo.listActive(1L)).thenReturn(List.of(small, big));
         when(trackRepo.getCapacity(anyInt())).thenReturn(2.0);
         when(trackRepo.countPendingItems(1)).thenReturn(3);
         when(trackRepo.countPendingItems(2)).thenReturn(100);

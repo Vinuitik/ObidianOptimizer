@@ -33,9 +33,12 @@ public class FlaggedCardRegenService {
     private final CardRepository cardRepo;
     private final CardGenerationService generationService;
     private final SettingsRepository settingsRepo;
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
 
     public FlaggedCardRegenService(CardRepository cardRepo, CardGenerationService generationService,
-                                   SettingsRepository settingsRepo) {
+                                   SettingsRepository settingsRepo,
+                                   com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.cardRepo = cardRepo;
         this.generationService = generationService;
         this.settingsRepo = settingsRepo;
@@ -49,12 +52,14 @@ public class FlaggedCardRegenService {
         if (!cardsEnabled || !settingsRepo.isFlashcardsEnabled()) {
             return new RegenResult(0, 0, 0);
         }
-        List<Map<String, Object>> pending = cardRepo.findNotesWithPendingFlags();
+        // Nightly sweep (chrono lane): active vault only.
+        long vaultId = activeVault.id();
+        List<Map<String, Object>> pending = cardRepo.findNotesWithPendingFlags(vaultId);
         if (pending.isEmpty()) return new RegenResult(0, 0, 0);
 
         int notes = 0, requested = 0, stored = 0;
         for (Map<String, Object> row : pending) {
-            RegenResult r = tryRegen(row);
+            RegenResult r = tryRegen(vaultId, row);
             notes += r.notes(); requested += r.replacementsRequested(); stored += r.stored();
         }
         if (notes > 0) {
@@ -70,13 +75,13 @@ public class FlaggedCardRegenService {
      * card is flagged, so the replacement lands in seconds/minutes rather than by 2am. The
      * nightly {@link #run()} sweep stays in place as a retry net for a transport failure here.
      */
-    public RegenResult regenerateNote(String notePath) {
+    public RegenResult regenerateNote(long vaultId, String notePath) {
         if (!cardsEnabled || !settingsRepo.isFlashcardsEnabled()) {
             return new RegenResult(0, 0, 0);
         }
-        Map<String, Object> row = cardRepo.findPendingFlagsForNote(notePath);
+        Map<String, Object> row = cardRepo.findPendingFlagsForNote(vaultId, notePath);
         if (row == null) return new RegenResult(0, 0, 0);
-        RegenResult r = tryRegen(row);
+        RegenResult r = tryRegen(vaultId, row);
         if (r.notes() > 0) {
             log.info("[FlaggedCardRegen] immediate refill for {}: {} replacement(s) requested, {} stored",
                 notePath, r.replacementsRequested(), r.stored());
@@ -84,18 +89,18 @@ public class FlaggedCardRegenService {
         return r;
     }
 
-    private RegenResult tryRegen(Map<String, Object> row) {
+    private RegenResult tryRegen(long vaultId, Map<String, Object> row) {
         String path = (String) row.get("note_path");
         String hash = (String) row.get("body_hash");
         int count = ((Number) row.get("flag_count")).intValue();
         List<String> reasons = reasonsOf(row.get("reasons"));
 
-        var result = generationService.regenerate(path, hash, count, reasons);
+        var result = generationService.regenerate(vaultId, path, hash, count, reasons);
         // Only mark serviced when the embedder actually answered — a transport failure
         // (wrapper down) must leave the flags pending so the nightly sweep retries,
         // mirroring CardJobWorker's recordAttempt gating.
         if (result == null) return new RegenResult(0, count, 0);
-        cardRepo.markFlagsServiced(path);
+        cardRepo.markFlagsServiced(vaultId, path);
         return new RegenResult(1, count, result.path("stored").asInt());
     }
 

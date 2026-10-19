@@ -20,9 +20,13 @@ import java.util.Map;
 @RestController
 public class PipelineFailureController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private final PipelineFailureRepository repo;
 
-    public PipelineFailureController(PipelineFailureRepository repo) {
+    public PipelineFailureController(PipelineFailureRepository repo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.repo = repo;
     }
 
@@ -33,7 +37,7 @@ public class PipelineFailureController {
             @RequestParam(required = false) String stage,
             @RequestParam(defaultValue = "200") int limit) {
         List<Map<String, Object>> out = new ArrayList<>();
-        for (PipelineFailureRepository.Failure f : repo.list(onlyOpen, source, stage, limit)) {
+        for (PipelineFailureRepository.Failure f : repo.list(activeVault.id(), onlyOpen, source, stage, limit)) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", f.id());
             m.put("occurredAt", f.occurredAt());
@@ -54,7 +58,7 @@ public class PipelineFailureController {
      *  is a debugging ledger: mark it looked-at/fixed, nothing more. */
     @PostMapping("pipeline-failures/{id}/resolve")
     public ResponseEntity<Map<String, Object>> resolve(@PathVariable long id) {
-        if (!repo.resolve(id)) {
+        if (!repo.resolve(activeVault.id(), id)) {
             return ResponseEntity.status(409).body(Map.of("error", "not open"));
         }
         return ResponseEntity.ok(Map.of("status", "resolved"));
@@ -67,7 +71,7 @@ public class PipelineFailureController {
             return ResponseEntity.badRequest().body(Map.of("error", "source and stage required"));
         }
         Map<String, Object> payload = body.input() != null ? body.input() : Map.of();
-        repo.record(body.source(), body.stage(), payload, null, body.error(), null);
+        repo.record(activeVault.id(), body.source(), body.stage(), payload, null, body.error(), null);
         return ResponseEntity.ok(Map.of("status", "recorded"));
     }
 

@@ -53,7 +53,7 @@ public class EmbeddingService {
      * @return true when every chunk is indexed (or unchanged) — false on any
      *         read/embed failure so the caller can retry the note later.
      */
-    public boolean indexNote(String path) {
+    public boolean indexNote(long vaultId, String path) {
         String content;
         try {
             content = Files.readString(Paths.get(path));
@@ -62,7 +62,7 @@ public class EmbeddingService {
             return false;
         }
 
-        boolean titleOk = indexTitleChunk(path);
+        boolean titleOk = indexTitleChunk(vaultId, path);
 
         List<NoteChunk> chunks = preprocessor.chunkNote(path, content);
 
@@ -72,7 +72,7 @@ public class EmbeddingService {
         List<String> changedHashes = new ArrayList<>();
         for (NoteChunk chunk : chunks) {
             String newHash = ContentHashing.sha256(chunk.getText());
-            String storedHash = chunkRepo.getContentHash(path, "text", chunk.getChunkIndex());
+            String storedHash = chunkRepo.getContentHash(vaultId, path, "text", chunk.getChunkIndex());
             if (newHash.equals(storedHash)) {
                 continue;
             }
@@ -100,12 +100,12 @@ public class EmbeddingService {
             }
             for (int i = 0; i < slice.size(); i++) {
                 NoteChunk c = slice.get(i);
-                chunkRepo.upsertChunk(path, c.getChunkIndex(), "text", c.getText(),
+                chunkRepo.upsertChunk(vaultId, path, c.getChunkIndex(), "text", c.getText(),
                     vectors.get(i), changedHashes.get(start + i));
             }
         }
 
-        chunkRepo.deleteStaleChunks(path, "text", chunks.size() - 1);
+        chunkRepo.deleteStaleChunks(vaultId, path, "text", chunks.size() - 1);
         log.debug("[EmbeddingService] indexed {} text chunk(s) for {} ({} changed)",
             chunks.size(), path, changed.size());
         return allOk && titleOk;
@@ -117,12 +117,12 @@ public class EmbeddingService {
      * note whose body happens to mention it via [[wikilink]]. Content-hash gated
      * like the body chunks, so a no-op rename-free reindex costs one hash compare.
      */
-    private boolean indexTitleChunk(String path) {
+    private boolean indexTitleChunk(long vaultId, String path) {
         String fileName = Paths.get(path).getFileName().toString();
         String title = fileName.endsWith(".md") ? fileName.substring(0, fileName.length() - 3) : fileName;
 
         String newHash = ContentHashing.sha256(title);
-        String storedHash = chunkRepo.getContentHash(path, "title", 0);
+        String storedHash = chunkRepo.getContentHash(vaultId, path, "title", 0);
         if (newHash.equals(storedHash)) {
             return true;
         }
@@ -132,7 +132,7 @@ public class EmbeddingService {
             log.warn("[EmbeddingService] title embed failed for {} — will retry", path);
             return false;
         }
-        chunkRepo.upsertChunk(path, 0, "title", title, vector, newHash);
+        chunkRepo.upsertChunk(vaultId, path, 0, "title", title, vector, newHash);
         return true;
     }
 

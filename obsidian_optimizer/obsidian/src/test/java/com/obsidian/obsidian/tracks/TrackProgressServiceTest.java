@@ -23,6 +23,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TrackProgressServiceTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @Mock TrackRepository trackRepo;
     TrackProgressService service;
 
@@ -35,9 +37,9 @@ class TrackProgressServiceTest {
 
     @Test
     void noDeadline_onTrackIsNull() {
-        service = new TrackProgressService(trackRepo);
+        service = new TrackProgressService(trackRepo, activeVault);
         Track t = track(1, "Curiosities", LocalDate.of(2026, 8, 1), null, true);
-        when(trackRepo.listProgressRows()).thenReturn(List.of(new TrackProgressRow(t, 2, 5)));
+        when(trackRepo.listProgressRows(1L)).thenReturn(List.of(new TrackProgressRow(t, 2, 5)));
 
         List<TrackProgress> progress = service.progress(LocalDate.of(2026, 8, 17));
 
@@ -49,12 +51,12 @@ class TrackProgressServiceTest {
 
     @Test
     void deadline_aheadOfExpectedPace_onTrackTrue() {
-        service = new TrackProgressService(trackRepo);
+        service = new TrackProgressService(trackRepo, activeVault);
         LocalDate created = LocalDate.of(2026, 8, 1);
         LocalDate today = LocalDate.of(2026, 8, 17);
         LocalDate deadline = LocalDate.of(2026, 9, 1);
         Track t = track(1, "Rust", created, deadline, true);
-        when(trackRepo.listProgressRows()).thenReturn(List.of(new TrackProgressRow(t, 8, 10)));
+        when(trackRepo.listProgressRows(1L)).thenReturn(List.of(new TrackProgressRow(t, 8, 10)));
         when(trackRepo.capacityBetween(created, deadline)).thenReturn(100.0); // full span
         when(trackRepo.capacityBetween(created, today)).thenReturn(40.0);     // 40% elapsed
 
@@ -66,12 +68,12 @@ class TrackProgressServiceTest {
 
     @Test
     void deadline_behindExpectedPace_onTrackFalse() {
-        service = new TrackProgressService(trackRepo);
+        service = new TrackProgressService(trackRepo, activeVault);
         LocalDate created = LocalDate.of(2026, 8, 1);
         LocalDate today = LocalDate.of(2026, 8, 17);
         LocalDate deadline = LocalDate.of(2026, 9, 1);
         Track t = track(1, "Rust", created, deadline, true);
-        when(trackRepo.listProgressRows()).thenReturn(List.of(new TrackProgressRow(t, 1, 10)));
+        when(trackRepo.listProgressRows(1L)).thenReturn(List.of(new TrackProgressRow(t, 1, 10)));
         when(trackRepo.capacityBetween(created, deadline)).thenReturn(100.0);
         when(trackRepo.capacityBetween(created, today)).thenReturn(40.0);
 
@@ -83,12 +85,12 @@ class TrackProgressServiceTest {
 
     @Test
     void deadline_exactlyOnPace_onTrackTrue() {
-        service = new TrackProgressService(trackRepo);
+        service = new TrackProgressService(trackRepo, activeVault);
         LocalDate created = LocalDate.of(2026, 8, 1);
         LocalDate today = LocalDate.of(2026, 8, 17);
         LocalDate deadline = LocalDate.of(2026, 9, 1);
         Track t = track(1, "Rust", created, deadline, true);
-        when(trackRepo.listProgressRows()).thenReturn(List.of(new TrackProgressRow(t, 4, 10)));
+        when(trackRepo.listProgressRows(1L)).thenReturn(List.of(new TrackProgressRow(t, 4, 10)));
         when(trackRepo.capacityBetween(created, deadline)).thenReturn(100.0);
         when(trackRepo.capacityBetween(created, today)).thenReturn(40.0);
 
@@ -100,12 +102,12 @@ class TrackProgressServiceTest {
 
     @Test
     void zeroCapacitySpan_expectedDoneIsFullTotal() {
-        service = new TrackProgressService(trackRepo);
+        service = new TrackProgressService(trackRepo, activeVault);
         LocalDate created = LocalDate.of(2026, 8, 17);
         LocalDate today = LocalDate.of(2026, 8, 17);
         LocalDate deadline = LocalDate.of(2026, 8, 17); // deadline == created, span=0
         Track t = track(1, "Rush", created, deadline, true);
-        when(trackRepo.listProgressRows()).thenReturn(List.of(new TrackProgressRow(t, 3, 10)));
+        when(trackRepo.listProgressRows(1L)).thenReturn(List.of(new TrackProgressRow(t, 3, 10)));
         when(trackRepo.capacityBetween(created, deadline)).thenReturn(0.0);
 
         List<TrackProgress> progress = service.progress(today);
@@ -121,7 +123,7 @@ class TrackProgressServiceTest {
      *  itemsDone/itemsTotal/onTrack computation has no way to vary with grouping. */
     @Test
     void itemGrouping_doesNotAffectProgressCounts() {
-        service = new TrackProgressService(trackRepo);
+        service = new TrackProgressService(trackRepo, activeVault);
         LocalDate created = LocalDate.of(2026, 8, 1);
         LocalDate today = LocalDate.of(2026, 8, 17);
         LocalDate deadline = LocalDate.of(2026, 9, 1);
@@ -133,10 +135,10 @@ class TrackProgressServiceTest {
         when(trackRepo.capacityBetween(created, deadline)).thenReturn(100.0);
         when(trackRepo.capacityBetween(created, today)).thenReturn(40.0);
 
-        when(trackRepo.listProgressRows()).thenReturn(List.of(groupedRow));
+        when(trackRepo.listProgressRows(1L)).thenReturn(List.of(groupedRow));
         TrackProgress groupedResult = service.progress(today).get(0);
 
-        when(trackRepo.listProgressRows()).thenReturn(List.of(ungroupedRow));
+        when(trackRepo.listProgressRows(1L)).thenReturn(List.of(ungroupedRow));
         TrackProgress ungroupedResult = service.progress(today).get(0);
 
         assertThat(groupedResult).isEqualTo(ungroupedResult);

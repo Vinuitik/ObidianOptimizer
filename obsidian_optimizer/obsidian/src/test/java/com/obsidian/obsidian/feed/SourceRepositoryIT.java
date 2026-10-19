@@ -25,6 +25,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers
 class SourceRepositoryIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =
@@ -55,53 +60,53 @@ class SourceRepositoryIT {
 
     @Test
     void create_roundTrips_andAutoAcceptDefaultsNull() {
-        var s = repo.create("rss", "https://a/", "https://a/feed", "A", null, null);
+        var s = repo.create(1L, "rss", "https://a/", "https://a/feed", "A", null, null);
         assertThat(s.autoAccept()).isNull();
         assertThat(s.status()).isEqualTo("active");
         assertThat(s.lastCheckedAt()).isNull();
-        assertThat(repo.get(s.id())).isEqualTo(s);
-        assertThat(repo.getByUrl("https://a/").id()).isEqualTo(s.id());
+        assertThat(repo.get(1L, s.id())).isEqualTo(s);
+        assertThat(repo.getByUrl(1L, "https://a/").id()).isEqualTo(s.id());
     }
 
     @Test
     void url_isUnique() {
-        repo.create("rss", "https://a/", null, "A", null, null);
-        assertThatThrownBy(() -> repo.create("rss", "https://a/", null, "A2", null, null)).isInstanceOf(Exception.class);
+        repo.create(1L, "rss", "https://a/", null, "A", null, null);
+        assertThatThrownBy(() -> repo.create(1L, "rss", "https://a/", null, "A2", null, null)).isInstanceOf(Exception.class);
     }
 
     @Test
     void update_partialAndClearToInherit() {
-        var s = repo.create("rss", "https://a/", null, "A", true, 5L);
-        var u = repo.update(s.id(), null, false, null, false, "paused", "Renamed");
+        var s = repo.create(1L, "rss", "https://a/", null, "A", true, 5L);
+        var u = repo.update(1L, s.id(), null, false, null, false, "paused", "Renamed");
         assertThat(u.autoAccept()).isTrue();
         assertThat(u.targetTrackId()).isEqualTo(5L);
         assertThat(u.status()).isEqualTo("paused");
         assertThat(u.title()).isEqualTo("Renamed");
-        var c = repo.update(s.id(), null, true, null, true, null, null);
+        var c = repo.update(1L, s.id(), null, true, null, true, null, null);
         assertThat(c.autoAccept()).isNull();
         assertThat(c.targetTrackId()).isNull();
     }
 
     @Test
     void listActive_excludesPaused_markCheckedAdvances() {
-        var a = repo.create("rss", "https://a/", null, "A", null, null);
-        var b = repo.create("rss", "https://b/", null, "B", null, null);
-        repo.update(b.id(), null, false, null, false, "paused", null);
-        assertThat(repo.listActive()).extracting(SourceRepository.Source::id).containsExactly(a.id());
+        var a = repo.create(1L, "rss", "https://a/", null, "A", null, null);
+        var b = repo.create(1L, "rss", "https://b/", null, "B", null, null);
+        repo.update(1L, b.id(), null, false, null, false, "paused", null);
+        assertThat(repo.listActive(1L)).extracting(SourceRepository.Source::id).containsExactly(a.id());
         Instant now = Instant.now();
         repo.markChecked(a.id(), now);
-        assertThat(repo.get(a.id()).lastCheckedAt()).isNotNull();
+        assertThat(repo.get(1L, a.id()).lastCheckedAt()).isNotNull();
     }
 
     @Test
     void delete_cascadesFeedItems_andPendingCountCounts(@Autowired FeedRepository feed) {
-        var s = repo.create("rss", "https://a/", null, "A", null, null);
-        feed.insertIfNew(s.id(), "https://a/1", "1", null, null, null);
-        feed.insertIfNew(s.id(), "https://a/2", "2", null, null, null);
-        assertThat(repo.get(s.id()).pendingCount()).isEqualTo(2);
-        assertThat(repo.delete(s.id())).isTrue();
+        var s = repo.create(1L, "rss", "https://a/", null, "A", null, null);
+        feed.insertIfNew(1L, s.id(), "https://a/1", "1", null, null, null);
+        feed.insertIfNew(1L, s.id(), "https://a/2", "2", null, null, null);
+        assertThat(repo.get(1L, s.id()).pendingCount()).isEqualTo(2);
+        assertThat(repo.delete(1L, s.id())).isTrue();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM feed_items", Integer.class)).isZero();
-        assertThat(repo.delete(s.id())).isFalse();
+        assertThat(repo.delete(1L, s.id())).isFalse();
     }
 
     @Test

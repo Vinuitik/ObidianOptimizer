@@ -343,3 +343,4 @@ To change the embedder endpoint: `embedder.url` (shared with EmbeddingService)
 | Embedding work list rule | `NoteIndexRepository.findNotesNeedingEmbedding()` |
 | Readiness gate flag | set: `ResourceScanService.scan` → `NoteIndexRepository.setIngestPending`; gates: `findNotesNeedingEmbedding` + `CardRepository.findNotesNeedingCards` |
 | Orphan chunk cleanup | `NoteEmbeddingWorker.purgeOrphanChunks()` (daily) |
+| Vault scoping (M3) | `NoteChunkRepository` (BM25 `findByTextSearch` + `findByVectorSimilarity` filter `vault_id`), `PendingImageJobRepository` (`PendingImageJob.vaultId`), `EmbeddingService.indexNote(vaultId, path)`, `SearchService.search(vaultId, …)`; `NoteEmbeddingWorker`/`ChunkEmbeddingReconciler`/`ImageProcessingWorker` scanners use `activeVault.id()`, queue messages carry `vaultId` (absent = 1, pre-M3 messages); `ResourceScanService` roots via `ActiveVault.rootFor(vaultId)` |

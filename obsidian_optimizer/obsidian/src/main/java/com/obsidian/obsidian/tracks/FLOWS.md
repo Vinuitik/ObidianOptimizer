@@ -367,3 +367,4 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 | Subscriptions (now "Passive Feed") — everything poll/accept/bin/restore/dedup | **[feed/FLOWS.md](../feed/FLOWS.md)** |
 | Legacy Subscribe-button redirect (`sourceUrl` on `POST /tracks`) | `TrackController.create()` |
 | Discover HTTP client (shared with `feed/`) | `TrackAgentClient.discover()` / `Candidate` |
+| Vault scoping (M3) | `TrackRepository` methods take `long vaultId` first; item routes vault-check via `TrackRepository.getItem(vaultId, id)` (items inherit their vault through `tracks`); `TodayPlanService`/`TrackProgressService`/`TrackController` use `activeVault.id()` |

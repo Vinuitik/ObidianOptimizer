@@ -29,6 +29,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 class ChronoServiceIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =

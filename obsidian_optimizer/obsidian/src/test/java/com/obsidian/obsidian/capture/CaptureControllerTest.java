@@ -38,6 +38,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(MockitoExtension.class)
 class CaptureControllerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @Mock FileRepository repository;
     @Mock CaptureRepository captureRepo;
     @Mock CaptureIngestWorker ingestWorker;
@@ -54,7 +56,7 @@ class CaptureControllerTest {
     @BeforeEach
     void setUp() {
         controller = new CaptureController(repository, captureRepo, ingestWorker, settingsRepo,
-            outboxRepo, pipelineFailureRepo, txManager);
+            outboxRepo, pipelineFailureRepo, txManager, activeVault);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -81,7 +83,7 @@ class CaptureControllerTest {
 
     @Test
     void captureFile_pdf_storesAndEnqueuesStandalone() throws Exception {
-        when(settingsRepo.getVaultPath()).thenReturn(vault.toString());
+        activeVault.set(1L, java.nio.file.Path.of(String.valueOf(vault.toString())));
         var pdf = new MockMultipartFile("file", "Intro to Agents.pdf",
             "application/pdf", "%PDF-1.4 body".getBytes());
 
@@ -90,7 +92,7 @@ class CaptureControllerTest {
             .andExpect(jsonPath("$.status").value("queued"))
             .andExpect(jsonPath("$.captureId").isNotEmpty());
 
-        verify(captureRepo).enqueue(anyString(), eq("pdf"),
+        verify(captureRepo).enqueue(org.mockito.ArgumentMatchers.eq(1L), anyString(), eq("pdf"),
             startsWith("resources/files/"), startsWith("resources/files/"), eq("Intro to Agents.pdf"));
         verify(ingestWorker).nudge();
         // the bytes actually landed as a vault resource
@@ -101,13 +103,13 @@ class CaptureControllerTest {
 
     @Test
     void captureFile_video_classifiesAsVideo() throws Exception {
-        when(settingsRepo.getVaultPath()).thenReturn(vault.toString());
+        activeVault.set(1L, java.nio.file.Path.of(String.valueOf(vault.toString())));
         var vid = new MockMultipartFile("file", "lecture.mp4", "video/mp4", "binary".getBytes());
 
         mvc.perform(multipart("/capture/file").file(vid))
             .andExpect(status().isOk());
 
-        verify(captureRepo).enqueue(anyString(), eq("video"), anyString(), anyString(), eq("lecture.mp4"));
+        verify(captureRepo).enqueue(org.mockito.ArgumentMatchers.eq(1L), anyString(), eq("video"), anyString(), anyString(), eq("lecture.mp4"));
     }
 
     @Test
@@ -167,7 +169,7 @@ class CaptureControllerTest {
                 {"url":"https://youtu.be/b","title":"Part 2"}
             ]}
             """);
-        when(captureRepo.existsLiveForSource(anyString())).thenReturn(false);
+        when(captureRepo.existsLiveForSource(org.mockito.ArgumentMatchers.eq(1L), anyString())).thenReturn(false);
 
         mvc.perform(post("/capture").contentType("application/json")
                 .content("{\"url\":\"https://www.youtube.com/playlist?list=PL1\"}"))
@@ -177,9 +179,9 @@ class CaptureControllerTest {
             .andExpect(jsonPath("$.count").value(2))
             .andExpect(jsonPath("$.skipped").value(0));
 
-        verify(captureRepo).enqueuePlaylistItem(anyString(), eq("video"),
+        verify(captureRepo).enqueuePlaylistItem(org.mockito.ArgumentMatchers.eq(1L), anyString(), eq("video"),
             eq("https://youtu.be/a"), isNull(), eq("Part 1"), anyString(), eq(0));
-        verify(captureRepo).enqueuePlaylistItem(anyString(), eq("video"),
+        verify(captureRepo).enqueuePlaylistItem(org.mockito.ArgumentMatchers.eq(1L), anyString(), eq("video"),
             eq("https://youtu.be/b"), isNull(), eq("Part 2"), anyString(), eq(1));
         verify(ingestWorker).nudge();
     }
@@ -192,8 +194,8 @@ class CaptureControllerTest {
                 {"url":"https://youtu.be/b","title":"Part 2"}
             ]}
             """);
-        when(captureRepo.existsLiveForSource("https://youtu.be/a")).thenReturn(true);
-        when(captureRepo.existsLiveForSource("https://youtu.be/b")).thenReturn(false);
+        when(captureRepo.existsLiveForSource(1L, "https://youtu.be/a")).thenReturn(true);
+        when(captureRepo.existsLiveForSource(1L, "https://youtu.be/b")).thenReturn(false);
 
         mvc.perform(post("/capture").contentType("application/json")
                 .content("{\"url\":\"https://www.youtube.com/playlist?list=PL1\"}"))
@@ -201,9 +203,9 @@ class CaptureControllerTest {
             .andExpect(jsonPath("$.count").value(1))
             .andExpect(jsonPath("$.skipped").value(1));
 
-        verify(captureRepo, never()).enqueuePlaylistItem(anyString(), anyString(),
+        verify(captureRepo, never()).enqueuePlaylistItem(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyString(),
             eq("https://youtu.be/a"), any(), anyString(), anyString(), anyInt());
-        verify(captureRepo).enqueuePlaylistItem(anyString(), eq("video"),
+        verify(captureRepo).enqueuePlaylistItem(org.mockito.ArgumentMatchers.eq(1L), anyString(), eq("video"),
             eq("https://youtu.be/b"), isNull(), eq("Part 2"), anyString(), eq(1));
     }
 

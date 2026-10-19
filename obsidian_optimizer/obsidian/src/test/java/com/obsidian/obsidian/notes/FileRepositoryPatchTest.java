@@ -29,6 +29,8 @@ import static org.mockito.Mockito.doNothing;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class FileRepositoryPatchTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @TempDir Path tmp;
 
     @Mock NoteLinkRepository noteLinkRepo;
@@ -41,12 +43,12 @@ class FileRepositoryPatchTest {
 
     @BeforeEach
     void setUp() {
-        doNothing().when(noteIndex).upsert(anyString(), anyString(), any(), anyLong());
-        doNothing().when(noteLinkRepo).updateLinks(anyString(), any());
+        doNothing().when(noteIndex).upsert(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyString(), any(), anyLong());
+        doNothing().when(noteLinkRepo).updateLinks(org.mockito.ArgumentMatchers.eq(1L), anyString(), any());
         // requireInsideVault needs a vault root — init() against the temp dir
-        org.mockito.Mockito.when(settingsRepo.getVaultPath()).thenReturn(tmp.toString());
+        activeVault.set(1L, java.nio.file.Path.of(tmp.toString()));
         org.mockito.Mockito.when(settingsRepo.getStartupSyncMode()).thenReturn("blocking");
-        repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex, imageScanService, syncQueueRepo);
+        repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex, imageScanService, syncQueueRepo, activeVault);
         repo.init();
     }
 

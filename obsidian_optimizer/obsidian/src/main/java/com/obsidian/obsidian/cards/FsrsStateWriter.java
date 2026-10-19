@@ -54,21 +54,21 @@ public class FsrsStateWriter {
      * null if it has no sr-frontmatter to migrate. Writes DB + frontmatter so the
      * nightly chrono run treats the note as already-current.
      */
-    public ReviewRow normalizeLegacy(String notePath) {
-        ReviewRow existing = read(notePath);
+    public ReviewRow normalizeLegacy(long vaultId, String notePath) {
+        ReviewRow existing = read(vaultId, notePath);
         if (existing != null) return existing;  // already FSRS
         FrontmatterRewriter.SrFields legacy = FrontmatterRewriter.read(Paths.get(notePath));
         if (legacy == null) return null;         // not a review note
         FsrsState seeded = seedFromLegacy(legacy);
         Instant lastReview = legacy.due().minusDays(Math.max(1, legacy.interval()))
             .atStartOfDay(ZoneId.systemDefault()).toInstant();
-        writeState(notePath, seeded, lastReview, legacy.due(), legacy.interval());
-        return read(notePath);
+        writeState(vaultId, notePath, seeded, lastReview, legacy.due(), legacy.interval());
+        return read(vaultId, notePath);
     }
 
     /** DB first; hydrate from the frontmatter mirror (and backfill the DB) on a miss. */
-    public ReviewRow read(String notePath) {
-        ReviewRow row = reviewRepo.find(notePath);
+    public ReviewRow read(long vaultId, String notePath) {
+        ReviewRow row = reviewRepo.find(vaultId, notePath);
         if (row != null) return row;
 
         FsrsFields f = FrontmatterRewriter.readFsrs(Paths.get(notePath));
@@ -82,27 +82,27 @@ public class FsrsStateWriter {
             last, due, f.bucket(), f.arm());
 
         if (f.arm() != null && f.bucket() != null) {
-            reviewRepo.upsert(notePath, f.stability(), f.difficulty(), last, due, f.bucket(), f.arm());
+            reviewRepo.upsert(vaultId, notePath, f.stability(), f.difficulty(), last, due, f.bucket(), f.arm());
             log.info("[FSRS] hydrated {} from frontmatter (DB row was missing)", notePath);
         }
         return hydrated;
     }
 
     /** Full state write — DB upsert + frontmatter mirror. */
-    public void write(String notePath, FsrsState state, Instant lastReview,
+    public void write(long vaultId, String notePath, FsrsState state, Instant lastReview,
                       Timestamp due, int intervalDays, String bucket, double arm) {
-        reviewRepo.upsert(notePath, state.stability(), state.difficulty(),
+        reviewRepo.upsert(vaultId, notePath, state.stability(), state.difficulty(),
             Timestamp.from(lastReview), due, bucket, arm);
         mirror(notePath, new FsrsFields(toLocalDate(due), intervalDays,
             state.stability(), state.difficulty(), toLocalDate(lastReview), arm, bucket));
     }
 
     /** Calendar-only move (Spread): shift the due date, leave memory state intact. */
-    public void reschedule(String notePath, LocalDate newDue) {
-        ReviewRow row = read(notePath);
+    public void reschedule(long vaultId, String notePath, LocalDate newDue) {
+        ReviewRow row = read(vaultId, notePath);
         if (row == null) return;
         Timestamp due = Timestamp.from(newDue.atStartOfDay(ZoneId.systemDefault()).toInstant());
-        reviewRepo.upsert(notePath, row.stability(), row.difficulty(), row.lastReview(), due,
+        reviewRepo.upsert(vaultId, notePath, row.stability(), row.difficulty(), row.lastReview(), due,
             row.pendingBucket(), row.pendingArm());
         FsrsFields f = FrontmatterRewriter.readFsrs(Paths.get(notePath));
         if (f != null) {
@@ -116,13 +116,13 @@ public class FsrsStateWriter {
      * pending bandit decision — no review happened, so the reward link is left
      * untouched. lastReview becomes the chrono run instant.
      */
-    public void writeState(String notePath, FsrsState state, Instant lastReview,
+    public void writeState(long vaultId, String notePath, FsrsState state, Instant lastReview,
                            LocalDate due, int intervalDays) {
-        ReviewRow prev = reviewRepo.find(notePath);
+        ReviewRow prev = reviewRepo.find(vaultId, notePath);
         String bucket = prev != null ? prev.pendingBucket() : null;
         Double arm    = prev != null ? prev.pendingArm() : null;
         Timestamp dueTs = Timestamp.from(due.atStartOfDay(ZoneId.systemDefault()).toInstant());
-        reviewRepo.upsert(notePath, state.stability(), state.difficulty(),
+        reviewRepo.upsert(vaultId, notePath, state.stability(), state.difficulty(),
             Timestamp.from(lastReview), dueTs, bucket, arm);
         mirror(notePath, new FsrsFields(due, intervalDays, state.stability(), state.difficulty(),
             toLocalDate(lastReview), arm, bucket));

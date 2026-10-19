@@ -29,6 +29,8 @@ import static org.mockito.Mockito.when;
  */
 class SchedulerIsolationTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @Test
     void embeddingProgressesWhileCardsWorkerIsBlocked() throws Exception {
         // ── Cards worker: its drain blocks mid-generation (simulates a cooled LLM) ──
@@ -36,9 +38,9 @@ class SchedulerIsolationTest {
         CardGenerationService gen = mock(CardGenerationService.class);
         CountDownLatch cardsBlock   = new CountDownLatch(1);
         CountDownLatch cardsStarted = new CountDownLatch(1);
-        when(cardRepo.findNotesNeedingCards(anyInt()))
+        when(cardRepo.findNotesNeedingCards(org.mockito.ArgumentMatchers.eq(1L), anyInt()))
             .thenReturn(List.of(Map.of("path", "/note.md", "body_hash", "h1")));
-        when(gen.generateFor(any(), any())).thenAnswer(inv -> {
+        when(gen.generateFor(org.mockito.ArgumentMatchers.eq(1L), any(), any())).thenAnswer(inv -> {
             cardsStarted.countDown();
             cardsBlock.await(5, TimeUnit.SECONDS);   // hold the cards lane hostage
             return null;
@@ -46,7 +48,7 @@ class SchedulerIsolationTest {
         com.obsidian.obsidian.settings.SettingsRepository settingsRepo =
             mock(com.obsidian.obsidian.settings.SettingsRepository.class);
         when(settingsRepo.isFlashcardsEnabled()).thenReturn(true);
-        CardJobWorker cards = new CardJobWorker(cardRepo, gen, settingsRepo);
+        CardJobWorker cards = new CardJobWorker(cardRepo, gen, settingsRepo, activeVault);
         ReflectionTestUtils.setField(cards, "enabled", true);
         ReflectionTestUtils.setField(cards, "batchLimit", 10);
 
@@ -55,11 +57,11 @@ class SchedulerIsolationTest {
         EmbeddingService emb    = mock(EmbeddingService.class);
         NoteChunkRepository chunk = mock(NoteChunkRepository.class);
         CountDownLatch embedded = new CountDownLatch(1);
-        when(idx.findNotesNeedingEmbedding(anyInt())).thenReturn(Map.of("/essay.md", "eh1"));
-        when(emb.indexNote("/essay.md")).thenReturn(true);
+        when(idx.findNotesNeedingEmbedding(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(Map.of("/essay.md", "eh1"));
+        when(emb.indexNote(1L, "/essay.md")).thenReturn(true);
         doAnswer(inv -> { embedded.countDown(); return null; })
-            .when(idx).markEmbedded(eq("/essay.md"), eq("eh1"));
-        NoteEmbeddingWorker embed = new NoteEmbeddingWorker(idx, emb, chunk);
+            .when(idx).markEmbedded(org.mockito.ArgumentMatchers.eq(1L), eq("/essay.md"), eq("eh1"));
+        NoteEmbeddingWorker embed = new NoteEmbeddingWorker(idx, emb, chunk, activeVault);
         ReflectionTestUtils.setField(embed, "enabled", true);
         ReflectionTestUtils.setField(embed, "batchSize", 8);
 

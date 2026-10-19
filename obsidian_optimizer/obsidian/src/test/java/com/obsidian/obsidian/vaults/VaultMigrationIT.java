@@ -192,24 +192,24 @@ class VaultMigrationIT {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM sources WHERE url='http://x/feed'", Integer.class)).isEqualTo(2);
 
         // Within a vault the real repository upserts still dedupe (default vault 1) and don't touch vault 2.
-        syncQueue.markPending("/vault/a.md", "h2");
-        syncQueue.markPending("/vault/a.md", "h3");
+        syncQueue.markPending(1L, "/vault/a.md", "h2");
+        syncQueue.markPending(1L, "/vault/a.md", "h3");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM sync_queue WHERE vault_id=1", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT content_hash FROM sync_queue WHERE vault_id=1", String.class)).isEqualTo("h3");
         assertThat(jdbc.queryForObject("SELECT content_hash FROM sync_queue WHERE vault_id=2", String.class)).isEqualTo("h");
-        workspace.insert("f.png", "image", null, 1);
-        workspace.insert("f.png", "pdf", null, 2);
+        workspace.insert(1L, "f.png", "image", null, 1);
+        workspace.insert(1L, "f.png", "pdf", null, 2);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM workspace_items WHERE vault_id=1", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT type FROM workspace_items WHERE vault_id=1", String.class)).isEqualTo("pdf");
         assertThat(jdbc.queryForObject("SELECT type FROM workspace_items WHERE vault_id=2", String.class)).isEqualTo("image");
-        chunks.upsertChunkTextOnly("/vault/a.md", 0, "text", "hello", "c1");
-        chunks.upsertChunkTextOnly("/vault/a.md", 0, "text", "hello2", "c2");
+        chunks.upsertChunkTextOnly(1L, "/vault/a.md", 0, "text", "hello", "c1");
+        chunks.upsertChunkTextOnly(1L, "/vault/a.md", 0, "text", "hello2", "c2");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM note_chunks", Integer.class)).isEqualTo(1);
         jdbc.update("INSERT INTO note_chunks(note_path,chunk_index,source,text,content_hash,vault_id) "
             + "VALUES ('/vault/a.md',0,'text','other','c',2)");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM note_chunks", Integer.class)).isEqualTo(2);
-        reviews.upsert("/vault/a.md", 1, 1, new java.sql.Timestamp(0), new java.sql.Timestamp(0), null, null);
-        reviews.upsert("/vault/a.md", 1, 1, new java.sql.Timestamp(0), new java.sql.Timestamp(0), null, null);
+        reviews.upsert(1L, "/vault/a.md", 1, 1, new java.sql.Timestamp(0), new java.sql.Timestamp(0), null, null);
+        reviews.upsert(1L, "/vault/a.md", 1, 1, new java.sql.Timestamp(0), new java.sql.Timestamp(0), null, null);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM note_reviews", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT reps FROM note_reviews", Integer.class)).isEqualTo(2);
 

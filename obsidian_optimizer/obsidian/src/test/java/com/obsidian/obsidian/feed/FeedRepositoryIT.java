@@ -25,6 +25,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers
 class FeedRepositoryIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =
@@ -55,16 +60,16 @@ class FeedRepositoryIT {
     @BeforeEach
     void clean() {
         jdbc.execute("TRUNCATE feed_items, sources RESTART IDENTITY CASCADE");
-        sid = sources.create("rss", "https://a/", null, "Blog A", null, null).id();
+        sid = sources.create(1L, "rss", "https://a/", null, "Blog A", null, null).id();
     }
 
     @Test
     void insertIfNew_dedupsOnItemUrl_whateverTheStatus() {
-        Long id = repo.insertIfNew(sid, "https://a/1", "One", "https://i/t.jpg", 90, Instant.parse("2026-08-01T00:00:00Z"));
+        Long id = repo.insertIfNew(1L, sid, "https://a/1", "One", "https://i/t.jpg", 90, Instant.parse("2026-08-01T00:00:00Z"));
         assertThat(id).isNotNull();
         repo.bin(id);
-        assertThat(repo.insertIfNew(sid, "https://a/1", "One again", null, null, null)).isNull();
-        var item = repo.get(id);
+        assertThat(repo.insertIfNew(1L, sid, "https://a/1", "One again", null, null, null)).isNull();
+        var item = repo.get(1L, id);
         assertThat(item.status()).isEqualTo("binned");
         assertThat(item.sourceTitle()).isEqualTo("Blog A");
         assertThat(item.thumbUrl()).isEqualTo("https://i/t.jpg");
@@ -73,27 +78,27 @@ class FeedRepositoryIT {
 
     @Test
     void list_filtersByStatus_newestPublishedFirst_nullDatesLast() {
-        Long old = repo.insertIfNew(sid, "https://a/old", "old", null, null, Instant.parse("2026-01-01T00:00:00Z"));
-        Long nu = repo.insertIfNew(sid, "https://a/new", "new", null, null, Instant.parse("2026-06-01T00:00:00Z"));
-        Long undated = repo.insertIfNew(sid, "https://a/nd", "nd", null, null, null);
-        Long binned = repo.insertIfNew(sid, "https://a/b", "b", null, null, null);
+        Long old = repo.insertIfNew(1L, sid, "https://a/old", "old", null, null, Instant.parse("2026-01-01T00:00:00Z"));
+        Long nu = repo.insertIfNew(1L, sid, "https://a/new", "new", null, null, Instant.parse("2026-06-01T00:00:00Z"));
+        Long undated = repo.insertIfNew(1L, sid, "https://a/nd", "nd", null, null, null);
+        Long binned = repo.insertIfNew(1L, sid, "https://a/b", "b", null, null, null);
         repo.bin(binned);
-        assertThat(repo.list("pending", 50)).extracting(FeedRepository.FeedItem::id).containsExactly(nu, old, undated);
-        assertThat(repo.list("binned", 50)).extracting(FeedRepository.FeedItem::id).containsExactly(binned);
-        assertThat(repo.list("pending", 2)).hasSize(2);
+        assertThat(repo.list(1L, "pending", 50)).extracting(FeedRepository.FeedItem::id).containsExactly(nu, old, undated);
+        assertThat(repo.list(1L, "binned", 50)).extracting(FeedRepository.FeedItem::id).containsExactly(binned);
+        assertThat(repo.list(1L, "pending", 2)).hasSize(2);
     }
 
     @Test
     void claimAccepted_isAtomicOnce_markPendingClears() {
-        Long id = repo.insertIfNew(sid, "https://a/1", "One", null, null, null);
+        Long id = repo.insertIfNew(1L, sid, "https://a/1", "One", null, null, null);
         assertThat(repo.claimAccepted(id, "cap1")).isTrue();
         assertThat(repo.claimAccepted(id, "cap2")).isFalse();
-        var item = repo.get(id);
+        var item = repo.get(1L, id);
         assertThat(item.status()).isEqualTo("accepted");
         assertThat(item.captureId()).isEqualTo("cap1");
         assertThat(item.decidedAt()).isNotNull();
         repo.markPending(id);
-        item = repo.get(id);
+        item = repo.get(1L, id);
         assertThat(item.status()).isEqualTo("pending");
         assertThat(item.captureId()).isNull();
         assertThat(item.decidedAt()).isNull();
@@ -101,13 +106,13 @@ class FeedRepositoryIT {
 
     @Test
     void bin_isIdempotent_andLeavesAcceptedAlone() {
-        Long a = repo.insertIfNew(sid, "https://a/1", "1", null, null, null);
+        Long a = repo.insertIfNew(1L, sid, "https://a/1", "1", null, null, null);
         repo.bin(a); repo.bin(a);
-        assertThat(repo.get(a).status()).isEqualTo("binned");
-        Long b = repo.insertIfNew(sid, "https://a/2", "2", null, null, null);
+        assertThat(repo.get(1L, a).status()).isEqualTo("binned");
+        Long b = repo.insertIfNew(1L, sid, "https://a/2", "2", null, null, null);
         repo.claimAccepted(b, "c");
         repo.bin(b);
-        assertThat(repo.get(b).status()).isEqualTo("accepted");
+        assertThat(repo.get(1L, b).status()).isEqualTo("accepted");
     }
 
     @Test
@@ -118,10 +123,10 @@ class FeedRepositoryIT {
 
     @Test
     void insertIfNew_withBody_roundTrips_sixArgOverloadLeavesItNull() {
-        Long withBody = repo.insertIfNew(sid, "https://a/post1", "Post", null, null, null, "full post text");
-        assertThat(repo.get(withBody).body()).isEqualTo("full post text");
+        Long withBody = repo.insertIfNew(1L, sid, "https://a/post1", "Post", null, null, null, "full post text");
+        assertThat(repo.get(1L, withBody).body()).isEqualTo("full post text");
 
-        Long withoutBody = repo.insertIfNew(sid, "https://a/vid1", "Vid", null, null, null);
-        assertThat(repo.get(withoutBody).body()).isNull();
+        Long withoutBody = repo.insertIfNew(1L, sid, "https://a/vid1", "Vid", null, null, null);
+        assertThat(repo.get(1L, withoutBody).body()).isNull();
     }
 }

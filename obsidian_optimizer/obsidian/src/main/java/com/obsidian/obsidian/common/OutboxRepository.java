@@ -66,11 +66,14 @@ public class OutboxRepository {
      *  transaction (e.g. {@code @Transactional}) for the immediate-publish path to
      *  fire — {@link OutboxRelay}'s scheduled sweep still picks the row up otherwise,
      *  just on its slower cadence rather than instantly. */
-    public UUID enqueue(String queueName, Map<String, Object> payload) {
+    public UUID enqueue(long vaultId, String queueName, Map<String, Object> payload) {
         UUID id = UUID.randomUUID();
-        String json = toJson(payload);
-        jdbc.update("INSERT INTO outbox_events(id, queue_name, payload) VALUES (?, ?, ?::jsonb)",
-            id, queueName, json);
+        // The vault travels in the payload too, so a consumer needs no extra lookup.
+        Map<String, Object> withVault = new java.util.LinkedHashMap<>(payload);
+        withVault.put("vaultId", vaultId);
+        String json = toJson(withVault);
+        jdbc.update("INSERT INTO outbox_events(id, queue_name, payload, vault_id) VALUES (?, ?, ?::jsonb, ?)",
+            id, queueName, json, vaultId);
         events.publishEvent(new OutboxRowWritten(id, queueName, json));
         return id;
     }

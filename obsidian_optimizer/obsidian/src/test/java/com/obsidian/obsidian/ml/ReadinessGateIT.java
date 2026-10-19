@@ -32,6 +32,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 class ReadinessGateIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> postgres =
@@ -97,7 +102,7 @@ class ReadinessGateIT {
     }
 
     private List<String> cardWorklistPaths() {
-        return cardRepo.findNotesNeedingCards(10).stream().map(m -> (String) m.get("path")).toList();
+        return cardRepo.findNotesNeedingCards(1L, 10).stream().map(m -> (String) m.get("path")).toList();
     }
 
     private boolean ingestPending(String path) {
@@ -110,7 +115,7 @@ class ReadinessGateIT {
         insertNote("/vault/ready.md",   "h1", null, false);
         insertNote("/vault/pending.md", "h2", null, true);
 
-        Map<String, String> work = noteIndex.findNotesNeedingEmbedding(10);
+        Map<String, String> work = noteIndex.findNotesNeedingEmbedding(1L, 10);
 
         assertThat(work).containsKey("/vault/ready.md");
         assertThat(work).doesNotContainKey("/vault/pending.md");
@@ -121,7 +126,7 @@ class ReadinessGateIT {
         insertNote("/vault/ready.md",   "h3", LocalDate.now(), false);
         insertNote("/vault/pending.md", "h4", LocalDate.now(), true);
 
-        List<String> paths = cardRepo.findNotesNeedingCards(10).stream()
+        List<String> paths = cardRepo.findNotesNeedingCards(1L, 10).stream()
             .map(m -> (String) m.get("path")).toList();
 
         assertThat(paths).contains("/vault/ready.md");
@@ -133,15 +138,15 @@ class ReadinessGateIT {
         insertNote("/vault/lecture.md", "h5", null, false);
 
         // Un-ingested video embed → flag set → excluded from the worklist.
-        resourceScan.scan("/vault/lecture.md", "intro\n![[clip.mp4]]\nnotes");
+        resourceScan.scan(1L, "/vault/lecture.md", "intro\n![[clip.mp4]]\nnotes");
         assertThat(ingestPending("/vault/lecture.md")).isTrue();
-        assertThat(noteIndex.findNotesNeedingEmbedding(10)).doesNotContainKey("/vault/lecture.md");
+        assertThat(noteIndex.findNotesNeedingEmbedding(1L, 10)).doesNotContainKey("/vault/lecture.md");
 
         // Ingest finished: marker injected → re-scan clears the flag → now eligible.
-        resourceScan.scan("/vault/lecture.md",
+        resourceScan.scan(1L, "/vault/lecture.md",
             "intro\n![[clip.mp4]]\n<!-- ingest:clip.mp4 2026-06-14 -->\ntranscript text");
         assertThat(ingestPending("/vault/lecture.md")).isFalse();
-        assertThat(noteIndex.findNotesNeedingEmbedding(10)).containsKey("/vault/lecture.md");
+        assertThat(noteIndex.findNotesNeedingEmbedding(1L, 10)).containsKey("/vault/lecture.md");
     }
 
     @Test
@@ -180,7 +185,7 @@ class ReadinessGateIT {
         insertNote("/vault/waiting.md", "h1", null, true);    // ingest_pending = true
         insertNote("/vault/done.md",    "h2", null, false);   // not pending
 
-        List<String> pending = noteIndex.findIngestPending(10);
+        List<String> pending = noteIndex.findIngestPending(1L, 10);
 
         assertThat(pending).contains("/vault/waiting.md");
         assertThat(pending).doesNotContain("/vault/done.md");

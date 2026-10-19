@@ -265,3 +265,4 @@ line that isn't.
 | **Playlist expansion (list-only, no download)** | `CaptureController.capturePlaylist()` → embedder `POST /playlist/expand` → `download/downloader.list_playlist_entries` (embedder `FLOWS.md`) |
 | **Playlist row insert** | `CaptureRepository.enqueuePlaylistItem(id, type, ref, path, title, playlistId, position)`; columns `playlist_id`/`playlist_position` |
 | **Capture-time track tag** (Phase 1b) | `capture.track_id` column; `CaptureController.resolveTrackId()`; `CaptureRepository.setTrackId()`; fan-out on note creation via `InternalAgentController.linkToTrack()` — see tracks/FLOWS.md |
+| Vault scoping (M3) | `CaptureRepository` methods take `long vaultId` first; `Capture.vaultId` is read by `CaptureIngestWorker` for per-capture work (notes lookup, text-resource root via `ActiveVault.rootFor`); worklists (`findQueued`/`findDeferred`/`findStaleActive`) = `activeVault.id()`; `CaptureController` passes `activeVault.id()` |

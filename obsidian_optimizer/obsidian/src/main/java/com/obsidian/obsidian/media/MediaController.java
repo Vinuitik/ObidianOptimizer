@@ -25,6 +25,8 @@ import java.util.Set;
 @RestController
 public class MediaController {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(MediaController.class);
 
     static final Set<String> IMAGE_EXTS = Set.of(".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg");
@@ -37,14 +39,16 @@ public class MediaController {
     private final SettingsRepository settingsRepo;
     private final SyncQueueRepository syncQueueRepo;
 
-    public MediaController(SettingsRepository settingsRepo, SyncQueueRepository syncQueueRepo) {
+    public MediaController(SettingsRepository settingsRepo, SyncQueueRepository syncQueueRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.settingsRepo  = settingsRepo;
         this.syncQueueRepo = syncQueueRepo;
     }
 
     @GetMapping("/images/{filename}")
     public ResponseEntity<Resource> getImage(@PathVariable String filename) {
-        Path resourcesRoot = Paths.get(settingsRepo.getVaultPath()).resolve("resources");
+        Path resourcesRoot = activeVault.root().resolve("resources");
         for (String subdir : SEARCH_SUBDIRS) {
             try {
                 Path candidate = resourcesRoot.resolve(subdir).resolve(filename).normalize();
@@ -89,18 +93,18 @@ public class MediaController {
     /** Byte-array variant for the internal agent API (keyframes etc.). */
     public String storeResourceBytes(String filename, byte[] bytes) throws IOException {
         String subdir = subdirFor(filename);
-        Path targetDir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve(subdir);
+        Path targetDir = activeVault.root().resolve("resources").resolve(subdir);
         Files.createDirectories(targetDir);
         Files.write(targetDir.resolve(filename), bytes);
         String relPath = "resources/" + subdir + "/" + filename;
-        syncQueueRepo.markPending(relPath, ContentHashing.sha256(bytes));
+        syncQueueRepo.markPending(activeVault.id(), relPath, ContentHashing.sha256(bytes));
         log.info("[storeResourceBytes] saved {} ({} bytes)", relPath, bytes.length);
         return relPath;
     }
 
     void uploadFile(MultipartFile file, String filename) throws IOException {
         String subdir = subdirFor(filename);
-        Path targetDir = Paths.get(settingsRepo.getVaultPath()).resolve("resources").resolve(subdir);
+        Path targetDir = activeVault.root().resolve("resources").resolve(subdir);
         Files.createDirectories(targetDir);
         file.transferTo(targetDir.resolve(filename).toFile());
         log.info("[upload] saved {} → resources/{}", filename, subdir);
@@ -108,7 +112,7 @@ public class MediaController {
         try {
             byte[] bytes = Files.readAllBytes(targetDir.resolve(filename));
             String relPath = "resources/" + subdir + "/" + filename;
-            syncQueueRepo.markPending(relPath, ContentHashing.sha256(bytes));
+            syncQueueRepo.markPending(activeVault.id(), relPath, ContentHashing.sha256(bytes));
         } catch (Exception e) {
             log.warn("[upload] sync queue update failed for {}: {}", filename, e.getMessage());
         }

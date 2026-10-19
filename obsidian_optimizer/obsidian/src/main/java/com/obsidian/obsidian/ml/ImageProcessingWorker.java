@@ -63,6 +63,7 @@ public class ImageProcessingWorker {
     private final EmbeddingService embeddingService;
     private final NoteChunkRepository chunkRepo;
     private final OutboxRepository outboxRepo;
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
     // Programmatic, not @Transactional: handleResult (below) is only ever called via
     // self-invocation (processJobBatch -> handleResult on `this`), which bypasses
     // Spring's AOP proxy entirely — an annotation here would silently never apply.
@@ -82,7 +83,9 @@ public class ImageProcessingWorker {
                                  EmbeddingService embeddingService,
                                  NoteChunkRepository chunkRepo,
                                  OutboxRepository outboxRepo,
-                                 PlatformTransactionManager txManager) {
+                                 PlatformTransactionManager txManager,
+                                 com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault      = activeVault;
         this.jobRepo          = jobRepo;
         this.embeddingService = embeddingService;
         this.chunkRepo        = chunkRepo;
@@ -117,7 +120,7 @@ public class ImageProcessingWorker {
      *  drain loop would hammer cooled providers. The blocking invokeAll now blocks the
      *  lane, not the scheduler thread, so embedding/cards/chrono keep running alongside it. */
     void drain() {
-        List<PendingImageJob> batch = jobRepo.findPending(BATCH_SIZE);
+        List<PendingImageJob> batch = jobRepo.findPending(activeVault.id(), BATCH_SIZE);
         if (batch.isEmpty()) return;
 
         log.info("[ImageProcessingWorker] processing {} pending image job(s)", batch.size());
@@ -167,13 +170,14 @@ public class ImageProcessingWorker {
      * like every other path onto this queue. */
     @Scheduled(fixedDelay = 86_400_000, initialDelay = 3_600_000)
     public void requeueSkipped() {
-        int pruned = jobRepo.pruneOrphans();
+        long vaultId = activeVault.id();
+        int pruned = jobRepo.pruneOrphans(vaultId);
         if (pruned > 0) {
             log.info("[ImageProcessingWorker] pruned {} orphan image job(s) (embedding note gone)", pruned);
         }
-        List<String> requeuedIds = jobRepo.requeueSkipped();
+        List<String> requeuedIds = jobRepo.requeueSkipped(vaultId);
         for (String id : requeuedIds) {
-            outboxRepo.enqueue(ImageCaptionQueueConfig.IMAGE_CAPTION_QUEUE, Map.of("jobId", id));
+            outboxRepo.enqueue(vaultId, ImageCaptionQueueConfig.IMAGE_CAPTION_QUEUE, Map.of("jobId", id));
         }
         if (!requeuedIds.isEmpty()) {
             log.info("[ImageProcessingWorker] requeued {} SKIPPED image job(s) for daily retry", requeuedIds.size());
@@ -314,7 +318,7 @@ public class ImageProcessingWorker {
 
         // Image chunks live in their own source='image' index range — appended
         // after this note's existing image chunks, independent of text chunks
-        int imageChunkStartIndex = getNextChunkIndex(job.getNotePath());
+        int imageChunkStartIndex = getNextChunkIndex(job.getVaultId(), job.getNotePath());
 
         List<String> textChunks = splitImageText(extractedText);
         for (int i = 0; i < textChunks.size(); i++) {
@@ -328,9 +332,9 @@ public class ImageProcessingWorker {
             // and the embed reconciler backfills it later. Either way the caption is safe.
             float[] embedding = embeddingService.embed(chunk);
             if (embedding != null) {
-                chunkRepo.upsertChunk(job.getNotePath(), chunkIndex, "image", chunk, embedding, hash);
+                chunkRepo.upsertChunk(job.getVaultId(), job.getNotePath(), chunkIndex, "image", chunk, embedding, hash);
             } else {
-                persistPendingChunkAndEnqueueEmbed(job.getNotePath(), chunkIndex, chunk, hash);
+                persistPendingChunkAndEnqueueEmbed(job.getVaultId(), job.getNotePath(), chunkIndex, chunk, hash);
             }
         }
 
@@ -349,10 +353,10 @@ public class ImageProcessingWorker {
      * one that did. ChunkEmbeddingReconciler's poll (now a much-slower safety net, see
      * {@code embedding.reconcile.delay-ms}) still finds anything this misses.
      */
-    private void persistPendingChunkAndEnqueueEmbed(String notePath, int chunkIndex, String text, String hash) {
+    private void persistPendingChunkAndEnqueueEmbed(long vaultId, String notePath, int chunkIndex, String text, String hash) {
         txTemplate.executeWithoutResult(status -> {
-            chunkRepo.upsertChunkTextOnly(notePath, chunkIndex, "image", text, hash);
-            outboxRepo.enqueue(RabbitQueueConfig.EMBED_CHUNK_QUEUE, Map.of(
+            chunkRepo.upsertChunkTextOnly(vaultId, notePath, chunkIndex, "image", text, hash);
+            outboxRepo.enqueue(vaultId, RabbitQueueConfig.EMBED_CHUNK_QUEUE, Map.of(
                 "notePath", notePath, "source", "image", "chunkIndex", chunkIndex));
         });
     }
@@ -374,9 +378,9 @@ public class ImageProcessingWorker {
         }
     }
 
-    private int getNextChunkIndex(String notePath) {
+    private int getNextChunkIndex(long vaultId, String notePath) {
         // Highest existing image-chunk index + 1 (text chunks are a separate range)
-        Integer max = chunkRepo.queryMaxChunkIndex(notePath, "image");
+        Integer max = chunkRepo.queryMaxChunkIndex(vaultId, notePath, "image");
         return max == null ? 0 : max + 1;
     }
 

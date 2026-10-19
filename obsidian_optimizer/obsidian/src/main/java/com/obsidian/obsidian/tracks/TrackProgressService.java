@@ -17,9 +17,13 @@ import java.util.List;
 @Service
 public class TrackProgressService {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private final TrackRepository trackRepo;
 
-    public TrackProgressService(TrackRepository trackRepo) {
+    public TrackProgressService(TrackRepository trackRepo,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.trackRepo = trackRepo;
     }
 
@@ -33,7 +37,7 @@ public class TrackProgressService {
 
     /** Date-parameterized for testability, same convention as TodayPlanService.today(LocalDate). */
     List<TrackProgress> progress(LocalDate today) {
-        return trackRepo.listProgressRows().stream().map(row -> toProgress(row, today)).toList();
+        return trackRepo.listProgressRows(activeVault.id()).stream().map(row -> toProgress(row, today)).toList();
     }
 
     private TrackProgress toProgress(TrackProgressRow row, LocalDate today) {

@@ -35,35 +35,35 @@ class TrackReviewHandoffTest {
     void legacyNote_migratedThenRescheduledToToday() {
         ReviewRow migrated = new ReviewRow("/vault/n.md", 2.3, 2.1, 3,
             Timestamp.from(Instant.now()), Timestamp.from(Instant.now()), null, null);
-        when(stateWriter.normalizeLegacy("/vault/n.md")).thenReturn(migrated);
+        when(stateWriter.normalizeLegacy(1L, "/vault/n.md")).thenReturn(migrated);
 
-        handoff.seedDueToday("/vault/n.md");
+        handoff.seedDueToday(1L, "/vault/n.md");
 
-        verify(stateWriter).reschedule("/vault/n.md", LocalDate.now());
-        verify(stateWriter, never()).writeState(any(), any(), any(), any(), anyInt());
+        verify(stateWriter).reschedule(1L, "/vault/n.md", LocalDate.now());
+        verify(stateWriter, never()).writeState(org.mockito.ArgumentMatchers.eq(1L), any(), any(), any(), any(), anyInt());
     }
 
     @Test
     void alreadyInFsrsPool_justRescheduledToToday() {
-        when(stateWriter.normalizeLegacy("/vault/n.md")).thenReturn(null);
+        when(stateWriter.normalizeLegacy(1L, "/vault/n.md")).thenReturn(null);
         ReviewRow existing = new ReviewRow("/vault/n.md", 2.3, 2.1, 3,
             Timestamp.from(Instant.now()), Timestamp.from(Instant.now()), null, null);
-        when(stateWriter.read("/vault/n.md")).thenReturn(existing);
+        when(stateWriter.read(1L, "/vault/n.md")).thenReturn(existing);
 
-        handoff.seedDueToday("/vault/n.md");
+        handoff.seedDueToday(1L, "/vault/n.md");
 
-        verify(stateWriter).reschedule("/vault/n.md", LocalDate.now());
-        verify(stateWriter, never()).writeState(any(), any(), any(), any(), anyInt());
+        verify(stateWriter).reschedule(1L, "/vault/n.md", LocalDate.now());
+        verify(stateWriter, never()).writeState(org.mockito.ArgumentMatchers.eq(1L), any(), any(), any(), any(), anyInt());
     }
 
     @Test
     void brandNewNote_seededWithFreshInitialStateDueToday() {
-        when(stateWriter.normalizeLegacy("/vault/n.md")).thenReturn(null);
-        when(stateWriter.read("/vault/n.md")).thenReturn(null);
+        when(stateWriter.normalizeLegacy(1L, "/vault/n.md")).thenReturn(null);
+        when(stateWriter.read(1L, "/vault/n.md")).thenReturn(null);
 
-        handoff.seedDueToday("/vault/n.md");
+        handoff.seedDueToday(1L, "/vault/n.md");
 
-        verify(stateWriter, never()).reschedule(any(), any());
-        verify(stateWriter).writeState(eq("/vault/n.md"), any(), any(), eq(LocalDate.now()), eq(1));
+        verify(stateWriter, never()).reschedule(org.mockito.ArgumentMatchers.eq(1L), any(), any());
+        verify(stateWriter).writeState(org.mockito.ArgumentMatchers.eq(1L), eq("/vault/n.md"), any(), any(), eq(LocalDate.now()), eq(1));
     }
 }

@@ -58,7 +58,7 @@ class BankruptcyServiceTest {
     @Test
     void notDeclaredWhenOverdueCountBelowLimit() throws IOException {
         Path f = writeNote("n.md", pastDate(1), 5, 250);
-        var result = service.run(List.of(f), 2, 365);  // 365d neglect threshold: nothing is chronic
+        var result = service.run(1L, List.of(f), 2, 365);  // 365d neglect threshold: nothing is chronic
         assertThat(result.declared()).isFalse();
         assertThat(result.overdueCount()).isEqualTo(1);
         assertThat(result.rescheduled()).isEqualTo(0);
@@ -69,7 +69,7 @@ class BankruptcyServiceTest {
     void declaredWhenOverdueCountEqualsLimit() throws IOException {
         List<Path> files = new ArrayList<>();
         for (int i = 0; i < 3; i++) files.add(writeNote("n" + i + ".md", pastDate(1), 5, 250));
-        var result = service.run(files, 3, 365);
+        var result = service.run(1L, files, 3, 365);
         assertThat(result.declared()).isTrue();
         assertThat(result.rescheduled()).isEqualTo(3);
     }
@@ -78,14 +78,14 @@ class BankruptcyServiceTest {
     void futureNotesNotCountedAsOverdue() throws IOException {
         Path future = writeNote("future.md", LocalDate.now().plusDays(5), 5, 250);
         Path overdue = writeNote("past.md", pastDate(1), 5, 250);
-        var result = service.run(List.of(future, overdue), 2, 365);
+        var result = service.run(1L, List.of(future, overdue), 2, 365);
         assertThat(result.declared()).isFalse();
         assertThat(result.overdueCount()).isEqualTo(1);
     }
 
     @Test
     void emptyFileListReturnsFalseResult() {
-        var result = service.run(List.of(), 1, 7);
+        var result = service.run(1L, List.of(), 1, 7);
         assertThat(result.declared()).isFalse();
         assertThat(result.overdueCount()).isEqualTo(0);
     }
@@ -98,7 +98,7 @@ class BankruptcyServiceTest {
         Path recent  = writeNote("recent.md",  pastDate(3),  5, 250);  // 3 days overdue
 
         // bankruptcyLimit = 200 (never triggered), chronicNeglectDays = 7
-        var result = service.run(List.of(chronic, recent), 200, 7);
+        var result = service.run(1L, List.of(chronic, recent), 200, 7);
 
         assertThat(result.declared()).isFalse();
         assertThat(result.chronicNeglected()).isEqualTo(1);
@@ -109,7 +109,7 @@ class BankruptcyServiceTest {
     @Test
     void chronicNote_isLapsed_evenWhenTotalOverdueBelowBankruptcyLimit() throws IOException {
         Path f = writeNote("old.md", pastDate(14), 20, 250);
-        var result = service.run(List.of(f), 200, 7);
+        var result = service.run(1L, List.of(f), 200, 7);
 
         assertThat(result.chronicNeglected()).isEqualTo(1);
         var fsrs = FrontmatterRewriter.readFsrs(f);
@@ -123,7 +123,7 @@ class BankruptcyServiceTest {
     @Test
     void legacyNote_isSeededIntoFsrs_andStabilityCollapses() throws IOException {
         Path f = writeNote("med.md", pastDate(1), 20, 250);
-        service.run(List.of(f), 1, 365);
+        service.run(1L, List.of(f), 1, 365);
 
         var fsrs = FrontmatterRewriter.readFsrs(f);
         assertThat(fsrs).isNotNull();
@@ -136,12 +136,12 @@ class BankruptcyServiceTest {
     @Test
     void existingFsrsState_isLapsedFromItsRealStability_notReseeded() throws IOException {
         Path f = writeNote("known.md", pastDate(1), 5, 250);
-        when(reviewRepo.find(f.toAbsolutePath().toString())).thenReturn(new ReviewRow(
+        when(reviewRepo.find(1L, f.toAbsolutePath().toString())).thenReturn(new ReviewRow(
             f.toAbsolutePath().toString(), 50.0, 3.0, 4,
             Timestamp.from(Instant.now().minus(40, ChronoUnit.DAYS)),
             Timestamp.from(Instant.now().minus(1, ChronoUnit.DAYS)), "dMid:sLong", 1.2));
 
-        service.run(List.of(f), 1, 365);
+        service.run(1L, List.of(f), 1, 365);
 
         var fsrs = FrontmatterRewriter.readFsrs(f);
         assertThat(fsrs.stability()).isLessThan(50.0);
@@ -152,15 +152,15 @@ class BankruptcyServiceTest {
     @Test
     void rescheduledNoteHasFutureDueDate() throws IOException {
         Path f = writeNote("past.md", pastDate(5), 5, 250);
-        service.run(List.of(f), 1, 365);
+        service.run(1L, List.of(f), 1, 365);
         assertThat(FrontmatterRewriter.read(f).due()).isAfter(LocalDate.now());
     }
 
     @Test
     void writesGoThroughTheDb_too() throws IOException {
         Path f = writeNote("dbcheck.md", pastDate(1), 10, 250);
-        service.run(List.of(f), 1, 365);
-        verify(reviewRepo).upsert(eq(f.toAbsolutePath().toString()), anyDouble(), anyDouble(),
+        service.run(1L, List.of(f), 1, 365);
+        verify(reviewRepo).upsert(org.mockito.ArgumentMatchers.eq(1L), eq(f.toAbsolutePath().toString()), anyDouble(), anyDouble(),
             any(), any(), any(), any());
     }
 }

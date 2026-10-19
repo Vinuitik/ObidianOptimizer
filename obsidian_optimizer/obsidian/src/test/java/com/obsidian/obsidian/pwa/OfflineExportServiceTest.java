@@ -32,6 +32,8 @@ import static org.mockito.Mockito.when;
  */
 class OfflineExportServiceTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     FileRepository fileRepo;
     DriveService drive;
     AssignmentService assignmentService;
@@ -63,14 +65,14 @@ class OfflineExportServiceTest {
         feedRepo = mock(FeedRepository.class);
         encryption = realEncryption("offline-export-test-passphrase");
         service = new OfflineExportService(fileRepo, encryption, drive, assignmentService, inbox,
-            settingsRepo, feedRepo);
+            settingsRepo, feedRepo, activeVault);
         when(drive.isConfigured()).thenReturn(true);
     }
 
     @Test
     void exportFeed_roundTripsPendingItems_textOnly() throws Exception {
         Instant published = Instant.parse("2026-09-01T10:00:00Z");
-        when(feedRepo.list("pending", 200)).thenReturn(List.of(
+        when(feedRepo.list(1L, "pending", 200)).thenReturn(List.of(
             new FeedItem(1L, 10L, "Some Channel", "https://www.youtube.com/watch?v=abc", "A Video",
                 "https://i/thumb.jpg", 120, published, "pending", null, null, null),
             new FeedItem(2L, 10L, "Some Channel", "https://www.youtube.com/watch?v=def", "Another Video",
@@ -101,11 +103,11 @@ class OfflineExportServiceTest {
 
     @Test
     void exportFeed_capsAtTwoHundred() throws Exception {
-        when(feedRepo.list("pending", 200)).thenReturn(List.of());
+        when(feedRepo.list(1L, "pending", 200)).thenReturn(List.of());
 
         service.exportFeed();
 
-        verify(feedRepo).list("pending", 200);
+        verify(feedRepo).list(1L, "pending", 200);
     }
 
     @Test
@@ -119,7 +121,7 @@ class OfflineExportServiceTest {
     void exportFeed_passphraseNotSet_throws() {
         VaultEncryptionService unconfigured = realEncryption("");
         OfflineExportService svc = new OfflineExportService(fileRepo, unconfigured, drive, assignmentService,
-            inbox, settingsRepo, feedRepo);
+            inbox, settingsRepo, feedRepo, activeVault);
 
         assertThatThrownBy(svc::exportFeed).isInstanceOf(IllegalStateException.class);
     }

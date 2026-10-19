@@ -45,6 +45,11 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 class CaptureRabbitFlowIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>(DockerImageName.parse("paradedb/paradedb:latest")
@@ -99,8 +104,8 @@ class CaptureRabbitFlowIT {
      *  outbox -> RabbitMQ -> @RabbitListener chain. */
     private String enqueueViaOutboxOnly(String ref) {
         String id = java.util.UUID.randomUUID().toString().substring(0, 12);
-        captureRepo.enqueue(id, "video", ref, null, ref);
-        outboxRepo.enqueue(RabbitQueueConfig.CAPTURE_QUEUE, Map.of("id", id));
+        captureRepo.enqueue(1L, id, "video", ref, null, ref);
+        outboxRepo.enqueue(1L, RabbitQueueConfig.CAPTURE_QUEUE, Map.of("id", id));
         return id;
     }
 

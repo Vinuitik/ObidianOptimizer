@@ -47,6 +47,11 @@ import static org.junit.jupiter.api.Assertions.fail;
 @Testcontainers
 class ImageCaptionFlowIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>(DockerImageName.parse("paradedb/paradedb:latest")
@@ -150,7 +155,7 @@ class ImageCaptionFlowIT {
         insertNote(notePath);
         handler = path -> new WrapperResponse(200, "{\"text\":\"a real caption\",\"provider\":\"test\"}");
 
-        imageScanService.registerImages(notePath, "![[fig1.png]]");
+        imageScanService.registerImages(1L, notePath, "![[fig1.png]]");
 
         waitUntil(() -> "DONE".equals(statusOf(notePath, "fig1.png")), 5000);
 
@@ -169,7 +174,7 @@ class ImageCaptionFlowIT {
             ? new WrapperResponse(503, "{\"error\":\"exhausted\"}")
             : new WrapperResponse(200, "{\"text\":\"caption after retry\",\"provider\":\"test\"}");
 
-        imageScanService.registerImages(notePath, "![[fig2.png]]");
+        imageScanService.registerImages(1L, notePath, "![[fig2.png]]");
 
         // First delivery gets a 503 -> rejected -> parked in image-caption.wait for
         // image.caption.retry.wait-ms (2s here) -> dead-letters back into
@@ -185,7 +190,7 @@ class ImageCaptionFlowIT {
         insertNote(notePath);
         handler = path -> new WrapperResponse(404, "{\"error\":\"not_found: " + path + "\"}");
 
-        imageScanService.registerImages(notePath, "![[gone.png]]");
+        imageScanService.registerImages(1L, notePath, "![[gone.png]]");
 
         // The listener normalizes the wrapper's "not_found: <path>" 404 body into the
         // same {"error":"not_found"} shape handleResult already checks for — proves

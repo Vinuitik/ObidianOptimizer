@@ -37,6 +37,11 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 class OutboxEmbedFlowIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>(DockerImageName.parse("paradedb/paradedb:latest")
@@ -108,9 +113,9 @@ class OutboxEmbedFlowIT {
     void registerImages_publishesToRabbit_andListenerEmbedsWithinSeconds() throws Exception {
         String path = "/vault/outbox-note.md";
         insertNote(path);
-        when(embeddingService.indexNote(path)).thenReturn(true);
+        when(embeddingService.indexNote(1L, path)).thenReturn(true);
 
-        imageScanService.registerImages(path, "plain note text, no embeds");
+        imageScanService.registerImages(1L, path, "plain note text, no embeds");
 
         waitUntil(() -> {
             String contentHash = jdbc.queryForObject(
@@ -120,7 +125,7 @@ class OutboxEmbedFlowIT {
             return contentHash != null && contentHash.equals(embeddedHash);
         }, 5000);
 
-        org.mockito.Mockito.verify(embeddingService).indexNote(path);
+        org.mockito.Mockito.verify(embeddingService).indexNote(1L, path);
     }
 
     @Test
@@ -138,7 +143,7 @@ class OutboxEmbedFlowIT {
         imageProcessingWorker.handleResult(job, mapper.readTree("{\"text\":\"a diagram caption\"}"), "test-provider");
 
         // Caption persisted immediately with a NULL vector (embedder "down" above).
-        assertThat(chunkRepo.getChunkText("/vault/diagram.md", "image", 0)).isEqualTo("a diagram caption");
+        assertThat(chunkRepo.getChunkText(1L, "/vault/diagram.md", "image", 0)).isEqualTo("a diagram caption");
 
         waitUntil(() ->
             jdbc.queryForObject(

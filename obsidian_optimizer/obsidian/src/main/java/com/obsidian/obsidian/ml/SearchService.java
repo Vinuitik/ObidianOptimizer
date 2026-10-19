@@ -28,11 +28,11 @@ public class SearchService {
         this.embeddingService = embeddingService;
     }
 
-    public List<SearchResult> search(String query, int limit, AtomicBoolean cancelled) {
+    public List<SearchResult> search(long vaultId, String query, int limit, AtomicBoolean cancelled) {
         int fetchLimit = embeddingService.getSearchLimit();
 
         // Step 1: embed query + vector search (the expensive HTTP call is inside here)
-        List<NoteChunk> vectorMatches = getVectorRankedMatches(query, fetchLimit);
+        List<NoteChunk> vectorMatches = getVectorRankedMatches(vaultId, query, fetchLimit);
 
         // Cheap checkpoint: if the client already left (timeout fired), skip BM25
         if (cancelled.get()) {
@@ -40,7 +40,7 @@ public class SearchService {
             return List.of();
         }
 
-        List<NoteChunk> textMatches   = getTextRankedMatches(query, fetchLimit);
+        List<NoteChunk> textMatches   = getTextRankedMatches(vaultId, query, fetchLimit);
 
         Map<String, Double> rrfScores = new HashMap<>();
         Map<String, NoteChunk> chunkMap = new HashMap<>();
@@ -85,13 +85,13 @@ public class SearchService {
         return results;
     }
 
-    private List<NoteChunk> getVectorRankedMatches(String query, int limit) {
+    private List<NoteChunk> getVectorRankedMatches(long vaultId, String query, int limit) {
         float[] queryVec = embeddingService.embedQuery(query);
         if (queryVec == null) return List.of();
-        return chunkRepo.findByVectorSimilarity(queryVec, limit);
+        return chunkRepo.findByVectorSimilarity(vaultId, queryVec, limit);
     }
 
-    private List<NoteChunk> getTextRankedMatches(String query, int limit) {
-        return chunkRepo.findByTextSearch(query, limit);
+    private List<NoteChunk> getTextRankedMatches(long vaultId, String query, int limit) {
+        return chunkRepo.findByTextSearch(vaultId, query, limit);
     }
 }

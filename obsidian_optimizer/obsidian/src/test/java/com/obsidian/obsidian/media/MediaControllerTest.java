@@ -28,6 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @MockitoSettings(strictness = Strictness.LENIENT)
 class MediaControllerTest {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault = com.obsidian.obsidian.vaults.ActiveVault.forTest(1L, java.nio.file.Path.of("/vault"));
+
     @Mock SettingsRepository settingsRepo;
     @Mock SyncQueueRepository syncQueueRepo;
     @TempDir Path vault;
@@ -36,8 +38,8 @@ class MediaControllerTest {
 
     @BeforeEach
     void setUp() {
-        when(settingsRepo.getVaultPath()).thenReturn(vault.toString());
-        mvc = MockMvcBuilders.standaloneSetup(new MediaController(settingsRepo, syncQueueRepo)).build();
+        activeVault.set(1L, java.nio.file.Path.of(String.valueOf(vault.toString())));
+        mvc = MockMvcBuilders.standaloneSetup(new MediaController(settingsRepo, syncQueueRepo, activeVault)).build();
     }
 
     // ── subdirFor ─────────────────────────────────────────────────────────────

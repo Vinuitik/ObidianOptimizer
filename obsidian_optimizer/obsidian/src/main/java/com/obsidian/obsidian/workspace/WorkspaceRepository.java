@@ -42,30 +42,31 @@ public class WorkspaceRepository {
     }
 
     /** Upsert — re-accumulating the same filename refreshes its row rather than duplicating. */
-    public void insert(String filename, String type, String sourceNote, int importance) {
+    public void insert(long vaultId, String filename, String type, String sourceNote, int importance) {
         jdbc.update("""
-            INSERT INTO workspace_items(filename, type, source_note, importance, added_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO workspace_items(filename, type, source_note, importance, added_at, vault_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (filename, vault_id) DO UPDATE SET
                 type = EXCLUDED.type, source_note = EXCLUDED.source_note,
                 importance = EXCLUDED.importance, added_at = EXCLUDED.added_at
-            """, filename, type, sourceNote, importance, System.currentTimeMillis());
+            """, filename, type, sourceNote, importance, System.currentTimeMillis(), vaultId);
     }
 
-    public List<WorkspaceItem> listAll() {
+    public List<WorkspaceItem> listAll(long vaultId) {
         return jdbc.query("""
             SELECT filename, type, source_note, importance, added_at
             FROM workspace_items
+            WHERE vault_id = ?
             ORDER BY importance DESC, added_at DESC
             """, (rs, i) -> new WorkspaceItem(
                 rs.getString("filename"),
                 rs.getString("type"),
                 rs.getString("source_note"),
                 rs.getInt("importance"),
-                rs.getLong("added_at")));
+                rs.getLong("added_at")), vaultId);
     }
 
-    public void delete(String filename) {
-        jdbc.update("DELETE FROM workspace_items WHERE filename = ?", filename);
+    public void delete(long vaultId, String filename) {
+        jdbc.update("DELETE FROM workspace_items WHERE filename = ? AND vault_id = ?", filename, vaultId);
     }
 }

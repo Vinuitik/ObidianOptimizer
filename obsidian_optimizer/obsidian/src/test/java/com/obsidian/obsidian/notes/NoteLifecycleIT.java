@@ -29,6 +29,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers
 class NoteLifecycleIT {
 
+    @org.springframework.beans.factory.annotation.Autowired com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    @org.junit.jupiter.api.BeforeEach
+    void pinActiveVaultToTempRoot() { activeVault.set(1L, VAULT); }
+
     @Container
     static final PostgreSQLContainer<?> postgres =
         new PostgreSQLContainer<>(org.testcontainers.utility.DockerImageName
@@ -87,7 +92,7 @@ class NoteLifecycleIT {
 
         assertThat(path).endsWith("NewNote.md");
         assertThat(Path.of(path)).exists();
-        assertThat(noteIndex.getAllPaths()).contains(path);
+        assertThat(noteIndex.getAllPaths(1L)).contains(path);
     }
 
     @Test
@@ -106,26 +111,26 @@ class NoteLifecycleIT {
     @Test
     void syncWithDisk_insertsExternallyCreatedFile() throws IOException {
         writeNote("External.md", "---\nsr-due: 2025-01-01\nsr-interval: 3\nsr-ease: 200\n---\n");
-        noteIndex.syncWithDisk(diskFiles());
-        assertThat(noteIndex.getAllPaths()).anyMatch(p -> p.endsWith("External.md"));
+        noteIndex.syncWithDisk(1L, diskFiles());
+        assertThat(noteIndex.getAllPaths(1L)).anyMatch(p -> p.endsWith("External.md"));
     }
 
     @Test
     void syncWithDisk_deletesRemovedFile() throws IOException {
         String path = fileRepo.createNote(VAULT.toString(), "Gone");
-        assertThat(noteIndex.getAllPaths()).contains(path);
+        assertThat(noteIndex.getAllPaths(1L)).contains(path);
 
         Files.delete(Path.of(path));
-        noteIndex.syncWithDisk(List.<File>of());
+        noteIndex.syncWithDisk(1L, List.<File>of());
 
-        assertThat(noteIndex.getAllPaths()).doesNotContain(path);
+        assertThat(noteIndex.getAllPaths(1L)).doesNotContain(path);
     }
 
     @Test
     void syncWithDisk_unchangedFile_remainsInDB() throws IOException {
         String path = fileRepo.createNote(VAULT.toString(), "Stable");
-        noteIndex.syncWithDisk(diskFiles());
-        assertThat(noteIndex.getAllPaths()).contains(path);
+        noteIndex.syncWithDisk(1L, diskFiles());
+        assertThat(noteIndex.getAllPaths(1L)).contains(path);
     }
 
     @Test
@@ -139,7 +144,7 @@ class NoteLifecycleIT {
         ));
 
         assertThat(Files.readString(Path.of(path))).contains("# Appended");
-        assertThat(noteIndex.getAllPaths()).contains(path);
+        assertThat(noteIndex.getAllPaths(1L)).contains(path);
     }
 
     @Test
@@ -149,8 +154,8 @@ class NoteLifecycleIT {
 
         assertThat(Path.of(new_)).exists();
         assertThat(Path.of(old)).doesNotExist();
-        assertThat(noteIndex.getAllPaths()).contains(new_);
-        assertThat(noteIndex.getAllPaths()).doesNotContain(old);
+        assertThat(noteIndex.getAllPaths(1L)).contains(new_);
+        assertThat(noteIndex.getAllPaths(1L)).doesNotContain(old);
     }
 
     @Test
@@ -158,7 +163,7 @@ class NoteLifecycleIT {
         String targetPath = fileRepo.createNote(VAULT.toString(), "TargetNote");
         String linkBody = "---\nsr-due: 2025-01-01\nsr-interval: 3\nsr-ease: 200\n---\n\nSee [[TargetNote]].";
         Path linker = writeNote("Linker.md", linkBody);
-        noteLinkRepo.updateLinks(linker.toString(), NoteLinkRepository.extractTargets(linkBody));
+        noteLinkRepo.updateLinks(1L, linker.toString(), NoteLinkRepository.extractTargets(linkBody));
 
         fileRepo.renameNote(targetPath, "RenamedNote");
 
@@ -173,7 +178,7 @@ class NoteLifecycleIT {
         fileRepo.softDeleteNote(path);
 
         assertThat(Path.of(path)).doesNotExist();
-        assertThat(noteIndex.getAllPaths()).doesNotContain(path);
+        assertThat(noteIndex.getAllPaths(1L)).doesNotContain(path);
 
         Path trash = VAULT.resolve("_trash");
         assertThat(Files.list(trash).anyMatch(p -> p.getFileName().toString().startsWith("ToTrash")))
@@ -186,7 +191,7 @@ class NoteLifecycleIT {
         LocalDate nextWeek  = LocalDate.now().plusDays(7);
         writeNote("Overdue.md", "---\nsr-due: " + yesterday + "\nsr-interval: 3\nsr-ease: 200\n---\n");
         writeNote("Future.md",  "---\nsr-due: " + nextWeek  + "\nsr-interval: 3\nsr-ease: 200\n---\n");
-        noteIndex.syncWithDisk(diskFiles());
+        noteIndex.syncWithDisk(1L, diskFiles());
 
         FileRepository.ReviewPage page = fileRepo.getReviewNotesPaged(0, 10);
 
@@ -200,7 +205,7 @@ class NoteLifecycleIT {
         for (int i = 0; i < 3; i++) {
             writeNote("Due" + i + ".md", "---\nsr-due: " + yesterday + "\nsr-interval: 3\nsr-ease: 200\n---\n");
         }
-        noteIndex.syncWithDisk(diskFiles());
+        noteIndex.syncWithDisk(1L, diskFiles());
 
         FileRepository.ReviewPage page = fileRepo.getReviewNotesPaged(0, 2);
         assertThat(page.notes()).hasSize(2);
@@ -211,21 +216,21 @@ class NoteLifecycleIT {
     void noteLinkIndex_storesLinksOnWrite() throws IOException {
         String body = "---\nsr-due: 2025-01-01\nsr-interval: 3\nsr-ease: 200\n---\n\n[[Alpha]] and [[Beta]].";
         String path = writeNote("Linker.md", body).toString();
-        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(body));
+        noteLinkRepo.updateLinks(1L, path, NoteLinkRepository.extractTargets(body));
 
-        assertThat(noteLinkRepo.findSourcesByTarget("Alpha")).contains(path);
-        assertThat(noteLinkRepo.findSourcesByTarget("Beta")).contains(path);
+        assertThat(noteLinkRepo.findSourcesByTarget(1L, "Alpha")).contains(path);
+        assertThat(noteLinkRepo.findSourcesByTarget(1L, "Beta")).contains(path);
     }
 
     @Test
     void noteLinkIndex_renameTarget_updatesEntries() throws IOException {
         String body = "---\nsr-due: 2025-01-01\nsr-interval: 3\nsr-ease: 200\n---\n\n[[OldTarget]].";
         String path = writeNote("Src.md", body).toString();
-        noteLinkRepo.updateLinks(path, NoteLinkRepository.extractTargets(body));
+        noteLinkRepo.updateLinks(1L, path, NoteLinkRepository.extractTargets(body));
 
-        noteLinkRepo.renameTarget("OldTarget", "NewTarget");
+        noteLinkRepo.renameTarget(1L, "OldTarget", "NewTarget");
 
-        assertThat(noteLinkRepo.findSourcesByTarget("OldTarget")).isEmpty();
-        assertThat(noteLinkRepo.findSourcesByTarget("NewTarget")).contains(path);
+        assertThat(noteLinkRepo.findSourcesByTarget(1L, "OldTarget")).isEmpty();
+        assertThat(noteLinkRepo.findSourcesByTarget(1L, "NewTarget")).contains(path);
     }
 }

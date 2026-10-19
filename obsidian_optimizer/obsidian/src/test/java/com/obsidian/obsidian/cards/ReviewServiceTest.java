@@ -46,14 +46,14 @@ class ReviewServiceTest {
 
     @Test
     void firstGrade_createsInitialFsrsState_noRewardYet() {
-        when(stateWriter.read("/vault/n.md")).thenReturn(null);
+        when(stateWriter.read(1L, "/vault/n.md")).thenReturn(null);
 
-        GradeResult result = service.grade("/vault/n.md", Band.GOOD, now);
+        GradeResult result = service.grade(1L, "/vault/n.md", Band.GOOD, now);
 
         assertThat(result.stability()).isCloseTo(2.3065, org.assertj.core.data.Offset.offset(1e-4));
         assertThat(result.baseIntervalDays()).isEqualTo(2);
         verify(bandit, never()).reward(anyString(), anyDouble(), anyBoolean());
-        verify(stateWriter).write(eq("/vault/n.md"), any(), any(), any(),
+        verify(stateWriter).write(org.mockito.ArgumentMatchers.eq(1L), eq("/vault/n.md"), any(), any(), any(),
             anyInt(), eq("dEasy:sShort"), eq(1.0));
     }
 
@@ -65,9 +65,9 @@ class ReviewServiceTest {
         ReviewRow prev = new ReviewRow("/vault/n.md", 2.3065, 2.118104, 1,
             Timestamp.from(now.minus(3, ChronoUnit.DAYS)),
             Timestamp.from(now), "dEasy:sShort", 1.2);
-        when(stateWriter.read("/vault/n.md")).thenReturn(prev);
+        when(stateWriter.read(1L, "/vault/n.md")).thenReturn(prev);
 
-        service.grade("/vault/n.md", Band.GOOD, now);
+        service.grade(1L, "/vault/n.md", Band.GOOD, now);
 
         verify(bandit).reward(eq("dEasy:sShort"), doubleThat(d -> Math.abs(d - 1.2) < 1e-6), eq(true));
     }
@@ -77,9 +77,9 @@ class ReviewServiceTest {
         ReviewRow prev = new ReviewRow("/vault/n.md", 2.3065, 2.118104, 1,
             Timestamp.from(now.minus(3, ChronoUnit.DAYS)),
             Timestamp.from(now), "dEasy:sShort", 1.5);  // base = 3/1.5 = 2d, elapsed 3d → eff 1.5
-        when(stateWriter.read("/vault/n.md")).thenReturn(prev);
+        when(stateWriter.read(1L, "/vault/n.md")).thenReturn(prev);
 
-        service.grade("/vault/n.md", Band.HARD, now);
+        service.grade(1L, "/vault/n.md", Band.HARD, now);
 
         verify(bandit).reward(eq("dEasy:sShort"), doubleThat(d -> Math.abs(d - 1.5) < 1e-6), eq(false));
     }
@@ -96,9 +96,9 @@ class ReviewServiceTest {
             Timestamp.from(now.minus(40, ChronoUnit.DAYS)),
             Timestamp.from(now.minus(30, ChronoUnit.DAYS)),
             "dEasy:sShort", 1.2);
-        when(stateWriter.read("/vault/n.md")).thenReturn(prev);
+        when(stateWriter.read(1L, "/vault/n.md")).thenReturn(prev);
 
-        GradeResult result = service.grade("/vault/n.md", Band.GOOD, now);
+        GradeResult result = service.grade(1L, "/vault/n.md", Band.GOOD, now);
 
         verify(bandit).reward(eq("dEasy:sShort"), doubleThat(d -> Math.abs(d - 4.8) < 0.05), eq(true));
         assertThat(result.stability()).isGreaterThan(0);
@@ -106,10 +106,10 @@ class ReviewServiceTest {
 
     @Test
     void banditArmScalesTheScheduledDate_butNotTheStoredState() {
-        when(stateWriter.read("/vault/n.md")).thenReturn(null);
+        when(stateWriter.read(1L, "/vault/n.md")).thenReturn(null);
         when(bandit.chooseArm(anyString())).thenReturn(1.5);
 
-        GradeResult result = service.grade("/vault/n.md", Band.EASY, now);
+        GradeResult result = service.grade(1L, "/vault/n.md", Band.EASY, now);
 
         // base FSRS interval for first Easy is 8 days; the arm stretches the
         // due date to 12 days but stability stays pure FSRS (8.2956)
@@ -121,9 +121,9 @@ class ReviewServiceTest {
 
     @Test
     void veryEasyMapsToFsrsEasy_butIsItsOwnBandLabel() {
-        when(stateWriter.read("/vault/n.md")).thenReturn(null);
-        GradeResult veryEasy = service.grade("/vault/n.md", Band.VERY_EASY, now);
-        GradeResult easy     = service.grade("/vault/n.md", Band.EASY, now);
+        when(stateWriter.read(1L, "/vault/n.md")).thenReturn(null);
+        GradeResult veryEasy = service.grade(1L, "/vault/n.md", Band.VERY_EASY, now);
+        GradeResult easy     = service.grade(1L, "/vault/n.md", Band.EASY, now);
         assertThat(veryEasy.stability()).isEqualTo(easy.stability());
         assertThat(veryEasy.band()).isEqualTo("VERY_EASY");
     }

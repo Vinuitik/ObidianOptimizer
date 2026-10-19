@@ -39,57 +39,57 @@ public class NoteLinkRepository {
         VaultKeys.swapPrimaryKey(jdbc, "note_links", "source_path, target_name");
     }
 
-    public void updateLinks(String sourcePath, Set<String> targets) {
-        jdbc.update("DELETE FROM note_links WHERE source_path = ?", sourcePath);
+    public void updateLinks(long vaultId, String sourcePath, Set<String> targets) {
+        jdbc.update("DELETE FROM note_links WHERE source_path = ? AND vault_id = ?", sourcePath, vaultId);
         for (String target : targets) {
             jdbc.update(
-                "INSERT INTO note_links(source_path, target_name) VALUES (?, ?) ON CONFLICT DO NOTHING",
-                sourcePath, target);
+                "INSERT INTO note_links(source_path, target_name, vault_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                sourcePath, target, vaultId);
         }
     }
 
-    public List<String> findSourcesByTarget(String targetName) {
+    public List<String> findSourcesByTarget(long vaultId, String targetName) {
         return jdbc.queryForList(
-            "SELECT source_path FROM note_links WHERE target_name = ?",
-            String.class, targetName);
+            "SELECT source_path FROM note_links WHERE vault_id = ? AND target_name = ?",
+            String.class, vaultId, targetName);
     }
 
-    public void renameTarget(String oldName, String newName) {
+    public void renameTarget(long vaultId, String oldName, String newName) {
         jdbc.update(
-            "UPDATE note_links SET target_name = ? WHERE target_name = ?",
-            newName, oldName);
+            "UPDATE note_links SET target_name = ? WHERE target_name = ? AND vault_id = ?",
+            newName, oldName, vaultId);
     }
 
-    public void renameSource(String oldPath, String newPath) {
+    public void renameSource(long vaultId, String oldPath, String newPath) {
         jdbc.update(
-            "UPDATE note_links SET source_path = ? WHERE source_path = ?",
-            newPath, oldPath);
+            "UPDATE note_links SET source_path = ? WHERE source_path = ? AND vault_id = ?",
+            newPath, oldPath, vaultId);
     }
 
-    public void deleteSource(String sourcePath) {
-        jdbc.update("DELETE FROM note_links WHERE source_path = ?", sourcePath);
+    public void deleteSource(long vaultId, String sourcePath) {
+        jdbc.update("DELETE FROM note_links WHERE source_path = ? AND vault_id = ?", sourcePath, vaultId);
     }
 
-    public void backfillIfEmpty(List<String> notePaths) {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM note_links", Integer.class);
+    public void backfillIfEmpty(long vaultId, List<String> notePaths) {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM note_links WHERE vault_id = ?", Integer.class, vaultId);
         if (count != null && count > 0) return;
-        backfill(notePaths);
+        backfill(vaultId, notePaths);
     }
 
-    public void truncateLinks() {
-        jdbc.execute("TRUNCATE note_links");
+    public void truncateLinks(long vaultId) {
+        jdbc.update("DELETE FROM note_links WHERE vault_id = ?", vaultId);
     }
 
-    public void forceRebuildLinks(List<String> notePaths) {
-        jdbc.execute("TRUNCATE note_links");
-        backfill(notePaths);
+    public void forceRebuildLinks(long vaultId, List<String> notePaths) {
+        truncateLinks(vaultId);
+        backfill(vaultId, notePaths);
     }
 
-    private void backfill(List<String> notePaths) {
+    private void backfill(long vaultId, List<String> notePaths) {
         for (String path : notePaths) {
             try {
                 String content = java.nio.file.Files.readString(java.nio.file.Paths.get(path));
-                updateLinks(path, extractTargets(content));
+                updateLinks(vaultId, path, extractTargets(content));
             } catch (java.io.IOException e) {
                 System.err.println("backfill skip " + path + ": " + e.getMessage());
             }

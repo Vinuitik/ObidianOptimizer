@@ -26,6 +26,8 @@ import java.util.List;
 @Component
 public class ChronoService {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(ChronoService.class);
 
     // Quiet mode: when false, the auto-triggers (startup + 2am) skip. Manual
@@ -53,7 +55,9 @@ public class ChronoService {
                          SettingsRepository settingsRepo, FileRepository fileRepo,
                          NoteIndexRepository noteIndex, ImageScanService imageScanService,
                          SyncQueueRepository syncQueueRepo,
-                         FlaggedCardRegenService flaggedCardRegen) {
+                         FlaggedCardRegenService flaggedCardRegen,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.fileMover        = fileMover;
         this.bankruptcy       = bankruptcy;
         this.spread           = spread;
@@ -102,17 +106,19 @@ public class ChronoService {
     }
 
     public ChronoResult runAllJobs() {
-        String vaultRoot   = settingsRepo.getVaultPath();
+        // Scanner: active vault only; id + root pinned for the whole run.
+        long vaultId       = activeVault.id();
+        String vaultRoot   = activeVault.root().toString();
         List<Path> mdFiles = fileRepo.listMdPaths();
 
         int filesMoved = fileMover.run(vaultRoot);
 
         BankruptcyService.BankruptcyResult bankruptcyResult =
-            bankruptcy.run(mdFiles, settingsRepo.getBankruptcyLimit(),
+            bankruptcy.run(vaultId, mdFiles, settingsRepo.getBankruptcyLimit(),
                            settingsRepo.getChronicNeglectDays());
 
         SpreadService.SpreadResult spreadResult =
-            spread.run(mdFiles, settingsRepo.getMaxDailyReviews());
+            spread.run(vaultId, mdFiles, settingsRepo.getMaxDailyReviews());
 
         // Refill user-flagged bad cards: one feedback-aware replacement per flag,
         // so notes whose garbage cards were quarantined don't stay thin. LLM-bound
@@ -133,12 +139,12 @@ public class ChronoService {
             try {
                 String content = Files.readString(mdPath);
                 String newHash = ContentHashing.sha256(content);
-                String storedHash = noteIndex.getContentHash(absPath);
+                String storedHash = noteIndex.getContentHash(vaultId, absPath);
                 if (!newHash.equals(storedHash)) {
-                    imageScanService.registerImages(absPath, content);
+                    imageScanService.registerImages(vaultId, absPath, content);
                     String rel = vaultRootPath.relativize(mdPath.toAbsolutePath().normalize())
                             .toString().replace('\\', '/');
-                    syncQueueRepo.markPending(rel, newHash);
+                    syncQueueRepo.markPending(vaultId, rel, newHash);
                     changed++;
                 }
             } catch (IOException e) {

@@ -82,18 +82,18 @@ public class NoteChunkRepository {
         }
     }
 
-    public void upsertChunk(String notePath, int chunkIndex, String source, String text,
+    public void upsertChunk(long vaultId, String notePath, int chunkIndex, String source, String text,
                             float[] embedding, String contentHash) {
         jdbc.update("""
-            INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector)
-            VALUES (?, ?, ?, ?, ?::vector, ?, to_tsvector('english', ?))
+            INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector, vault_id)
+            VALUES (?, ?, ?, ?, ?::vector, ?, to_tsvector('english', ?), ?)
             ON CONFLICT (note_path, source, chunk_index, vault_id) DO UPDATE SET
               text         = EXCLUDED.text,
               embedding    = EXCLUDED.embedding,
               content_hash = EXCLUDED.content_hash,
               fts_vector   = EXCLUDED.fts_vector
             """,
-            notePath, chunkIndex, source, text, floatArrayToString(embedding), contentHash, text);
+            notePath, chunkIndex, source, text, floatArrayToString(embedding), contentHash, text, vaultId);
     }
 
     /**
@@ -102,22 +102,22 @@ public class NoteChunkRepository {
      * reconciler ({@link #findChunksNeedingEmbedding}) fills the vector later. On
      * conflict the embedding is reset to NULL so a changed caption gets re-embedded.
      */
-    public void upsertChunkTextOnly(String notePath, int chunkIndex, String source,
+    public void upsertChunkTextOnly(long vaultId, String notePath, int chunkIndex, String source,
                                     String text, String contentHash) {
         jdbc.update("""
-            INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector)
-            VALUES (?, ?, ?, ?, NULL, ?, to_tsvector('english', ?))
+            INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector, vault_id)
+            VALUES (?, ?, ?, ?, NULL, ?, to_tsvector('english', ?), ?)
             ON CONFLICT (note_path, source, chunk_index, vault_id) DO UPDATE SET
               text         = EXCLUDED.text,
               embedding    = NULL,
               content_hash = EXCLUDED.content_hash,
               fts_vector   = EXCLUDED.fts_vector
             """,
-            notePath, chunkIndex, source, text, contentHash, text);
+            notePath, chunkIndex, source, text, contentHash, text, vaultId);
     }
 
     /** Row awaiting a vector — the embed queue's unit of work. */
-    public record PendingChunk(String notePath, String source, int chunkIndex, String text) {}
+    public record PendingChunk(long vaultId, String notePath, String source, int chunkIndex, String text) {}
 
     /**
      * Claim a batch of chunks that still need embedding (the "embed queue"). Any
@@ -125,17 +125,17 @@ public class NoteChunkRepository {
      * every stage. Single-consumer today (one lane); add {@code FOR UPDATE SKIP
      * LOCKED} here when you want concurrent embed consumers.
      */
-    public List<PendingChunk> findChunksNeedingEmbedding(int limit) {
+    public List<PendingChunk> findChunksNeedingEmbedding(long vaultId, int limit) {
         return jdbc.query("""
             SELECT note_path, source, chunk_index, text
             FROM note_chunks
-            WHERE embedding IS NULL
+            WHERE vault_id = ? AND embedding IS NULL
             ORDER BY note_path, source, chunk_index
             LIMIT ?
             """,
-            (rs, i) -> new PendingChunk(rs.getString("note_path"), rs.getString("source"),
+            (rs, i) -> new PendingChunk(vaultId, rs.getString("note_path"), rs.getString("source"),
                                         rs.getInt("chunk_index"), rs.getString("text")),
-            limit);
+            vaultId, limit);
     }
 
     /**
@@ -143,55 +143,56 @@ public class NoteChunkRepository {
      * {@code embedding IS NULL} guard makes double-processing a no-op without row
      * locks. Returns true if this call actually wrote the vector.
      */
-    public boolean setChunkEmbedding(String notePath, String source, int chunkIndex, float[] embedding) {
+    public boolean setChunkEmbedding(long vaultId, String notePath, String source, int chunkIndex, float[] embedding) {
         int n = jdbc.update("""
             UPDATE note_chunks SET embedding = ?::vector
-            WHERE note_path = ? AND source = ? AND chunk_index = ? AND embedding IS NULL
+            WHERE vault_id = ? AND note_path = ? AND source = ? AND chunk_index = ? AND embedding IS NULL
             """,
-            floatArrayToString(embedding), notePath, source, chunkIndex);
+            floatArrayToString(embedding), vaultId, notePath, source, chunkIndex);
         return n > 0;
     }
 
     /** Removes chunks of one source beyond newMaxIndex to handle note shrinkage. */
-    public void deleteStaleChunks(String notePath, String source, int newMaxIndex) {
+    public void deleteStaleChunks(long vaultId, String notePath, String source, int newMaxIndex) {
         jdbc.update(
-            "DELETE FROM note_chunks WHERE note_path = ? AND source = ? AND chunk_index > ?",
-            notePath, source, newMaxIndex);
+            "DELETE FROM note_chunks WHERE vault_id = ? AND note_path = ? AND source = ? AND chunk_index > ?",
+            vaultId, notePath, source, newMaxIndex);
     }
 
     /** Removes chunks for notes that no longer exist in the notes index (deleted/renamed). */
-    public int deleteOrphanChunks() {
+    public int deleteOrphanChunks(long vaultId) {
         return jdbc.update(
-            "DELETE FROM note_chunks WHERE NOT EXISTS (SELECT 1 FROM notes WHERE notes.path = note_chunks.note_path)");
+            "DELETE FROM note_chunks WHERE vault_id = ? AND NOT EXISTS (SELECT 1 FROM notes WHERE notes.path = note_chunks.note_path AND notes.vault_id = note_chunks.vault_id)",
+            vaultId);
     }
 
     /** Text of a chunk still awaiting a vector, or null if the chunk is gone or already
      *  embedded — the outbox consumer's idempotency check (a re-delivered or
      *  superseded message is then a safe no-op instead of re-embedding). */
-    public String getChunkText(String notePath, String source, int chunkIndex) {
+    public String getChunkText(long vaultId, String notePath, String source, int chunkIndex) {
         List<String> rows = jdbc.queryForList("""
             SELECT text FROM note_chunks
-            WHERE note_path = ? AND source = ? AND chunk_index = ? AND embedding IS NULL
-            """, String.class, notePath, source, chunkIndex);
+            WHERE vault_id = ? AND note_path = ? AND source = ? AND chunk_index = ? AND embedding IS NULL
+            """, String.class, vaultId, notePath, source, chunkIndex);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    public String getContentHash(String notePath, String source, int chunkIndex) {
+    public String getContentHash(long vaultId, String notePath, String source, int chunkIndex) {
         List<String> rows = jdbc.queryForList(
-            "SELECT content_hash FROM note_chunks WHERE note_path = ? AND source = ? AND chunk_index = ?",
-            String.class, notePath, source, chunkIndex);
+            "SELECT content_hash FROM note_chunks WHERE vault_id = ? AND note_path = ? AND source = ? AND chunk_index = ?",
+            String.class, vaultId, notePath, source, chunkIndex);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     /** Vector similarity search using pgvector cosine distance. */
-    public List<NoteChunk> findByVectorSimilarity(float[] queryVec, int limit) {
+    public List<NoteChunk> findByVectorSimilarity(long vaultId, float[] queryVec, int limit) {
         return jdbc.query("""
             SELECT note_path, chunk_index, source, text
             FROM note_chunks
-            WHERE embedding IS NOT NULL
+            WHERE vault_id = ? AND embedding IS NOT NULL
             ORDER BY embedding <=> ?::vector
             LIMIT ?
-            """, new NoteChunkRowMapper(), floatArrayToString(queryVec), limit);
+            """, new NoteChunkRowMapper(), vaultId, floatArrayToString(queryVec), limit);
     }
 
     /**
@@ -200,32 +201,34 @@ public class NoteChunkRepository {
      * syntax throws Tantivy parse errors on punctuation like "C++" or "a/b",
      * whereas match() treats the input as plain terms. Ranked by BM25 score.
      */
-    public List<NoteChunk> findByTextSearch(String query, int limit) {
+    public List<NoteChunk> findByTextSearch(long vaultId, String query, int limit) {
         if (query == null || query.isBlank()) return List.of();
+        // vault_id is a plain predicate next to the BM25 match; the bm25 index also carries
+        // vault_id so pg_search can push it down. Correct either way (post-filter fallback).
         return jdbc.query("""
             SELECT note_path, chunk_index, source, text
             FROM note_chunks
-            WHERE id @@@ paradedb.match('text', ?)
+            WHERE id @@@ paradedb.match('text', ?) AND vault_id = ?
             ORDER BY paradedb.score(id) DESC
             LIMIT ?
-            """, new NoteChunkRowMapper(), query, limit);
+            """, new NoteChunkRowMapper(), query, vaultId, limit);
     }
 
     /** Count of distinct notes that have at least one chunk of the given source —
      *  a DB-truth progress signal for one-off backfills (survives app restarts,
      *  unlike an in-memory job flag). */
-    public int countDistinctNotesForSource(String source) {
+    public int countDistinctNotesForSource(long vaultId, String source) {
         Integer n = jdbc.queryForObject(
-            "SELECT COUNT(DISTINCT note_path) FROM note_chunks WHERE source = ?",
-            Integer.class, source);
+            "SELECT COUNT(DISTINCT note_path) FROM note_chunks WHERE vault_id = ? AND source = ?",
+            Integer.class, vaultId, source);
         return n == null ? 0 : n;
     }
 
     /** Returns the highest chunk_index for a note within one source, or null if none exist. */
-    public Integer queryMaxChunkIndex(String notePath, String source) {
+    public Integer queryMaxChunkIndex(long vaultId, String notePath, String source) {
         List<Integer> rows = jdbc.queryForList(
-            "SELECT MAX(chunk_index) FROM note_chunks WHERE note_path = ? AND source = ?",
-            Integer.class, notePath, source);
+            "SELECT MAX(chunk_index) FROM note_chunks WHERE vault_id = ? AND note_path = ? AND source = ?",
+            Integer.class, vaultId, notePath, source);
         return (rows.isEmpty() || rows.get(0) == null) ? null : rows.get(0);
     }
 

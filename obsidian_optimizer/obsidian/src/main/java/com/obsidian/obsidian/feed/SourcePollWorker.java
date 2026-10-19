@@ -34,6 +34,8 @@ import java.util.regex.Pattern;
 @Component
 public class SourcePollWorker {
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
     private static final Logger log = LoggerFactory.getLogger(SourcePollWorker.class);
 
     private final SourceRepository sourceRepo;
@@ -46,7 +48,9 @@ public class SourcePollWorker {
 
     public SourcePollWorker(SourceRepository sourceRepo, FeedRepository feedRepo, FeedService feedService,
                             SettingsRepository settingsRepo, TrackAgentClient trackAgentClient,
-                            OfflineExportService offlineExport) {
+                            OfflineExportService offlineExport,
+            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.sourceRepo = sourceRepo;
         this.feedRepo = feedRepo;
         this.feedService = feedService;
@@ -63,12 +67,13 @@ public class SourcePollWorker {
 
     void drain() {
         long intervalMs = settingsRepo.getSubscriptionPollIntervalMs();
-        for (Source s : sourceRepo.listActive()) {
+        long vaultId = activeVault.id();   // scanner: active vault only
+        for (Source s : sourceRepo.listActive(vaultId)) {
             boolean due = s.lastCheckedAt() == null
                 || Instant.now().isAfter(s.lastCheckedAt().plusMillis(intervalMs));
             if (!due) continue;
             try {
-                pollSource(s);
+                pollSource(vaultId, s);
             } catch (RuntimeException e) {
                 log.warn("[SourcePollWorker] source {} ({}) failed: {}", s.id(), s.url(), e.toString());
             }
@@ -76,39 +81,39 @@ public class SourcePollWorker {
     }
 
     /** User-triggered "check now" — async, bypasses the interval gate. */
-    public void pollNowAsync(long sourceId) {
+    public void pollNowAsync(long vaultId, long sourceId) {
         CompletableFuture.runAsync(() -> {
-            Source s = sourceRepo.get(sourceId);
+            Source s = sourceRepo.get(vaultId, sourceId);
             if (s != null) {
-                try { pollSource(s); }
+                try { pollSource(vaultId, s); }
                 catch (RuntimeException e) { log.warn("[SourcePollWorker] poll-now {} failed: {}", sourceId, e.toString()); }
             }
         });
     }
 
     /** discover → insert. A source never checked before is the first-poll BACKLOG: always pending. */
-    void pollSource(Source s) {
+    void pollSource(long vaultId, Source s) {
         String target = s.feedUrl() != null ? s.feedUrl() : s.url();
         DiscoverResult res = trackAgentClient.discover(target, discoverType(s));
         if (!res.ok()) return;   // last_checked_at untouched, retried next tick
-        ingestCandidates(s, res.candidates(), s.lastCheckedAt() == null);
+        ingestCandidates(vaultId, s, res.candidates(), s.lastCheckedAt() == null);
     }
 
     /** Insert candidates as pending (dedup by normalized item_url), auto-accept NEW ones only when
      *  not backlog and effective autoAccept (source value, else global) is true; advance the cursor
      *  (also for an empty feed). Returns the number of new items. */
-    int ingestCandidates(Source s, List<Candidate> candidates, boolean backlog) {
+    int ingestCandidates(long vaultId, Source s, List<Candidate> candidates, boolean backlog) {
         boolean auto = !backlog && (s.autoAccept() != null ? s.autoAccept() : settingsRepo.isFeedAutoAccept());
         int inserted = 0;
         for (Candidate c : candidates) {
             String url = normalizeUrl(c.itemUrl());
             if (url == null) continue;
             String title = (c.title() == null || c.title().isBlank()) ? url : c.title();
-            Long id = feedRepo.insertIfNew(s.id(), url, title, c.thumbUrl(), c.durationS(),
+            Long id = feedRepo.insertIfNew(vaultId, s.id(), url, title, c.thumbUrl(), c.durationS(),
                 parseDate(c.publishedAt()), c.body());
             if (id == null) continue;
             inserted++;
-            if (auto) feedService.accept(id);
+            if (auto) feedService.accept(vaultId, id);
         }
         sourceRepo.markChecked(s.id(), Instant.now());
         if (inserted > 0) {

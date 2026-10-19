@@ -81,3 +81,4 @@ Field validation:
 | Default value for any key | `SettingsRepository` seed block |
 | `vaultPath` rejection (400) | `SettingsController.updateSettings()` |
 | Validate a new field | `SettingsController.updateSettings()` validation block |
+| Vault scoping (M3) | `GET /settings` `vaultPath` = `ActiveVault.root()`; `SettingsRepository.getVaultPath()` removed (the `vaultPath` app_settings row is no longer read) |

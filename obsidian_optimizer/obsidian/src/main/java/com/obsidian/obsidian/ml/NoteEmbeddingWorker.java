@@ -6,6 +6,7 @@ import com.obsidian.obsidian.common.PollingQueueWorker;
 import com.obsidian.obsidian.common.WorkQueue;
 import com.obsidian.obsidian.common.WorkerLane;
 import com.obsidian.obsidian.notes.NoteIndexRepository;
+import com.obsidian.obsidian.vaults.ActiveVault;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,19 +43,22 @@ public class NoteEmbeddingWorker {
     private final NoteIndexRepository noteIndexRepo;
     private final EmbeddingService embeddingService;
     private final NoteChunkRepository chunkRepo;
+    private final ActiveVault activeVault;
 
     // Own lane: the drain runs here, never on the scheduler thread, so a slow
     // embedder call can't starve the image / card / chrono workers (and vice versa).
     private final WorkerLane lane = new WorkerLane("embed");
 
-    private record EmbedCandidate(String path, String hash) {}
+    private record EmbedCandidate(long vaultId, String path, String hash) {}
 
     private final PollingQueueWorker<EmbedCandidate> pollingWorker;
     private final ObjectMapper mapper = new ObjectMapper();
 
     public NoteEmbeddingWorker(NoteIndexRepository noteIndexRepo,
                                EmbeddingService embeddingService,
-                               NoteChunkRepository chunkRepo) {
+                               NoteChunkRepository chunkRepo,
+                               ActiveVault activeVault) {
+        this.activeVault      = activeVault;
         this.noteIndexRepo    = noteIndexRepo;
         this.embeddingService = embeddingService;
         this.chunkRepo        = chunkRepo;
@@ -62,10 +66,12 @@ public class NoteEmbeddingWorker {
         WorkQueue<EmbedCandidate> queue = new WorkQueue<>() {
             @Override
             public List<EmbedCandidate> claimBatch(int limit) {
-                Map<String, String> pending = noteIndexRepo.findNotesNeedingEmbedding(limit);
+                // Scanner: active vault only (inactive vaults get no proactive embedding).
+                long vaultId = activeVault.id();
+                Map<String, String> pending = noteIndexRepo.findNotesNeedingEmbedding(vaultId, limit);
                 List<EmbedCandidate> out = new ArrayList<>(pending.size());
                 for (Map.Entry<String, String> e : pending.entrySet()) {
-                    out.add(new EmbedCandidate(e.getKey(), e.getValue()));
+                    out.add(new EmbedCandidate(vaultId, e.getKey(), e.getValue()));
                 }
                 return out;
             }
@@ -79,7 +85,7 @@ public class NoteEmbeddingWorker {
         };
 
         PollingQueueWorker.ItemProcessor<EmbedCandidate> processor =
-            candidate -> embedOne(candidate.path(), candidate.hash());
+            candidate -> embedOne(candidate.vaultId(), candidate.path(), candidate.hash());
 
         PollingQueueWorker.BatchListener<EmbedCandidate> listener = new PollingQueueWorker.BatchListener<>() {
             @Override
@@ -122,26 +128,30 @@ public class NoteEmbeddingWorker {
     @RabbitListener(queues = com.obsidian.obsidian.common.RabbitQueueConfig.EMBED_QUEUE)
     public void onEmbedMessage(String payloadJson) {
         String path;
+        long vaultId;
         try {
             JsonNode node = mapper.readTree(payloadJson);
             path = node.path("notePath").asText(null);
+            // The vault the note was written in travels with the message (OutboxRepository.enqueue).
+            // Messages queued before M3 carry none: they were all vault 1.
+            vaultId = node.path("vaultId").asLong(1L);
         } catch (Exception e) {
             log.warn("[NoteEmbeddingWorker] malformed embed message, dropping: {}", e.getMessage());
             return;
         }
         if (path == null) return;
-        String hash = noteIndexRepo.getContentHash(path);
+        String hash = noteIndexRepo.getContentHash(vaultId, path);
         if (hash == null) return; // note deleted or never hashed — nothing to do
-        embedOne(path, hash);
+        embedOne(vaultId, path, hash);
     }
 
     /** Shared by the polling fallback and the RabbitMQ fast path: embed one note and
      *  record success against the given hash (must be the hash currently in
      *  {@code notes.content_hash} for markEmbedded's guard to actually take). */
-    boolean embedOne(String path, String hash) {
+    boolean embedOne(long vaultId, String path, String hash) {
         try {
-            if (embeddingService.indexNote(path)) {
-                noteIndexRepo.markEmbedded(path, hash);
+            if (embeddingService.indexNote(vaultId, path)) {
+                noteIndexRepo.markEmbedded(vaultId, path, hash);
                 return true;
             }
             // false → embedder unreachable / partial failure: stays in the
@@ -171,12 +181,13 @@ public class NoteEmbeddingWorker {
      */
     public boolean backfillTitleChunks() {
         return lane.trigger(() -> {
-            List<String> paths = noteIndexRepo.getAllPaths();
+            long vaultId = activeVault.id();
+            List<String> paths = noteIndexRepo.getAllPaths(vaultId);
             log.info("[NoteEmbeddingWorker] title backfill: scanning {} note(s)", paths.size());
             int ok = 0;
             for (String path : paths) {
                 try {
-                    if (embeddingService.indexNote(path)) ok++;
+                    if (embeddingService.indexNote(vaultId, path)) ok++;
                 } catch (Exception e) {
                     log.warn("[NoteEmbeddingWorker] title backfill failed for {}: {}", path, e.getMessage());
                 }
@@ -197,7 +208,7 @@ public class NoteEmbeddingWorker {
     @Scheduled(fixedDelay = 86_400_000, initialDelay = 7_200_000)
     public void purgeOrphanChunks() {
         try {
-            int purged = chunkRepo.deleteOrphanChunks();
+            int purged = chunkRepo.deleteOrphanChunks(activeVault.id());
             if (purged > 0) {
                 log.info("[NoteEmbeddingWorker] purged {} orphan chunk(s) of deleted/renamed notes", purged);
             }

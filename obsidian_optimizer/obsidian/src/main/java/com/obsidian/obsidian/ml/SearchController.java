@@ -24,9 +24,12 @@ public class SearchController {
     private final NoteEmbeddingWorker embeddingWorker;
     private final NoteChunkRepository chunkRepo;
     private final NoteIndexRepository noteIndexRepo;
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
 
     public SearchController(SearchService searchService, NoteEmbeddingWorker embeddingWorker,
-                            NoteChunkRepository chunkRepo, NoteIndexRepository noteIndexRepo) {
+                            NoteChunkRepository chunkRepo, NoteIndexRepository noteIndexRepo,
+                            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
         this.searchService = searchService;
         this.embeddingWorker = embeddingWorker;
         this.chunkRepo = chunkRepo;
@@ -39,6 +42,7 @@ public class SearchController {
             @RequestParam(defaultValue = "10") int limit) {
 
         AtomicBoolean cancelled = new AtomicBoolean(false);
+        long vaultId = activeVault.id();   // captured on the request thread, before the async hop
 
         // On timeout: mark cancelled and return empty list so the client isn't left hanging.
         DeferredResult<List<SearchResult>> deferred = new DeferredResult<>(TIMEOUT_MS, List.of());
@@ -48,7 +52,7 @@ public class SearchController {
         });
 
         CompletableFuture.supplyAsync(() ->
-                searchService.search(q, Math.min(limit, 20), cancelled)
+                searchService.search(vaultId, q, Math.min(limit, 20), cancelled)
         ).thenAccept(results -> {
             if (!cancelled.get()) deferred.setResult(results);
         }).exceptionally(ex -> {
@@ -80,8 +84,8 @@ public class SearchController {
      */
     @GetMapping("/search/reindex-titles/status")
     public Map<String, Object> reindexTitlesStatus() {
-        int titledNotes = chunkRepo.countDistinctNotesForSource("title");
-        int totalNotes = noteIndexRepo.getAllPaths().size();
+        int titledNotes = chunkRepo.countDistinctNotesForSource(activeVault.id(), "title");
+        int totalNotes = noteIndexRepo.getAllPaths(activeVault.id()).size();
         return Map.of(
             "titledNotes", titledNotes,
             "totalNotes", totalNotes,

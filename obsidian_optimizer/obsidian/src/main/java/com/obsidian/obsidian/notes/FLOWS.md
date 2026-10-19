@@ -185,7 +185,7 @@ Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String>
 ## DELETE /notes — Soft Delete
 
 `NotesController.deleteNote(DeleteNoteRequest{path})`  
-→ `FileRepository.softDeleteNote()` → move to `ROOT_FILE/_trash/` → `NoteIndexRepository.delete()` → `NoteLinkRepository.deleteSource()`
+→ `FileRepository.softDeleteNote()` → move to `<active vault root>/_trash/` → `NoteIndexRepository.delete()` → `NoteLinkRepository.deleteSource()`
 
 ## DELETE /folders — Recursive Soft Delete
 
@@ -229,3 +229,4 @@ file is a no-op (acknowledge can be retried). Collision-suffixes on name clash.
 | Wiki-link rewrite regex | `NoteLinkRepository.rewriteLinks()` |
 | Vault path boundary | `FileRepository.requireInsideVault()` / `requireSimpleName()` |
 | Force full re-index | `TRUNCATE notes; TRUNCATE note_links;` in psql → restart, or `PUT /api/settings` with same vaultPath |
+| Vault scoping (M3) | `FileRepository` root/id = `ActiveVault.root()/id()` (`root()`/`vid()` helpers; `ROOT_FILE` removed); every `NoteIndexRepository`/`NoteLinkRepository` method takes `long vaultId` first |

@@ -49,9 +49,9 @@ public class NoteReviewRepository {
                             Timestamp lastReview, Timestamp due,
                             String pendingBucket, Double pendingArm) {}
 
-    public ReviewRow find(String notePath) {
+    public ReviewRow find(long vaultId, String notePath) {
         List<ReviewRow> rows = jdbc.query(
-            "SELECT * FROM note_reviews WHERE note_path = ?",
+            "SELECT * FROM note_reviews WHERE vault_id = ? AND note_path = ?",
             (rs, i) -> new ReviewRow(
                 rs.getString("note_path"), rs.getDouble("stability"), rs.getDouble("difficulty"),
                 rs.getInt("reps"), rs.getTimestamp("last_review"), rs.getTimestamp("due"),
@@ -61,36 +61,36 @@ public class NoteReviewRepository {
                 // arm is set (which is every note that's been reviewed once). Widen
                 // through Number so both null and Float are handled.
                 rs.getObject("pending_arm") instanceof Number n ? n.doubleValue() : null),
-            notePath);
+            vaultId, notePath);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    public void upsert(String notePath, double stability, double difficulty,
+    public void upsert(long vaultId, String notePath, double stability, double difficulty,
                        Timestamp lastReview, Timestamp due, String pendingBucket, Double pendingArm) {
         jdbc.update("""
             INSERT INTO note_reviews(note_path, stability, difficulty, reps, last_review, due,
-                                     pending_bucket, pending_arm)
-            VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+                                     pending_bucket, pending_arm, vault_id)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)
             ON CONFLICT (note_path, vault_id) DO UPDATE SET
               stability = EXCLUDED.stability, difficulty = EXCLUDED.difficulty,
               reps = note_reviews.reps + 1,
               last_review = EXCLUDED.last_review, due = EXCLUDED.due,
               pending_bucket = EXCLUDED.pending_bucket, pending_arm = EXCLUDED.pending_arm
-            """, notePath, stability, difficulty, lastReview, due, pendingBucket, pendingArm);
+            """, notePath, stability, difficulty, lastReview, due, pendingBucket, pendingArm, vaultId);
     }
 
     /** Notes due now, most overdue first. */
-    public List<Map<String, Object>> findDue(int limit) {
+    public List<Map<String, Object>> findDue(long vaultId, int limit) {
         return jdbc.queryForList("""
             SELECT note_path, stability, difficulty, reps, last_review, due
             FROM note_reviews
-            WHERE due <= now()
+            WHERE vault_id = ? AND due <= now()
             ORDER BY due ASC
             LIMIT ?
-            """, limit);
+            """, vaultId, limit);
     }
 
-    public void delete(String notePath) {
-        jdbc.update("DELETE FROM note_reviews WHERE note_path = ?", notePath);
+    public void delete(long vaultId, String notePath) {
+        jdbc.update("DELETE FROM note_reviews WHERE note_path = ? AND vault_id = ?", notePath, vaultId);
     }
 }

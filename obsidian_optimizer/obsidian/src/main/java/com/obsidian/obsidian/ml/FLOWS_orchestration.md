@@ -164,3 +164,4 @@ Image captions + card text don't touch the GPU — they route through the host-w
 | GPU VRAM cap / kill switch | `.env` `EMBED_GPU_MEM_LIMIT_MB` / `GPU_SLOT` |
 | LLM provider priority / cooldown | `host-wrapper/llm_router.py` · `.env` `LLM_*_PRIORITY` |
 | Isolation regression test | `ml/SchedulerIsolationTest.java` |
+| Vault scoping (M3) | outbox messages carry `vaultId` (`OutboxRepository.enqueue(vaultId, queue, payload)`); `NoteEmbeddingWorker.onEmbedMessage` / `ChunkEmbeddingReconciler.onEmbedChunkMessage` read it (default 1 for old messages); polling safety nets use `activeVault.id()` |

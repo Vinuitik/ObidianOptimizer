@@ -38,9 +38,9 @@ class AssignmentServiceTest {
     @BeforeEach
     void setUp() {
         service = new AssignmentService(repo, reviewService, reviewPrep);
-        when(repo.notesInScope(NOTE)).thenReturn(List.of(NOTE));
-        when(repo.currentCycle(anyString(), anyString())).thenReturn(1);
-        when(repo.insertAssignment(any(), anyInt(), anyInt(), any(), any()))
+        when(repo.notesInScope(1L, NOTE)).thenReturn(List.of(NOTE));
+        when(repo.currentCycle(org.mockito.ArgumentMatchers.eq(1L), anyString(), anyString())).thenReturn(1);
+        when(repo.insertAssignment(org.mockito.ArgumentMatchers.eq(1L), any(), anyInt(), anyInt(), any(), any()))
             .thenReturn(UUID.randomUUID());
     }
 
@@ -56,7 +56,7 @@ class AssignmentServiceTest {
 
     /** Stub a tier's bag to hand out the given cards in order, then run dry (null). */
     private void tier(int min, int max, Map<String, Object>... cards) {
-        var stub = when(repo.drawCardInTier(eq(NOTE), eq(min), eq(max), anyInt(), any()));
+        var stub = when(repo.drawCardInTier(org.mockito.ArgumentMatchers.eq(1L), eq(NOTE), eq(min), eq(max), anyInt(), any()));
         for (Map<String, Object> c : cards) stub = stub.thenReturn(c);
         stub.thenReturn(null);
     }
@@ -72,7 +72,7 @@ class AssignmentServiceTest {
         tier(3, 3, mcq(3));
         tier(4, 5, mcq(5));
 
-        var cards = cards(service.build(NOTE, 10));
+        var cards = cards(service.build(1L, NOTE, 10));
 
         assertThat(cards).hasSize(3);
         assertThat(cards).extracting(c -> AssignmentService.Tier.of(((Number) c.get("difficulty")).intValue()))
@@ -87,7 +87,7 @@ class AssignmentServiceTest {
         tier(3, 3);  // empty
         tier(4, 5);  // empty
 
-        var cards = cards(service.build(NOTE, 10));
+        var cards = cards(service.build(1L, NOTE, 10));
 
         assertThat(cards).hasSize(AssignmentService.MAX_PER_TIER);
     }
@@ -99,7 +99,7 @@ class AssignmentServiceTest {
         tier(3, 3, mcq(3), mcq(3), mcq(3));
         tier(4, 5, mcq(4), mcq(5), mcq(4));
 
-        var cards = cards(service.build(NOTE, 100));
+        var cards = cards(service.build(1L, NOTE, 100));
 
         assertThat(cards.size()).isLessThanOrEqualTo(AssignmentService.MAX_CARDS_PER_NOTE);
     }
@@ -110,7 +110,7 @@ class AssignmentServiceTest {
         tier(3, 3, mcq(3));
         tier(4, 5, mcq(5));
 
-        var assignment = service.build(NOTE, 10);
+        var assignment = service.build(1L, NOTE, 10);
 
         int actual = (int) assignment.get("actualPoints");
         assertThat(actual).isEqualTo(1 + 3 + 5);   // points = difficulty
@@ -122,18 +122,18 @@ class AssignmentServiceTest {
         tier(3, 3, mcq(3));
         tier(4, 5, mcq(5));
 
-        service.build(NOTE, 10);
+        service.build(1L, NOTE, 10);
 
         // On-demand normalize + card-gen + embed runs before the bag draw.
-        verify(reviewPrep).prepare(NOTE);
+        verify(reviewPrep).prepare(1L, NOTE);
     }
 
     @Test
     void throwsWhenScopeHasNoCards() {
-        when(repo.notesInScope("/vault/empty.md")).thenReturn(List.of());
-        assertThatThrownBy(() -> service.build("/vault/empty.md", 10))
+        when(repo.notesInScope(1L, "/vault/empty.md")).thenReturn(List.of());
+        assertThatThrownBy(() -> service.build(1L, "/vault/empty.md", 10))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("no active cards");
-        verify(reviewPrep).prepare("/vault/empty.md");   // prep attempted even when empty
+        verify(reviewPrep).prepare(1L, "/vault/empty.md");   // prep attempted even when empty
     }
 }
