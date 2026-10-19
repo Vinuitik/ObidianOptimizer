@@ -169,8 +169,20 @@ def ensure_schema(conn) -> None:
           drawn_cycle   INT NOT NULL DEFAULT 0,
           created_at    TIMESTAMP NOT NULL DEFAULT now(),
           vault_id      BIGINT NOT NULL DEFAULT 1,
-          UNIQUE (note_path, card_hash)
+          UNIQUE (note_path, card_hash, vault_id)
         )""")
+    # Pre-M2 installs have UNIQUE (note_path, card_hash): swap it (idempotent, one txn) so
+    # the vault-aware ON CONFLICT in _store has an arbiter even if the embedder boots first.
+    conn.execute("""
+        DO $$ DECLARE c text; BEGIN
+          SELECT conname INTO c FROM pg_constraint
+           WHERE conrelid = 'cards'::regclass AND contype = 'u'
+             AND pg_get_constraintdef(oid) = 'UNIQUE (note_path, card_hash)';
+          IF c IS NOT NULL THEN
+            EXECUTE format('ALTER TABLE cards DROP CONSTRAINT %I', c);
+            EXECUTE format('ALTER TABLE cards ADD CONSTRAINT %I UNIQUE (note_path, card_hash, vault_id)', c);
+          END IF;
+        END $$""")
     # The FLAGGED status widening is migrated on an existing table by the Java side
     # (CardRepository.initSchema ALTER); this inline DDL only matters when the
     # embedder creates the table on a fresh install.
@@ -190,7 +202,7 @@ def _store(note_path: str, source_hash: str, cards: list[dict]) -> dict:
             cur = conn.execute("""
                 INSERT INTO cards (note_path, type, payload, difficulty, card_hash, source_hash)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (note_path, card_hash) DO UPDATE SET
+                ON CONFLICT (note_path, card_hash, vault_id) DO UPDATE SET
                   source_hash = EXCLUDED.source_hash,
                   -- Never resurrect a user-flagged card: if the agent regenerates the
                   -- identical bad question, it stays FLAGGED (out of the draw pool).

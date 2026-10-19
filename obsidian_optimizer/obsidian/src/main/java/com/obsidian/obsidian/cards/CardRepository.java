@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.cards;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.context.annotation.DependsOn;
@@ -83,6 +84,8 @@ public class CardRepository {
             """);
         jdbc.execute("ALTER TABLE card_flags ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
         jdbc.execute("ALTER TABLE card_gen_attempts ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapPrimaryKey(jdbc, "card_gen_attempts", "note_path");
+        VaultKeys.swapUnique(jdbc, "cards", "note_path, card_hash", "note_path, card_hash, vault_id");
     }
 
     /**
@@ -142,7 +145,7 @@ public class CardRepository {
         jdbc.update("""
             INSERT INTO card_gen_attempts(note_path, source_hash, attempted_at)
             VALUES (?, ?, now())
-            ON CONFLICT (note_path) DO UPDATE SET
+            ON CONFLICT (note_path, vault_id) DO UPDATE SET
               source_hash = EXCLUDED.source_hash, attempted_at = now()
             """, notePath, sourceHash);
     }

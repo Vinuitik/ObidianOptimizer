@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.workspace;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.context.annotation.DependsOn;
@@ -37,6 +38,7 @@ public class WorkspaceRepository {
             )
             """);
         jdbc.execute("ALTER TABLE workspace_items ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapPrimaryKey(jdbc, "workspace_items", "filename");
     }
 
     /** Upsert — re-accumulating the same filename refreshes its row rather than duplicating. */
@@ -44,7 +46,7 @@ public class WorkspaceRepository {
         jdbc.update("""
             INSERT INTO workspace_items(filename, type, source_note, importance, added_at)
             VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (filename) DO UPDATE SET
+            ON CONFLICT (filename, vault_id) DO UPDATE SET
                 type = EXCLUDED.type, source_note = EXCLUDED.source_note,
                 importance = EXCLUDED.importance, added_at = EXCLUDED.added_at
             """, filename, type, sourceNote, importance, System.currentTimeMillis());

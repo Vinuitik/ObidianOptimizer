@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.ml;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -40,6 +41,7 @@ public class PendingImageJobRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_pending_image_status ON pending_image_jobs(status) WHERE status = 'PENDING'");
         jdbc.execute("ALTER TABLE pending_image_jobs ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapUnique(jdbc, "pending_image_jobs", "note_path, image_path", "note_path, image_path, vault_id");
     }
 
     /** Result of {@link #upsertPending}: the row's id, and whether it actually needs
@@ -53,7 +55,7 @@ public class PendingImageJobRepository {
         Map<String, Object> row = jdbc.queryForMap("""
             INSERT INTO pending_image_jobs(note_path, image_path, status)
             VALUES (?, ?, 'PENDING')
-            ON CONFLICT (note_path, image_path) DO UPDATE
+            ON CONFLICT (note_path, image_path, vault_id) DO UPDATE
               SET status = CASE
                 WHEN pending_image_jobs.status = 'DONE' THEN 'DONE'
                 ELSE 'PENDING'

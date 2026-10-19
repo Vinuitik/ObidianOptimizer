@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.feed;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.context.annotation.DependsOn;
@@ -53,6 +54,7 @@ public class FeedRepository {
         // every other item kind. Added by migration (existing rows predate the column).
         jdbc.execute("ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS body TEXT");
         jdbc.execute("ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapUnique(jdbc, "feed_items", "item_url", "vault_id, item_url");
     }
 
     private static final String SELECT = """
@@ -73,7 +75,7 @@ public class FeedRepository {
         List<Long> ids = jdbc.queryForList("""
             INSERT INTO feed_items(source_id, item_url, title, thumb_url, duration_s, published_at, body)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (item_url) DO NOTHING RETURNING id
+            ON CONFLICT (vault_id, item_url) DO NOTHING RETURNING id
             """, Long.class, sourceId, itemUrl, title, thumbUrl, durationS,
             publishedAt == null ? null : Timestamp.from(publishedAt), body);
         return ids.isEmpty() ? null : ids.get(0);

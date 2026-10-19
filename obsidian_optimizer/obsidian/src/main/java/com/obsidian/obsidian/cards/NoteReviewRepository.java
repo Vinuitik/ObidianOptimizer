@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.cards;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.context.annotation.DependsOn;
@@ -41,6 +42,7 @@ public class NoteReviewRepository {
             """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_note_reviews_due ON note_reviews(due)");
         jdbc.execute("ALTER TABLE note_reviews ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapPrimaryKey(jdbc, "note_reviews", "note_path");
     }
 
     public record ReviewRow(String notePath, double stability, double difficulty, int reps,
@@ -69,7 +71,7 @@ public class NoteReviewRepository {
             INSERT INTO note_reviews(note_path, stability, difficulty, reps, last_review, due,
                                      pending_bucket, pending_arm)
             VALUES (?, ?, ?, 1, ?, ?, ?, ?)
-            ON CONFLICT (note_path) DO UPDATE SET
+            ON CONFLICT (note_path, vault_id) DO UPDATE SET
               stability = EXCLUDED.stability, difficulty = EXCLUDED.difficulty,
               reps = note_reviews.reps + 1,
               last_review = EXCLUDED.last_review, due = EXCLUDED.due,

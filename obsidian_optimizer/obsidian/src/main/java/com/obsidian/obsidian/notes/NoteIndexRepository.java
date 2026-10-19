@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.notes;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -76,6 +77,7 @@ public class NoteIndexRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_notes_capture_id ON notes(capture_id)");
         jdbc.execute("ALTER TABLE notes ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapPrimaryKey(jdbc, "notes", "path");
     }
 
     /** Proposed-note paths for a capture, in source order (capture_seq). Used by the
@@ -226,7 +228,7 @@ public class NoteIndexRepository {
             INSERT INTO notes(path, title, sr_due, sr_interval, sr_ease, modified_at,
                               capture_id, capture_seq)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (path) DO UPDATE SET
+            ON CONFLICT (path, vault_id) DO UPDATE SET
               title       = EXCLUDED.title,
               sr_due      = EXCLUDED.sr_due,
               sr_interval = EXCLUDED.sr_interval,

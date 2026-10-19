@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.notes;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -35,6 +36,7 @@ public class NoteLinkRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_name)");
         jdbc.execute("ALTER TABLE note_links ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapPrimaryKey(jdbc, "note_links", "source_path, target_name");
     }
 
     public void updateLinks(String sourcePath, Set<String> targets) {
