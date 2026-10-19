@@ -123,6 +123,7 @@ services:
       - "127.0.0.1:8084:8084"   # loopback only — kept for vite dev proxy; browsers go through nginx
     environment:
       - VAULT_PATH=/vault
+      - HOST_VAULT_PATH=${HOST_VAULT_PATH}
       - IMAGE_PATH=/vault/resources/images
       - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/obsidian
       - SPRING_DATASOURCE_USERNAME=obsidian
