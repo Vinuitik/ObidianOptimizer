@@ -2,6 +2,7 @@ package com.obsidian.obsidian.capture;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.Map;
  * ran when the row was created (in-place note snapshots) is inserted at {@code processing}.
  */
 @Component
+@DependsOn("vaultRepository")
 public class CaptureRepository {
 
     private final JdbcTemplate jdbc;
@@ -70,6 +72,7 @@ public class CaptureRepository {
         // error and lifetime attempt count instead of nothing.
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0");
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS last_error TEXT");
+        jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     public void create(String id, String sourceType, String sourceRef,

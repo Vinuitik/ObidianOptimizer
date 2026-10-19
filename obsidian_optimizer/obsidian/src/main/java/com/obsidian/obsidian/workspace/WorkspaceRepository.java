@@ -2,6 +2,7 @@ package com.obsidian.obsidian.workspace;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.List;
  * Unrelated to ingest review — that lives in _inbox/ (see InboxController).
  */
 @Repository
+@DependsOn("vaultRepository")
 public class WorkspaceRepository {
 
     public record WorkspaceItem(String filename, String type, String sourceNote, int importance, long addedAt) {}
@@ -34,6 +36,7 @@ public class WorkspaceRepository {
                 added_at     BIGINT NOT NULL
             )
             """);
+        jdbc.execute("ALTER TABLE workspace_items ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     /** Upsert — re-accumulating the same filename refreshes its row rather than duplicating. */

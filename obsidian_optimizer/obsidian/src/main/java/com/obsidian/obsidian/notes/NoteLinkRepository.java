@@ -8,9 +8,11 @@ import java.util.regex.Pattern;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 @Component
+@DependsOn("vaultRepository")
 public class NoteLinkRepository {
 
     private final JdbcTemplate jdbc;
@@ -32,6 +34,7 @@ public class NoteLinkRepository {
             """);
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_name)");
+        jdbc.execute("ALTER TABLE note_links ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     public void updateLinks(String sourcePath, Set<String> targets) {

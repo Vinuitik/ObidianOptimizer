@@ -5,6 +5,7 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import java.sql.ResultSet;
@@ -26,6 +27,7 @@ import java.util.UUID;
  * durable, and separately sweeps unpublished rows on a timer as the fallback path.
  */
 @Component
+@DependsOn("vaultRepository")
 public class OutboxRepository {
 
     private final JdbcTemplate jdbc;
@@ -50,6 +52,7 @@ public class OutboxRepository {
             """);
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_outbox_unpublished ON outbox_events(created_at) WHERE published_at IS NULL");
+        jdbc.execute("ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     public record OutboxRow(UUID id, String queueName, String payloadJson) {}

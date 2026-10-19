@@ -32,7 +32,8 @@ def ensure_schema(conn) -> None:
             error_type TEXT,
             error_message TEXT,
             bundle_ref TEXT,
-            resolved_at TIMESTAMPTZ
+            resolved_at TIMESTAMPTZ,
+            vault_id BIGINT DEFAULT 1
         )
     """)
     conn.execute(

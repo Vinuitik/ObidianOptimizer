@@ -2,6 +2,7 @@ package com.obsidian.obsidian.feed;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Repository;
 
 import java.sql.ResultSet;
@@ -16,6 +17,7 @@ import java.util.List;
  * to guarantee the {@code sources} table exists first (FK). See feed/FLOWS.md.
  */
 @Repository
+@DependsOn("vaultRepository")
 public class FeedRepository {
 
     private final JdbcTemplate jdbc;
@@ -50,6 +52,7 @@ public class FeedRepository {
         // body: full text of a YouTube Community post (P3 youtube_posts kind) — null for
         // every other item kind. Added by migration (existing rows predate the column).
         jdbc.execute("ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS body TEXT");
+        jdbc.execute("ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     private static final String SELECT = """

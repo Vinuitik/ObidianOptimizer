@@ -15,9 +15,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 @Component
+@DependsOn("vaultRepository")
 public class NoteIndexRepository {
 
     private static final Logger log = LoggerFactory.getLogger(NoteIndexRepository.class);
@@ -73,6 +75,7 @@ public class NoteIndexRepository {
             "ALTER TABLE notes ADD COLUMN IF NOT EXISTS capture_seq INT");
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_notes_capture_id ON notes(capture_id)");
+        jdbc.execute("ALTER TABLE notes ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     /** Proposed-note paths for a capture, in source order (capture_seq). Used by the

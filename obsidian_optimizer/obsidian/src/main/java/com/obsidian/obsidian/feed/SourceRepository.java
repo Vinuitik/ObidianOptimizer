@@ -2,6 +2,7 @@ package com.obsidian.obsidian.feed;
 
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Repository;
 
 import java.sql.ResultSet;
@@ -16,6 +17,7 @@ import java.util.List;
  * See feed/FLOWS.md.
  */
 @Repository
+@DependsOn("vaultRepository")
 public class SourceRepository {
 
     private final JdbcTemplate jdbc;
@@ -45,6 +47,7 @@ public class SourceRepository {
               status          TEXT NOT NULL DEFAULT 'active'
             )
             """);
+        jdbc.execute("ALTER TABLE sources ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     private static final String SELECT = """

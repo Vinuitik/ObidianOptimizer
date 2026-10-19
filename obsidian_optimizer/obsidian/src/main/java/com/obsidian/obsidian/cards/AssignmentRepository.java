@@ -12,7 +12,7 @@ import java.util.UUID;
 // attempts.card_id REFERENCES cards(id) — CardRepository.initSchema must run first.
 // Without this, first boot on a FRESH database fails (alphabetical bean order
 // initializes AssignmentRepository before CardRepository).
-@DependsOn("cardRepository")
+@DependsOn({"cardRepository", "vaultRepository"})
 @Repository
 public class AssignmentRepository {
 
@@ -53,6 +53,8 @@ public class AssignmentRepository {
               current_cycle INT NOT NULL DEFAULT 1,
               PRIMARY KEY (scope, type)
             )""");
+        jdbc.execute("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE scope_state ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
     }
 
     // ── Bag draw: select-without-replacement per (scope, type) ───────────────
