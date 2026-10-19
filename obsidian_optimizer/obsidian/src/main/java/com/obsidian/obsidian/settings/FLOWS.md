@@ -4,6 +4,9 @@ Files: SettingsController.java, SettingsRepository.java
 
 ---
 
+## vault_settings Table (M4)
+`vault_settings(vault_id, key, value, PK(vault_id,key))`: syncEnabled, sync.drive.folder_id, sync.refresh_token, sync.account_email, syncPassphrase, sync.device_id, chronoLastRunDate, resourcePath, startupSyncMode. Copied once from `app_settings` to vault 1 at boot (legacy rows left, unread). Accessors take `vaultId` first; `GET/PUT /settings` read/write the ACTIVE vault's values for these keys. OAuth app creds stay in `app_settings`. Details: `vaults/FLOWS.md`.
+
 ## app_settings Table
 
 ```sql
@@ -82,3 +85,5 @@ Field validation:
 | `vaultPath` rejection (400) | `SettingsController.updateSettings()` |
 | Validate a new field | `SettingsController.updateSettings()` validation block |
 | Vault scoping (M3) | `GET /settings` `vaultPath` = `ActiveVault.root()`; `SettingsRepository.getVaultPath()` removed (the `vaultPath` app_settings row is no longer read) |
+| Per-vault setting (M4) | `SettingsRepository.PER_VAULT_KEYS`, `getForVault/setForVault`, typed per-vault getters/setters; `SettingsController` passes `activeVault.id()` |
+| Enable sync rejected (400) when folder shared | `SettingsController.updateSettings()` syncEnabled branch, `SettingsRepository.otherVaultUsingDriveFolder()` |

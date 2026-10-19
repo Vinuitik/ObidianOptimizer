@@ -1,8 +1,8 @@
 # Vaults — FLOWS
 
-Files: VaultRepository.java, ActiveVault.java, VaultKeys.java, VaultHeaderFilter.java, VaultMigrationIT.java + VaultScopingIT.java + VaultHeaderFilterTest.java (tests); plan: architecture_plans/VAULTS_PLAN.md
+Files: VaultRepository.java, ActiveVault.java, VaultController.java, VaultException.java, VaultSwitchedEvent.java, VaultKeys.java, VaultHeaderFilter.java, VaultMigrationIT.java + VaultScopingIT.java + VaultSwitchIT.java + VaultHeaderFilterTest.java (tests); settings: ../settings/SettingsRepository.java; sync: ../sync/SyncWorker.java; plan: architecture_plans/VAULTS_PLAN.md
 
-Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id) + M3 (Java scoping: every vault-scoped query filters on `vault_id`, paths come from `ActiveVault`, `X-Vault-Id` filter). Everything marked [NOT IMPLEMENTED] is a later milestone.
+Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id) + M3 (Java scoping: every vault-scoped query filters on `vault_id`, paths come from `ActiveVault`, `X-Vault-Id` filter) + M4 (`vault_settings`, symmetric per-vault Drive sync, per-vault chrono date, switching + rescan, registry REST). Everything marked [NOT IMPLEMENTED] is a later milestone.
 
 ## Boot: registry + backfill
 Spring start → `VaultRepository.initSchema()` (@PostConstruct) → CREATE `vaults` + partial unique index `uq_vaults_single_active` → seed vault 1 (`ON CONFLICT DO NOTHING`) → `setval` on the id sequence
@@ -34,9 +34,21 @@ Rule: no ThreadLocal, no hidden "current vault" inside a repository. Every metho
 - BM25: the `idx_note_chunks_bm25 (id, text, vault_id)` index from M2 is queried with an ordinary `AND vault_id = ?` predicate next to `@@@ paradedb.match(...)` (`NoteChunkRepository.findByTextSearch`); correct whether or not pg_search pushes the filter into the index.
 - Tests: `VaultScopingIT` (two temp-dir vaults, row 2 inserted, `ActiveVault.set(id, root)`): notes, review queue, FSRS rows, BM25 + vector search, embed queue, image jobs, cards/assignments, tracks/sources/feed/capture/workspace never leak; `VaultHeaderFilterTest` (409). ITs that use a temp vault must pin `activeVault.set(1L, VAULT)` (the registry row says `/vault`); unit tests use `ActiveVault.forTest(id, root)`.
 
+## Per-vault settings (M4)
+`vault_settings(vault_id, key, value, PK(vault_id,key))`, created in `SettingsRepository.initSchema()` (`@DependsOn("vaultRepository")`).
+Per-vault keys (`SettingsRepository.PER_VAULT_KEYS`): syncEnabled, sync.drive.folder_id, sync.refresh_token, sync.account_email, syncPassphrase, sync.device_id, chronoLastRunDate, resourcePath, startupSyncMode. Every accessor takes `long vaultId` first (`getSyncPassphrase(v)`, `isSyncEnabled(v)`, `getChronoLastRunDate(v)`, ...; generic `getForVault/setForVault`).
+Boot migration: `INSERT ... SELECT 1, key, value FROM app_settings WHERE key = ANY(PER_VAULT_KEYS) ON CONFLICT DO NOTHING` — copies to vault 1, idempotent, never overwrites a later edit; the `app_settings` rows stay but are never read. Env seeds (`SYNC_PASSPHRASE`, `GOOGLE_DRIVE_FOLDER_ID`) now seed vault 1 in `vault_settings`.
+Global (stay in `app_settings`): Google OAuth app creds (syncClientId/Secret, redirect uri), review caps, flags, everything else.
+New vaults (id != 1): no rows -> defaults in the accessors (`syncEnabled=false`, `startupSyncMode=blocking`, `resourcePath=<container_path>/resources/images`, others blank).
+
+## Switching (M4)
+REST (nginx strips `/api`): `GET /vaults`; `PUT /vaults/active {id}` (404 unknown, 409 archived); `PATCH /vaults/{id} {name}`; `POST /vaults/{id}/archive` + `/restore` (409 on the active or last non-archived vault). `VaultController` -> `ActiveVault.switchTo(id)` / `VaultRepository`. `/vaults/**` bypasses `VaultHeaderFilter` (a stale tab must still be able to switch). Registration (POST /vaults) is M6 [NOT IMPLEMENTED].
+`ActiveVault.switchTo(id)` -> `VaultRepository.activate(id)` (one txn: clear `active`, set it; validates 404/409) -> AtomicReference flips -> `VaultSwitchedEvent(old,new)` (no event when id == current).
+Listeners rerun for the new vault: `FileRepository.onVaultSwitched` (startup disk sync + image scan, async), `ChunkEmbeddingReconciler`, `ResourceScanService`, `ImageProcessingWorker` (each kicks its own tick; their `claimBatch` reads `activeVault.id()` per pass). `SyncService.initialScan` is NOT rerun on switch (it runs at boot for every sync-enabled vault + the active one).
+Inactive vaults: no scanners, no card gen/chunking/embedding (D5). In-flight queue work finishes in its own vault (`rootFor(vaultId)`).
+To change what reruns on a switch: add/remove an `@EventListener` on `VaultSwitchedEvent`.
+
 ## Not yet
-- `ActiveVault.switchTo`, `VaultSwitchedEvent`, rescan-on-switch [NOT IMPLEMENTED] (M4)
-- `vault_settings`, per-vault Drive sync/chrono [NOT IMPLEMENTED] (M4)
 - Python scoping [NOT IMPLEMENTED] (M5); mounts/host-wrapper `POST /vaults` [NOT IMPLEMENTED] (M6); frontend [NOT IMPLEMENTED] (M7); GC job (M7b); DROP DEFAULT (M8) [NOT IMPLEMENTED]
 
 ## Technology Notes
@@ -45,7 +57,10 @@ Rule: no ThreadLocal, no hidden "current vault" inside a repository. Every metho
 - M3 scoping is enforced by code, not the DB: a repo method that forgets `vault_id` on an INSERT still lands in vault 1 until M8 drops the DEFAULT. `VaultScopingIT` is the only guard — add a case there when adding a vault-scoped query.
 - `DEFAULT 1` is a safety net: any insert that forgets vault_id lands in vault 1 silently. It is removed only in M8; until then wrong-vault writes are NOT caught.
 - `ADD COLUMN ... NOT NULL DEFAULT 1` on Postgres 11+ is metadata-only (instant), but takes a brief ACCESS EXCLUSIVE lock per table.
-- `ActiveVault` is an in-memory AtomicReference, single backend node; it is loaded once at boot and never refreshed (no switching until M4). Scanners read it once per pass, so after M4 a switch mid-pass finishes the pass in the old vault's rows (by design: in-flight work completes in its own vault) — but `FileRepository`, `SyncService` and other `ActiveVault`-pinning services re-read it per call and would follow a switch.
+- `ActiveVault` is an in-memory AtomicReference, single backend node; loaded at boot, changed only by `switchTo` (DB flag is the source of truth, a second backend node would not see a switch). Scanners read it once per pass, so a switch mid-pass finishes the pass in the old vault's rows (by design) — but `FileRepository`, `TodayPlanService` and other `ActiveVault`-pinning services re-read it per call and follow a switch immediately.
+- `switchTo` is `synchronized` and the DB update commits before the in-memory flip; if the process dies in between, the next boot loads the DB flag, so the DB wins.
+- Dropping a vault's `syncEnabled` / archiving only stops SyncWorker/backup from picking it; manual endpoints still act on the ACTIVE vault regardless.
+- The nightly DB backup is a whole-database `pg_dump` (every vault's rows) encrypted with, and uploaded to, EACH sync-enabled vault's own folder — a vault's Drive folder therefore holds a copy of the other vaults' data, encrypted under that vault's passphrase. Restore (`DbBackupService.restore(v, force)`) is whole-DB too.
 - `FileRepository` is an active-vault facade: a queue consumer that calls it (e.g. `InternalAgentController.createNote` driven by an embedder callback) writes to the vault that is active NOW, not the job's vault. The embedder side carries `vault_id` from M5.
 - Rabbit payloads without `vaultId` (queued before the M3 deploy) are treated as vault 1.
 - Seed hardcodes id 1 and container_path `/vault` (must match the compose mount). If `/vault` is changed, the UNIQUE(container_path) seed insert for id 1 is skipped when a row already exists, silently keeping the old value.
@@ -69,3 +84,10 @@ Rule: no ThreadLocal, no hidden "current vault" inside a repository. Every metho
 | Job's vault filesystem root | `ActiveVault.rootFor(vaultId)` |
 | Rabbit payload carries vaultId | `OutboxRepository.enqueue(vaultId, queue, payload)` |
 | Test helpers | `ActiveVault.set(id, root)`, `ActiveVault.forTest(id, root)` |
+| Per-vault setting keys | `SettingsRepository.PER_VAULT_KEYS`, `getForVault/setForVault` |
+| vault_settings DDL + legacy copy | `SettingsRepository.initSchema()` |
+| Switch vault | `ActiveVault.switchTo()`, `VaultRepository.activate()`, `VaultController.setActive()` |
+| What reruns on a switch | `@EventListener VaultSwitchedEvent` in `FileRepository`, `ChunkEmbeddingReconciler`, `ResourceScanService`, `ImageProcessingWorker` |
+| Archive / restore rules | `VaultRepository.archive()/restore()` |
+| Vault REST | `VaultController` |
+| M4 tests | `VaultSwitchIT`, `SyncWorkerTest` |
