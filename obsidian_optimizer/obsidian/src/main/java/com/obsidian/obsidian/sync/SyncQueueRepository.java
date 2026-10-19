@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.sync;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import com.obsidian.obsidian.common.OutboxRepository;
 import com.obsidian.obsidian.common.RabbitQueueConfig;
 import jakarta.annotation.PostConstruct;
@@ -43,6 +44,7 @@ public class SyncQueueRepository {
                 CHECK (status IN ('PENDING','DONE','FAILED','DELETE_PENDING'))
             """);
         jdbc.execute("ALTER TABLE sync_queue ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapPrimaryKey(jdbc, "sync_queue", "path");
     }
 
     /**
@@ -59,7 +61,7 @@ public class SyncQueueRepository {
         jdbc.update("""
             INSERT INTO sync_queue(path, content_hash, status, retry_count)
             VALUES (?, ?, 'PENDING', 0)
-            ON CONFLICT (path) DO UPDATE SET
+            ON CONFLICT (path, vault_id) DO UPDATE SET
                 content_hash = EXCLUDED.content_hash,
                 status       = 'PENDING',
                 retry_count  = 0
@@ -91,7 +93,7 @@ public class SyncQueueRepository {
         jdbc.update("""
             INSERT INTO sync_queue(path, content_hash, status, last_synced_at, drive_file_id, retry_count)
             VALUES (?, ?, 'DONE', ?, ?, 0)
-            ON CONFLICT (path) DO UPDATE SET
+            ON CONFLICT (path, vault_id) DO UPDATE SET
                 content_hash   = EXCLUDED.content_hash,
                 status         = 'DONE',
                 last_synced_at = EXCLUDED.last_synced_at,

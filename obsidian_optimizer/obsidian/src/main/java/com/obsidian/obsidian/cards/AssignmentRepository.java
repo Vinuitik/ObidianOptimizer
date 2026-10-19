@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.cards;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -55,6 +56,7 @@ public class AssignmentRepository {
             )""");
         jdbc.execute("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
         jdbc.execute("ALTER TABLE scope_state ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapPrimaryKey(jdbc, "scope_state", "scope, type");
     }
 
     // ── Bag draw: select-without-replacement per (scope, type) ───────────────

@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.ml;
 
+import com.obsidian.obsidian.vaults.VaultKeys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -50,8 +51,6 @@ public class NoteChunkRepository {
         // `text` column directly; key_field must be the table PK (id). This is the index
         // findByTextSearch queries through the @@@ operator + paradedb.score().
         jdbc.execute("CREATE EXTENSION IF NOT EXISTS pg_search");
-        jdbc.execute(
-            "CREATE INDEX IF NOT EXISTS idx_note_chunks_bm25 ON note_chunks USING bm25 (id, text) WITH (key_field='id')");
         // LEGACY: stock-Postgres FTS index. No longer used by search (superseded by the
         // BM25 index above). Kept only until the fts_vector column is dropped in a
         // follow-up migration; still populated by the upsert methods for now.
@@ -59,6 +58,28 @@ public class NoteChunkRepository {
             "CREATE INDEX IF NOT EXISTS idx_note_chunks_fts ON note_chunks USING GIN(fts_vector)");
         // ivfflat index requires rows to exist first; created lazily by EmbeddingService after bulk insert
         jdbc.execute("ALTER TABLE note_chunks ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        VaultKeys.swapUniqueIndex(jdbc, "note_chunks", "uq_note_chunks_path_source_idx", "note_path, source, chunk_index, vault_id");
+        // BM25 index carries vault_id (filter field for M3's per-vault search). Create if missing,
+        // rebuild once if an older definition lacks it. If this pg_search build rejects the
+        // numeric field the DO block rolls back and we fall back to the old (id, text) index;
+        // M3 must then post-filter.
+        try {
+            jdbc.execute("""
+                DO $$ BEGIN
+                  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_note_chunks_bm25') THEN
+                    CREATE INDEX idx_note_chunks_bm25 ON note_chunks USING bm25 (id, text, vault_id) WITH (key_field='id');
+                  ELSIF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_note_chunks_bm25'
+                                  AND indexdef NOT LIKE '%vault_id%') THEN
+                    DROP INDEX idx_note_chunks_bm25;
+                    CREATE INDEX idx_note_chunks_bm25 ON note_chunks USING bm25 (id, text, vault_id) WITH (key_field='id');
+                  END IF;
+                END $$
+                """);
+        } catch (org.springframework.dao.DataAccessException e) {
+            org.slf4j.LoggerFactory.getLogger(NoteChunkRepository.class)
+                .warn("BM25 index with vault_id unsupported by this pg_search build ({}); keeping (id,text) index", e.getMessage());
+            jdbc.execute("CREATE INDEX IF NOT EXISTS idx_note_chunks_bm25 ON note_chunks USING bm25 (id, text) WITH (key_field='id')");
+        }
     }
 
     public void upsertChunk(String notePath, int chunkIndex, String source, String text,
@@ -66,7 +87,7 @@ public class NoteChunkRepository {
         jdbc.update("""
             INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector)
             VALUES (?, ?, ?, ?, ?::vector, ?, to_tsvector('english', ?))
-            ON CONFLICT (note_path, source, chunk_index) DO UPDATE SET
+            ON CONFLICT (note_path, source, chunk_index, vault_id) DO UPDATE SET
               text         = EXCLUDED.text,
               embedding    = EXCLUDED.embedding,
               content_hash = EXCLUDED.content_hash,
@@ -86,7 +107,7 @@ public class NoteChunkRepository {
         jdbc.update("""
             INSERT INTO note_chunks(note_path, chunk_index, source, text, embedding, content_hash, fts_vector)
             VALUES (?, ?, ?, ?, NULL, ?, to_tsvector('english', ?))
-            ON CONFLICT (note_path, source, chunk_index) DO UPDATE SET
+            ON CONFLICT (note_path, source, chunk_index, vault_id) DO UPDATE SET
               text         = EXCLUDED.text,
               embedding    = NULL,
               content_hash = EXCLUDED.content_hash,

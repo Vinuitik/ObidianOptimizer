@@ -279,3 +279,27 @@ def test_extract_json_handles_code_fences():
     fenced = "```json\n[{\"a\": 1}]\n```"
     assert gen._extract_json(fenced) == [{"a": 1}]
     assert gen._extract_json("Sure! Here you go: [1, 2]") == [1, 2]
+
+
+def test_store_conflict_target_includes_vault_id(monkeypatch):
+    """M2: cards unique key is (note_path, card_hash, vault_id); the upsert must name it."""
+    executed = []
+
+    class FakeConn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None):
+            executed.append(sql)
+            return type("Cur", (), {"rowcount": 1})()
+        def commit(self): pass
+
+    monkeypatch.setattr(gen.psycopg, "connect", lambda url: FakeConn())
+    card = {"type": "open", "difficulty": 2, "question": "q",
+            "reference_answers": ["a", "b"], "explanation": "e"}
+    out = gen._store("/vault/a.md", "sh", [card])
+    assert out["stored"] == 1
+    inserts = [s for s in executed if "INSERT INTO cards" in s]
+    assert len(inserts) == 1
+    assert "ON CONFLICT (note_path, card_hash, vault_id) DO UPDATE" in inserts[0]
+    ddl = [s for s in executed if "CREATE TABLE IF NOT EXISTS cards" in s][0]
+    assert "UNIQUE (note_path, card_hash, vault_id)" in ddl

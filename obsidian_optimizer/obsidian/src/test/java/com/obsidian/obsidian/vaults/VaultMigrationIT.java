@@ -108,6 +108,21 @@ class VaultMigrationIT {
         // Strip back to the pre-vaults schema.
         for (String t : vaultIdTables()) jdbc.execute("ALTER TABLE " + t + " DROP COLUMN vault_id");
         jdbc.execute("DROP TABLE vaults CASCADE");
+        // DROP COLUMN also dropped every key that contained vault_id: restore the pre-vaults keys.
+        for (String ddl : List.of(
+            "ALTER TABLE notes ADD PRIMARY KEY (path)",
+            "ALTER TABLE note_links ADD PRIMARY KEY (source_path, target_name)",
+            "ALTER TABLE note_reviews ADD PRIMARY KEY (note_path)",
+            "ALTER TABLE card_gen_attempts ADD PRIMARY KEY (note_path)",
+            "ALTER TABLE sync_queue ADD PRIMARY KEY (path)",
+            "ALTER TABLE workspace_items ADD PRIMARY KEY (filename)",
+            "ALTER TABLE scope_state ADD PRIMARY KEY (scope, type)",
+            "ALTER TABLE cards ADD UNIQUE (note_path, card_hash)",
+            "ALTER TABLE pending_image_jobs ADD UNIQUE (note_path, image_path)",
+            "ALTER TABLE sources ADD UNIQUE (url)",
+            "ALTER TABLE feed_items ADD UNIQUE (item_url)",
+            "CREATE UNIQUE INDEX uq_note_chunks_path_source_idx ON note_chunks(note_path, source, chunk_index)"))
+            jdbc.execute(ddl);
 
         jdbc.update("INSERT INTO notes(path, title, modified_at) VALUES ('/vault/a.md','a',1),('/vault/b.md','b',2)");
         jdbc.update("INSERT INTO note_links(source_path, target_name) VALUES ('/vault/a.md','b')");
@@ -140,6 +155,68 @@ class VaultMigrationIT {
             assertThat(jdbc.queryForObject("SELECT nextval(pg_get_serial_sequence('vaults','id'))", Long.class))
                 .isGreaterThan(1L);
         }
+    }
+
+    private List<String> keyDefs(String table) {
+        return jdbc.queryForList("SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            + "WHERE conrelid = '" + table + "'::regclass AND contype IN ('p','u')", String.class);
+    }
+
+    @Test
+    void keysIncludeVaultId_samePathsCoexistAcrossVaults_andUpsertsDedupeWithinVault() {
+        for (int boot = 0; boot < 2; boot++) {   // second pass = guarded swaps are no-ops
+            rerunInitSchema();
+            for (String t : List.of("notes", "note_links", "note_reviews", "card_gen_attempts", "sync_queue",
+                    "workspace_items", "scope_state", "cards", "pending_image_jobs", "sources", "feed_items")) {
+                assertThat(keyDefs(t)).as("keys of " + t).isNotEmpty()
+                    .allMatch(d -> d.equals("PRIMARY KEY (id)") || d.contains("vault_id"));
+            }
+            assertThat(jdbc.queryForObject("SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_note_chunks_path_source_idx'",
+                String.class)).contains("vault_id");
+            assertThat(jdbc.queryForObject("SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_note_chunks_bm25'",
+                String.class)).contains("vault_id");
+        }
+        jdbc.update("INSERT INTO vaults(id, name, container_path, active) VALUES (2, 'Two', '/vaults/2', false) ON CONFLICT DO NOTHING");
+        jdbc.update("DELETE FROM notes"); jdbc.update("DELETE FROM sync_queue");
+        jdbc.update("DELETE FROM workspace_items"); jdbc.update("DELETE FROM note_chunks");
+        jdbc.update("DELETE FROM note_reviews"); jdbc.update("DELETE FROM sources");
+
+        // Same path / filename in vault 1 and vault 2: no conflict.
+        for (long v : new long[]{1, 2}) {
+            jdbc.update("INSERT INTO notes(path,title,modified_at,vault_id) VALUES ('rel/a.md','a',1,?)", v);
+            jdbc.update("INSERT INTO workspace_items(filename,type,added_at,vault_id) VALUES ('f.png','image',1,?)", v);
+            jdbc.update("INSERT INTO sync_queue(path,content_hash,vault_id) VALUES ('/vault/a.md','h',?)", v);
+            jdbc.update("INSERT INTO sources(kind,url,vault_id) VALUES ('rss','http://x/feed',?)", v);
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notes WHERE path='rel/a.md'", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM sources WHERE url='http://x/feed'", Integer.class)).isEqualTo(2);
+
+        // Within a vault the real repository upserts still dedupe (default vault 1) and don't touch vault 2.
+        syncQueue.markPending("/vault/a.md", "h2");
+        syncQueue.markPending("/vault/a.md", "h3");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM sync_queue WHERE vault_id=1", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT content_hash FROM sync_queue WHERE vault_id=1", String.class)).isEqualTo("h3");
+        assertThat(jdbc.queryForObject("SELECT content_hash FROM sync_queue WHERE vault_id=2", String.class)).isEqualTo("h");
+        workspace.insert("f.png", "image", null, 1);
+        workspace.insert("f.png", "pdf", null, 2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM workspace_items WHERE vault_id=1", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT type FROM workspace_items WHERE vault_id=1", String.class)).isEqualTo("pdf");
+        assertThat(jdbc.queryForObject("SELECT type FROM workspace_items WHERE vault_id=2", String.class)).isEqualTo("image");
+        chunks.upsertChunkTextOnly("/vault/a.md", 0, "text", "hello", "c1");
+        chunks.upsertChunkTextOnly("/vault/a.md", 0, "text", "hello2", "c2");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM note_chunks", Integer.class)).isEqualTo(1);
+        jdbc.update("INSERT INTO note_chunks(note_path,chunk_index,source,text,content_hash,vault_id) "
+            + "VALUES ('/vault/a.md',0,'text','other','c',2)");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM note_chunks", Integer.class)).isEqualTo(2);
+        reviews.upsert("/vault/a.md", 1, 1, new java.sql.Timestamp(0), new java.sql.Timestamp(0), null, null);
+        reviews.upsert("/vault/a.md", 1, 1, new java.sql.Timestamp(0), new java.sql.Timestamp(0), null, null);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM note_reviews", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT reps FROM note_reviews", Integer.class)).isEqualTo(2);
+
+        // Leave the shared DB clean for the other test (it asserts exact counts / vault 1 only).
+        for (String t : List.of("notes", "sync_queue", "workspace_items", "note_chunks", "note_reviews", "sources"))
+            jdbc.update("DELETE FROM " + t);
+        jdbc.update("DELETE FROM vaults WHERE id = 2");
     }
 
     @Test
