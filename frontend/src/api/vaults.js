@@ -23,6 +23,8 @@ export const renameVault = (id, name) =>
   req(`/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
 export const archiveVault = (id) => req(`/${id}/archive`, { method: 'POST' });
 export const restoreVault = (id) => req(`/${id}/restore`, { method: 'POST' });
+// 202 = queued; the server backs up, then purges the vault's DB rows (never files on disk).
+export const deleteVault = (id) => req(`/${id}/delete`, { method: 'POST' });
 
 // Switch the server's active vault, remember it for sync readers + the SW, then reload so every
 // store / IDB handle / cached URL is rebuilt for the new vault.

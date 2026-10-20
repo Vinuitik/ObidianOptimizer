@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fetchHostChildren } from '../api/notes';
 import {
-  fetchVaults, registerVault, renameVault, archiveVault, restoreVault, switchVault,
+  fetchVaults, registerVault, renameVault, archiveVault, restoreVault, switchVault, deleteVault,
 } from '../api/vaults';
 import useVaults from '../vault/useVaults';
 import FolderPicker from '../components/organisms/FolderPicker';
@@ -43,6 +43,15 @@ export default function VaultsPanel({ isAuthenticated, waitOpts }) {
   const [busy, setBusy]       = useState(null);
   const [error, setError]     = useState(null);
   const [editing, setEditing] = useState(null);   // { id, name }
+  const [deleting, setDeleting] = useState(null); // { id, name, typed }
+
+  // Keep refreshing while a deletion job is queued/running so the badge settles by itself.
+  const deletionPending = (vaults || []).some(v => v.deletion_status === 'QUEUED' || v.deletion_status === 'RUNNING');
+  useEffect(() => {
+    if (!deletionPending) return undefined;
+    const t = setInterval(() => { reload(); }, 3000);
+    return () => clearInterval(t);
+  }, [deletionPending, reload]);
 
   async function run(label, fn) {
     setBusy(label); setError(null);
@@ -88,6 +97,9 @@ export default function VaultsPanel({ isAuthenticated, waitOpts }) {
               )}
               {v.active && <Badge tone="success">Active</Badge>}
               {v.archived_at && <Badge tone="neutral">Archived</Badge>}
+              {v.deletion_status === 'QUEUED' && <Badge tone="neutral">Deletion queued</Badge>}
+              {v.deletion_status === 'RUNNING' && <Badge tone="neutral">Deleting…</Badge>}
+              {v.deletion_status === 'FAILED' && <Badge tone="danger">Deletion failed</Badge>}
             </div>
             <span className={styles.note}>{v.host_path || v.container_path}</span>
             <div className={styles.inline}>
@@ -102,7 +114,26 @@ export default function VaultsPanel({ isAuthenticated, waitOpts }) {
               {!v.active && (v.archived_at
                 ? <Button size="sm" variant="ghost" disabled={!isAuthenticated || busy} onClick={() => run('restore', () => restoreVault(v.id))}>Restore</Button>
                 : <Button size="sm" variant="ghost" disabled={!isAuthenticated || busy} onClick={() => run('archive', () => archiveVault(v.id))}>Archive</Button>)}
+              {!v.active && !v.is_primary && (!v.deletion_status || v.deletion_status === 'FAILED') && (
+                <Button size="sm" variant="ghost" disabled={!isAuthenticated || busy} onClick={() => setDeleting({ id: v.id, name: v.name, typed: '' })}>Delete</Button>
+              )}
             </div>
+            {deleting?.id === v.id && (
+              <div role="alertdialog" aria-label="Confirm delete vault" className={styles.note}>
+                <p>Deletes this vault&apos;s notes, cards, tracks and settings from the app (a backup is written first). Files in the folder on disk are never touched. Type <strong>{v.name}</strong> to confirm.</p>
+                <Input
+                  aria-label="Type the vault name to confirm" value={deleting.typed}
+                  onChange={e => setDeleting({ ...deleting, typed: e.target.value })}
+                />
+                <div className={styles.inline}>
+                  <Button
+                    size="sm" variant="primary" disabled={deleting.typed !== v.name || Boolean(busy)}
+                    onClick={() => run('delete', async () => { await deleteVault(v.id); setDeleting(null); })}
+                  >Delete vault</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setDeleting(null)}>Cancel</Button>
+                </div>
+              </div>
+            )}
             {!v.active && !v.archived_at && (
               <span className={styles.note}>Drive sync: switch to this vault to see or change it.</span>
             )}
