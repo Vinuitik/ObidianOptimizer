@@ -229,7 +229,7 @@ and the dev-facing `FLOWS.md`, keeps `README.md`).
 ---
 
 ### Learn ▸ Today | Week
-`LearnPage` view state (default `today`): Today = `TodayPlan` + `InboxReview` below; Week = `WeekPlan` (see frontend/FLOWS.md "Learn — Today | Week"). Feed is NOT mounted here now (Sources page, L2) — `FeedView` temporarily unreachable.
+`LearnPage` view state (default `today`): Today = `InboxReview` first, `TodayPlan` below; Week = `WeekPlan` (see frontend/FLOWS.md "Learn — Today | Week"). Feed is NOT mounted here now (Sources page, L2) — `FeedView` temporarily unreachable.
 Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAccept`) → `PUT /settings` (global default; per-source override in Sources tab).
 
 ---

@@ -97,11 +97,14 @@ Add it to the **claude.ai** website as a custom connector with **No authenticati
 Route transitions: `AnimatePresence mode="wait"` + Framer Motion 180ms opacity fade.  
 To add a route: `App.jsx <Routes>` + `NavBar.jsx NAV_ITEMS`
 
-## Tracks — add to track
-Files: TrackAddBox.jsx, TrackEditor.jsx (TrackItemsEditor), api/capture.js
-- One box: `classifyInput()` → urls → `captureResource(url, trackId)` each | text → debounced `searchNotes` → pick = `addTrackItem(trackId, title, notePath)`, or "plain item" row = `addTrackItem(trackId, text, null)` | file drop/picker → `captureFile(file, trackId)` (`POST /capture/file`).
-- Captured link/file shows link|file + "processing…" placeholder; `fetchTrackItems` polled every 5s (6x) until item count grows. To change: `TrackAddBox` POLL_MS/POLL_MAX.
-- Persisted item chip = `itemKind()`: note (has notePath) | plain. link/file not derivable after ingest (no backend field). [NOT IMPLEMENTED]
+## Tracks — add to track (note picker)
+Files: TrackAddBox.jsx, TrackEditor.jsx (TrackItemsEditor), api/tracks.js (addTrackItem)
+- Items MUST reference an existing note (backend 400s without notePath). `TrackAddBox` = debounced `searchNotes(q)` → click hit → `addTrackItem(trackId, title, notePath)`. No hit → "No matching notes", nothing addable. To change: `TrackAddBox.jsx`.
+- URL/file intake removed from tracks (lives on Sources). `classifyInput`/`itemKind`/`ItemTypeChip` still exported (QuickCapture uses `classifyInput`).
+
+## Technology Notes (add-to-track)
+- Search is server-side `searchNotes`; offline/aborted → empty dropdown, add impossible (no offline add).
+- Legacy items with no notePath still render (chip "plain") but can't be created anymore.
 
 ## Tracks — one-step create + Advanced
 Files: NewTrackForm.jsx, TrackEditor.jsx (TrackDetail), WeekPlan.jsx (drawer host), TrackEditor.test.jsx
@@ -134,10 +137,22 @@ Test files sit next to the component or util they cover: `ComponentName.test.jsx
 - Tab persistence across page refresh
 
 ## Learn — Today | Week (replaces /tracks page)
-Files: LearnPage.jsx, TodayPlan.jsx, WeekPlan.jsx, TrackEditor.jsx, TracksPlan.module.css, api/tracks.js (fetchWeekPlan)
+Files: LearnPage.jsx, TodayPlan.jsx, WeekPlan.jsx, TrackEditor.jsx, TracksPlan.module.css, api/tracks.js (fetchWeekPlan, mondayOf)
 - `LearnPage` SegmentedTabs Today | Week (local `useState('today')`; settings `tracksEnabled=false` → Inbox only).
-- Today: `TodayPlan` (GET /tracks/today → `fetchTodayPlan()`: mode toggle, overBudget banner, "N of M for today", reason lines, Mark done → `completeTrackItem()` + toast; "Add to spaced review" in localStorage `tracks:addToReview:<trackId>`) with `InboxReview` rendered BELOW on the same screen. Skeleton until first fetch. Empty CTAs → switch to Week. To change: `TodayPlan.jsx`.
-- Week: `WeekPlan` → `fetchWeekPlan()` (GET /tracks/week) → 7 day cards (chip per track + count, "cap N"); refetches when store `tracks`/`trackCapacity` change and on drawer close. Click chip / "All tracks" chip → right drawer with `TrackDetail` (deadline, items, Advanced: type/status/priority/schedule/mini-course). Toolbar: + New track (`NewTrackForm`), Daily capacity, Import. To change: `WeekPlan.jsx`, `TrackEditor.jsx`.
+- Today: `TodayPlan` (GET /tracks/today → `fetchTodayPlan()`: mode toggle, overBudget banner, "N of M for today", reason lines, Mark done → `completeTrackItem()` + toast; "Add to spaced review" in localStorage `tracks:addToReview:<trackId>`) with `InboxReview` rendered FIRST (primary) and `TodayPlan` below it (Learn = pre-processing between Sources and notes). Skeleton until first fetch. Empty CTAs → switch to Week. To change: `TodayPlan.jsx`.
+- Week: `WeekPlan` → `fetchWeekPlan(mondayOf())` (GET /tracks/week?start=<this Monday>) → Mon–Sun cards (chip per track + `done/planned` Badge, green ✓ when complete; day header `done/planned` Badge; past days = actual completions; "cap N"); refetches when store `tracks`/`trackCapacity` change and on drawer close. Click chip / "All tracks" chip → right drawer with `TrackDetail` (deadline, items, Advanced: type/status/priority/schedule/mini-course). Toolbar: + New track (`NewTrackForm`), Daily capacity, Import. To change: `WeekPlan.jsx`, `TrackEditor.jsx`.
 - `/tracks` → `<Navigate to="/learn">` (App.jsx + pwa/MobileApp.jsx); nav entries removed. Old Progress tab dropped (store `trackProgress` still exists). Capture-time `trackPending` + track pickers removed.
 - Feed no longer mounted in Learn (moved to Sources, milestone L2) — `FeedView` unreachable until then.
 - Tests: `TodayPlan.test.jsx`, `WeekPlan.test.jsx`, `TrackEditor.test.jsx`, `pages/LearnPage.test.jsx`.
+
+## Technology Notes (Week)
+- `mondayOf()` uses the browser's local date; a wrong clock/timezone shifts the week. Week is not navigable (always this week) [NOT IMPLEMENTED: prev/next week].
+- `done`/`planned` come from the backend; older backends omit them → badge falls back to `0/count`.
+
+## Change Index (Learn/Week additions)
+| Thing | Where |
+|---|---|
+| Week start date | `api/tracks.js mondayOf()` / `WeekPlan.load()` |
+| Progress badges / done state | `WeekPlan.jsx isDone` |
+| Learn Today order | `LearnPage.jsx` todayStack |
+| Track item add (note-only) | `TrackAddBox.jsx pick()` |

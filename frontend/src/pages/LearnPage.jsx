@@ -6,7 +6,7 @@ import WeekPlan from '../components/organisms/WeekPlan';
 import SegmentedTabs from '../components/molecules/SegmentedTabs';
 import styles from './LearnPage.module.css';
 
-// Learn = Today (scheduled track items + Inbox review below) | Week (7-day grid + track editor).
+// Learn = Today (Inbox review first, scheduled track items below) | Week (7-day grid + track editor).
 // Capture → ingest → proposed notes still lands in the Inbox. The Feed moved out (Sources page,
 // milestone L2): FeedView/feed store stay in-tree but are unmounted until then.
 export default function LearnPage() {
@@ -43,8 +43,8 @@ export default function LearnPage() {
       <div className={styles.viewBody}>
         {view === 'week' ? <WeekPlan /> : (
           <div className={styles.todayStack}>
-            <TodayPlan onCreateTrack={() => setView('week')} onManage={() => setView('week')} />
             <InboxReview />
+            <TodayPlan onCreateTrack={() => setView('week')} onManage={() => setView('week')} />
           </div>
         )}
       </div>

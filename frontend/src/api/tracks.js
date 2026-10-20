@@ -110,10 +110,19 @@ export async function fetchTodayPlan() {
   return res.json();
 }
 
-// 7-day projection starting today (assumes no completions; items consumed day by day):
-// [{ date, weekday, capacity, items: [{ trackId, trackTitle, trackType, count }] }]
-export async function fetchWeekPlan() {
-  const res = await req(`${BASE}/tracks/week`);
+// Monday (local) of the week containing `d`, as YYYY-MM-DD.
+export function mondayOf(d = new Date()) {
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7));
+  const p = n => String(n).padStart(2, '0');
+  return `${m.getFullYear()}-${p(m.getMonth() + 1)}-${p(m.getDate())}`;
+}
+
+// Mon–Sun grid for the week starting `start` (YYYY-MM-DD, default this Monday). Past days = actual
+// completions; today = done + still planned; future = projection.
+// [{ date, weekday, capacity, done, planned, items: [{ trackId, trackTitle, trackType, count, done, planned }] }]
+export async function fetchWeekPlan(start = mondayOf()) {
+  const res = await req(`${BASE}/tracks/week?start=${encodeURIComponent(start)}`);
   return res.json();
 }
 
