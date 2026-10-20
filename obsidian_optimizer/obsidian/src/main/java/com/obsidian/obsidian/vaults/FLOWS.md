@@ -66,7 +66,7 @@ Tests: `VaultSwitchIT` (register_*), `VaultWrapperClientTest`, `host-wrapper/tes
 
 ## Not yet
 - GC job (M7b) [NOT IMPLEMENTED]
-- M8 code DONE: every `initSchema` runs `ALTER COLUMN vault_id DROP DEFAULT` right after its ADD COLUMN (Java) / in `generate.ensure_schema` + `failures.ensure_schema` (Python); all main INSERTs set vault_id explicitly (`pipeline_failures` stays nullable). A forgotten vault_id now fails loudly (NOT NULL violation). Known leftover: `host-wrapper/main.py _resolve_vault_image` maps only `/vault` (vault 1) and the image-name index is vault-1 only; non-primary vault image paths (`/vaults/<id>/...`) are not resolved.
+- M8 code DONE: every `initSchema` runs `ALTER COLUMN vault_id DROP DEFAULT` right after its ADD COLUMN (Java) / in `generate.ensure_schema` + `failures.ensure_schema` (Python); all main INSERTs set vault_id explicitly (`pipeline_failures` stays nullable). A forgotten vault_id now fails loudly (NOT NULL violation).
 - M8 MANUAL E2E [NOT DONE]: (1) deploy (merge --no-ff + restart; confirm `DROP DEFAULT` ran, no boot errors); (2) register a test vault (Settings > Vaults, accept downtime); (3) switch to it, create note/card/track, confirm it appears only there; (4) switch back to vault 1, compare per-table counts vs `backups/pre-vaults-*.dump` and confirm Drive folder untouched; (5) archive/restore the test vault.
 
 ## Frontend (M7 + M4b client)

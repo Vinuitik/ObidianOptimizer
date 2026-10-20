@@ -67,3 +67,24 @@ def test_rejects_overlap(env):
     assert post(c, 2, t / "v3").status_code == 409             # same id, different path
     assert post(c, 1, t / "v3").status_code == 400
     assert len(calls) == 1
+
+
+def test_resolve_image_both_path_kinds_and_escapes(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "_VAULTS_REGISTRY", tmp_path / "vaults.registry.json")
+    monkeypatch.setattr(main, "VAULT_HOST_PATH", str(tmp_path / "primary"))
+    main._image_indexes.clear()
+    (tmp_path / "primary" / "res").mkdir(parents=True)
+    (tmp_path / "v2" / "res").mkdir(parents=True)
+    (tmp_path / "primary" / "a.png").write_bytes(b"1")
+    (tmp_path / "v2" / "b.png").write_bytes(b"2")
+    (tmp_path / "v2" / "res" / "c.jpg").write_bytes(b"3")
+    (tmp_path / "secret.png").write_bytes(b"x")
+    (tmp_path / "vaults.registry.json").write_text(json.dumps({"2": str(tmp_path / "v2")}))
+
+    assert main._resolve_vault_image("/vault/a.png")[0] == tmp_path / "primary" / "a.png"
+    assert main._resolve_vault_image("/vaults/2/b.png")[0] == tmp_path / "v2" / "b.png"
+    assert main._resolve_vault_image("/vaults/2/c.jpg")[0] == tmp_path / "v2" / "res" / "c.jpg"
+    assert main._resolve_vault_image("/vaults/2/a.png")[0] is None
+    assert main._resolve_vault_image("/vaults/9/b.png") == (None, None)
+    assert main._resolve_vault_image("/vaults/2/../secret.png") == (None, None)
+    assert main._resolve_vault_image("/vault/../secret.png") == (None, None)
