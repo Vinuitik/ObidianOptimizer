@@ -54,6 +54,7 @@ public class FeedRepository {
         // every other item kind. Added by migration (existing rows predate the column).
         jdbc.execute("ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS body TEXT");
         jdbc.execute("ALTER TABLE feed_items ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE feed_items ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapUnique(jdbc, "feed_items", "item_url", "vault_id, item_url");
     }
 

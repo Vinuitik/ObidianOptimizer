@@ -168,9 +168,10 @@ def ensure_schema(conn) -> None:
           status        TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','ARCHIVED','FLAGGED')),
           drawn_cycle   INT NOT NULL DEFAULT 0,
           created_at    TIMESTAMP NOT NULL DEFAULT now(),
-          vault_id      BIGINT NOT NULL DEFAULT 1,
+          vault_id      BIGINT NOT NULL,
           UNIQUE (note_path, card_hash, vault_id)
         )""")
+    conn.execute("ALTER TABLE cards ALTER COLUMN vault_id DROP DEFAULT")
     # Pre-M2 installs have UNIQUE (note_path, card_hash): swap it (idempotent, one txn) so
     # the vault-aware ON CONFLICT in _store has an arbiter even if the embedder boots first.
     conn.execute("""

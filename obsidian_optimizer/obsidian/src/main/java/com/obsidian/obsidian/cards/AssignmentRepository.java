@@ -55,7 +55,9 @@ public class AssignmentRepository {
               PRIMARY KEY (scope, type)
             )""");
         jdbc.execute("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE assignments ALTER COLUMN vault_id DROP DEFAULT");
         jdbc.execute("ALTER TABLE scope_state ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE scope_state ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapPrimaryKey(jdbc, "scope_state", "scope, type");
     }
 

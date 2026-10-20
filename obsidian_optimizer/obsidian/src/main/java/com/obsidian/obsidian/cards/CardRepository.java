@@ -74,6 +74,7 @@ public class CardRepository {
             )
             """);
         jdbc.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE cards ALTER COLUMN vault_id DROP DEFAULT");
         // Python may have created the column (no FK) before the registry existed.
         jdbc.execute("""
             DO $$ BEGIN
@@ -83,7 +84,9 @@ public class CardRepository {
             END $$
             """);
         jdbc.execute("ALTER TABLE card_flags ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE card_flags ALTER COLUMN vault_id DROP DEFAULT");
         jdbc.execute("ALTER TABLE card_gen_attempts ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE card_gen_attempts ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapPrimaryKey(jdbc, "card_gen_attempts", "note_path");
         VaultKeys.swapUnique(jdbc, "cards", "note_path, card_hash", "note_path, card_hash, vault_id");
     }

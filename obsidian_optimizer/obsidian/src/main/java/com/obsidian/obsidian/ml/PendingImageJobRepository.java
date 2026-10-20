@@ -41,6 +41,7 @@ public class PendingImageJobRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_pending_image_status ON pending_image_jobs(status) WHERE status = 'PENDING'");
         jdbc.execute("ALTER TABLE pending_image_jobs ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE pending_image_jobs ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapUnique(jdbc, "pending_image_jobs", "note_path, image_path", "note_path, image_path, vault_id");
     }
 

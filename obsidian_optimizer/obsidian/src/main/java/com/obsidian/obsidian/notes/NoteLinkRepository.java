@@ -36,6 +36,7 @@ public class NoteLinkRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_links_target ON note_links(target_name)");
         jdbc.execute("ALTER TABLE note_links ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE note_links ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapPrimaryKey(jdbc, "note_links", "source_path, target_name");
     }
 

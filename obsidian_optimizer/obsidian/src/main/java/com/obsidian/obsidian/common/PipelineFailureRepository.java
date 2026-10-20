@@ -56,6 +56,7 @@ public class PipelineFailureRepository {
             "CREATE INDEX IF NOT EXISTS pipeline_failures_open_idx " +
             "ON pipeline_failures (stage) WHERE resolved_at IS NULL");
         jdbc.execute("ALTER TABLE pipeline_failures ADD COLUMN IF NOT EXISTS vault_id BIGINT DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE pipeline_failures ALTER COLUMN vault_id DROP DEFAULT");
         // Python may have created the column (no FK) before the registry existed.
         jdbc.execute("""
             DO $$ BEGIN

@@ -96,7 +96,7 @@ class OutboxEmbedFlowIT {
     }
 
     private void insertNote(String path) {
-        jdbc.update("INSERT INTO notes(path, title, modified_at) VALUES (?, ?, ?)",
+        jdbc.update("INSERT INTO notes(path, title, modified_at, vault_id) VALUES (?, ?, ?, 1)",
             path, path.substring(path.lastIndexOf('/') + 1), System.currentTimeMillis());
     }
 

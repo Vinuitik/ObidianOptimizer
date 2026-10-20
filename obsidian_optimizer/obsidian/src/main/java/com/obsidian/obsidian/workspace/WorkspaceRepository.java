@@ -38,6 +38,7 @@ public class WorkspaceRepository {
             )
             """);
         jdbc.execute("ALTER TABLE workspace_items ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE workspace_items ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapPrimaryKey(jdbc, "workspace_items", "filename");
     }
 

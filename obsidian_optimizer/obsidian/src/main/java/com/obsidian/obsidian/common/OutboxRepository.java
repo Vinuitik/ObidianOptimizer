@@ -53,6 +53,7 @@ public class OutboxRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_outbox_unpublished ON outbox_events(created_at) WHERE published_at IS NULL");
         jdbc.execute("ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE outbox_events ALTER COLUMN vault_id DROP DEFAULT");
     }
 
     public record OutboxRow(UUID id, String queueName, String payloadJson) {}

@@ -33,9 +33,10 @@ def ensure_schema(conn) -> None:
             error_message TEXT,
             bundle_ref TEXT,
             resolved_at TIMESTAMPTZ,
-            vault_id BIGINT DEFAULT 1
+            vault_id BIGINT
         )
     """)
+    conn.execute("ALTER TABLE pipeline_failures ALTER COLUMN vault_id DROP DEFAULT")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS pipeline_failures_open_idx "
         "ON pipeline_failures (stage) WHERE resolved_at IS NULL"

@@ -58,6 +58,7 @@ public class NoteChunkRepository {
             "CREATE INDEX IF NOT EXISTS idx_note_chunks_fts ON note_chunks USING GIN(fts_vector)");
         // ivfflat index requires rows to exist first; created lazily by EmbeddingService after bulk insert
         jdbc.execute("ALTER TABLE note_chunks ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE note_chunks ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapUniqueIndex(jdbc, "note_chunks", "uq_note_chunks_path_source_idx", "note_path, source, chunk_index, vault_id");
         // BM25 index carries vault_id (filter field for M3's per-vault search). Create if missing,
         // rebuild once if an older definition lacks it. If this pg_search build rejects the

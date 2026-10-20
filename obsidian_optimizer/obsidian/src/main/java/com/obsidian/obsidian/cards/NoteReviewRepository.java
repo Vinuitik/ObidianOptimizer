@@ -42,6 +42,7 @@ public class NoteReviewRepository {
             """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_note_reviews_due ON note_reviews(due)");
         jdbc.execute("ALTER TABLE note_reviews ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE note_reviews ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapPrimaryKey(jdbc, "note_reviews", "note_path");
     }
 
