@@ -9,11 +9,11 @@ vi.mock('../components/organisms/TodayPlan', () => ({ default: () => <div data-t
 vi.mock('../components/organisms/WeekPlan', () => ({ default: () => <div data-testid="week" /> }));
 
 describe('LearnPage', () => {
-  it('Today view shows the plan with the Inbox below on one screen', () => {
+  it('Today view shows the Inbox first with the plan below on one screen', () => {
     render(<LearnPage />);
     const today = screen.getByTestId('today');
     const inbox = screen.getByTestId('inbox');
-    expect(today.compareDocumentPosition(inbox) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(inbox.compareDocumentPosition(today) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByTestId('week')).toBeNull();
     expect(screen.queryByText('Feed')).toBeNull();
   });

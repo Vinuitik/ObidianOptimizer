@@ -57,38 +57,21 @@ describe('itemKind', () => {
   });
 });
 
-describe('TrackAddBox', () => {
+describe('TrackAddBox (note picker)', () => {
   it('picking a note match adds an item with notePath', async () => {
     mockSearch.mockResolvedValue([{ path: 'Notes/Graphs.md', title: 'Graphs' }]);
     render(<TrackAddBox trackId={7} />);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'graph' } });
-    const opt = await screen.findByText('Graphs');
-    fireEvent.click(opt);
+    fireEvent.click(await screen.findByText('Graphs'));
     await waitFor(() => expect(mockAdd).toHaveBeenCalledWith(7, 'Graphs', 'Notes/Graphs.md'));
   });
 
-  it('plain row adds item without notePath', async () => {
+  it('no plain-title add: without a match nothing can be added', async () => {
     render(<TrackAddBox trackId={7} />);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'do thing' } });
-    fireEvent.click(await screen.findByText(/Add as plain item/));
-    await waitFor(() => expect(mockAdd).toHaveBeenCalledWith(7, 'do thing', null));
-  });
-
-  it('urls go through captureResource per url', async () => {
-    mockCaptureResource.mockResolvedValue({ ok: true, duplicate: false });
-    render(<TrackAddBox trackId={7} />);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'https://a.com\nhttps://b.com' } });
-    fireEvent.click(screen.getByRole('button', { name: /Capture 2 links/ }));
-    await waitFor(() => expect(mockCaptureResource).toHaveBeenCalledTimes(2));
-    expect(mockCaptureResource).toHaveBeenCalledWith('https://a.com', 7);
-  });
-
-  it('file drop calls captureFile with trackId', async () => {
-    mockCaptureFile.mockResolvedValue({ ok: true, duplicate: false });
-    render(<TrackAddBox trackId={7} />);
-    const file = new File(['x'], 'paper.pdf', { type: 'application/pdf' });
-    fireEvent.drop(screen.getByTestId('track-add-box'), { dataTransfer: { files: [file], types: ['Files'] } });
-    await waitFor(() => expect(mockCaptureFile).toHaveBeenCalledWith(file, 7));
-    expect(await screen.findAllByText('processing…')).toBeTruthy();
+    expect(await screen.findByText('No matching notes')).toBeTruthy();
+    expect(screen.queryByText(/Add as plain item/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Capture|Attach/ })).toBeNull();
+    expect(mockAdd).not.toHaveBeenCalled();
   });
 });

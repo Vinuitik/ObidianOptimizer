@@ -16,13 +16,15 @@ vi.mock('../../api/notes', () => ({ searchNotes: vi.fn().mockResolvedValue([]) }
 const mockWeek = vi.fn();
 vi.mock('../../api/tracks', () => ({
   fetchWeekPlan: (...a) => mockWeek(...a),
+  mondayOf: () => '2026-10-19',
   generateMinicourse: vi.fn(), fetchMinicourseJob: vi.fn(), approveMinicourse: vi.fn(),
   importCsv: vi.fn(), commitImport: vi.fn(),
 }));
 
 const days = Array.from({ length: 7 }, (_, i) => ({
   date: `2026-10-${String(19 + i).padStart(2, '0')}`, weekday: i, capacity: 4,
-  items: i < 2 ? [{ trackId: 5, trackTitle: 'Rust', trackType: 'book', count: i + 2 }] : [],
+  items: i < 2 ? [{ trackId: 5, trackTitle: 'Rust', trackType: 'book', count: i + 2, planned: i + 2, done: i === 0 ? 2 : 1 }] : [],
+  done: i === 0 ? 2 : i === 1 ? 1 : 0, planned: i < 2 ? i + 2 : 0,
 }));
 
 beforeEach(() => { vi.clearAllMocks(); mockWeek.mockResolvedValue(days); });
@@ -35,7 +37,15 @@ describe('WeekPlan', () => {
     expect(screen.getByText('Sun')).toBeTruthy();
     const chips = screen.getAllByText('Rust').filter(el => el.closest('[data-testid="week-day"]'));
     expect(chips).toHaveLength(2);
-    expect(screen.getByText('3')).toBeTruthy();
+    expect(mockWeek).toHaveBeenCalledWith('2026-10-19');
+  });
+
+  it('shows done/planned badges per item and per day, done state when complete', async () => {
+    render(<WeekPlan />);
+    await screen.findAllByTestId('week-day');
+    const items = screen.getAllByTestId('item-progress').map(e => e.textContent.trim());
+    expect(items).toEqual(['✓ 2/2', '1/3']);
+    expect(screen.getAllByTestId('day-progress').map(e => e.textContent.trim())).toEqual(['2/2', '1/3']);
   });
 
   it('clicking a track chip opens the editor drawer', async () => {

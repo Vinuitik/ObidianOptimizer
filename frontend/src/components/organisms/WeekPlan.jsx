@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import useStore from '../../store/useStore';
-import { fetchWeekPlan } from '../../api/tracks';
+import { fetchWeekPlan, mondayOf } from '../../api/tracks';
 import Button from '../atoms/Button';
 import Badge from '../atoms/Badge';
 import Skeleton from '../atoms/Skeleton';
@@ -10,7 +10,9 @@ import NewTrackForm from './NewTrackForm';
 import { TrackDetail, CapacityPanel, ImportPanel, WEEKDAYS } from './TrackEditor';
 import styles from './TracksPlan.module.css';
 
-// Week = 7 days from today (backend: GET /api/tracks/week) + the track editor in a side drawer.
+const isDone = x => (x.planned ?? 0) > 0 && (x.done ?? 0) >= x.planned;
+
+// Week = Mon–Sun of this week (backend: GET /api/tracks/week?start=<Monday>) + the track editor in a side drawer.
 // panel: null | { kind: 'track', id } | { kind: 'new' } | { kind: 'capacity' } | { kind: 'import' }
 export default function WeekPlan() {
   const tracks        = useStore(s => s.tracks);
@@ -21,7 +23,7 @@ export default function WeekPlan() {
   const [panel, setPanel]     = useState(null);
 
   const load = useCallback(() => {
-    return fetchWeekPlan().then(d => { setDays(d); setError(null); }).catch(e => setError(e.message ?? String(e)));
+    return fetchWeekPlan(mondayOf()).then(d => { setDays(d); setError(null); }).catch(e => setError(e.message ?? String(e)));
   }, []);
 
   useEffect(() => { fetchTracks(); }, [fetchTracks]);
@@ -54,6 +56,9 @@ export default function WeekPlan() {
               <div className={styles.weekDayHead}>
                 <span className={styles.weekDayName}>{WEEKDAYS[d.weekday] ?? d.date}</span>
                 <span className={styles.muted}>{d.date.slice(5)}</span>
+                {(d.planned ?? 0) > 0 && (
+                  <Badge tone={isDone(d) ? 'success' : 'neutral'} data-testid="day-progress">{d.done ?? 0}/{d.planned}</Badge>
+                )}
               </div>
               {d.items.length === 0 && <span className={styles.muted}>Nothing</span>}
               {d.items.map(it => (
@@ -64,7 +69,9 @@ export default function WeekPlan() {
                   onClick={() => setPanel({ kind: 'track', id: it.trackId })}
                 >
                   <span className={`${styles.truncate} ${styles.grow}`}>{it.trackTitle}</span>
-                  <Badge tone="accent">{it.count}</Badge>
+                  <Badge tone={isDone(it) ? 'success' : 'accent'} data-testid="item-progress">
+                    {isDone(it) ? '✓ ' : ''}{it.done ?? 0}/{it.planned ?? it.count}
+                  </Badge>
                 </button>
               ))}
               <span className={styles.muted}>cap {d.capacity}</span>
