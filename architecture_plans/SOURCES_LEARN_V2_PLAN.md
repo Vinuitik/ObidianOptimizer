@@ -18,7 +18,12 @@ Status: APPROVED 2026-10-20 (supersedes the IA parts of LEARN_SOURCES_PLAN.md).
 - M7b user-requested vault deletion (vaults/): `POST /api/vaults/{id}/delete` enqueues a durable
   job (not active, not primary, not last) → worker writes a per-vault dump first, then purges every
   vault-scoped row. Never deletes vault files on disk. Settings → Vaults gets a confirm-guarded button.
-- I1 tracks intake removal (backend + embedder): pending minicourse decision.
+- I1 tracks intake removal (backend + embedder): tracks = group EXISTING notes into a course +
+  schedule; minicourse KEPT (generates lessons from a track's notes). Remove only raw-data intake
+  into tracks (URL/resource add, feed accept → track, capture.track_id, MCP track-resource intake).
+- B1 backup wiring: DbBackupService implements vaults.VaultBackup; pre-delete backup is Drive-only —
+  delete refused (409) when vault has no Drive/encryption; backup must throw, never silently skip.
+  Drive refresh token (and other device-local secrets) never overwritten on restore.
 - W1 Week badges: `/tracks/week` returns done+planned per day.
 - L2/L3b frontend: Sources page (only intake screen), Learn = Inbox-first pre-processing + Week,
   default route `/` → Review, remove track-intake UI.
