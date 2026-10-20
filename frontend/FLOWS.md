@@ -88,7 +88,9 @@ Add it to the **claude.ai** website as a custom connector with **No authenticati
 
 | Path | Page |
 |---|---|
-| `/` | `MainPage` — 3-panel note editor |
+| `/` | `<Navigate to="/review">` — Review is the default (web + PWA start_url `/`; PwaApp also redirects `/` and `*` to `/review`) |
+| `/notes` | `MainPage` — 3-panel note editor |
+| `/sources` | `SourcesPage` — Feed + Capture (only raw-data intake) |
 | `/learn` | `LearnPage` — split view: ResourcePanel (pdf/video) + NotePanel |
 | `/review` | `ReviewPage` — due list + FlashcardSession (tests) or SlideshowReview (self-rate), per `flashcardsEnabled` |
 | `/dashboard` | `DashboardPage` — live processing stats, polls `/api/stats` every 3s |
@@ -139,5 +141,30 @@ Files: LearnPage.jsx, TodayPlan.jsx, WeekPlan.jsx, TrackEditor.jsx, TracksPlan.m
 - Today: `TodayPlan` (GET /tracks/today → `fetchTodayPlan()`: mode toggle, overBudget banner, "N of M for today", reason lines, Mark done → `completeTrackItem()` + toast; "Add to spaced review" in localStorage `tracks:addToReview:<trackId>`) with `InboxReview` rendered BELOW on the same screen. Skeleton until first fetch. Empty CTAs → switch to Week. To change: `TodayPlan.jsx`.
 - Week: `WeekPlan` → `fetchWeekPlan()` (GET /tracks/week) → 7 day cards (chip per track + count, "cap N"); refetches when store `tracks`/`trackCapacity` change and on drawer close. Click chip / "All tracks" chip → right drawer with `TrackDetail` (deadline, items, Advanced: type/status/priority/schedule/mini-course). Toolbar: + New track (`NewTrackForm`), Daily capacity, Import. To change: `WeekPlan.jsx`, `TrackEditor.jsx`.
 - `/tracks` → `<Navigate to="/learn">` (App.jsx + pwa/MobileApp.jsx); nav entries removed. Old Progress tab dropped (store `trackProgress` still exists). Capture-time `trackPending` + track pickers removed.
-- Feed no longer mounted in Learn (moved to Sources, milestone L2) — `FeedView` unreachable until then.
+- Feed lives on Sources (see "Sources" below), not Learn.
 - Tests: `TodayPlan.test.jsx`, `WeekPlan.test.jsx`, `TrackEditor.test.jsx`, `pages/LearnPage.test.jsx`.
+
+## Sources — the only raw-data intake (`/sources`)
+Files: SourcesPage.jsx, FeedView.jsx, FeedSources.jsx, CapturePage.jsx (pwa/), offlineApi.js, outbox.js, api/capture.js, api/feed.js
+- Product flow: Sources → (auto ingest) Inbox/Learn → Tracks group existing notes → Review. No capture/feed carries a track id any more.
+- `SourcesPage` (auth-gated) SegmentedTabs Feed | Capture (local `useState('feed')`). Same page on web (`App.jsx`) and PWA (`pwa/MobileApp.jsx`, bottom tab "Sources" replaces "Capture").
+- Feed tab → `FeedView` tabs Swipe · Bin · Subscriptions. Subscribe: `FeedSources` → store `resolveFeedSource`/`addFeedSource` → `POST /feed/sources {url}` (preview first). To change: `FeedSources.jsx`, `api/feed.js`.
+- Capture tab → `pwa/CapturePage` modes Link · Note (idea/text) · File. Link/Note → `offlineApi.captureUrl(url)` / `captureText(text,title)` → `POST /api/capture` (offline/401 → `outbox.enqueueCapture*`, replay body has no track fields; old queued `trackOpts` ignored). File → `api/capture.captureFile(file)` (online only). To change: `CapturePage.jsx`, `offlineApi.js`.
+- Global quick idea/URL/file capture stays in NavBar `QuickCapture` (web). `/capture` PWA route kept as share-target landing (SW 303 → `/capture?shared=`).
+- Tests: `pages/SourcesPage.test.jsx`, `App.routes.test.jsx`, `__tests__/Feed*.test.jsx`, `pwa/shell.test.jsx`.
+
+### Change Index (Sources / routing)
+| Thing | Where |
+|---|---|
+| Default route `/` | `App.jsx` `<Route path="/">` Navigate; PWA `MobileApp.jsx` |
+| Nav entries/order | `components/organisms/useNavItems.js` `NAV_ITEMS`; PWA `pwa/BottomNav.jsx` `TABS` |
+| Sources tabs | `pages/SourcesPage.jsx` `TABS` |
+| Feed sub-tabs | `FeedView.jsx` `TABS` |
+| Capture modes | `pwa/CapturePage.jsx` `MODES` |
+| Capture POST bodies | `offlineApi.captureUrl/captureText`, `outbox.flush`, `api/capture.js` |
+
+### Technology Notes (Sources)
+- Feed/swipe state is in-memory Zustand (`useStore` feed slices): lost on refresh; pending list is cached offline in IndexedDB meta `feedItems` only after a pull.
+- Outbox is IndexedDB: queued captures survive reload but are per-device/browser profile; items queued before F1 may still hold `trackOpts` (silently dropped on replay).
+- PWA `start_url` is `/`; the redirect to `/review` happens client-side (no server redirect), so first paint is the SPA shell. Moving Notes from `/` to `/notes` breaks old bookmarks to `/` (they now open Review).
+- File capture is online-only (multipart, not queued) except the SW share-target path.

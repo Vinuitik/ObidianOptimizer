@@ -159,23 +159,21 @@ export async function gradeNoteOffline(notePath, band) {
 }
 
 // Capture a shared/pasted link → backend ingest. Queues when offline / on 401.
-// trackOpts (tracks/FLOWS.md Phase 1b): { trackId } tags an existing track, or
-// { newTrackTitle, newTrackType? } creates one on the fly — resolved server-side
-// (CaptureController.resolveTrackId). Omitted ⇒ today's exact untagged behavior.
-export async function captureUrl(url, trackOpts = {}) {
+// Raw-data intake is Sources-only: captures are never tagged to a track (backend dropped it).
+export async function captureUrl(url) {
   return withOfflineFallback(
     async () => {
       const res = await fetch('/api/capture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ url, ...trackOpts }),
+        body: JSON.stringify({ url }),
       });
       if (res.ok) return { queued: false };
       // 401 gets its own queued-with-reason result (not a login rethrow) — capture is a
       // fire-and-forget action the UI doesn't block on, so it just queues for replay
       // after the user signs back in, same as any other unreachable case.
-      if (res.status === 401) { await enqueueCapture(url, trackOpts); return { queued: true, reason: 'auth' }; }
+      if (res.status === 401) { await enqueueCapture(url); return { queued: true, reason: 'auth' }; }
       throw new ApiError(res.status);
     },
     // isOnline() at this point distinguishes WHY it queued: the device had no connection
@@ -183,7 +181,7 @@ export async function captureUrl(url, trackOpts = {}) {
     // didn't answer (TypeError). Those are different facts and were getting flattened into
     // one misleading "Offline" message — see captureText for the same fix.
     async () => {
-      await enqueueCapture(url, trackOpts);
+      await enqueueCapture(url);
       const reason = isOnline() ? 'unreachable' : 'offline';
       await relayToMailboxIfUnreachable(reason);
       return { queued: true, reason };
@@ -195,24 +193,24 @@ export async function captureUrl(url, trackOpts = {}) {
 // driveMode is irrelevant here (capture always needs the server — there's no local queue
 // bypass), but withOfflineFallback's driveMode gate is harmless since driveMode is never
 // set true for a surface that calls this.
-export async function captureText(text, title, trackOpts = {}) {
+export async function captureText(text, title) {
   return withOfflineFallback(
     async () => {
       const res = await fetch('/api/capture', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ text, title, ...trackOpts }),
+        body: JSON.stringify({ text, title }),
       });
       if (res.ok) return { queued: false };
       if (res.status === 401) {
-        await enqueueCaptureText(text, title, trackOpts);
+        await enqueueCaptureText(text, title);
         return { queued: true, reason: 'auth' };
       }
       throw new ApiError(res.status);
     },
     async () => {
-      await enqueueCaptureText(text, title, trackOpts);
+      await enqueueCaptureText(text, title);
       const reason = isOnline() ? 'unreachable' : 'offline';
       await relayToMailboxIfUnreachable(reason);
       return { queued: true, reason };

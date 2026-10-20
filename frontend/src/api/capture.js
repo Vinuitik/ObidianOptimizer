@@ -34,17 +34,16 @@ export function dismissCapture(id) {
   return req(`/capture/${id}/dismiss`, { method: 'POST' });
 }
 
-// Submit one resource into the durable capture pipeline, tagged to an existing track
-// (TracksPage.jsx's batch "Add resources" form). Doesn't use req() — a 409 here means
+// Submit one resource into the durable capture pipeline (Sources page). Doesn't use req() — a 409 here means
 // "already in the pipeline", not an error, so the caller needs it distinguished rather
 // than thrown.
-export async function captureResource(url, trackId) {
+export async function captureResource(url) {
   const res = await fetch(`${BASE}/capture`, {
     credentials: 'same-origin',
     cache: 'no-store',
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, trackId }),
+    body: JSON.stringify({ url }),
   });
   if (res.status === 409) return { ok: true, duplicate: true };
   if (!res.ok) {
@@ -55,12 +54,11 @@ export async function captureResource(url, trackId) {
   return { ok: true, duplicate: false };
 }
 
-// Upload a file (PDF/audio/video/...) into the capture pipeline, tagged to a track.
+// Upload a file (PDF/audio/video/...) into the capture pipeline.
 // Multipart: no Content-Type header (the browser sets the boundary).
-export async function captureFile(file, trackId) {
+export async function captureFile(file) {
   const form = new FormData();
   form.append('file', file);
-  if (trackId != null) form.append('trackId', String(trackId));
   const res = await fetch(`${BASE}/capture/file`, {
     credentials: 'same-origin',
     cache: 'no-store',

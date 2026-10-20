@@ -79,7 +79,7 @@ describe('FeedView', () => {
 
   it('keys are ignored while typing in an input', () => {
     mount();
-    fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Subscriptions' }));
     fireEvent.keyDown(screen.getByLabelText('Source URL'), { key: 'ArrowRight' });
     expect(feed.acceptFeedItem).not.toHaveBeenCalled();
   });

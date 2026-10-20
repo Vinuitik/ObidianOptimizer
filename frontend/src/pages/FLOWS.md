@@ -1,6 +1,6 @@
 # Pages Flows
 
-Files: MainPage.jsx, LearnPage.jsx, ReviewPage.jsx, DashboardPage.jsx, SettingsPage.jsx, GetAppPage.jsx, PipelineFailuresPage.jsx
+Files: MainPage.jsx, SourcesPage.jsx, LearnPage.jsx, ReviewPage.jsx, DashboardPage.jsx, SettingsPage.jsx, GetAppPage.jsx, PipelineFailuresPage.jsx
 
 ---
 
@@ -229,8 +229,8 @@ and the dev-facing `FLOWS.md`, keeps `README.md`).
 ---
 
 ### Learn ▸ Today | Week
-`LearnPage` view state (default `today`): Today = `TodayPlan` + `InboxReview` below; Week = `WeekPlan` (see frontend/FLOWS.md "Learn — Today | Week"). Feed is NOT mounted here now (Sources page, L2) — `FeedView` temporarily unreachable.
-Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAccept`) → `PUT /settings` (global default; per-source override in Sources tab).
+`LearnPage` view state (default `today`): Today = `TodayPlan` + `InboxReview` below; Week = `WeekPlan` (see frontend/FLOWS.md "Learn — Today | Week"). Feed lives on `SourcesPage` (`/sources`: Feed | Capture tabs; see frontend/FLOWS.md "Sources").
+Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAccept`) → `PUT /settings` (global default; per-source override in Sources ▸ Feed ▸ Subscriptions).
 
 ---
 

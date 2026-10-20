@@ -4,6 +4,7 @@ import MainPage from './pages/MainPage';
 import SettingsPage from './pages/SettingsPage';
 import ReviewPage from './pages/ReviewPage';
 import LearnPage from './pages/LearnPage';
+import SourcesPage from './pages/SourcesPage';
 import DashboardPage from './pages/DashboardPage';
 import GetAppPage from './pages/GetAppPage';
 import PipelineFailuresPage from './pages/PipelineFailuresPage';
@@ -30,7 +31,9 @@ function AnimatedRoutes() {
     // Enter-only transition (no exit wait) — remounts per pathname via key.
     <PageTransition key={location.pathname} className={styles.pageWrapper}>
         <Routes location={location}>
-          <Route path="/" element={<MainPage />} />
+          <Route path="/" element={<Navigate to="/review" replace />} />
+          <Route path="/notes" element={<MainPage />} />
+          <Route path="/sources" element={<SourcesPage />} />
           <Route path="/learn" element={<LearnPage />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/tracks" element={<Navigate to="/learn" replace />} />

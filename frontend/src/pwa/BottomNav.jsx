@@ -10,7 +10,7 @@ import styles from './BottomNav.module.css';
 export const TABS = [
   { to: '/review',  icon: 'clock',  label: 'Review' },
   { to: '/learn',   icon: 'inbox',  label: 'Learn' },
-  { to: '/capture', icon: 'plus',   label: 'Capture' },
+  { to: '/sources', icon: 'plus',   label: 'Sources' },
   { to: '/notes',   icon: 'file',   label: 'Notes' },
 ];
 

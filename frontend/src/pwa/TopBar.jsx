@@ -9,7 +9,7 @@ import styles from './TopBar.module.css';
 
 // Route -> page title shown instead of the brand. Unknown paths fall back to the app name.
 export const TITLES = {
-  '/review': 'Review', '/learn': 'Learn', '/capture': 'Capture',
+  '/review': 'Review', '/learn': 'Learn', '/capture': 'Capture', '/sources': 'Sources',
   '/notes': 'Notes', '/search': 'Search', '/sync': 'Sync', '/settings': 'Sync',
 };
 export const titleFor = (pathname) => TITLES[pathname] ?? 'Obsidian Optimizer';

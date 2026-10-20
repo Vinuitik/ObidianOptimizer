@@ -30,10 +30,10 @@ describe('bottom nav', () => {
   });
 
   it('is Review, Learn, Capture, Notes - no Sync tab', () => {
-    expect(TABS.map(t => t.to)).toEqual(['/review', '/learn', '/capture', '/notes']);
+    expect(TABS.map(t => t.to)).toEqual(['/review', '/learn', '/sources', '/notes']);
     wrap(<BottomNav />);
     const labels = screen.getAllByRole('link').map(a => a.textContent);
-    expect(labels).toEqual(['Review', 'Learn', 'Capture', 'Notes']);
+    expect(labels).toEqual(['Review', 'Learn', 'Sources', 'Notes']);
   });
 
   it('shows due-count badge on Review from the store', () => {
