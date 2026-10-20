@@ -6,6 +6,7 @@
 # (tunnel + host-wrapper + compose) after this SSH session ends.
 set -euo pipefail
 cd "$HOME/Desktop/ObidianOptimizer"
+[[ -f docker-compose.vaults.yml ]] && export COMPOSE_FILE=docker-compose.yml:docker-compose.vaults.yml
 
 echo "[redeploy] stopping existing start.sh / stack ..."
 pkill -f "linux_scripts/start.sh" 2>/dev/null || true

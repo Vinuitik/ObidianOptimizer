@@ -29,6 +29,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+[[ -f "$ROOT_DIR/docker-compose.vaults.yml" ]] && COMPOSE_FILE_ARGS="-f $COMPOSE_FILE -f $ROOT_DIR/docker-compose.vaults.yml" || COMPOSE_FILE_ARGS="-f $COMPOSE_FILE"
 
 # ---- Tunables (override via env) ----
 CPU_LIMIT="${CPU_LIMIT:-90}"        # °C — Comet Lake-H Tjmax ~100; 90 leaves headroom
@@ -38,7 +39,7 @@ BREACH_STREAK="${BREACH_STREAK:-3}" # consecutive over-limit reads before stoppi
                                     #   (3 x 15s = ~45s sustained, ignores brief spikes)
 
 # Project-specific hooks (defaults target this project's docker-compose stack).
-STOP_CMD="${STOP_CMD:-docker compose -f \"$COMPOSE_FILE\" down --timeout 30}"
+STOP_CMD="${STOP_CMD:-docker compose $COMPOSE_FILE_ARGS down --timeout 30}"
 ALIVE_CMD="${ALIVE_CMD:-}"          # empty -> auto: docker compose ps for this project
 
 # Re-exec the whole guard under an inhibitor lock so the lid stays "open" for the
@@ -75,7 +76,7 @@ stack_alive() {
     if [[ -n "$ALIVE_CMD" ]]; then
         bash -c "$ALIVE_CMD" >/dev/null 2>&1
     elif [[ -f "$COMPOSE_FILE" ]] && command -v docker >/dev/null 2>&1; then
-        [[ -n "$(docker compose -f "$COMPOSE_FILE" ps -q 2>/dev/null)" ]]
+        [[ -n "$(docker compose $COMPOSE_FILE_ARGS ps -q 2>/dev/null)" ]]
     else
         return 0   # can't tell -> assume alive; run until breach or Ctrl+C
     fi

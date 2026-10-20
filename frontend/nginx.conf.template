@@ -121,6 +121,16 @@ server {
         alias /vault-resources/;
     }
 
+    # Non-primary vaults (id >= 2): /vault-media/<id>/… → that vault's resources/, /workspace/<id>/… →
+    # its _workspace/. Binds come from docker-compose.vaults.yml (host-wrapper POST /vaults).
+    # Regex locations beat the prefix ones below; vault 1 keeps the bare paths.
+    location ~ ^/vault-media/([2-9]|[1-9][0-9]+)/(.*)$ {
+        alias /vaults-res/$1/$2;
+    }
+    location ~ ^/workspace/([2-9]|[1-9][0-9]+)/(.*)$ {
+        alias /vaults-ws/$1/$2;
+    }
+
     # vault/_workspace/ → learn-page workspace files (PDF, video, audio)
     location /workspace/ {
         alias /workspace/;

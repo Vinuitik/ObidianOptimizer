@@ -94,6 +94,23 @@ public class VaultRepository {
         jdbc.update("UPDATE vaults SET active = true WHERE id = ?", id);
     }
 
+    /** Inserts an inactive vault at {@code /vaults/<id>}; returns its id. 409 if the host path is taken. */
+    @Transactional
+    public long register(String name, String hostPath) {
+        Integer dup = jdbc.queryForObject("SELECT count(*) FROM vaults WHERE host_path = ?", Integer.class, hostPath);
+        if (dup != null && dup > 0) throw VaultException.conflict("host path already registered");
+        jdbc.execute("SELECT setval(pg_get_serial_sequence('vaults','id'), GREATEST((SELECT max(id) FROM vaults), 1))");
+        long id = jdbc.queryForObject("SELECT nextval(pg_get_serial_sequence('vaults','id'))", Long.class);
+        jdbc.update("INSERT INTO vaults(id, name, host_path, container_path, active, is_primary) VALUES (?, ?, ?, ?, false, false)",
+            id, name, hostPath, "/vaults/" + id);
+        return id;
+    }
+
+    /** Rollback of a registration the wrapper refused. Never touches the primary or an active vault. */
+    public void deleteRegistration(long id) {
+        jdbc.update("DELETE FROM vaults WHERE id = ? AND NOT is_primary AND NOT active", id);
+    }
+
     public void rename(long id, String name) {
         require(id);
         jdbc.update("UPDATE vaults SET name = ? WHERE id = ?", name, id);

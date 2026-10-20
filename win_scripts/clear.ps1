@@ -64,7 +64,9 @@ if (-not $Force) {
 # Stop + remove containers/networks (volumes survive a plain `down`). The tunnel
 # profile is included so cloudflared is torn down too if it was running.
 Write-Host "`nStopping containers..." -ForegroundColor Green
-docker compose -f $compose --profile tunnel down
+$vaultsYml = Join-Path $rootDir "docker-compose.vaults.yml"
+$extra = if (Test-Path $vaultsYml) { @("-f", $vaultsYml) } else { @() }
+docker compose -f $compose @extra --profile tunnel down
 
 # Remove the targeted volumes by exact name.
 foreach ($v in $targets) {

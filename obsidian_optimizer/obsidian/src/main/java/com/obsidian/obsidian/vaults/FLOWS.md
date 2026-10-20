@@ -2,7 +2,7 @@
 
 Files: VaultRepository.java, ActiveVault.java, VaultInternalRoutingIT.java (test), ../internalapi/InternalAgentController.java, ../common/IngestClient.java, embedder/vault_paths.py, VaultController.java, VaultException.java, VaultSwitchedEvent.java, VaultKeys.java, VaultHeaderFilter.java, VaultMigrationIT.java + VaultScopingIT.java + VaultSwitchIT.java + VaultHeaderFilterTest.java (tests); settings: ../settings/SettingsRepository.java; sync: ../sync/SyncWorker.java; plan: architecture_plans/VAULTS_PLAN.md
 
-Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id) + M3 (Java scoping: every vault-scoped query filters on `vault_id`, paths come from `ActiveVault`, `X-Vault-Id` filter) + M4 (`vault_settings`, symmetric per-vault Drive sync, per-vault chrono date, switching + rescan, registry REST) + M5 (Python scoping: embedder requests/callbacks carry the vault). Everything marked [NOT IMPLEMENTED] is a later milestone.
+Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id) + M3 (Java scoping: every vault-scoped query filters on `vault_id`, paths come from `ActiveVault`, `X-Vault-Id` filter) + M4 (`vault_settings`, symmetric per-vault Drive sync, per-vault chrono date, switching + rescan, registry REST) + M5 (Python scoping: embedder requests/callbacks carry the vault) + M6 (registration `POST /vaults` + wrapper-generated mounts + nginx per-vault media). Everything marked [NOT IMPLEMENTED] is a later milestone.
 
 ## Boot: registry + backfill
 Spring start → `VaultRepository.initSchema()` (@PostConstruct) → CREATE `vaults` + partial unique index `uq_vaults_single_active` → seed vault 1 (`ON CONFLICT DO NOTHING`) → `setval` on the id sequence
@@ -42,7 +42,7 @@ Global (stay in `app_settings`): Google OAuth app creds (syncClientId/Secret, re
 New vaults (id != 1): no rows -> defaults in the accessors (`syncEnabled=false`, `startupSyncMode=blocking`, `resourcePath=<container_path>/resources/images`, others blank).
 
 ## Switching (M4)
-REST (nginx strips `/api`): `GET /vaults`; `PUT /vaults/active {id}` (404 unknown, 409 archived); `PATCH /vaults/{id} {name}`; `POST /vaults/{id}/archive` + `/restore` (409 on the active or last non-archived vault). `VaultController` -> `ActiveVault.switchTo(id)` / `VaultRepository`. `/vaults/**` bypasses `VaultHeaderFilter` (a stale tab must still be able to switch). Registration (POST /vaults) is M6 [NOT IMPLEMENTED].
+REST (nginx strips `/api`): `GET /vaults`; `PUT /vaults/active {id}` (404 unknown, 409 archived); `PATCH /vaults/{id} {name}`; `POST /vaults/{id}/archive` + `/restore` (409 on the active or last non-archived vault). `VaultController` -> `ActiveVault.switchTo(id)` / `VaultRepository`. `/vaults/**` bypasses `VaultHeaderFilter` (a stale tab must still be able to switch). Registration: see Registration (M6).
 `ActiveVault.switchTo(id)` -> `VaultRepository.activate(id)` (one txn: clear `active`, set it; validates 404/409) -> AtomicReference flips -> `VaultSwitchedEvent(old,new)` (no event when id == current).
 Listeners rerun for the new vault: `FileRepository.onVaultSwitched` (startup disk sync + image scan, async), `ChunkEmbeddingReconciler`, `ResourceScanService`, `ImageProcessingWorker` (each kicks its own tick; their `claimBatch` reads `activeVault.id()` per pass). `SyncService.initialScan` is NOT rerun on switch (it runs at boot for every sync-enabled vault + the active one).
 Inactive vaults: no scanners, no card gen/chunking/embedding (D5). In-flight queue work finishes in its own vault (`rootFor(vaultId)`).
@@ -54,10 +54,21 @@ Embedder → Java (`/api/internal/**`): bodies carry `vaultId` (GET tracks: `?va
 Embedder internals: `embedder/vault_paths.py` + `embedder/ingest/FLOWS.md` (Multi-vault scoping rows). MCP + `/pdf-page` + `/media-rendition` resolve the ACTIVE vault per call (~5s cache), `placement` uses `vault_id = %s` instead of `LIKE '/vault/%%'`.
 Tests: `VaultInternalRoutingIT` (callback after switch, no-vaultId = vault 1, escape guard), `embedder/tests/test_multivault.py`.
 
+## Registration (M6)
+`POST /vaults {name, hostPath}` (`VaultController.register`) -> `VaultRepository.register()` (inactive row, id from the sequence, `container_path=/vaults/<id>`, 409 on duplicate host_path)
+-> `VaultWrapperClient.register(id, hostPath)` -> host-wrapper `POST /vaults {id, host_path}` (`main.py register_vault()`) -> **202** + the vault view.
+Wrapper 400/409 (missing dir, overlap with primary/repo/another vault, id/path clash) is relayed and the row removed (`deleteRegistration`); wrapper down -> 503 + row removed.
+Wrapper: validate -> add to `<repo>/vaults.registry.json` -> `mkdir -p _reports _workspace resources` in the vault -> regenerate `<repo>/docker-compose.vaults.yml` from ALL registered vaults (`render_vaults_override()`) -> if the text changed, detached `docker compose -f docker-compose.yml -f docker-compose.vaults.yml up -d` (`_run_compose()`, ~20s, backend/embedder/frontend get recreated). Same id+path again = no-op, no recreate.
+Binds per vault `<id>`: backend rw `<host>:/vaults/<id>`; embedder ro `<host>:/vaults/<id>:ro` + rw `<host>/{_reports,_workspace,resources}:/vaults/<id>/<sub>`; frontend(nginx) ro `<host>/resources:/vaults-res/<id>`, `<host>/_workspace:/vaults-ws/<id>`.
+Media: nginx `/vault-media/<id>/…` -> `/vaults-res/<id>/…`, `/workspace/<id>/…` -> `/vaults-ws/<id>/…` for id >= 2 (`frontend/nginx.conf.template`); vault 1 keeps the bare `/vault-media/` and `/workspace/`.
+Every compose invocation must include the override when it exists (`start.sh`, `stop.sh`, `clear.sh`, `overnight.sh`, `redeploy.sh`, `refresh-embedder.sh`, `pg-backup.sh`, `win_scripts/start.ps1|clear.ps1`) - otherwise a plain `up` recreates containers WITHOUT the extra vaults' mounts.
+Tests: `VaultSwitchIT` (register_*), `VaultWrapperClientTest`, `host-wrapper/tests/test_vaults.py`.
+
 ## Not yet
-- mounts/host-wrapper `POST /vaults` [NOT IMPLEMENTED] (M6) — the embedder already computes `<root>/_reports|_workspace|resources` for non-1 vaults but nothing mounts them rw yet; frontend [NOT IMPLEMENTED] (M7); GC job (M7b); DROP DEFAULT (M8) [NOT IMPLEMENTED]
+- frontend [NOT IMPLEMENTED] (M7: media URL builders in `frontend/src/utils/media.js`/`noteMedia.js` still emit bare `/vault-media/`; there are no Java/Python URL builders); GC job (M7b); DROP DEFAULT (M8) [NOT IMPLEMENTED]
 
 ## Technology Notes
+- Mounts are only applied by a compose recreate: a registered vault is unusable until the wrapper's detached `up -d` finishes (the 202 does not wait). The wrapper is unauthenticated and writes compose files + runs docker: same trust model as before. The registry file is the source of truth for the override; delete a vault by editing `vaults.registry.json` + regenerating (no unregister endpoint yet). `/vaults/<id>` is a nested rw bind under an ro bind in the embedder: needs the three subdirs to exist on the host (the wrapper creates them). Windows host paths are passed as-is (forward slashes) and untested.
 - Schema management is `CREATE/ALTER ... IF NOT EXISTS` at bean init, no Flyway: no versioning, no rollback; bean order is the only ordering guarantee (hence `@DependsOn`). A repo missing `@DependsOn` can fail on a fresh DB (FK to a not-yet-created `vaults`).
 - Key swaps take ACCESS EXCLUSIVE and rebuild the table's index (seconds on current sizes; note_chunks/BM25 rebuild is the slowest). Swapping a PK where some other table later adds an FK to it would fail the DROP; keep FKs on surrogate ids. A key with vault_id LAST keeps existing path lookups on the index; M3 queries filter both anyway.
 - M3 scoping is enforced by code, not the DB: a repo method that forgets `vault_id` on an INSERT still lands in vault 1 until M8 drops the DEFAULT. `VaultScopingIT` is the only guard — add a case there when adding a vault-scoped query.
@@ -103,3 +114,7 @@ Tests: `VaultInternalRoutingIT` (callback after switch, no-vaultId = vault 1, es
 | Archive / restore rules | `VaultRepository.archive()/restore()` |
 | Vault REST | `VaultController` |
 | M4 tests | `VaultSwitchIT`, `SyncWorkerTest` |
+| Register a vault | `VaultController.register()`, `VaultRepository.register()/deleteRegistration()`, `VaultWrapperClient.register()` |
+| Per-vault compose binds / override file | host-wrapper `render_vaults_override()`, `register_vault()`, `_run_compose()`; files `docker-compose.vaults.yml` + `vaults.registry.json` (gitignored) |
+| Per-vault media URLs | `frontend/nginx.conf.template` (`/vault-media/<id>/`, `/workspace/<id>/`) |
+| M6 tests | `VaultSwitchIT`, `VaultWrapperClientTest`, `host-wrapper/tests/test_vaults.py` |

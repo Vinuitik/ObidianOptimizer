@@ -21,6 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT_DIR"
+[[ -f docker-compose.vaults.yml ]] && export COMPOSE_FILE=docker-compose.yml:docker-compose.vaults.yml
 
 IMAGE="obidianoptimizer-embedder"
 ROLLBACK_TAG="${IMAGE}:pre-refresh"

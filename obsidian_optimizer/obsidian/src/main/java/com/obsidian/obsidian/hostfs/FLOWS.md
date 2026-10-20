@@ -33,7 +33,7 @@ saveable setting (PUT /settings). See [../settings/FLOWS.md](../settings/FLOWS.m
 ## Switch the vault [REMOVED]
 
 Unsafe switch (`PUT /api/host/vault`, wrapper `PUT /vault-path`, `_write_env_vault`, `RecreatingOverlay`) deleted in VAULTS_PLAN.md M0.
-Safe replacement = `POST /vaults` on the wrapper [NOT IMPLEMENTED, planned M6]. Only `GET /api/host/vault` remains.
+Safe replacement = `POST /api/vaults` -> wrapper `POST /vaults` (M6, see [../vaults/FLOWS.md](../vaults/FLOWS.md) Registration). Only `GET /api/host/vault` remains here.
 
 ---
 
@@ -73,3 +73,4 @@ Safe replacement = `POST /vaults` on the wrapper [NOT IMPLEMENTED, planned M6]. 
 | Reconnect/reload behaviour after switch | `SettingsPage.RecreatingOverlay`, `notes.js pingHealth()` |
 | Vault-root cap for in-vault picker | `SettingsPage.loadVaultDir()` |
 | Wrapper base URL | `wrapper.url` (application.properties / `WRAPPER_URL` env) |
+| Register-vault wrapper call (URL, timeout) | `vaults/VaultWrapperClient` (`wrapper.url`) |

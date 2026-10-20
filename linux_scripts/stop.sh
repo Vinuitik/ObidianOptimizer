@@ -11,7 +11,7 @@ if systemctl is-active --quiet obsidian-optimizer 2>/dev/null; then
     sudo -n systemctl stop obsidian-optimizer
 else
     # Not under systemd (start.sh run by hand): tear down directly.
-    docker compose -f "$ROOT_DIR/docker-compose.yml" --profile tunnel down --remove-orphans
+    docker compose -f "$ROOT_DIR/docker-compose.yml" $([[ -f "$ROOT_DIR/docker-compose.vaults.yml" ]] && echo "-f $ROOT_DIR/docker-compose.vaults.yml") --profile tunnel down --remove-orphans
     port=$(grep -E '^\s*PORT\s*=' "$ROOT_DIR/.env" | head -1 | sed 's/^\s*PORT\s*=\s*//' | tr -d "\"'")
     pids=$(lsof -ti :"${port:-5001}" 2>/dev/null || true)
     [[ -n "$pids" ]] && kill $pids 2>/dev/null || true
