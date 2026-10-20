@@ -123,7 +123,7 @@ class MailboxConsumeIT {
 
     private long newFeedItem() {
         long sid = sourceRepo.create(1L, "youtube", "https://www.youtube.com/@mbtest" + System.nanoTime(),
-            null, "MB Source", null, null).id();
+            null, "MB Source", null).id();
         return feedRepo.insertIfNew(1L, sid, "https://www.youtube.com/watch?v=" + "mb" + System.nanoTime() % 1_000_000,
             "MB item", null, null, null);
     }

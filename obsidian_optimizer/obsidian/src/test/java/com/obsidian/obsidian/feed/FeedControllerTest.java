@@ -34,7 +34,7 @@ class FeedControllerTest {
     }
 
     static Source src(long id, String kind, String url) {
-        return new Source(id, kind, url, null, "T", null, null, "active", Instant.now(), Instant.now(), 0);
+        return new Source(id, kind, url, null, "T", null, "active", Instant.now(), Instant.now(), 0);
     }
 
     @BeforeEach
@@ -166,10 +166,10 @@ class FeedControllerTest {
         List<Candidate> candidates = List.of(cand("https://arxiv.org/list/cs.LG/2026-10", "Listing"));
         when(client.discover(url, "page_watch")).thenReturn(new DiscoverResult(true, candidates, null));
         Source created = src(1, "page_watch", url);
-        when(sourceRepo.create(1L, "page_watch", url, null, "arxiv.org", null, null)).thenReturn(created);
+        when(sourceRepo.create(1L, "page_watch", url, null, "arxiv.org", null)).thenReturn(created);
         when(sourceRepo.get(1L, 1)).thenReturn(created);
 
-        ResponseEntity<?> resp = controller.createSource(new FeedController.CreateSourceRequest(url, null, null, null));
+        ResponseEntity<?> resp = controller.createSource(new FeedController.CreateSourceRequest(url, null, null));
 
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(pollWorker).ingestCandidates(1L, created, candidates, true);
@@ -181,7 +181,7 @@ class FeedControllerTest {
         Source existing = src(5, "rss", url);
         when(sourceRepo.getByUrl(1L, url)).thenReturn(existing);
 
-        ResponseEntity<?> resp = controller.createSource(new FeedController.CreateSourceRequest(url, null, null, null));
+        ResponseEntity<?> resp = controller.createSource(new FeedController.CreateSourceRequest(url, null, null));
 
         assertThat(resp.getBody()).isEqualTo(existing);
         verifyNoInteractions(client);

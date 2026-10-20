@@ -451,3 +451,12 @@ def test_approve_minicourse_unknown_job_raises(monkeypatch):
 
     with pytest.raises(ValueError):
         mcp_server.approve_minicourse("no-such-job")
+
+
+def test_mcp_write_tools_have_no_track_intake_params():
+    import inspect
+    from mcp_tools import write
+    assert "track_id" not in inspect.signature(write.ingest_resource).parameters
+    assert "track_id" not in inspect.signature(write.create_note).parameters
+    assert "track_id" not in inspect.signature(write._stage_note_as_is).parameters
+    assert "title" in inspect.signature(write.create_track).parameters

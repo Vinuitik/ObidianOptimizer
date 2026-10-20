@@ -6,7 +6,6 @@ import com.obsidian.obsidian.capture.CaptureRepository;
 import com.obsidian.obsidian.feed.FeedRepository.FeedItem;
 import com.obsidian.obsidian.feed.SourceRepository.Source;
 import com.obsidian.obsidian.settings.SettingsRepository;
-import com.obsidian.obsidian.tracks.TrackRepository;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
@@ -33,11 +32,10 @@ public class FeedService {
     private final SourceRepository sourceRepo;
     private final CaptureRepository captureRepo;
     private final CaptureIngestWorker ingestWorker;
-    private final TrackRepository trackRepo;
     private final SettingsRepository settingsRepo;
 
     public FeedService(FeedRepository feedRepo, SourceRepository sourceRepo, CaptureRepository captureRepo,
-                       CaptureIngestWorker ingestWorker, TrackRepository trackRepo,
+                       CaptureIngestWorker ingestWorker,
                        SettingsRepository settingsRepo,
             com.obsidian.obsidian.vaults.ActiveVault activeVault) {
         this.activeVault = activeVault;
@@ -45,11 +43,10 @@ public class FeedService {
         this.sourceRepo = sourceRepo;
         this.captureRepo = captureRepo;
         this.ingestWorker = ingestWorker;
-        this.trackRepo = trackRepo;
         this.settingsRepo = settingsRepo;
     }
 
-    /** pending/binned → accepted + exactly one capture tagged with the target track.
+    /** pending/binned → accepted + exactly one capture (→ Inbox; never attaches to a track).
      *  Idempotent: the atomic claim means a 2nd/concurrent call returns the same captureId.
      *  Returns null if the item doesn't exist. */
     public String accept(long vaultId, long itemId) {
@@ -60,9 +57,6 @@ public class FeedService {
             return feedRepo.get(vaultId, itemId).captureId();   // already accepted → same id
         }
         try {
-            Source src = sourceRepo.get(vaultId, item.sourceId());
-            long trackId = (src != null && src.targetTrackId() != null)
-                ? src.targetTrackId() : trackRepo.getOrCreatePassive(vaultId).id();
             String title = (item.title() == null || item.title().isBlank()) ? item.itemUrl() : item.title();
             if (item.body() != null && !item.body().isBlank()) {
                 // youtube_posts: the full text is already in hand (see feed/FLOWS.md) — a
@@ -73,7 +67,6 @@ public class FeedService {
                 captureRepo.enqueue(vaultId, captureId, CaptureController.classifyUrl(item.itemUrl()),
                     item.itemUrl(), null, title);
             }
-            captureRepo.setTrackId(captureId, trackId);
         } catch (RuntimeException e) {
             feedRepo.markPending(itemId);   // don't strand an 'accepted' row with no capture
             throw e;

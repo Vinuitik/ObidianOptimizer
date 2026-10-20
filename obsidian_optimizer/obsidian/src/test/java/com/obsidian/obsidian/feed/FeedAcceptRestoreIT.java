@@ -65,12 +65,12 @@ class FeedAcceptRestoreIT {
     void clean() {
         jdbc.execute("TRUNCATE feed_items, sources RESTART IDENTITY CASCADE");
         jdbc.execute("TRUNCATE capture CASCADE");
-        sid = sources.create(1L, "youtube", "https://www.youtube.com/@x", null, "X", null, null).id();
+        sid = sources.create(1L, "youtube", "https://www.youtube.com/@x", null, "X", null).id();
         itemId = feed.insertIfNew(1L, sid, "https://www.youtube.com/watch?v=abcdefghijk", "Vid", null, null, null);
     }
 
     @Test
-    void pollInsertsNoCaptures_acceptCreatesExactlyOne_taggedWithPassiveTrack() {
+    void pollInsertsNoCaptures_acceptCreatesExactlyOne_noTrackAttached() {
         assertThat(captures.listAll(1L)).isEmpty();
 
         String cap = service.accept(1L, itemId);
@@ -79,8 +79,7 @@ class FeedAcceptRestoreIT {
         var c = captures.get(cap);
         assertThat(c.status()).isEqualTo("queued");
         assertThat(c.sourceRef()).isEqualTo("https://www.youtube.com/watch?v=abcdefghijk");
-        assertThat(c.trackId()).isEqualTo(tracks.getOrCreatePassive(1L).id());
-        assertThat(tracks.getOrCreatePassive(1L).priority()).isEqualTo("could");
+        assertThat(tracks.listAll(1L)).isEmpty();   // accept never creates/attaches a track
         assertThat(feed.get(1L, itemId).captureId()).isEqualTo(cap);
     }
 
@@ -90,13 +89,6 @@ class FeedAcceptRestoreIT {
         String b = service.accept(1L, itemId);
         assertThat(b).isEqualTo(a);
         assertThat(captures.listAll(1L)).hasSize(1);
-    }
-
-    @Test
-    void accept_usesSourceTargetTrack_whenSet() {
-        long tr = tracks.create(1L, "Mine", "custom", "manual").id();
-        sources.update(1L, sid, null, false, tr, false, null, null);
-        assertThat(captures.get(service.accept(1L, itemId)).trackId()).isEqualTo(tr);
     }
 
     @Test

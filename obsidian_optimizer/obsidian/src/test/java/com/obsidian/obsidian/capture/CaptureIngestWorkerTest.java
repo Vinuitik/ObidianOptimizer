@@ -47,17 +47,17 @@ class CaptureIngestWorkerTest {
 
     private static CaptureRepository.Capture url(String id) {
         return new CaptureRepository.Capture(1L, id, "video", "https://youtu.be/" + id, null,
-            id, "queued", null, 0L, null, null, null, 0, null);
+            id, "queued", null, 0L, null, null, 0, null);
     }
 
     private static CaptureRepository.Capture processing(String id) {
         return new CaptureRepository.Capture(1L, id, "video", "https://youtu.be/" + id, null,
-            id, "processing", null, 0L, null, null, null, 0, null);
+            id, "processing", null, 0L, null, null, 0, null);
     }
 
     private static CaptureRepository.Capture deferred(String id, String bundleRef) {
         return new CaptureRepository.Capture(1L, id, "video", "https://youtu.be/" + id, null,
-            id, "deferred", bundleRef, 0L, null, null, null, 0, null);
+            id, "deferred", bundleRef, 0L, null, null, 0, null);
     }
 
     private static Message messageFor(String id, Integer attempt) {

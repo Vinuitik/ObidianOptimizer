@@ -263,24 +263,6 @@ def create_track(title: str, type: str, vault_id: int = 1) -> dict:
     return res.json()
 
 
-def add_track_item(track_id: str, title: str, note_path: str, capture_id: str | None = None,
-                   vault_id: int = 1) -> None:
-    """Append a synthesized note as a track_items row. Called from the async ingest job
-    path (jobs.py) once a note the MCP caller tagged with track_id actually lands — the
-    tool call itself already returned before synthesis finishes, so this can't happen at
-    call time. Best-effort by design: callers swallow failures (a track-tagging hiccup
-    must never sink note delivery, same rule as one-bad-note-in-a-batch elsewhere here).
-
-    capture_id (optional): groups sibling notes from the same job under one
-    track_item_groups row (trackId, captureId) on the Java side."""
-    res = httpx.post(f"{BACKEND_URL}/api/internal/tracks/{track_id}/items", headers=_headers(),
-                     json={"title": title, "notePath": note_path, "captureId": capture_id,
-                           "vaultId": vault_id},
-                     timeout=30)
-    if res.status_code != 200:
-        raise PublishError(f"add_track_item {res.status_code}: {res.text[:300]}")
-
-
 def get_track_items(track_id: str, vault_id: int = 1) -> dict | None:
     """Fetch a Learning Track's title + attached items (GET /api/internal/tracks/{id}/items,
     step 1 of the mini-course feature) — the embedder never carries a session cookie, so

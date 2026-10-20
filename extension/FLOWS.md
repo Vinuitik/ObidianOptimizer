@@ -106,7 +106,7 @@ tools *here*. `background.connectAgentWs()` opens `wss://…/agent-ws?token=<age
 wake (`scheduleAgentReconnect`) / `setConfig` / startup. *To change tools:* `AGENT_TOOLS`.
 
 ## Flow — track picker [REMOVED]
-Popup track picker removed (L3; backend ignores capture-time tagging). `background.js` still threads an optional `trackOpts` (default `{}`) — harmless.
+Popup track picker removed (L3); `background.js` `trackOpts` plumbing and `listTracks` removed (I1) - the extension only captures / subscribes, never touches tracks.
 
 ## Flow — Subscribe to Feed (with preview, P3)
 `popup.js #subscribe-page` opens the form (prefilled with the active tab's URL) → **Preview**

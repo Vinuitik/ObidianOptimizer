@@ -34,7 +34,7 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
            embed_ref: str | None = None, capture_id: str | None = None,
            text: str | None = None, source_type: str | None = None,
            title: str | None = None, resume_bundle: str | None = None,
-           track_id: str | None = None, vault: Vault | None = None) -> dict:
+           vault: Vault | None = None) -> dict:
     vault = vault or Vault.default()    # no vault given = a pre-multi-vault caller = vault 1
     # In-place dedup: never run two jobs for the same (note, embed) at once —
     # the auto-scanner re-fires on every save until the marker lands.
@@ -84,10 +84,6 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
         "force_whisper": force_whisper, "extract_only": extract_only,
         "note_path": note_path, "embed_ref": embed_ref,
         "capture_id": capture_id, "source_type": source_type, "title": title,
-        # MCP-only (tracks/FLOWS.md Phase 1b): ingest_resource(track_id=...) — this route
-        # never touches the Java `capture` table, so there's no capture.track_id to look
-        # up server-side; the tag has to ride on the job itself. None everywhere else.
-        "track_id": track_id,
         "_resolved_path": str(resolved_path) if resolved_path else None,
         "_text": text,
         # Resume mode: skip extraction, load this already-saved bundle, synthesize only
@@ -599,24 +595,6 @@ def _synthesize_and_inject_v2(job: dict, bundle: dict):
     job["capture_id"] = capture_id
 
 
-def _link_track_item(job: dict, title: str, path: str) -> None:
-    """MCP-only fan-out (tracks/FLOWS.md Phase 1b): ingest_resource(track_id=...) tags
-    the JOB, not a capture row (this route never touches the Java `capture` table), so
-    the item append has to happen here, per note, once synthesis actually produces one —
-    unlike the capture-queue path where InternalAgentController links it server-side from
-    capture.track_id. Best-effort: swallow failures, same as the one-bad-note tolerance
-    already used around every publish.create_note() call in this module."""
-    track_id = job.get("track_id")
-    if not track_id:
-        return
-    from ingest import publish
-    try:
-        publish.add_track_item(track_id, title, path, capture_id=job.get("capture_id"),
-                               vault_id=job["vault_id"])
-    except Exception as e:
-        log.warning("track item link failed (track_id=%s, note=%r): %s", track_id, title, e)
-
-
 def _synthesize_and_publish_v2(job: dict, bundle: dict):
     """v2 standalone: one note per Unit into the Inbox staging folder. Reuses v1
     `synthesize.assemble` via a span→segs shim; one bad note never sinks its siblings."""
@@ -683,7 +661,6 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
                                        synthesize.slugify(n.title), note_md,
                                        capture_id=capture_id, vault_id=vault.id)
             created.append(path)
-            _link_track_item(job, n.title, path)
         except Exception as e:  # one bad note must not sink its siblings
             log.warning("v2 note %r failed: %s", n.title, e)
             failures.append({"title": n.title, "error": str(e)[:300]})
@@ -755,7 +732,6 @@ def _synthesize_and_publish(job: dict, bundle: dict):
                                        synthesize.slugify(plan["title"]), note_md,
                                        capture_id=capture_id, vault_id=vault.id)
             created.append(path)
-            _link_track_item(job, plan["title"], path)
         except Exception as e:  # one bad note must not sink its siblings
             log.warning("note %r failed: %s", plan["title"], e)
             failures.append({"title": plan["title"], "error": str(e)[:300]})

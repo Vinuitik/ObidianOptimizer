@@ -34,7 +34,7 @@ public class CaptureRepository {
     public record Capture(long vaultId, String id, String sourceType, String sourceRef,
                           String sourcePath, String title, String status,
                           String bundleRef, long createdAt,
-                          String playlistId, Integer playlistPosition, Long trackId,
+                          String playlistId, Integer playlistPosition,
                           int retryCount, String lastError) {}
 
     @PostConstruct
@@ -60,10 +60,8 @@ public class CaptureRepository {
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS playlist_id TEXT");
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS playlist_position INTEGER");
         jdbc.execute("CREATE INDEX IF NOT EXISTS idx_capture_playlist ON capture(playlist_id)");
-        // track_id: capture-time Learning Track tag (tracks/FLOWS.md Phase 1b). Soft reference
-        // (no FK) by the same convention as note_path/source_path — tracks lives in a separate
-        // repository with its own initSchema(), and Spring gives no ordering guarantee between
-        // @PostConstruct methods in different beans.
+        // track_id: LEGACY capture-time track tag; no longer read or written (I1 — all intake
+        // goes Sources → capture → Inbox, tracks only group existing notes). Column kept.
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS track_id BIGINT");
         // retry_count/last_error: a 'failed' capture (real ingest error, e.g. yt-dlp rejected
         // the URL) used to just sit there until the cleanup sweep silently discarded it 30 min
@@ -124,10 +122,6 @@ public class CaptureRepository {
     /** Tag a capture with the Learning Track its resulting notes should be filed into
      *  (tracks/FLOWS.md Phase 1b) — set right after enqueue, read back by
      *  InternalAgentController.createNote() when each synthesized note lands. */
-    public void setTrackId(String id, long trackId) {
-        jdbc.update("UPDATE capture SET track_id = ? WHERE id = ?", trackId, id);
-    }
-
     /** Mark a capture failed ONLY if it's still processing — so a job that fails after a
      *  successful submit stops being a silent 'processing' strand, without clobbering a
      *  capture the user already filed/acknowledged. Records the real error so the failed-list
@@ -277,13 +271,11 @@ public class CaptureRepository {
     private static Capture map(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         int rawPosition = rs.getInt("playlist_position");
         Integer playlistPosition = rs.wasNull() ? null : rawPosition;
-        long rawTrackId = rs.getLong("track_id");
-        Long trackId = rs.wasNull() ? null : rawTrackId;
         return new Capture(
             rs.getLong("vault_id"), rs.getString("id"), rs.getString("source_type"), rs.getString("source_ref"),
             rs.getString("source_path"), rs.getString("title"), rs.getString("status"),
             rs.getString("bundle_ref"), rs.getLong("created_at"),
-            rs.getString("playlist_id"), playlistPosition, trackId,
+            rs.getString("playlist_id"), playlistPosition,
             rs.getInt("retry_count"), rs.getString("last_error"));
     }
 }

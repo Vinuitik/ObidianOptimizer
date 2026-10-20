@@ -291,8 +291,8 @@ class VaultScopingIT {
         tracks.delete(2, t1.id());                       // wrong vault: no effect
         assertThat(tracks.get(1, t1.id())).isNotNull();
 
-        var s1 = sources.create(1, "rss", "https://same/feed", null, "S", null, null);
-        var s2 = sources.create(2, "rss", "https://same/feed", null, "S", null, null);   // (vault,url) unique
+        var s1 = sources.create(1, "rss", "https://same/feed", null, "S", null);
+        var s2 = sources.create(2, "rss", "https://same/feed", null, "S", null);   // (vault,url) unique
         assertThat(sources.list(1)).extracting("id").containsExactly(s1.id());
         assertThat(sources.getByUrl(2, "https://same/feed").id()).isEqualTo(s2.id());
         assertThat(sources.get(2, s1.id())).isNull();

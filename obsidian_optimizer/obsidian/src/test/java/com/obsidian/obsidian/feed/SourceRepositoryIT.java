@@ -60,7 +60,7 @@ class SourceRepositoryIT {
 
     @Test
     void create_roundTrips_andAutoAcceptDefaultsNull() {
-        var s = repo.create(1L, "rss", "https://a/", "https://a/feed", "A", null, null);
+        var s = repo.create(1L, "rss", "https://a/", "https://a/feed", "A", null);
         assertThat(s.autoAccept()).isNull();
         assertThat(s.status()).isEqualTo("active");
         assertThat(s.lastCheckedAt()).isNull();
@@ -70,28 +70,26 @@ class SourceRepositoryIT {
 
     @Test
     void url_isUnique() {
-        repo.create(1L, "rss", "https://a/", null, "A", null, null);
-        assertThatThrownBy(() -> repo.create(1L, "rss", "https://a/", null, "A2", null, null)).isInstanceOf(Exception.class);
+        repo.create(1L, "rss", "https://a/", null, "A", null);
+        assertThatThrownBy(() -> repo.create(1L, "rss", "https://a/", null, "A2", null)).isInstanceOf(Exception.class);
     }
 
     @Test
     void update_partialAndClearToInherit() {
-        var s = repo.create(1L, "rss", "https://a/", null, "A", true, 5L);
-        var u = repo.update(1L, s.id(), null, false, null, false, "paused", "Renamed");
+        var s = repo.create(1L, "rss", "https://a/", null, "A", true);
+        var u = repo.update(1L, s.id(), null, false, "paused", "Renamed");
         assertThat(u.autoAccept()).isTrue();
-        assertThat(u.targetTrackId()).isEqualTo(5L);
         assertThat(u.status()).isEqualTo("paused");
         assertThat(u.title()).isEqualTo("Renamed");
-        var c = repo.update(1L, s.id(), null, true, null, true, null, null);
+        var c = repo.update(1L, s.id(), null, true, null, null);
         assertThat(c.autoAccept()).isNull();
-        assertThat(c.targetTrackId()).isNull();
     }
 
     @Test
     void listActive_excludesPaused_markCheckedAdvances() {
-        var a = repo.create(1L, "rss", "https://a/", null, "A", null, null);
-        var b = repo.create(1L, "rss", "https://b/", null, "B", null, null);
-        repo.update(1L, b.id(), null, false, null, false, "paused", null);
+        var a = repo.create(1L, "rss", "https://a/", null, "A", null);
+        var b = repo.create(1L, "rss", "https://b/", null, "B", null);
+        repo.update(1L, b.id(), null, false, "paused", null);
         assertThat(repo.listActive(1L)).extracting(SourceRepository.Source::id).containsExactly(a.id());
         Instant now = Instant.now();
         repo.markChecked(a.id(), now);
@@ -100,7 +98,7 @@ class SourceRepositoryIT {
 
     @Test
     void delete_cascadesFeedItems_andPendingCountCounts(@Autowired FeedRepository feed) {
-        var s = repo.create(1L, "rss", "https://a/", null, "A", null, null);
+        var s = repo.create(1L, "rss", "https://a/", null, "A", null);
         feed.insertIfNew(1L, s.id(), "https://a/1", "1", null, null, null);
         feed.insertIfNew(1L, s.id(), "https://a/2", "2", null, null, null);
         assertThat(repo.get(1L, s.id()).pendingCount()).isEqualTo(2);

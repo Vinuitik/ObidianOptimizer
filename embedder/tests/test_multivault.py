@@ -455,9 +455,8 @@ def test_publish_payloads_carry_vault_id(monkeypatch):
     publish.ensure_folder("f", 3)
     publish.store_media("a.png", "AAEC", 3)
     publish.create_track("T", "custom", 3)
-    publish.add_track_item("1", "t", "n.md", vault_id=3)
     publish.create_capture("c", "s", "x", 3)
-    assert len(sent) == 7 and all(b["vaultId"] == 3 for _, _, b in sent)
+    assert len(sent) == 6 and all(b["vaultId"] == 3 for _, _, b in sent)
 
     seen = {}
     monkeypatch.setattr(publish.httpx, "get",
