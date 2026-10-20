@@ -46,14 +46,13 @@ class TrackControllerTest {
     @Mock TrackReviewHandoff reviewHandoff;
     @Mock TrackProgressService progressService;
     @Mock TrackAgentClient trackAgentClient;
-    @Mock com.obsidian.obsidian.feed.FeedController feedController;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         TrackController controller = new TrackController(
-            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, feedController, activeVault);
+            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, activeVault);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -237,15 +236,51 @@ class TrackControllerTest {
     }
 
     @Test
-    void create_withSourceUrl_redirectsToFeed_noTrackCreated() throws Exception {
-        org.mockito.Mockito.doReturn(org.springframework.http.ResponseEntity.ok(java.util.Map.of("id", 7)))
-            .when(feedController).createSource(any());
+    void create_ignoresSourceUrl_plainTrackCreated() throws Exception {
+        Track t = new Track(7L, "Ch", "custom", "active", "manual", null, null, true, Instant.now(), null, null, null);
+        when(trackRepo.create(1L, "Ch", "custom", "manual")).thenReturn(t);
 
         mvc.perform(post("/tracks").contentType("application/json")
-                .content("{\"title\":\"Ch\",\"type\":\"subscription\",\"sourceUrl\":\"https://youtube.com/@x\"}"))
+                .content("{\"title\":\"Ch\",\"sourceUrl\":\"https://youtube.com/@x\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(7));
+    }
 
-        verify(trackRepo, never()).create(org.mockito.ArgumentMatchers.eq(1L), any(), any(), any());
+    @Test
+    void addItem_withoutNotePath_rejected() throws Exception {
+        Track t = new Track(7L, "Ch", "custom", "active", "manual", null, null, true, Instant.now(), null, null, null);
+        when(trackRepo.get(1L, 7L)).thenReturn(t);
+
+        mvc.perform(post("/tracks/7/items").contentType("application/json").content("{\"title\":\"x\"}"))
+            .andExpect(status().isBadRequest());
+
+        verify(trackRepo, never()).addItem(anyLong(), any(), any());
+    }
+
+    @Test
+    void addItem_withNotePath_addsExistingNoteReference() throws Exception {
+        Track t = new Track(7L, "Ch", "custom", "active", "manual", null, null, true, Instant.now(), null, null, null);
+        when(trackRepo.get(1L, 7L)).thenReturn(t);
+
+        mvc.perform(post("/tracks/7/items").contentType("application/json")
+                .content("{\"title\":\"x\",\"notePath\":\"a/x.md\"}"))
+            .andExpect(status().isOk());
+
+        verify(trackRepo).addItem(7L, "x", "a/x.md");
+    }
+
+    @Test
+    void week_returnsDoneAndPlannedPerDay() throws Exception {
+        var item = new TodayPlanService.WeekTrackCount(1L, "T", "custom", 3, 1, 3);
+        var day = new TodayPlanService.WeekDay(java.time.LocalDate.of(2026, 8, 17), "Mon", 4, List.of(item), 1, 3);
+        when(todayPlan.week()).thenReturn(List.of(day));
+
+        mvc.perform(get("/tracks/week"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].done").value(1))
+            .andExpect(jsonPath("$[0].planned").value(3))
+            .andExpect(jsonPath("$[0].items[0].done").value(1))
+            .andExpect(jsonPath("$[0].items[0].planned").value(3))
+            .andExpect(jsonPath("$[0].items[0].count").value(3));
     }
 }

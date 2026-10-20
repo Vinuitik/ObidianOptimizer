@@ -33,7 +33,7 @@ class SourcePollWorkerTest {
 
     static Source src(long id, Boolean auto, Instant lastChecked) {
         return new Source(id, "rss", "https://blog.example/", "https://blog.example/feed.xml", "Blog",
-            auto, null, "active", lastChecked, Instant.now(), 0);
+            auto, "active", lastChecked, Instant.now(), 0);
     }
 
     static Candidate cand(String url) { return new Candidate(url, "T " + url, "2026-08-01T00:00:00Z", "https://i/t.jpg", 60, null); }

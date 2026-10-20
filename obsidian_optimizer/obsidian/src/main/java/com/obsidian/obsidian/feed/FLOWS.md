@@ -4,7 +4,7 @@ Files: SourceRepository.java, FeedRepository.java, FeedService.java, FeedControl
 Tests: SourceRepositoryIT.java, FeedRepositoryIT.java, FeedAcceptRestoreIT.java, SourcePollWorkerTest.java, FeedControllerTest.java
 Embedder: embedder/subscriptions/discover.py (`youtube_feed_url`, `discover_feed`, `discover_page_watch`, `discover_youtube_posts`, `discover`)
 Plan: FLOWS_feed.md (design doc — §0 P0 findings, §2 data model, §3 subscribe flow, "### P1a"/"### P3" scope/contract)
-Related: tracks/FLOWS.md (Passive track via `TrackRepository.getOrCreatePassive()`, Phase 1b tagging),
+Related: tracks/FLOWS.md (tracks group existing notes only; accept never touches tracks, I1),
 capture/FLOWS.md (`CaptureRepository.enqueue`/`cancelQueued`), settings/FLOWS.md (`feedAutoAccept`),
 pwa/FLOWS.md (backend offline export/mailbox — P2), frontend/src/pwa/FLOWS.md (phone offline feed — P2)
 
@@ -49,7 +49,7 @@ right (accept): POST /feed/items/{id}/accept → FeedController.accept() → Fee
   → FeedRepository.claimAccepted(id, captureId)   -- atomic pending|binned → accepted, WHERE status <> 'accepted'
        false (already accepted, incl. concurrent 2nd call) → return the existing captureId (idempotent)
   → true → CaptureRepository.enqueue(captureId, classifyUrl(url), url, null, title)
-         + CaptureRepository.setTrackId(captureId, targetTrackId ?? TrackRepository.getOrCreatePassive().id())
+         (I1: NO track tagging - accept goes capture -> Inbox only; Sources.target_track_id is gone from the API)
          + CaptureIngestWorker.nudge()             -- same ingest path the extension/PWA already use
        enqueue throws → FeedRepository.markPending(id)   -- don't strand an 'accepted' row with no capture
 
@@ -65,7 +65,7 @@ Undo is client-side `restore` of the last decision — no server undo stack (per
 ## Source lifecycle
 
 ```
-POST /feed/sources {url, title?, autoAccept?, targetTrackId?}  → FeedController.createSource()
+POST /feed/sources {url, title?, autoAccept?}  → FeedController.createSource()
   existing source for this exact url → return it (idempotent)
   else: FeedController.resolve(url) — see "Resolve (P3)" below
         !ok → 422 "could not read a feed from that URL"
@@ -74,8 +74,8 @@ POST /feed/sources {url, title?, autoAccept?, targetTrackId?}  → FeedControlle
 
 GET    /feed/sources                → SourceRepository.list()  (includes live pendingCount per source)
 POST   /feed/sources/resolve {url}  → FeedController.resolveSource()  -- preview only, see below
-PATCH  /feed/sources/{id} {autoAccept?, targetTrackId?, status?, title?}
-  -- explicit JSON null for autoAccept/targetTrackId clears to "inherit global" / "inherit Passive track"
+PATCH  /feed/sources/{id} {autoAccept?, status?, title?}
+  -- explicit JSON null for autoAccept clears to "inherit global"; a stray targetTrackId in the body is ignored
 DELETE /feed/sources/{id}           → ON DELETE CASCADE drops its feed_items; already-ingested notes untouched
 POST   /feed/sources/{id}/poll      → SourcePollWorker.pollNowAsync(id)  -- 202, bypasses the interval gate
 ```
@@ -197,7 +197,7 @@ itemUrl, title, publishedAt, thumbUrl, durationS).
 
 ```sql
 sources     (id, kind, url UNIQUE, feed_url, title, auto_accept BOOLEAN NULL /*null=inherit global*/,
-             target_track_id, last_checked_at, created_at, status 'active'|'paused')
+             target_track_id /*LEGACY, unused since I1*/, last_checked_at, created_at, status 'active'|'paused')
              -- kind: 'youtube' | 'rss' | 'page_watch' | 'youtube_posts' (P3; free text, not an enum/CHECK)
 feed_items  (id, source_id → sources ON DELETE CASCADE, item_url UNIQUE, title, thumb_url, duration_s,
              published_at, status 'pending'|'binned'|'accepted', decided_at, capture_id, created_at,
@@ -216,10 +216,10 @@ GET    /feed/items?status=pending|binned|accepted&limit=50
 POST   /feed/items/{id}/accept   → 200 {captureId}        (idempotent)
 POST   /feed/items/{id}/bin      → 204                     (idempotent)
 POST   /feed/items/{id}/restore  → 204 → pending; 409 if the capture already left QUEUED
-GET    /feed/sources             → [{id, kind, url, feedUrl, title, autoAccept|null, targetTrackId, status, lastCheckedAt, pendingCount}]
-POST   /feed/sources {url, autoAccept?, targetTrackId?} → Source
+GET    /feed/sources             → [{id, kind, url, feedUrl, title, autoAccept|null, status, lastCheckedAt, pendingCount}]
+POST   /feed/sources {url, autoAccept?} → Source
 POST   /feed/sources/resolve {url} → {kind, feedUrl, title, preview:[{title,itemUrl,publishedAt,thumbUrl,durationS}]}  [P3, preview only]
-PATCH  /feed/sources/{id} {autoAccept?, targetTrackId?, status?, title?}
+PATCH  /feed/sources/{id} {autoAccept?, status?, title?}
 DELETE /feed/sources/{id}
 POST   /feed/sources/{id}/poll   → 202
 ```
@@ -285,11 +285,11 @@ updating the frontend in the same change.
 | Poll tick / due check | `SourcePollWorker.tick()` / `drain()` |
 | Poll interval (per-source) | `SettingsRepository.getSubscriptionPollIntervalMs()` |
 | Global auto-accept default | `SettingsRepository.isFeedAutoAccept()` (`app_settings.feedAutoAccept`) |
-| Per-source auto-accept / target track | `sources.auto_accept` / `sources.target_track_id` |
+| Per-source auto-accept | `sources.auto_accept` (`sources.target_track_id` column is legacy/unused - I1) |
 | URL normalization / dedup key | `SourcePollWorker.normalizeUrl()` + `feed_items.item_url UNIQUE` |
 | Backlog vs live-item auto-accept gate | `SourcePollWorker.ingestCandidates()` (`backlog` param) |
-| Accept → ingest | `FeedService.accept()` → `CaptureRepository.enqueue`/`setTrackId` |
-| Passive default track | `TrackRepository.getOrCreatePassive()` |
+| Accept → ingest | `FeedService.accept()` → `CaptureRepository.enqueue` (no track tagging, I1) |
+| Passive default track | [REMOVED in I1] `TrackRepository.getOrCreatePassive()` is now unused (left in place); existing "Passive" track rows are untouched |
 | Bin / restore / 409 | `FeedService.bin()`/`restore()` / `CaptureStartedException` |
 | Restore cancels an unclaimed capture | `CaptureRepository.cancelQueued()` |
 | REST surface | `FeedController` (items/sources endpoints) |

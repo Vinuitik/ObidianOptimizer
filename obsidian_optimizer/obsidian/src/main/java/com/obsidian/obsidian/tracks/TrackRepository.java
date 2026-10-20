@@ -10,6 +10,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -270,6 +271,25 @@ public class TrackRepository {
         return jdbc.update(
             "UPDATE track_items SET status = 'done', completed_at = now() WHERE id = ? AND status = 'pending'",
             itemId) > 0;
+    }
+
+    /** Items completed per local day per track over [from, to) - drives the Week badges.
+     *  {@code zone} converts the timestamptz completed_at to the caller's calendar day. */
+    public Map<LocalDate, Map<Long, Integer>> completionsByDay(long vaultId, LocalDate from,
+                                                                LocalDate to, java.time.ZoneId zone) {
+        Map<LocalDate, Map<Long, Integer>> out = new HashMap<>();
+        if (!from.isBefore(to)) return out;
+        jdbc.query("""
+            SELECT (ti.completed_at AT TIME ZONE ?)::date AS day, ti.track_id, COUNT(*) AS n
+            FROM track_items ti JOIN tracks t ON t.id = ti.track_id
+            WHERE t.vault_id = ? AND ti.status = 'done' AND ti.completed_at IS NOT NULL
+              AND (ti.completed_at AT TIME ZONE ?)::date >= ? AND (ti.completed_at AT TIME ZONE ?)::date < ?
+            GROUP BY 1, 2
+            """, rs -> {
+                out.computeIfAbsent(rs.getDate("day").toLocalDate(), k -> new java.util.LinkedHashMap<>())
+                   .put(rs.getLong("track_id"), rs.getInt("n"));
+            }, zone.getId(), vaultId, zone.getId(), java.sql.Date.valueOf(from), zone.getId(), java.sql.Date.valueOf(to));
+        return out;
     }
 
     /** Next N pending items for a track, ordered by position — the read-time allocation

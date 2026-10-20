@@ -60,7 +60,7 @@ class FeedRepositoryIT {
     @BeforeEach
     void clean() {
         jdbc.execute("TRUNCATE feed_items, sources RESTART IDENTITY CASCADE");
-        sid = sources.create(1L, "rss", "https://a/", null, "Blog A", null, null).id();
+        sid = sources.create(1L, "rss", "https://a/", null, "Blog A", null).id();
     }
 
     @Test

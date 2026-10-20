@@ -177,104 +177,58 @@ watch. `FsrsStateWriter.mirror()` no-ops silently if the note has no frontmatter
 (common for a fresh AI-generated/captured note) — the DB row (`note_reviews`) is what
 `/reviews/due` actually queries, so the note surfaces for review regardless.
 
-### Week Flow (L1, IMPLEMENTED)
+### Week Flow (L1 + W1 done/planned, IMPLEMENTED)
 ```
-GET /api/tracks/week → TrackController.week() → TodayPlanService.week(start)
-  pending[track] = countPendingItems for every active track (copy, working set)
-  for i in 0..6: d = start+i; cap = getCapacity(weekday(d))
-      a = allocate(d, mode, cap, ...pending)            // same allocator as Today
-      pending[track] -= a.take                          // assume no completions, consume day by day
-  -> [{date, weekday("Mon"..), capacity, items:[{trackId, trackTitle, trackType, count}]}]
+GET /api/tracks/week[?start=YYYY-MM-DD] -> TrackController.week() -> TodayPlanService.week(start, today)
+  done[day][track] = TrackRepository.completionsByDay(vault, start, min(start+7, today+1), systemZone)
+                     (COUNT of track_items done, grouped by completed_at local date)
+  pending[track]   = countPendingItems for every active track (working copy)
+  for i in 0..6: d = start+i
+      d <  today : items = actual completions only; planned = done          (no re-projection)
+      d == today : a = allocate(...) on remaining pending; planned = done + a.take; done = completions so far
+      d >  today : a = allocate(...); planned = a.take; done = 0; pending[track] -= a.take
+  -> [{date, weekday, capacity, done, planned,
+       items:[{trackId, trackTitle, trackType, count(==planned), done, planned}]}]
 ```
-Frontend: `api/tracks.js fetchWeekPlan()` (no UI yet). Projection only: no persisted plan, mode applies
-to every projected day, deadline pace is recomputed per day from the consumed pending counts.
+To change the done/planned rules: `TodayPlanService.week(LocalDate, LocalDate)`; the completion query:
+`TrackRepository.completionsByDay()`. Timezone = JVM default (`ZoneId.systemDefault()`), same as `LocalDate.now()`.
+Frontend: `api/tracks.js fetchWeekPlan()` (badges are a later frontend milestone). `start` earlier than today
+shows past days as actuals; omit it for today..today+6 (no past days).
 
-## Capture-time track tagging (Phase 1b) — REMOVED (L1)
+## I1 - tracks group EXISTING notes only (IMPLEMENTED)
 
-Backend no longer writes `capture.track_id` from capture requests: `CaptureController.capture()` /
-`captureFile()` / `enqueueCapture()` / `captureFileBytes()` and the mailbox replay ignore any
-`trackId`/`newTrackTitle`/`newTrackType`. The column, `CaptureRepository.setTrackId()` (still used by
-`FeedService.accept()`) and the note->track fan-out (`InternalAgentController.linkToTrack()`) remain.
-Extension / PWA pickers still send these fields until their UI is dropped (L3); they are now ignored.
-The text below is historical.
-
-Goal: tag a capture to a track at the moment of capture, on any surface, without slowing
-the default "just capture it" path. Three surfaces (extension, mobile PWA, MCP) converge
-on two different backend primitives depending on whether the surface goes through the
-Java `capture` table at all.
-
-**Deviation from the original plan doc worth flagging**: the plan speculated a bulk
-`notes_created` callback on job completion. That callback doesn't exist in this codebase —
-standalone notes are published **one at a time**, synchronously, via
-`InternalAgentController.createNote()` (`POST /api/internal/notes`), called once per note
-from Python `publish.create_note()`. The fan-out below hooks that real per-note callback
-instead of inventing a new one.
+Product model: all raw-data intake is Sources -> capture -> ingest -> Inbox. A track never ingests
+anything; it groups notes that already exist and schedules them. Minicourse is kept.
 
 ```
-EXTENSION / PWA (capture-queue path):
-  POST /api/capture {url|text, trackId? | newTrackTitle?+newTrackType?}
-    CaptureController.resolveTrackId(): newTrackTitle set → trackRepo.create() first;
-      else the given trackId; neither → null (untagged, unchanged behavior)
-    captureRepo.enqueue(...) as always, THEN captureRepo.setTrackId(captureId, trackId)
-                                    │
-  CaptureIngestWorker.drain() → IngestClient.submit* → embedder ingest job (async, minutes)
-                                    │
-  embedder synthesis (jobs._synthesize_and_publish[_v2]) calls, per produced note:
-    publish.create_note(folder, title, content, capture_id=capture_id)
-      → POST /api/internal/notes {folder, name, content, captureId}
-        InternalAgentController.createNote():
-          write the note as always, THEN linkToTrack(captureId, name, path):
-            captureRepo.get(captureId).trackId() != null?
-              → trackRepo.addItem(trackId, name, path)   (best-effort, try/catch — a
-                track-tagging hiccup must never fail note delivery)
-
-MCP (never touches the Java capture table — see capture/FLOWS.md "MCP ingest durability
-gap"; track_id has to ride on the embedder job/tool call itself instead):
-  create_track(title, type?)          → POST /api/internal/tracks        → new Track
-  ingest_resource(ref, track_id?)     → ingest_jobs.submit(..., track_id=...)
-    → job dict carries track_id; jobs._link_track_item() called per note produced
-      (parallel to the capture_id-based path above, but self-contained — no Java lookup)
-  create_note(text, track_id?, already_processed=True)   → _stage_note_as_is() calls
-    publish.add_track_item(track_id, title, path) synchronously right after the write
-    (this path is itself synchronous, so no job-dict indirection needed)
+Add to a track:   POST /api/tracks/{id}/items {title, notePath}   TrackController.addItem()
+                    notePath REQUIRED (400 without) -> trackRepo.addItem(id, title, notePath)
+                  To change: TrackController.addItem()
+Create a track:   POST /api/tracks {title, type?}                  TrackController.create()
+                    sourceUrl/sourceType no longer accepted (old Subscribe redirect to feed/ is gone;
+                    subscribe via POST /api/feed/sources)
+MCP:              create_track(title, type?) -> POST /api/internal/tracks (empty track, groups existing notes)
+                  ingest_resource(ref) / create_note(text, ...) have NO track_id param; notes land in the Inbox
+Feed accept:      FeedService.accept() -> captureRepo.enqueue -> Inbox   (no track, no "Passive" track)
+Capture:          capture.track_id never read/written (column kept); InternalAgentController.createNote()
+                  ignores captureId for track purposes; POST /api/internal/tracks/{id}/items DELETED
+Minicourse:       GET /api/internal/tracks/{id}/items -> embedder minicourse.build_course_bundle() reads each
+                  item's notePath off the vault (items without notePath skipped) - works unchanged
 ```
-
-Both `POST /api/internal/tracks` and `POST /api/internal/tracks/{id}/items` are new
-internal-token-gated endpoints on `InternalAgentController` — MCP tool calls never carry
-the session cookie the public `/tracks` endpoints require, so track creation/item-append
-from a conversation needs its own internal mirror (same pattern as every other
-agent-write endpoint in that controller).
-
-**Not implemented** (flagged as extras in the plan doc, not required by its own
-verification checklist): the PWA share-target quick-pick ("Add to track" after a
-fire-and-forget share) and the InboxReview drag-onto-a-track fallback for trackless
-captures. The manual capture form (`CapturePage.jsx`, both Link and Note modes) and the
-extension popup both got the full picker; MCP got `create_track` + `track_id` on
-`ingest_resource`/`create_note`.
-
-## Subscriptions — moved to feed/ (P1a, 2026-10-10)
-
-The 2026-08-26 subscription implementation (a track with `type='subscription'` + `source_url`/
-`source_type`, auto-ingesting every discovered item with no triage) had 0 live rows and has been
-replaced wholesale by the Passive Feed backend. `SubscriptionPollWorker` and `TrackController.pollNow`
-are deleted; `TrackRepository.create()` no longer takes `sourceUrl`/`sourceType`. The legacy
-`tracks.source_url`/`source_type`/`last_checked_at` columns are left in the schema (no live data, no
-destructive migration) but are unused code paths now.
-
-`POST /api/tracks {sourceUrl: "..."}` (old Subscribe button contract, still called by not-yet-updated
-frontend surfaces) is redirected server-side: `TrackController.create()` detects `sourceUrl` and
-forwards to `FeedController.createSource()`, returning a `Source` instead of a `Track`.
-
-See **[feed/FLOWS.md](../feed/FLOWS.md)** for the real poll/accept/bin/restore flows, the data model,
-and the API contract. `TrackAgentClient.java` (the embedder discover HTTP client) still lives here —
-`feed/` depends on it rather than duplicating it.
+Removed: `POST /api/internal/tracks/{id}/items`, `TrackController` sourceUrl redirect,
+`CaptureRepository.setTrackId()`, `Capture.trackId`, `InternalAgentController.linkToTrack()`,
+`SourceRepository.Source.targetTrackId` (+ create/update params), embedder `publish.add_track_item`,
+`jobs._link_track_item`, MCP `track_id` params, extension `listTracks`/`trackOpts`.
+Left (unused, harmless): `TrackRepository.getOrCreatePassive()/getOrCreateGroup()`, the
+`capture.track_id`, `sources.target_track_id`, `track_item_groups` columns/tables, existing "Passive" track rows.
+[NOT IMPLEMENTED] Excel import (`POST /tracks/import/commit`) still creates items with `notePath = null`
+(titles only) - kept for now, flagged as an open product decision.
 
 ## Settings gate (nav visibility only)
 
 `tracksEnabled` (`app_settings`, default `true` — ships live, not behind a flag) controls
 **only** whether the Tracks tab shows in `NavBar` (`tracksOnly` filter, mirrors
-`flashcardsOnly`). Turning it off does not stop capture-time track tagging (Phase 1b) or
-delete any data — `/tracks` stays reachable directly. Toggle: Settings → Learning Tracks.
+`flashcardsOnly`). Turning it off does not delete any data — `/tracks` stays reachable directly. Toggle: Settings → Learning Tracks.
 
 ## Technology Notes
 
@@ -300,13 +254,11 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 - **`reorderItem` is O(track size)** in the worst case (moving item 1→N shifts every sibling
   by one position). Fine at book/course-chapter scale (tens of items); would need a different
   approach (fractional positions, etc.) if tracks ever held thousands of items — not expected.
-- **`capture.track_id` has no FK** (Phase 1b) — same soft-reference convention as
-  `note_path`/`source_path`, but here it's load-bearing on startup ordering too:
-  `CaptureRepository` and `TrackRepository` are separate `@PostConstruct` beans with no
-  guaranteed init order, so a hard FK to `tracks(id)` could fail to create if capture's
-  schema ran first. A stale/deleted track id just means `linkToTrack()`'s `trackRepo.get()`
-  lookup (inside `addItem`, indirectly) errors and is swallowed — the note itself still
-  lands, only the track-item append silently no-ops.
+- **`capture.track_id` / `sources.target_track_id` are dead columns** (I1): kept (no destructive
+  migration), nothing reads or writes them. Old extension/PWA builds may still send
+  `trackId`/`newTrackTitle` on `/capture`; the backend ignores those fields.
+- **Items need a `notePath` but it is a soft reference**: `addItem` checks non-blank, NOT that the
+  file exists (the UI picks from the vault; MCP/curl could pass a typo). Minicourse skips unreadable notes.
 - **`TrackRepository.capacityBetween()` has two callers, deliberately not consolidated
   into one.** `TrackProgressService` calls the real `TrackRepository.capacityBetween()`
   method directly (its Mockito test stubs that method's return value). `TodayPlanService`
@@ -317,12 +269,6 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
   an unstubbed method) instead of running the real summation, silently breaking every
   existing Phase 1c test. Small, deliberate duplication over a shared call that would have
   required rewriting already-passing tests for no behavior change.
-- **Two independent track-tagging paths, deliberately not unified.** The capture-queue
-  path (extension/PWA) looks the track up server-side from `capture.track_id`, keyed by
-  `captureId`, at note-creation time. The MCP path carries `track_id` directly on the
-  embedder job/tool call, because MCP-originated ingest never creates a `capture` row to
-  look anything up from. They converge on the same effect (`trackRepo.addItem`) through
-  different plumbing — see the Phase 1b flow diagram above.
 - **Subscription/feed poll-interval default is seed-once**: `insertDefault("subscriptionsPollIntervalMs")`
   is `ON CONFLICT DO NOTHING`, so changing the code default doesn't touch an existing install's row;
   not exposed in `GET/PUT /settings`. See feed/FLOWS.md for the rest of the poll/dedup/auto-accept
@@ -351,20 +297,16 @@ delete any data — `/tracks` stays reachable directly. Toggle: Settings → Lea
 | Frontend Tracks state | `useStore.js` — `tracks`, `todayItems`, `trackItems`, `trackSchedules` (wiped on logout via `initialDataState()`) |
 | Track item drag-reorder (Manage tab) | `TracksPage.jsx` `TrackItemsEditor` — native HTML5 DnD, position = array index |
 | Unscheduled-track fallback order / capacity math (Today+Week) | `TodayPlanService.allocate()` |
-| 7-day projection | `TodayPlanService.week()`; `GET /api/tracks/week` -> `TrackController.week()`; `api/tracks.js fetchWeekPlan()` |
+| 7-day projection + done/planned badges (W1) | `TodayPlanService.week()` / `week(start, today)` / `TrackRepository.completionsByDay()`; `GET /api/tracks/week` -> `TrackController.week()`; `api/tracks.js fetchWeekPlan()` |
 | Weekly schedule editor | `TracksPage.jsx` `TrackScheduleEditor` — full-replace PUT, budget='' means "not scheduled" |
-| **Phase 1b** — capture.track_id column | `CaptureRepository.initSchema()` / `setTrackId()` |
-| **Phase 1b** — resolve trackId or create-on-the-fly | [REMOVED in L1] `CaptureController.resolveTrackId()` deleted; request params dropped |
-| **Phase 1b** — capture-queue note→track fan-out | `InternalAgentController.createNote()` → `linkToTrack()`; Python side threads `capture_id` through `publish.create_note()` (`ingest/jobs.py` `_synthesize_and_publish[_v2]`) |
-| **Phase 1b** — MCP track creation/item-append (internal, token-gated) | `InternalAgentController.createTrack()` / `addTrackItem()`; Python `publish.create_track()` / `publish.add_track_item()` |
-| **Phase 1b** — MCP tools | `embedder/mcp_tools/write.py` `create_track`, `ingest_resource(track_id=)`, `create_note(track_id=)`; job-side fan-out in `ingest/jobs.py` `_link_track_item()` |
-| **Phase 1b** — extension picker | `extension/popup.html` `#cap-track`; `popup.js` `trackSelection()`/`loadTracks()`; `background.js` `listTracks()` + `trackOpts` threaded through `capture()`/`captureText()`/`routeText()`/`capturePage()`/`escalate()` |
-| **Phase 1b** — PWA picker | `frontend/src/pwa/CapturePage.jsx` (`trackOpts()`); threaded through `offlineApi.js` `captureUrl`/`captureText` and `outbox.js` `enqueueCapture`/`enqueueCaptureText`/`flush()` for offline replay |
+| capture.track_id column (dead since I1) | `CaptureRepository.initSchema()` |
 | **Phase 1d** — Progress query (SQL join + counts) | `TrackRepository.listProgressRows()` |
 | **Phase 1d** — onTrack calc | `TrackProgressService.progress(LocalDate)` / `toProgress()` |
 | **Phase 1d** — shared capacity-window sum | `TrackRepository.capacityBetween()` (public; `TodayPlanService` keeps its own private copy — see Technology Notes) |
 | **Phase 1d** — Progress tab UI | `TracksPage.jsx` `ProgressTab`; card styles in `TracksPage.module.css` `.progressGrid`/`.progressCard*` |
 | Subscriptions (now "Passive Feed") — everything poll/accept/bin/restore/dedup | **[feed/FLOWS.md](../feed/FLOWS.md)** |
-| Legacy Subscribe-button redirect (`sourceUrl` on `POST /tracks`) | `TrackController.create()` |
+| Legacy Subscribe-button redirect (`sourceUrl` on `POST /tracks`) | [REMOVED in I1] `TrackController.create()` |
+| Require notePath on track items (I1) | `TrackController.addItem()` |
+| MCP track creation (internal) | `InternalAgentController.createTrack()`; `publish.create_track()`; `mcp_tools/write.py create_track` |
 | Discover HTTP client (shared with `feed/`) | `TrackAgentClient.discover()` / `Candidate` |
 | Vault scoping (M3) | `TrackRepository` methods take `long vaultId` first; item routes vault-check via `TrackRepository.getItem(vaultId, id)` (items inherit their vault through `tracks`); `TodayPlanService`/`TrackProgressService`/`TrackController` use `activeVault.id()` |

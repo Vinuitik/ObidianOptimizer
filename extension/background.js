@@ -151,28 +151,15 @@ async function login({ username, password }) {
   } catch (e) { return { ok: false, error: String(e) }; }
 }
 
-// ── Learning Tracks (tracks/FLOWS.md Phase 1b) ───────────────────────────────────
-// trackOpts flows straight into the /capture body: { trackId } tags an existing track,
-// { newTrackTitle } creates one on the fly — the backend resolves it (CaptureController.
-// resolveTrackId). Omitted/empty ⇒ today's exact untagged behavior.
-async function listTracks() {
-  try {
-    const res = await obsidian('/tracks');
-    if (res.status === 401) return { ok: false, status: 401 };
-    if (!res.ok) return { ok: false, status: res.status };
-    return { ok: true, tracks: await res.json() };
-  } catch (e) { return { ok: false, error: String(e) }; }
-}
-
 // ── Capture actions ────────────────────────────────────────────────────────────
 // Raw text/markdown → a Capture: the original is kept as a resource and the ingest
 // agent synthesizes proposed notes from it (CAPTURE_ARCH.md). The user amends/files
 // them in the Learn queue — AI never auto-files.
-async function captureText(text, title, trackOpts = {}) {
+async function captureText(text, title) {
   const t = title
     ? sanitizeName(title)
     : sanitizeName(text.split('\n').find(l => l.trim()) || '');
-  const res = await json('/capture', 'POST', { text, title: t, ...trackOpts });
+  const res = await json('/capture', 'POST', { text, title: t});
   if (res.status === 401) return { ok: false, status: 401 };
   if (!res.ok) {
     return handleFailure(res, 'capture_text',
@@ -182,8 +169,8 @@ async function captureText(text, title, trackOpts = {}) {
 }
 
 // A URL → the ingest pipeline (extract → synthesize → Learn inbox).
-async function capture(url, trackOpts = {}) {
-  const res = await json('/capture', 'POST', { url, ...trackOpts });
+async function capture(url) {
+  const res = await json('/capture', 'POST', { url});
   if (res.status === 401) return { ok: false, status: 401 };
   if (res.status === 409) {   // backend duplicate guard — already in the inbox
     let msg = 'Already in your inbox — not capturing it again.';
@@ -256,16 +243,15 @@ async function captureDriveFile(url) {
   return cap.ok ? { ok: true, kind: 'media', detail: `Pulled "${name}" from Drive + generating notes` } : cap;
 }
 
-// Route a single captured string (used by both popup and context menu). trackOpts
-// (tracks/FLOWS.md Phase 1b) — see listTracks()/captureText()/capture() above.
-async function routeText(text, trackOpts = {}) {
+// Route a single captured string (used by both popup and context menu).
+async function routeText(text) {
   if (driveFileId(text)) return captureDriveFile(text.trim());
   const { kind, value } = classify(text);
-  if (kind === 'text') return captureText(value, undefined, trackOpts);
+  if (kind === 'text') return captureText(value, undefined);
 
   // For URLs, always generate notes via /capture. For media/video, also keep a
   // viewable copy in _workspace so it shows up in Learn's player.
-  const captureRes = await capture(value, trackOpts);
+  const captureRes = await capture(value);
   if (!captureRes.ok) return captureRes;
 
   if (kind === 'media') {
@@ -337,8 +323,8 @@ async function scrapeTab(tabId) {
 // Escalate to the agent: hand the raw URL to /capture so the backend ingest pipeline
 // (extract → synthesize) tries its own extraction/download. The fallback when the
 // client-side smart path can't do it (scrape too thin, download failed).
-async function escalate(url, note, trackOpts = {}) {
-  const cap = await capture(url, trackOpts);
+async function escalate(url, note) {
+  const cap = await capture(url);
   if (!cap.ok) return cap;
   return { ok: true, kind: 'agent', detail: note || 'Handed to the agent to extract' };
 }
@@ -347,8 +333,7 @@ async function escalate(url, note, trackOpts = {}) {
 //   youtube/video → download (yt-dlp) + notes   ·   pdf/media → download file + notes
 //   web page      → scrape the RENDERED text and send it as text
 //   anything that fails → escalate to the agent (raw URL → ingest)
-// trackOpts (tracks/FLOWS.md Phase 1b) — see listTracks()/captureText()/capture() above.
-async function capturePage({ url, tabId, ...trackOpts }) {
+async function capturePage({ url, tabId }) {
   if (!url || !URL_RE.test(url)) {
     return { ok: false, error: 'This page can’t be captured (not a web URL).' };
   }
@@ -358,15 +343,15 @@ async function capturePage({ url, tabId, ...trackOpts }) {
   if (kind === 'video') {
     // Just pass the link — the ingest pipeline downloads the video (into resources/, for
     // in-app playback + keyframes) as part of /capture. No separate /download grab.
-    const cap = await capture(value, trackOpts);
+    const cap = await capture(value);
     if (cap.duplicate) return cap;
-    if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL', trackOpts);
+    if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL');
     return { ok: true, kind, detail: 'Generating notes + downloading video for playback' };
   }
   if (kind === 'media') {   // pdf / direct media file — ingest downloads it into resources/
-    const cap = await capture(value, trackOpts);
+    const cap = await capture(value);
     if (cap.duplicate) return cap;
-    if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL', trackOpts);
+    if (!cap.ok) return escalate(value, 'Capture failed — agent will try the URL');
     return { ok: true, kind, detail: 'Generating notes + downloading file' };
   }
 
@@ -374,21 +359,20 @@ async function capturePage({ url, tabId, ...trackOpts }) {
   const scraped = tabId != null ? await scrapeTab(tabId) : null;
   // Capture any embedded video(s) so they get the full ingest (download → resources +
   // transcript + keyframes + bounded clips), same as a direct video capture. Deduped,
-  // capped so a gallery page can't fan out into dozens of jobs; any selected track tags
-  // these too (the whole page capture is one action from the user's point of view).
+  // capped so a gallery page can't fan out into dozens of jobs.
   const foundVideos = [...new Set((scraped?.videos || []).map(normalizeVideoUrl).filter(Boolean))].slice(0, 4);
-  for (const v of foundVideos) await capture(v, trackOpts);
+  for (const v of foundVideos) await capture(v);
 
   const hasText = scraped && (scraped.text || '').length >= MIN_SCRAPE_CHARS;
   if (hasText) {
-    const res = await captureText(scraped.text, scraped.title, trackOpts);
+    const res = await captureText(scraped.text, scraped.title);
     if (foundVideos.length) res.detail = `Notes from page + ${foundVideos.length} embedded video(s)`;
     return res;
   }
   if (foundVideos.length) {
     return { ok: true, kind: 'video', detail: `Captured ${foundVideos.length} embedded video(s) from the page` };
   }
-  return escalate(value, 'Page scrape was thin — agent extracting from the URL', trackOpts);
+  return escalate(value, 'Page scrape was thin — agent extracting from the URL');
 }
 
 // A dropped local file → store in _workspace, then ingest it for notes.
@@ -413,10 +397,9 @@ async function uploadFile({ name, type, dataB64 }) {
 const HANDLERS = {
   checkAuth: () => checkAuth(),
   login,
-  routeText: ({ text, ...trackOpts }) => routeText(text, trackOpts),
+  routeText: ({ text}) => routeText(text),
   capturePage,
   uploadFile,
-  listTracks: () => listTracks(),
   subscribeSource,
   resolveSource,
   getConfig: () => getConfig(),

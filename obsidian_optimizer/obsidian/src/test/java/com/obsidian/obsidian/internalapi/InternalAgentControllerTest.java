@@ -7,7 +7,6 @@ import com.obsidian.obsidian.settings.SettingsRepository;
 import com.obsidian.obsidian.tracks.TrackRepository;
 import com.obsidian.obsidian.tracks.TrackRepository.Track;
 import com.obsidian.obsidian.tracks.TrackRepository.TrackItem;
-import com.obsidian.obsidian.tracks.TrackRepository.TrackItemGroup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -98,18 +97,12 @@ class InternalAgentControllerTest {
             .andExpect(status().isNotFound());
     }
 
-    // ── linkToTrack (via createNote) — group-aware item add (Step 3a) ──────────
+    // ── I1: raw intake no longer attaches to tracks ─────────────────────────────
 
     @Test
-    void createNote_captureHasTrackId_createsGroupThenAddsItemWithGroupId() throws Exception {
+    void createNote_withCaptureId_neverTouchesTracks() throws Exception {
         activeVault.set(1L, java.nio.file.Path.of(String.valueOf("/tmp")));
         when(fileRepository.createNote(1L, "/tmp", "Note1")).thenReturn("/tmp/Note1.md");
-        CaptureRepository.Capture cap = new CaptureRepository.Capture(1L, 
-            "cap-1", "video", "https://example.com/v1", null, "My Video", "processing",
-            null, 0L, null, null, 7L, 0, null);
-        when(captureRepo.get("cap-1")).thenReturn(cap);
-        TrackItemGroup group = new TrackItemGroup(50L, 7L, "My Video", "https://example.com/v1", Instant.now());
-        when(trackRepo.getOrCreateGroup(1L, 7L, "cap-1", "My Video", "https://example.com/v1")).thenReturn(group);
 
         mvc.perform(post("/api/internal/notes")
                 .header("X-Internal-Token", TOKEN)
@@ -117,64 +110,17 @@ class InternalAgentControllerTest {
                 .content("{\"folder\":\"\",\"name\":\"Note1\",\"content\":\"hi\",\"captureId\":\"cap-1\"}"))
             .andExpect(status().isOk());
 
-        verify(trackRepo).getOrCreateGroup(1L, 7L, "cap-1", "My Video", "https://example.com/v1");
-        verify(trackRepo).addItem(7L, "Note1", "/tmp/Note1.md", 50L);
+        org.mockito.Mockito.verifyNoInteractions(trackRepo);
     }
 
     @Test
-    void createNote_captureHasNoTrackId_neitherGroupNorItemTouched() throws Exception {
-        activeVault.set(1L, java.nio.file.Path.of(String.valueOf("/tmp")));
-        when(fileRepository.createNote(1L, "/tmp", "Note1")).thenReturn("/tmp/Note1.md");
-        CaptureRepository.Capture cap = new CaptureRepository.Capture(1L, 
-            "cap-2", "video", "https://example.com/v2", null, "Other Video", "processing",
-            null, 0L, null, null, null, 0, null);
-        when(captureRepo.get("cap-2")).thenReturn(cap);
-
-        mvc.perform(post("/api/internal/notes")
-                .header("X-Internal-Token", TOKEN)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"folder\":\"\",\"name\":\"Note1\",\"content\":\"hi\",\"captureId\":\"cap-2\"}"))
-            .andExpect(status().isOk());
-
-        verify(trackRepo, never()).getOrCreateGroup(org.mockito.ArgumentMatchers.eq(1L), anyLong(), anyString(), anyString(), any());
-        verify(trackRepo, never()).addItem(anyLong(), anyString(), anyString(), any());
-    }
-
-    // ── POST /tracks/{id}/items (MCP-facing, Step 3a) ───────────────────────────
-
-    @Test
-    void addTrackItem_withCaptureId_createsGroupThenAddsItemWithGroupId() throws Exception {
-        when(trackRepo.get(1L, 7L)).thenReturn(
-            new Track(7L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(), null, null, null));
-        CaptureRepository.Capture cap = new CaptureRepository.Capture(1L, 
-            "cap-1", "video", "https://example.com/v1", null, "My Video", "processing",
-            null, 0L, null, null, 7L, 0, null);
-        when(captureRepo.get("cap-1")).thenReturn(cap);
-        TrackItemGroup group = new TrackItemGroup(50L, 7L, "My Video", "https://example.com/v1", Instant.now());
-        when(trackRepo.getOrCreateGroup(1L, 7L, "cap-1", "My Video", "https://example.com/v1")).thenReturn(group);
-
+    void postTrackItems_endpointRemoved() throws Exception {
         mvc.perform(post("/api/internal/tracks/7/items")
                 .header("X-Internal-Token", TOKEN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"Chapter 1\",\"notePath\":\"vault/Ch1.md\",\"captureId\":\"cap-1\"}"))
-            .andExpect(status().isOk());
+            .andExpect(status().isMethodNotAllowed());
 
-        verify(trackRepo).getOrCreateGroup(1L, 7L, "cap-1", "My Video", "https://example.com/v1");
-        verify(trackRepo).addItem(7L, "Chapter 1", "vault/Ch1.md", 50L);
-    }
-
-    @Test
-    void addTrackItem_withoutCaptureId_usesThreeArgAddItem_noGroupTouched() throws Exception {
-        when(trackRepo.get(1L, 7L)).thenReturn(
-            new Track(7L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(), null, null, null));
-
-        mvc.perform(post("/api/internal/tracks/7/items")
-                .header("X-Internal-Token", TOKEN)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"title\":\"Chapter 1\",\"notePath\":\"vault/Ch1.md\"}"))
-            .andExpect(status().isOk());
-
-        verify(trackRepo).addItem(7L, "Chapter 1", "vault/Ch1.md");
-        verify(trackRepo, never()).getOrCreateGroup(org.mockito.ArgumentMatchers.eq(1L), anyLong(), anyString(), anyString(), any());
+        verify(trackRepo, never()).addItem(anyLong(), anyString(), anyString(), any());
     }
 }

@@ -449,4 +449,54 @@ class TodayPlanServiceTest {
         assertThat(week.get(0).items().get(0).trackTitle()).isEqualTo("T1");
         assertThat(week.get(2).items().get(0).trackId()).isEqualTo(2); // small exhausted
     }
+
+    // ── W1: done + planned per day ───────────────────────────────────────────────
+
+    @Test
+    void week_pastDoneActual_todayDonePlusRemaining_futurePlannedOnly() {
+        LocalDate mon = LocalDate.of(2026, 8, 17);
+        LocalDate wed = mon.plusDays(2);
+        Track t = prioTrack(1, "must", 2);
+        when(trackRepo.listActive(1L)).thenReturn(List.of(t));
+        when(trackRepo.listAll(1L)).thenReturn(List.of(t));
+        when(trackRepo.getCapacity(anyInt())).thenReturn(2.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(100);
+        when(trackRepo.completionsByDay(eq(1L), eq(mon), eq(wed.plusDays(1)), any())).thenReturn(Map.of(
+            mon, Map.of(1L, 3),          // past: 3 actually done
+            wed, Map.of(1L, 1)));        // today: 1 done so far
+
+        List<TodayPlanService.WeekDay> week = service.week(mon, wed);
+
+        var past = week.get(0);
+        assertThat(past.done()).isEqualTo(3);
+        assertThat(past.planned()).isEqualTo(3);                       // actuals, not the 2/day capacity
+        assertThat(past.items().get(0).done()).isEqualTo(3);
+        assertThat(week.get(1).items()).isEmpty();                     // past day with no completions
+        var today = week.get(2);
+        assertThat(today.done()).isEqualTo(1);
+        assertThat(today.planned()).isEqualTo(3);                      // 1 done + 2 still allocated
+        assertThat(today.items().get(0).planned()).isEqualTo(3);
+        var future = week.get(3);
+        assertThat(future.done()).isZero();
+        assertThat(future.planned()).isEqualTo(2);
+        assertThat(future.items().get(0).done()).isZero();
+        assertThat(future.items().get(0).count()).isEqualTo(2);        // count == planned (compat)
+    }
+
+    @Test
+    void week_todayWithOnlyDoneItems_stillShowsDoneBadge() {
+        LocalDate mon = LocalDate.of(2026, 8, 17);
+        Track t = prioTrack(1, "must", 2);
+        when(trackRepo.listActive(1L)).thenReturn(List.of(t));
+        when(trackRepo.listAll(1L)).thenReturn(List.of(t));
+        when(trackRepo.getCapacity(anyInt())).thenReturn(2.0);
+        when(trackRepo.countPendingItems(1)).thenReturn(0);            // everything finished
+        when(trackRepo.completionsByDay(eq(1L), eq(mon), eq(mon.plusDays(1)), any()))
+            .thenReturn(Map.of(mon, Map.of(1L, 2)));
+
+        var today = service.week(mon, mon).get(0);
+
+        assertThat(today.done()).isEqualTo(2);
+        assertThat(today.planned()).isEqualTo(2);
+    }
 }

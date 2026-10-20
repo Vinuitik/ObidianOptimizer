@@ -35,7 +35,7 @@ public class FeedController {
         this.trackAgentClient = trackAgentClient;
     }
 
-    public record CreateSourceRequest(String url, String title, Boolean autoAccept, Long targetTrackId) {}
+    public record CreateSourceRequest(String url, String title, Boolean autoAccept) {}
 
     // ── Items ────────────────────────────────────────────────────────────────
 
@@ -92,7 +92,7 @@ public class FeedController {
         Resolved r = resolve(url);
         if (r == null) return ResponseEntity.unprocessableEntity().body("could not read a feed from that URL");
         String title = (req.title() != null && !req.title().isBlank()) ? req.title().trim() : defaultTitle(url);
-        Source s = sourceRepo.create(activeVault.id(), r.kind(), url, r.feedUrl(), title, req.autoAccept(), req.targetTrackId());
+        Source s = sourceRepo.create(activeVault.id(), r.kind(), url, r.feedUrl(), title, req.autoAccept());
         pollWorker.ingestCandidates(activeVault.id(), s, r.candidates(), true);
         return ResponseEntity.ok(sourceRepo.get(activeVault.id(), s.id()));
     }
@@ -144,7 +144,6 @@ public class FeedController {
     public ResponseEntity<?> patchSource(@PathVariable long id, @RequestBody Map<String, Object> body) {
         if (sourceRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
         Boolean auto = body.get("autoAccept") instanceof Boolean b ? b : null;
-        Long track = body.get("targetTrackId") instanceof Number n ? n.longValue() : null;
         String status = body.get("status") instanceof String s ? s : null;
         if (status != null && !status.equals("active") && !status.equals("paused")) {
             return ResponseEntity.badRequest().body("status must be active|paused");
@@ -152,7 +151,6 @@ public class FeedController {
         String title = body.get("title") instanceof String t && !t.isBlank() ? t.trim() : null;
         return ResponseEntity.ok(sourceRepo.update(activeVault.id(), id,
             auto, body.containsKey("autoAccept") && body.get("autoAccept") == null,
-            track, body.containsKey("targetTrackId") && body.get("targetTrackId") == null,
             status, title));
     }
 

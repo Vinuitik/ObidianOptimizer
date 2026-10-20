@@ -1,6 +1,5 @@
 package com.obsidian.obsidian.tracks;
 
-import com.obsidian.obsidian.feed.FeedController;
 import com.obsidian.obsidian.tracks.TodayPlanService.TodayPlan;
 import com.obsidian.obsidian.tracks.TrackRepository.Track;
 import com.obsidian.obsidian.tracks.TrackRepository.TrackItem;
@@ -25,11 +24,10 @@ public class TrackController {
     private final TrackReviewHandoff reviewHandoff;
     private final TrackProgressService progressService;
     private final TrackAgentClient trackAgentClient;
-    private final FeedController feedController;
 
     TrackController(TrackRepository trackRepo, TodayPlanService todayPlan,
                     TrackReviewHandoff reviewHandoff, TrackProgressService progressService,
-                    TrackAgentClient trackAgentClient, FeedController feedController,
+                    TrackAgentClient trackAgentClient,
             com.obsidian.obsidian.vaults.ActiveVault activeVault) {
         this.activeVault = activeVault;
         this.trackRepo = trackRepo;
@@ -37,7 +35,6 @@ public class TrackController {
         this.reviewHandoff = reviewHandoff;
         this.progressService = progressService;
         this.trackAgentClient = trackAgentClient;
-        this.feedController = feedController;
     }
 
     // ── Tracks ───────────────────────────────────────────────────────────────
@@ -51,12 +48,6 @@ public class TrackController {
     public ResponseEntity<?> create(@RequestBody CreateTrackRequest req) {
         if (req.title() == null || req.title().isBlank()) {
             return ResponseEntity.badRequest().body("title is required");
-        }
-        // Legacy Subscribe path (extension / PWA / TracksPage): subscriptions moved to the
-        // Passive Feed — redirect to feed/ and return the Source instead of creating a track.
-        if (req.sourceUrl() != null && !req.sourceUrl().isBlank()) {
-            return feedController.createSource(new FeedController.CreateSourceRequest(
-                req.sourceUrl(), req.title(), null, null));
         }
         String type = req.type() == null || req.type().isBlank() ? "custom" : req.type();
         return ResponseEntity.ok(trackRepo.create(activeVault.id(), req.title().trim(), type, "manual"));
@@ -97,7 +88,11 @@ public class TrackController {
         if (req.title() == null || req.title().isBlank()) {
             return ResponseEntity.badRequest().body("title is required");
         }
-        return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath()));
+        // Tracks group EXISTING notes only — raw intake goes Sources → capture → Inbox.
+        if (req.notePath() == null || req.notePath().isBlank()) {
+            return ResponseEntity.badRequest().body("notePath is required (items reference existing notes)");
+        }
+        return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath().trim()));
     }
 
     @PatchMapping("items/{itemId}")
@@ -162,9 +157,11 @@ public class TrackController {
         return todayPlan.today();
     }
 
+    /** Optional {@code start} (ISO date): earlier than today shows past days as actual completions. */
     @GetMapping("week")
-    public List<TodayPlanService.WeekDay> week() {
-        return todayPlan.week();
+    public List<TodayPlanService.WeekDay> week(@RequestParam(value = "start", required = false) String start) {
+        return start == null || start.isBlank() ? todayPlan.week()
+            : todayPlan.week(LocalDate.parse(start), LocalDate.now());
     }
 
     // ── Progress (Phase 1d) ────────────────────────────────────────────────────
@@ -258,7 +255,7 @@ public class TrackController {
 
     // ── DTOs ─────────────────────────────────────────────────────────────────
 
-    record CreateTrackRequest(String title, String type, String sourceUrl, String sourceType) {}
+    record CreateTrackRequest(String title, String type) {}
     record UpdateTrackRequest(String title, String type, String status, String deadline,
                               String priority, Boolean includeInProgress, Boolean clearDeadline) {}
     record AddItemRequest(String title, String notePath) {}

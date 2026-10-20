@@ -29,7 +29,7 @@ public class SourceRepository {
 
     /** {@code autoAccept} null = inherit the global {@code feedAutoAccept} setting. */
     public record Source(long id, String kind, String url, String feedUrl, String title,
-                         Boolean autoAccept, Long targetTrackId, String status,
+                         Boolean autoAccept, String status,
                          Instant lastCheckedAt, Instant createdAt, int pendingCount) {}
 
     @PostConstruct
@@ -42,7 +42,7 @@ public class SourceRepository {
               feed_url        TEXT,
               title           TEXT,
               auto_accept     BOOLEAN,
-              target_track_id BIGINT,
+              target_track_id BIGINT,   -- LEGACY: unused since I1 (accept never attaches to a track)
               last_checked_at TIMESTAMPTZ,
               created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
               status          TEXT NOT NULL DEFAULT 'active'
@@ -60,11 +60,11 @@ public class SourceRepository {
         """;
 
     public Source create(long vaultId, String kind, String url, String feedUrl, String title,
-                         Boolean autoAccept, Long targetTrackId) {
+                         Boolean autoAccept) {
         long id = jdbc.queryForObject("""
-            INSERT INTO sources(kind, url, feed_url, title, auto_accept, target_track_id, vault_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
-            """, Long.class, kind, url, feedUrl, title, autoAccept, targetTrackId, vaultId);
+            INSERT INTO sources(kind, url, feed_url, title, auto_accept, vault_id)
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+            """, Long.class, kind, url, feedUrl, title, autoAccept, vaultId);
         return get(vaultId, id);
     }
 
@@ -86,14 +86,12 @@ public class SourceRepository {
         return jdbc.query(SELECT + " WHERE s.vault_id = ? AND s.status = 'active' ORDER BY s.id", SourceRepository::map, vaultId);
     }
 
-    /** Partial update — null fields unchanged. {@code clearAutoAccept}/{@code clearTargetTrack}
-     *  reset to "inherit" (the PATCH body sent an explicit null). */
+    /** Partial update — null fields unchanged. {@code clearAutoAccept}
+     *  resets to "inherit" (the PATCH body sent an explicit null). */
     public Source update(long vaultId, long id, Boolean autoAccept, boolean clearAutoAccept,
-                         Long targetTrackId, boolean clearTargetTrack, String status, String title) {
+                         String status, String title) {
         if (clearAutoAccept) jdbc.update("UPDATE sources SET auto_accept = NULL WHERE id = ?", id);
         else if (autoAccept != null) jdbc.update("UPDATE sources SET auto_accept = ? WHERE id = ?", autoAccept, id);
-        if (clearTargetTrack) jdbc.update("UPDATE sources SET target_track_id = NULL WHERE id = ?", id);
-        else if (targetTrackId != null) jdbc.update("UPDATE sources SET target_track_id = ? WHERE id = ?", targetTrackId, id);
         if (status != null) jdbc.update("UPDATE sources SET status = ? WHERE id = ?", status, id);
         if (title != null) jdbc.update("UPDATE sources SET title = ? WHERE id = ?", title, id);
         return get(vaultId, id);
@@ -118,7 +116,7 @@ public class SourceRepository {
         Boolean auto = (Boolean) rs.getObject("auto_accept");
         return new Source(rs.getLong("id"), rs.getString("kind"), rs.getString("url"),
             rs.getString("feed_url"), rs.getString("title"), auto,
-            (Long) rs.getObject("target_track_id"), rs.getString("status"),
+            rs.getString("status"),
             checked == null ? null : checked.toInstant(), rs.getTimestamp("created_at").toInstant(),
             rs.getInt("pending_count"));
     }

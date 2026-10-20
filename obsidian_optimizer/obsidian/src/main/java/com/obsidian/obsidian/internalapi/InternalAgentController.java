@@ -85,10 +85,7 @@ public class InternalAgentController {
     }
 
     /** Create a note with full content. folder is vault-relative ("" = vault root).
-     *  captureId (optional): when the producing capture row is tagged with a Learning
-     *  Track (tracks/FLOWS.md Phase 1b — capture.track_id, set via CaptureController's
-     *  extension/PWA capture-time picker), the note is also appended as a track_items row.
-     *  Best-effort: a track-tagging hiccup must never fail note delivery. */
+     *  captureId is accepted for compatibility but no longer links the note to a track. */
     @PostMapping("/notes")
     public ResponseEntity<?> createNote(@RequestHeader(value = "X-Internal-Token", required = false) String token,
                                         @RequestBody CreateNoteRequest req) {
@@ -99,24 +96,9 @@ public class InternalAgentController {
             String path = fileRepository.createNote(vid, absFolder, req.name());
             fileRepository.updateNote(vid, path, req.content());
             log.info("[internal.createNote] agent created {} (vault {})", path, vid);
-            linkToTrack(req.captureId(), req.name(), path);
             return ResponseEntity.ok(Map.of("path", path));
         } catch (IOException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
-        }
-    }
-
-    private void linkToTrack(String captureId, String noteTitle, String notePath) {
-        if (captureId == null || captureId.isBlank()) return;
-        try {
-            CaptureRepository.Capture cap = captureRepo.get(captureId);
-            if (cap != null && cap.trackId() != null) {
-                String groupTitle = (cap.title() != null && !cap.title().isBlank()) ? cap.title() : cap.sourceRef();
-                long groupId = trackRepo.getOrCreateGroup(cap.vaultId(), cap.trackId(), captureId, groupTitle, cap.sourceRef()).id();
-                trackRepo.addItem(cap.trackId(), noteTitle, notePath, groupId);
-            }
-        } catch (Exception e) {
-            log.warn("[internal.createNote] track link failed for capture {}: {}", captureId, e.toString());
         }
     }
 
@@ -133,30 +115,6 @@ public class InternalAgentController {
         }
         String type = (req.type() == null || req.type().isBlank()) ? "custom" : req.type();
         return ResponseEntity.ok(trackRepo.create(vaultOf(req.vaultId()), req.title().trim(), type, "manual"));
-    }
-
-    /** MCP-originated track item append (ingest_resource/create_note with track_id — the
-     *  async-job path, where the note lands well after the tool call returns, so the
-     *  embedder appends the item itself once synthesis actually produces the note). */
-    @PostMapping("/tracks/{id}/items")
-    public ResponseEntity<?> addTrackItem(@RequestHeader(value = "X-Internal-Token", required = false) String token,
-                                          @PathVariable long id,
-                                          @RequestBody AddTrackItemRequest req) {
-        if (badToken(token)) return unauthorized();
-        long vid = vaultOf(req.vaultId());
-        if (trackRepo.get(vid, id) == null) return ResponseEntity.notFound().build();
-        if (req.title() == null || req.title().isBlank()) {
-            return ResponseEntity.badRequest().body("title is required");
-        }
-        if (req.captureId() == null || req.captureId().isBlank()) {
-            return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath()));
-        }
-        CaptureRepository.Capture cap = captureRepo.get(req.captureId());
-        String groupTitle = (cap != null && cap.title() != null && !cap.title().isBlank())
-            ? cap.title() : req.title().trim();
-        String sourceUrl = cap != null ? cap.sourceRef() : null;
-        long groupId = trackRepo.getOrCreateGroup(vid, id, req.captureId(), groupTitle, sourceUrl).id();
-        return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath(), groupId));
     }
 
     /** Mini-course generation (step 1): the embedder reads a track's title + existing
@@ -275,5 +233,4 @@ public class InternalAgentController {
     record StoreMediaRequest(String filename, String dataB64, Long vaultId) {}
     record CreateCaptureRequest(String captureId, String sourceRef, String content, Long vaultId) {}
     record CreateTrackRequest(String title, String type, Long vaultId) {}
-    record AddTrackItemRequest(String title, String notePath, String captureId, Long vaultId) {}
 }

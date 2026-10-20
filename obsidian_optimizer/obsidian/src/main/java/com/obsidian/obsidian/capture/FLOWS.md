@@ -14,15 +14,12 @@ RabbitMQ's own durability are what survive a restart.
 ## Intake → outbox → RabbitMQ → submit → notes
 
 ```
-POST /api/capture {url|text, title?, trackId?|newTrackTitle?+newTrackType?}
-                                                              CaptureController.capture()
-  resolveTrackId(): newTrackTitle set → trackRepo.create() first; else the given trackId;
-    neither → null (untagged — today's exact behavior). See tracks/FLOWS.md Phase 1b.
+POST /api/capture {url|text, title?}                          CaptureController.capture()
+  (trackId/newTrackTitle in old clients' bodies are ignored - I1: capture never touches tracks)
   text → storeTextResource() writes resources/files/{id}.md  (kept for Learn side-by-side)
   enqueueAndPublish(id, type, ref, sourcePath, title)   TransactionTemplate, ONE transaction:
     captureRepo.enqueue(...)                              → row status = 'queued'
     outboxRepo.enqueue(CAPTURE_QUEUE, {id})                → outbox row, published on commit
-  trackId resolved → captureRepo.setTrackId(id, trackId)     → capture.track_id set
   ingestWorker.nudge()                             → ALSO trigger the poll safety net now
     (deliberately redundant with the outbox publish above — claim() is atomic so whichever
     path (Rabbit listener or this poll) reaches the row first wins; the other is a no-op)
@@ -67,13 +64,6 @@ CaptureIngestWorker — TWO paths into the same processCapture() body:
     4xx       → deadLetter(id, err)    straight to capture.deadletter — NO ladder (retry won't help)
     5xx/down  → next rung, or deadLetter(id, err) if the ladder (3 rungs) is exhausted
 
-Per-note track fan-out (Phase 1b, capture.track_id set)          jobs.py + InternalAgentController
-  embedder synthesis, per note produced:
-    publish.create_note(folder, title, content, capture_id=capture_id)
-      → POST /api/internal/notes {folder, name, content, captureId}
-        InternalAgentController.createNote(): write note as always, then linkToTrack():
-          captureRepo.get(captureId).trackId() != null → trackRepo.addItem(trackId, name, path)
-          (best-effort — a track-tagging hiccup never fails note delivery)
 ```
 
 To change drain cadence: `ingest.capture.delay-ms` (tick) / `ingest.capture.batch-limit`.
@@ -264,5 +254,5 @@ line that isn't.
 | **Playlist URL detection** | `CaptureController.isPlaylistUrl()` (`PLAYLIST_PATH`/`LIST_PARAM` regexes, video-host gated) |
 | **Playlist expansion (list-only, no download)** | `CaptureController.capturePlaylist()` → embedder `POST /playlist/expand` → `download/downloader.list_playlist_entries` (embedder `FLOWS.md`) |
 | **Playlist row insert** | `CaptureRepository.enqueuePlaylistItem(id, type, ref, path, title, playlistId, position)`; columns `playlist_id`/`playlist_position` |
-| **Capture-time track tag** (Phase 1b) | `capture.track_id` column; `CaptureController.resolveTrackId()`; `CaptureRepository.setTrackId()`; fan-out on note creation via `InternalAgentController.linkToTrack()` — see tracks/FLOWS.md |
+| **Capture-time track tag** (Phase 1b) | [REMOVED in I1] `capture.track_id` column left in `CaptureRepository.initSchema()` but never read/written; `setTrackId()`, `Capture.trackId`, `linkToTrack()` deleted |
 | Vault scoping (M3) | `CaptureRepository` methods take `long vaultId` first; `Capture.vaultId` is read by `CaptureIngestWorker` for per-capture work (notes lookup, text-resource root via `ActiveVault.rootFor`); worklists (`findQueued`/`findDeferred`/`findStaleActive`) = `activeVault.id()`; `CaptureController` passes `activeVault.id()` |
