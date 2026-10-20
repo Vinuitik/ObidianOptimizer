@@ -49,6 +49,7 @@ public class SourceRepository {
             )
             """);
         jdbc.execute("ALTER TABLE sources ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE sources ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapUnique(jdbc, "sources", "url", "vault_id, url");
     }
 

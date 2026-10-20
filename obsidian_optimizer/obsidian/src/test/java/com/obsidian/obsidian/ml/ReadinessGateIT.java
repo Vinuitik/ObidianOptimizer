@@ -82,7 +82,7 @@ class ReadinessGateIT {
     /** Insert a note with distinct content_hash and body_hash. */
     private void insertNote(String path, String contentHash, String bodyHash, LocalDate srDue, boolean pending) {
         jdbc.update(
-            "INSERT INTO notes(path, title, modified_at, content_hash, body_hash, sr_due, ingest_pending) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO notes(path, title, modified_at, content_hash, body_hash, sr_due, ingest_pending, vault_id) VALUES (?,?,?,?,?,?,?,1)",
             path, path.substring(path.lastIndexOf('/') + 1), System.currentTimeMillis(),
             contentHash, bodyHash, srDue == null ? null : Date.valueOf(srDue), pending);
     }
@@ -90,14 +90,14 @@ class ReadinessGateIT {
     /** Simulate a generated, ACTIVE card whose source_hash is the note's body_hash. */
     private void insertCard(String path, String sourceHash) {
         jdbc.update(
-            "INSERT INTO cards(note_path, type, payload, difficulty, card_hash, source_hash, status) " +
-            "VALUES (?,?,?::jsonb,?,?,?,?)",
+            "INSERT INTO cards(note_path, type, payload, difficulty, card_hash, source_hash, status, vault_id) " +
+            "VALUES (?,?,?::jsonb,?,?,?,?,1)",
             path, "mcq", "{}", 1, "card-" + sourceHash, sourceHash, "ACTIVE");
     }
 
     private void insertImageJob(String notePath, String imagePath, String status) {
         jdbc.update(
-            "INSERT INTO pending_image_jobs(note_path, image_path, status) VALUES (?,?,?)",
+            "INSERT INTO pending_image_jobs(note_path, image_path, status, vault_id) VALUES (?,?,?,1)",
             notePath, imagePath, status);
     }
 

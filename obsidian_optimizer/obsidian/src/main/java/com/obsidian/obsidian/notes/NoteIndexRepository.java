@@ -77,6 +77,7 @@ public class NoteIndexRepository {
         jdbc.execute(
             "CREATE INDEX IF NOT EXISTS idx_notes_capture_id ON notes(capture_id)");
         jdbc.execute("ALTER TABLE notes ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE notes ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapPrimaryKey(jdbc, "notes", "path");
     }
 

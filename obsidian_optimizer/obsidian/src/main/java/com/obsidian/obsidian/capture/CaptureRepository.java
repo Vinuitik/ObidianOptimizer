@@ -73,6 +73,7 @@ public class CaptureRepository {
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0");
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS last_error TEXT");
         jdbc.execute("ALTER TABLE capture ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE capture ALTER COLUMN vault_id DROP DEFAULT");
     }
 
     public void create(long vaultId, String id, String sourceType, String sourceRef,

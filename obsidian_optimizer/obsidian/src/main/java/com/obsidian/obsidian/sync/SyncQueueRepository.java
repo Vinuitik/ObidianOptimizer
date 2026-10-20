@@ -44,6 +44,7 @@ public class SyncQueueRepository {
                 CHECK (status IN ('PENDING','DONE','FAILED','DELETE_PENDING'))
             """);
         jdbc.execute("ALTER TABLE sync_queue ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
+        jdbc.execute("ALTER TABLE sync_queue ALTER COLUMN vault_id DROP DEFAULT");
         VaultKeys.swapPrimaryKey(jdbc, "sync_queue", "path");
     }
 
