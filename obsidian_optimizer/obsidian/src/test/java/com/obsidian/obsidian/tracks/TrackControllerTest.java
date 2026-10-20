@@ -268,4 +268,19 @@ class TrackControllerTest {
 
         verify(trackRepo).addItem(7L, "x", "a/x.md");
     }
+
+    @Test
+    void week_returnsDoneAndPlannedPerDay() throws Exception {
+        var item = new TodayPlanService.WeekTrackCount(1L, "T", "custom", 3, 1, 3);
+        var day = new TodayPlanService.WeekDay(java.time.LocalDate.of(2026, 8, 17), "Mon", 4, List.of(item), 1, 3);
+        when(todayPlan.week()).thenReturn(List.of(day));
+
+        mvc.perform(get("/tracks/week"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].done").value(1))
+            .andExpect(jsonPath("$[0].planned").value(3))
+            .andExpect(jsonPath("$[0].items[0].done").value(1))
+            .andExpect(jsonPath("$[0].items[0].planned").value(3))
+            .andExpect(jsonPath("$[0].items[0].count").value(3));
+    }
 }

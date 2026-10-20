@@ -100,38 +100,84 @@ public class TodayPlanService {
         return new TodayPlan(items, mode, a.overBudget(), items.size(), (int) Math.round(todayCap));
     }
 
-    public record WeekTrackCount(long trackId, String trackTitle, String trackType, int count) {}
+    /** {@code planned} = what the day shows as its target for this track; {@code done} = items
+     *  actually completed that day. {@code count} == {@code planned} (kept for older clients). */
+    public record WeekTrackCount(long trackId, String trackTitle, String trackType, int count,
+                                 int done, int planned) {}
 
-    public record WeekDay(LocalDate date, String weekday, int capacity, List<WeekTrackCount> items) {}
+    /** {@code done}/{@code planned} = day totals over {@code items}. */
+    public record WeekDay(LocalDate date, String weekday, int capacity, List<WeekTrackCount> items,
+                          int done, int planned) {}
 
-    /** Projection of the next 7 days (today first) with the same allocator, assuming nothing
-     *  gets completed: each projected day consumes its allocated items from a working pending
-     *  count so a 3-item track doesn't repeat on all 7 days. */
+    /** 7-day view starting today (past days only appear when {@code start} is earlier). */
     public List<WeekDay> week() {
-        return week(LocalDate.now());
+        return week(LocalDate.now(), LocalDate.now());
     }
 
     List<WeekDay> week(LocalDate start) {
+        return week(start, start);   // tests / callers that treat `start` as "today"
+    }
+
+    /** Per day: past (< today) = actual completions only (planned == done, nothing is
+     *  re-projected); today = done so far + what the allocator still wants (planned = done +
+     *  remaining); future = allocator projection only, assuming nothing gets completed (each
+     *  projected day consumes its items from a working pending count so a 3-item track doesn't
+     *  repeat on all 7 days). Today's remaining already excludes done items (pending only). */
+    public List<WeekDay> week(LocalDate start, LocalDate today) {
         String mode = getMode();
-        List<Track> active = trackRepo.listActive(activeVault.id());
+        long vid = activeVault.id();
+        List<Track> active = trackRepo.listActive(vid);
         Map<Long, Integer> pending = new HashMap<>();
         for (Track t : active) pending.put(t.id(), trackRepo.countPendingItems(t.id()));
+
+        LocalDate end = start.plusDays(7);
+        LocalDate doneTo = end.isAfter(today.plusDays(1)) ? today.plusDays(1) : end;
+        Map<LocalDate, Map<Long, Integer>> doneByDay =
+            trackRepo.completionsByDay(vid, start, doneTo, java.time.ZoneId.systemDefault());
+        Map<Long, Track> byId = new HashMap<>();
+        for (Track t : trackRepo.listAll(vid)) byId.put(t.id(), t);
 
         List<WeekDay> days = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
             LocalDate d = start.plusDays(i);
             double cap = trackRepo.getCapacity(weekdayOf(d));
-            Allocation a = allocate(d, mode, cap, trackRepo::getCapacity, active, pending,
-                trackRepo::getScheduleBudget);
+            Map<Long, Integer> done = doneByDay.getOrDefault(d, Map.of());
             List<WeekTrackCount> counts = new ArrayList<>();
-            for (Alloc al : a.allocs()) {
-                if (al.take() <= 0) continue;
-                Track t = al.track();
-                pending.merge(t.id(), -al.take(), Integer::sum);
-                counts.add(new WeekTrackCount(t.id(), t.title(), t.type(), al.take()));
+            int dayDone = 0, dayPlanned = 0;
+            if (d.isBefore(today)) {
+                for (Map.Entry<Long, Integer> e : done.entrySet()) {
+                    Track t = byId.get(e.getKey());
+                    if (t == null) continue;
+                    counts.add(new WeekTrackCount(t.id(), t.title(), t.type(), e.getValue(), e.getValue(), e.getValue()));
+                    dayDone += e.getValue(); dayPlanned += e.getValue();
+                }
+            } else {
+                Allocation a = allocate(d, mode, cap, trackRepo::getCapacity, active, pending,
+                    trackRepo::getScheduleBudget);
+                boolean isToday = d.equals(today);
+                Map<Long, Integer> remaining = new LinkedHashMap<>();
+                for (Alloc al : a.allocs()) {
+                    if (al.take() <= 0) continue;
+                    pending.merge(al.track().id(), -al.take(), Integer::sum);
+                    remaining.put(al.track().id(), al.take());
+                }
+                if (isToday) {
+                    for (Long tid : done.keySet()) remaining.putIfAbsent(tid, 0);
+                }
+                for (Map.Entry<Long, Integer> e : remaining.entrySet()) {
+                    Track t = byId.get(e.getKey());
+                    if (t == null) {   // allocator tracks are always active tracks of this vault
+                        t = active.stream().filter(x -> x.id() == e.getKey()).findFirst().orElse(null);
+                        if (t == null) continue;
+                    }
+                    int dn = isToday ? done.getOrDefault(e.getKey(), 0) : 0;
+                    int planned = dn + e.getValue();
+                    counts.add(new WeekTrackCount(t.id(), t.title(), t.type(), planned, dn, planned));
+                    dayDone += dn; dayPlanned += planned;
+                }
             }
             days.add(new WeekDay(d, d.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.ENGLISH),
-                (int) Math.round(cap), counts));
+                (int) Math.round(cap), counts, dayDone, dayPlanned));
         }
         return days;
     }

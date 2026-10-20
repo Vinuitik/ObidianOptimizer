@@ -157,9 +157,11 @@ public class TrackController {
         return todayPlan.today();
     }
 
+    /** Optional {@code start} (ISO date): earlier than today shows past days as actual completions. */
     @GetMapping("week")
-    public List<TodayPlanService.WeekDay> week() {
-        return todayPlan.week();
+    public List<TodayPlanService.WeekDay> week(@RequestParam(value = "start", required = false) String start) {
+        return start == null || start.isBlank() ? todayPlan.week()
+            : todayPlan.week(LocalDate.parse(start), LocalDate.now());
     }
 
     // ── Progress (Phase 1d) ────────────────────────────────────────────────────

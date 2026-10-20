@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -364,5 +365,30 @@ class TrackRepositoryIT {
 
         Track t = repo.create(1L, "Rust Book", "book", "manual");
         assertThat(repo.get(1L, t.id())).isEqualTo(t);
+    }
+
+    @Test
+    void completionsByDay_groupsDoneItemsByLocalDayAndTrack() {
+        Track a = repo.create(1L, "A", "custom", "manual");
+        Track b = repo.create(1L, "B", "custom", "manual");
+        var zone = java.time.ZoneId.of("UTC");
+        long a1 = repo.addItem(a.id(), "a1", "a1.md").id();
+        long a2 = repo.addItem(a.id(), "a2", "a2.md").id();
+        long a3 = repo.addItem(a.id(), "a3", "a3.md").id();
+        long b1 = repo.addItem(b.id(), "b1", "b1.md").id();
+        repo.addItem(b.id(), "b2-pending", "b2.md");
+        for (long id : new long[]{a1, a2, a3, b1}) repo.completeItem(id);
+        jdbc.update("UPDATE track_items SET completed_at = '2026-08-17T10:00:00Z' WHERE id IN (?, ?)", a1, a2);
+        jdbc.update("UPDATE track_items SET completed_at = '2026-08-18T23:30:00Z' WHERE id = ?", a3);
+        jdbc.update("UPDATE track_items SET completed_at = '2026-08-17T08:00:00Z' WHERE id = ?", b1);
+
+        var out = repo.completionsByDay(1L, LocalDate.of(2026, 8, 17), LocalDate.of(2026, 8, 19), zone);
+
+        assertThat(out.get(LocalDate.of(2026, 8, 17))).containsEntry(a.id(), 2).containsEntry(b.id(), 1);
+        assertThat(out.get(LocalDate.of(2026, 8, 18))).containsOnly(java.util.Map.entry(a.id(), 1));
+        // upper bound is exclusive; other vaults are not counted
+        assertThat(repo.completionsByDay(1L, LocalDate.of(2026, 8, 17), LocalDate.of(2026, 8, 18), zone))
+            .doesNotContainKey(LocalDate.of(2026, 8, 18));
+        assertThat(repo.completionsByDay(2L, LocalDate.of(2026, 8, 17), LocalDate.of(2026, 8, 19), zone)).isEmpty();
     }
 }
