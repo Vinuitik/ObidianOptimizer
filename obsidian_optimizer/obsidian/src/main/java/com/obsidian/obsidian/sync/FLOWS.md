@@ -255,43 +255,61 @@ Version history/rollback is Drive-native: updated files keep prior revisions ~30
 
 ## DB Backup & Restore (`DbBackupService`)
 
-The per-file sync covers vault FILES; this covers the **Postgres DB** — the expensive
-derived data (embeddings in `note_chunks`, `cards`, image OCR, review state). So moving to
-a new device doesn't re-run the GPU/LLM/vision pipeline. Runs `pg_dump`/`pg_restore` via the
-`postgresql18-client` baked into the backend image.
+The per-file sync covers vault FILES; this covers the **Postgres rows of ONE vault** — the expensive
+derived data (embeddings in `note_chunks`, `cards`, image OCR, review state). So moving to a new
+device doesn't re-run the GPU/LLM/vision pipeline. Since D1 each vault's Drive `_db/` folder holds
+ONLY that vault's rows (no other vault's data leaks into its Drive). Logic lives in
+`VaultDbSnapshotter` (catalog discovery + COPY); `DbBackupService` does Drive/encryption/status.
+The full local `pg_dump` (`linux_scripts/pg-backup.sh`) is unchanged and is the all-vault backup.
+
+**Table discovery** (`VaultDbSnapshotter.discover(vaultId)`, from the live catalog — no hand list):
+```
+scoped  = has a vault_id column                       → WHERE vault_id = <v>
+        | no vault_id but single-col FK to a scoped table (attempts, track_items, track_schedule…)
+                                                      → WHERE fk_col IN (SELECT ref FROM parent WHERE <parent pred>)  (OR over FKs, fixed point)
+global  = everything else (app_settings, bandit_arms, daily_capacity, consumed_events, vaults…)
+registry= global table FK-referenced by a scoped table (vaults) — exported, NEVER imported
+extension-owned tables (spatial_ref_sys) excluded via pg_depend
+```
+To change X: `VaultDbSnapshotter.discover()`.
 
 **Backup** (`SyncWorker.scheduledDbBackup` nightly / `triggerDbBackup` manual → sync lane):
 ```
-pg_dump -Fc -h postgres -U … -d obsidian  — ProcessBuilder + PGPASSWORD → temp file
-  (no file drain — the 6h upload cron keeps Drive current; Sync first for a perfect snapshot)
-VaultEncryptionService.encrypt(bytes)     — gzip+AES-GCM, same passphrase as file sync
-DriveService.uploadDbBackup(enc, "obsidian-db-<ts>.pgdump.enc", pgVersion, deviceId)
+DbBackupService.isPrimary(v)                — vaults.is_primary → globals included only if true
+VaultDbSnapshotter.export(v, includeGlobals) — ONE REPEATABLE READ read-only tx; per table
+                                              COPY (SELECT * FROM t WHERE <pred>) TO STDOUT → zip entry data/<t>.copy
+                                              + manifest.json {format, vaultId, includesGlobals, tables[name,columns,rows]}
+VaultEncryptionService.encrypt(v, zip)      — gzip+AES-GCM, that vault's passphrase
+DriveService.uploadDbBackup(v, enc, "obsidian-db-v<id>-<ts>.vdb.enc", pgVersion, deviceId)
   → _db/ folder (EXCLUDED from listRecursive → janitor never trashes it)
-prune()                                    — hard-delete dumps beyond SYNC_DBBACKUP_KEEP (3)
+prune()                                      — hard-delete dumps beyond SYNC_DBBACKUP_KEEP (3)
 ```
 
 **Restore** (`triggerDbRestore(force)` → sync lane; one-click "Restore from Drive"):
 ```
-restoreBlockedReason(force)   — synchronous 400 guard: passphrase set? Drive connected?
-                                DB empty (unless force)? a backup exists?
-DriveService.latestDbBackup() → downloadFile → decrypt → temp file
-pg_restore --clean --if-exists --no-owner -h postgres -U … -d obsidian <dump>
-encryptionService.reload()                 — passphrase may live in the restored settings
+restoreBlockedReason(v, force) — synchronous 400 guard: passphrase set? Drive connected?
+                                 THIS VAULT has notes (unless force)? a backup exists?
+DriveService.latestDbBackup() → downloadFile → decrypt
+name ends ".vdb.enc"  → VaultDbSnapshotter.restore(v, isPrimary, zip)   — ONE tx:
+    manifest checks (format, vaultId == v) → vault registered here? → discover()
+    DELETE scoped rows of v, children first → (primary + snapshot has globals) DELETE globals
+    COPY t (backup cols) FROM STDIN, parents first → setval() on serial columns past MAX(id)
+    any exception → whole tx rolls back (vault untouched)
+else (legacy ".pgdump.enc") → pg_restore --clean --if-exists --no-owner  [WHOLE DB, all vaults — old behaviour kept]
+encryptionService.reload()                 — passphrase may live in restored vault_settings
 syncService.downloadAllQuiet()             — write vault file bytes to disk, NO reprocessing
-                                             (restored DB is authoritative; boot reconcile
-                                              sees matching hashes → no re-embed/re-caption)
 → restart recommended (dbRestorePhase surfaces this in the UI)
 ```
 
 Both run on the **same sync `WorkerLane`** as file uploads (single-flight — a backup/restore
 never races a drain). Manual endpoints return 202; the Settings panel polls `/sync/status`
-(`dbBackupRunning` / `dbRestoring` / `dbRestorePhase` / `dbBackup{exists,lastBackupAt,…}` / `dbEmpty`).
+(`dbBackupRunning` / `dbRestoring` / `dbRestorePhase` / `dbBackup{exists,lastBackupAt,…}` / `dbEmpty` — per vault).
 
-**Fresh-device bootstrap ordering** (chicken-and-egg — passphrase + refresh token live in
-`app_settings` INSIDE the DB you're restoring): (1) OAuth-connect Drive fresh, (2) set the
-SAME passphrase (env `SYNC_PASSPHRASE` or Settings), (3) Restore. The dump's `app_settings`
-then overwrites those — fine because the passphrase must match anyway. If the dumped refresh
-token is stale, reconnect Drive after restore.
+**Fresh-device bootstrap ordering** (passphrase + refresh token live in the DB you're restoring):
+(1) register the vault on the new device (the snapshot refuses a vault id missing from `vaults`),
+(2) OAuth-connect Drive fresh, (3) set the SAME passphrase (env `SYNC_PASSPHRASE` or Settings),
+(4) Restore. Restoring the PRIMARY vault also replaces global tables (`app_settings` incl. the
+Drive refresh token — reconnect Drive if stale); restoring any other vault never touches globals.
 
 ---
 
@@ -406,6 +424,27 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
   under a live app works but a **restart is recommended** afterward (beans/caches read stale
   pre-restore rows); the UI says so via `dbRestorePhase`. Backups are FULL each night (147 MB
   DB → tens of MB compressed) — no incremental/WAL; fine at this size.
+- **Per-vault snapshot (D1) failure modes**:
+  - *Restore order / FKs*: scoped tables are ordered parents-first from `pg_constraint`; DELETE runs
+    children-first, COPY parents-first. Only single-column FKs are followed; a multi-column FK to a
+    scoped table makes the child look GLOBAL (it would then ride only in the primary's backup). FK
+    cycles fall back to name order and may fail the restore (rolled back, not corrupting).
+    Non-deferrable FKs are checked per COPY statement, so self-referencing tables are fine.
+  - *Schema drift*: the manifest records the backup's columns; COPY names them explicitly. Columns
+    ADDED since the backup take their defaults; a column REMOVED/renamed since the backup aborts the
+    restore ("Schema drift") and rolls back. A table missing from the backup is left empty (WARN).
+    No type-change handling — an incompatible type fails the COPY and rolls back.
+  - *Id collisions*: surrogate-id (BIGSERIAL) tables restore with their old ids. If another vault
+    has since taken one of those ids the restore fails on the PK and rolls back. UUID tables don't collide.
+  - *Memory*: the snapshot is built in a `byte[]` (same order as the old `readAllBytes` of the dump).
+  - *Consistency*: export is one REPEATABLE READ tx -> consistent across tables; it holds a snapshot
+    (vacuum horizon) for the duration. Restore holds row locks on the vault's rows in one tx; the
+    `dbBackupLock` keeps the upload pipeline out meanwhile.
+  - *Legacy `.pgdump.enc`* still restores whole-DB via `pg_restore --clean` (ALL vaults overwritten) —
+    needs the `postgresql18-client`. Once a new-format backup exists it is the newest and wins.
+  - *Primary restore replaces globals* (`app_settings`, `bandit_arms`, ...) wholesale from the backup,
+    never the `vaults` registry (device-specific host paths).
+  - `postgresql` JDBC driver is now `compile` scope (CopyManager); `COPY ... TO STDOUT` needs no superuser/file access.
 - **`_db/` is invisible to the file layer**: `DriveService.listRecursive` skips it, so the
   janitor never trashes dumps and `downloadAll`/`downloadAllQuiet` never treat a dump as a note.
 - **Concurrency correctness**: uploads run on a fixed pool (`SYNC_UPLOAD_CONCURRENCY`).
@@ -437,7 +476,7 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 
 ## Multi-vault notes (M4)
 - Keys are derived lazily and cached per vault (`VaultEncryptionService.keys`); `reload(v)` after a passphrase change.
-- The 3am DB backup dumps the WHOLE database and uploads it to each sync-enabled vault's folder (encrypted with that vault's passphrase): other vaults' rows ride along. Restore is whole-DB.
+- The 3am DB backup is PER VAULT (D1): each sync-enabled vault's `_db/` gets only its own rows, encrypted with its passphrase; globals only in the primary's. Restore is per vault.
 - PWA phone link + offline bundles + mailbox (`PwaController`, `OfflineExportService`, `MailboxConsumeService`) use the ACTIVE vault's folder/passphrase, captured once per call; true per-vault PWA is M4b/M7.
 - `sync.janitor_last` is now written per vault (`vault_settings`).
 
@@ -449,7 +488,11 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 | Upload concurrency | `SYNC_UPLOAD_CONCURRENCY` env / `sync.upload.concurrency` (default 3) |
 | DB backup schedule | `SYNC_DBBACKUP_CRON` env / `sync.dbbackup.cron` (default nightly 3am) |
 | DB dumps retained | `SYNC_DBBACKUP_KEEP` env / `sync.dbbackup.keep` (default 3) |
-| pg_dump / pg_restore logic | `DbBackupService.backupNow()` / `restore()` |
+| Backup / restore orchestration (Drive, encrypt, status) | `DbBackupService.backupNow()` / `restore()` |
+| Which tables are scoped / global / registry, row predicate | `VaultDbSnapshotter.discover()` |
+| COPY export / transactional per-vault import, sequence realign | `VaultDbSnapshotter.export()` / `restore()` / `realignSequences()` |
+| Snapshot file name / legacy-dump detection | `DbBackupService.SNAPSHOT_SUFFIX` |
+| Which vault carries globals | `DbBackupService.isPrimary()` (`vaults.is_primary`) |
 | Restore guard (empty/force) | `DbBackupService.restoreBlockedReason()` |
 | Quiet file materialization | `SyncService.downloadAllQuiet()` |
 | Drive `_db/` ops + janitor skip | `DriveService.uploadDbBackup/listDbBackups/latestDbBackup`, `listRecursive` skip |

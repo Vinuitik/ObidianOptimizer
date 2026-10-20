@@ -54,7 +54,7 @@ class DbBackupServiceTest {
     private void configuredAndEmpty() {
         when(encryptionService.isConfigured(1L)).thenReturn(true);
         when(driveService.isConfigured(1L)).thenReturn(true);
-        when(jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class)).thenReturn(0);
+        when(jdbc.queryForObject("SELECT COUNT(*) FROM notes WHERE vault_id = ?", Integer.class, 1L)).thenReturn(0);
     }
 
     @Test
@@ -81,7 +81,7 @@ class DbBackupServiceTest {
     void restoreBlockedReason_nonEmptyDbWithoutForce_blocked() {
         when(encryptionService.isConfigured(1L)).thenReturn(true);
         when(driveService.isConfigured(1L)).thenReturn(true);
-        when(jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class)).thenReturn(42);
+        when(jdbc.queryForObject("SELECT COUNT(*) FROM notes WHERE vault_id = ?", Integer.class, 1L)).thenReturn(42);
 
         String reason = backupService.restoreBlockedReason(1L, false);
 
@@ -136,7 +136,7 @@ class DbBackupServiceTest {
     @Test
     void statusFragment_driveNotConfigured_reportsNoBackupWithoutCallingDrive() throws Exception {
         when(driveService.isConfigured(1L)).thenReturn(false);
-        when(jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class)).thenReturn(0);
+        when(jdbc.queryForObject("SELECT COUNT(*) FROM notes WHERE vault_id = ?", Integer.class, 1L)).thenReturn(0);
 
         @SuppressWarnings("unchecked")
         java.util.Map<String, Object> status = backupService.statusFragment(1L);
@@ -151,7 +151,7 @@ class DbBackupServiceTest {
     @Test
     void statusFragment_driveConfiguredWithBackups_exposesLatestBackupMetadata() throws Exception {
         when(driveService.isConfigured(1L)).thenReturn(true);
-        when(jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class)).thenReturn(5);
+        when(jdbc.queryForObject("SELECT COUNT(*) FROM notes WHERE vault_id = ?", Integer.class, 1L)).thenReturn(5);
         when(driveService.listDbBackups(1L)).thenReturn(List.of(
             new DbBackupInfo("newest", "b2.enc", 1738368000000L, 200L),
             new DbBackupInfo("older",  "b1.enc", 1735689600000L, 100L)));
