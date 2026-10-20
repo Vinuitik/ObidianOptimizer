@@ -116,6 +116,29 @@ class VaultDbSnapshotIT {
     }
 
     @Test
+    void restore_neverOverwritesDeviceLocalSecrets_vaultAndGlobal() throws Exception {
+        jdbc.update("INSERT INTO vault_settings(vault_id,key,value) VALUES (1,'sync.refresh_token','THIS-DEVICE') ON CONFLICT (vault_id,key) DO UPDATE SET value=EXCLUDED.value");
+        jdbc.update("INSERT INTO vault_settings(vault_id,key,value) VALUES (1,'sync.device_id','dev-here') ON CONFLICT (vault_id,key) DO UPDATE SET value=EXCLUDED.value");
+        jdbc.update("INSERT INTO vault_settings(vault_id,key,value) VALUES (1,'syncEnabled','true') ON CONFLICT (vault_id,key) DO UPDATE SET value=EXCLUDED.value");
+        jdbc.update("INSERT INTO app_settings(key,value) VALUES ('syncClientSecret','SECRET-HERE') ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value");
+        byte[] backup = snap.export(1L, true);
+        // Simulate the backup coming from another device: tamper stored values after export.
+        jdbc.update("UPDATE vault_settings SET value='OTHER-DEVICE' WHERE vault_id=1 AND key='sync.refresh_token'");
+        jdbc.update("UPDATE vault_settings SET value='dev-here' WHERE vault_id=1 AND key='sync.device_id'");
+        jdbc.update("UPDATE vault_settings SET value='false' WHERE vault_id=1 AND key='syncEnabled'");
+        jdbc.update("UPDATE app_settings SET value='SECRET-LOCAL-NEW' WHERE key='syncClientSecret'");
+        jdbc.update("DELETE FROM vault_settings WHERE vault_id=1 AND key='sync.device_id'");   // absent locally
+
+        snap.restore(1L, true, backup);
+
+        assertThat(jdbc.queryForObject("SELECT value FROM vault_settings WHERE vault_id=1 AND key='sync.refresh_token'", String.class)).isEqualTo("OTHER-DEVICE");
+        assertThat(jdbc.queryForList("SELECT value FROM vault_settings WHERE vault_id=1 AND key='sync.device_id'", String.class)).isEmpty();   // absent stays absent
+        assertThat(jdbc.queryForObject("SELECT value FROM app_settings WHERE key='syncClientSecret'", String.class)).isEqualTo("SECRET-LOCAL-NEW");
+        // non-secret per-vault setting IS restored from the backup
+        assertThat(jdbc.queryForObject("SELECT value FROM vault_settings WHERE vault_id=1 AND key='syncEnabled'", String.class)).isEqualTo("true");
+    }
+
+    @Test
     void restore_isAtomic_failureRollsBackDeletes() throws Exception {
         byte[] backup = snap.export(1L, false);
         // Backup claims a column that no longer exists → fails after the DELETEs.

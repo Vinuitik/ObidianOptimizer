@@ -58,6 +58,25 @@ class DbBackupServiceTest {
     }
 
     @Test
+    void portBackup_throwsWhenDriveMissing_whileNightlyBackupNowSkips() throws Exception {
+        when(encryptionService.isConfigured(1L)).thenReturn(true);
+        when(driveService.isConfigured(1L)).thenReturn(false);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> backupService.backup(1L))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("Drive");
+        backupService.backupNow(1L);   // cron path: warn + skip, no throw
+        verify(driveService, never()).uploadDbBackup(anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
+    void portBackup_throwsWhenEncryptionMissing() {
+        when(encryptionService.isConfigured(1L)).thenReturn(false);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> backupService.backup(1L))
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("encryption");
+        assertThat(backupService.blockedReason(1L)).contains("encryption");
+    }
+
+    @Test
     void restoreBlockedReason_noPassphrase_blocksBeforeCheckingAnythingElse() {
         when(encryptionService.isConfigured(1L)).thenReturn(false);
 

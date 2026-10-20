@@ -58,7 +58,7 @@ class VaultDeletionIT {
     }
 
     @MockBean ChronoService chronoService;
-    @MockBean VaultBackup backup;
+    @MockBean com.obsidian.obsidian.sync.DbBackupService backup;   // replaces the real VaultBackup bean (DbBackupService)
 
     @Autowired JdbcTemplate jdbc;
     @Autowired ActiveVault activeVault;
@@ -105,6 +105,14 @@ class VaultDeletionIT {
         mvc.perform(post("/vaults/2/delete")).andExpect(status().isConflict());   // active
         mvc.perform(post("/vaults/99/delete")).andExpect(status().isNotFound());
         mvc.perform(post("/vaults/3/delete")).andExpect(status().isAccepted());
+    }
+
+    @Test
+    void enqueue_refusedWithoutDriveOrEncryption_409_andNothingQueued() throws Exception {
+        when(backup.blockedReason(3L)).thenReturn("Google Drive not configured for vault 3");
+        mvc.perform(post("/vaults/3/delete")).andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("Google Drive not configured")));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM vault_deletion_jobs", Integer.class)).isZero();
     }
 
     @Test

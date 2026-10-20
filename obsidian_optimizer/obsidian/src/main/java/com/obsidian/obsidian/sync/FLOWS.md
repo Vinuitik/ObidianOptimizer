@@ -285,6 +285,10 @@ DriveService.uploadDbBackup(v, enc, "obsidian-db-v<id>-<ts>.vdb.enc", pgVersion,
 prune()                                      — hard-delete dumps beyond SYNC_DBBACKUP_KEEP (3)
 ```
 
+**Pre-delete backup (B1)** — `DbBackupService implements vaults.VaultBackup`: `VaultDeletionWorker` → `backup(v)` → `blockedReason(v)` (encryption? Drive?) → THROW if blocked, else `doBackup(v)` (same snapshot→encrypt→upload→prune as the nightly path; upload failure also throws). Nightly cron `backupNow(v)` → same `blockedReason` → WARN + skip. `VaultDeletionRepository.enqueue()` calls `blockedReason` too → `POST /vaults/{id}/delete` 409. To change: `DbBackupService.backup()` / `blockedReason()`.
+
+**Device-local keys are never restored** (`VaultDbSnapshotter.DEVICE_LOCAL_VAULT_KEYS` / `DEVICE_LOCAL_GLOBAL_KEYS`): restore captures this device's rows first (`keepVault`/`keepGlobal`), runs the DELETE/COPY, then `reimpose()` drops whatever the backup brought for those keys and re-inserts the local ones (absent locally = absent after). Vault keys: `sync.refresh_token`, `sync.account_email`, `sync.device_id`, `syncPassphrase`, `sync.drive.folder_id`, `resourcePath`. Global (`app_settings`, primary restore only): `syncClientId`, `syncClientSecret`, `sync.oauth.redirect_uri`, `vaultPath`, and the legacy global copies of the five sync keys. Legacy `.pgdump.enc` path: `captureDeviceLocalAll()` before / `reapplyDeviceLocalAll()` after `pg_restore`.
+
 **Restore** (`triggerDbRestore(force)` → sync lane; one-click "Restore from Drive"):
 ```
 restoreBlockedReason(v, force) — synchronous 400 guard: passphrase set? Drive connected?
@@ -292,8 +296,10 @@ restoreBlockedReason(v, force) — synchronous 400 guard: passphrase set? Drive 
 DriveService.latestDbBackup() → downloadFile → decrypt
 name ends ".vdb.enc"  → VaultDbSnapshotter.restore(v, isPrimary, zip)   — ONE tx:
     manifest checks (format, vaultId == v) → vault registered here? → discover()
+    capture this device's secrets (keepVault/keepGlobal)
     DELETE scoped rows of v, children first → (primary + snapshot has globals) DELETE globals
     COPY t (backup cols) FROM STDIN, parents first → setval() on serial columns past MAX(id)
+    reimpose(): put THIS device's secrets back (see below)
     any exception → whole tx rolls back (vault untouched)
 else (legacy ".pgdump.enc") → pg_restore --clean --if-exists --no-owner  [WHOLE DB, all vaults — old behaviour kept]
 encryptionService.reload()                 — passphrase may live in restored vault_settings
@@ -308,8 +314,7 @@ never races a drain). Manual endpoints return 202; the Settings panel polls `/sy
 **Fresh-device bootstrap ordering** (passphrase + refresh token live in the DB you're restoring):
 (1) register the vault on the new device (the snapshot refuses a vault id missing from `vaults`),
 (2) OAuth-connect Drive fresh, (3) set the SAME passphrase (env `SYNC_PASSPHRASE` or Settings),
-(4) Restore. Restoring the PRIMARY vault also replaces global tables (`app_settings` incl. the
-Drive refresh token — reconnect Drive if stale); restoring any other vault never touches globals.
+(4) Restore. Restoring the PRIMARY vault also replaces global tables (`app_settings`, `bandit_arms`, ...) EXCEPT the device-local keys above (refresh token, passphrase, OAuth client secret, device id, ... stay as on this device); restoring any other vault never touches globals.
 
 ---
 
@@ -442,6 +447,8 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
     `dbBackupLock` keeps the upload pipeline out meanwhile.
   - *Legacy `.pgdump.enc`* still restores whole-DB via `pg_restore --clean` (ALL vaults overwritten) —
     needs the `postgresql18-client`. Once a new-format backup exists it is the newest and wins.
+  - *Device-local keys survive restore*: a backup from device A restored on device B keeps B's Drive token/passphrase/device id/folder id/paths. Trade-off: the key list is hand-maintained (`DEVICE_LOCAL_*_KEYS`); a NEW per-device secret added to settings must be added there or a restore will overwrite it. `sync.drive.folder_id` is kept local, so a restore never re-points a vault at another Drive folder.
+  - *Pre-delete backup is Drive-only*: no Drive/encryption = deletion refused (409) and the worker throws; there is no local-file fallback. The backup lands in the vault's own Drive `_db/` and is pruned to `sync.dbbackup.keep` (3) like any other — deleting a vault leaves its Drive folder untouched.
   - *Primary restore replaces globals* (`app_settings`, `bandit_arms`, ...) wholesale from the backup,
     never the `vaults` registry (device-specific host paths).
   - `postgresql` JDBC driver is now `compile` scope (CopyManager); `COPY ... TO STDOUT` needs no superuser/file access.
@@ -546,3 +553,5 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 | Auto-created Drive root name | `DriveService.rootFolderId()`: vault 1 `ObsidianOptimizer`, others `ObsidianOptimizer-v<id>` |
 | Rabbit sync-upload vault | `SyncService.onSyncUploadMessage()` reads `vaultId` from payload (absent = 1), skips if that vault's sync is off |
 | OAuth connect target vault | `SyncOAuthService.buildAuthUrl(vaultId, origin)` stores it in the pending state; `handleCallback` writes the token to that vault |
+| Pre-delete backup / enqueue gate | `DbBackupService.backup()`, `blockedReason()` |
+| Which keys a restore preserves | `VaultDbSnapshotter.DEVICE_LOCAL_VAULT_KEYS`, `DEVICE_LOCAL_GLOBAL_KEYS` |
