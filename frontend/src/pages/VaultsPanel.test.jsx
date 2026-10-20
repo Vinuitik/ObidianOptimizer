@@ -1,13 +1,13 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import VaultsPanel from './VaultsPanel';
 
 vi.mock('../api/notes', () => ({ fetchHostChildren: vi.fn() }));
 vi.mock('../api/vaults', () => ({
   fetchVaults: vi.fn(), registerVault: vi.fn(), renameVault: vi.fn(),
-  archiveVault: vi.fn(), restoreVault: vi.fn(), switchVault: vi.fn(),
+  archiveVault: vi.fn(), restoreVault: vi.fn(), switchVault: vi.fn(), deleteVault: vi.fn(),
 }));
-import { fetchVaults, registerVault, switchVault } from '../api/vaults';
+import { fetchVaults, registerVault, switchVault, deleteVault } from '../api/vaults';
 
 const LIST = [
   { id: 1, name: 'NewLife', host_path: '/home/me/NewLife', container_path: '/vault', active: true },
@@ -40,5 +40,34 @@ describe('VaultsPanel', () => {
     expect(registerVault).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('Add and restart'));
     await waitFor(() => expect(registerVault).toHaveBeenCalledWith('New', '/home/me/New'));
+  });
+
+  it('delete needs the vault name typed; never offered for active/primary', async () => {
+    deleteVault.mockResolvedValue({ status: 'QUEUED' });
+    render(<VaultsPanel isAuthenticated />);
+    await screen.findByText('Work');
+    // vault 1 is active -> no Delete; vaults 2 and 3 are eligible
+    expect(screen.getAllByText('Delete')).toHaveLength(2);
+    fireEvent.click(within(screen.getByTestId('vault-2')).getByText('Delete'));
+    const confirm = screen.getByText('Delete vault');
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Type the vault name to confirm'), { target: { value: 'wor' } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Type the vault name to confirm'), { target: { value: 'Work' } });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(deleteVault).toHaveBeenCalledWith(2));
+  });
+
+  it('shows queued and in-progress deletion state without a Delete button', async () => {
+    fetchVaults.mockResolvedValue([
+      LIST[0],
+      { ...LIST[1], deletion_status: 'QUEUED' },
+      { ...LIST[2], archived_at: null, deletion_status: 'RUNNING' },
+    ]);
+    render(<VaultsPanel isAuthenticated />);
+    expect(await screen.findByText('Deletion queued')).toBeInTheDocument();
+    expect(screen.getByText('Deleting…')).toBeInTheDocument();
+    expect(screen.queryByText('Delete')).toBeNull();
   });
 });
