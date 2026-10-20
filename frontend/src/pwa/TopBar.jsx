@@ -3,6 +3,7 @@ import useStore from '../store/useStore';
 import RefreshButton from '../components/atoms/RefreshButton';
 import Badge from '../components/atoms/Badge';
 import Button from '../components/atoms/Button';
+import VaultSwitcher from '../components/molecules/VaultSwitcher';
 import useSyncStatus from './syncStatus';
 import styles from './TopBar.module.css';
 
@@ -26,6 +27,7 @@ export default function TopBar() {
     <div className={styles.bar}>
       <h1 className={styles.title}>{titleFor(pathname)}</h1>
       <div className={styles.actions}>
+        {isAuthenticated && <VaultSwitcher />}
         <Link to="/sync" className={styles.chip} data-state={sync.state} aria-label={`Sync status: ${sync.label}. Open sync.`}>
           <Badge tone={sync.tone}>{sync.label}</Badge>
         </Link>

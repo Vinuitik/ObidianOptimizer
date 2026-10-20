@@ -7,6 +7,7 @@
 // `_workspace/…` → `/workspace/…`, and image embeds `![[name]]` → `/vault-media/<subdir>/name` (media.mediaUrl).
 import { parseSourceRegion } from './inboxParse';
 import { mediaUrl as embedUrl } from './media';
+import { mediaPrefix } from '../vault/activeVault';
 
 const VIDEO_AUDIO_RE = /\.(mp4|mkv|webm|mov|m4v|mp3|m4a|wav|ogg|flac)$/i;
 const PDF_RE = /\.pdf$/i;
@@ -46,8 +47,8 @@ function vaultPdfPath(ref) {
 export function vaultMediaUrl(path) {
   if (!path || /^https?:\/\//.test(path)) return null;   // external ref → streamed live, not warmed
   const p = path.replace(/^\.?\//, '');
-  if (p.startsWith('resources/'))  return '/vault-media/' + enc(p.slice('resources/'.length));
-  if (p.startsWith('_workspace/')) return '/workspace/' + enc(p.slice('_workspace/'.length));
+  if (p.startsWith('resources/'))  return mediaPrefix('vault-media') + enc(p.slice('resources/'.length));
+  if (p.startsWith('_workspace/')) return mediaPrefix('workspace') + enc(p.slice('_workspace/'.length));
   return null;
 }
 

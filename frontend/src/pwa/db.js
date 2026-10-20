@@ -7,15 +7,20 @@
 //   outbox       autoIncrement      — { id, kind:'grade'|'capture'|'assignment', ...payload, eventId, ts }
 //   meta         keyPath 'key'      — { key, value }  (lastSync, driveCreds, doneDate, cachedNoteNames, …)
 
-const DB_NAME = 'obsopt-offline';
+// One IDB per vault (VAULTS_PLAN M7): vault 1 keeps `obsopt-offline`, others `obsopt-offline-v<id>`
+// (see vault/activeVault.dbNameFor). The active id is fixed per page load (a switch reloads), so the
+// handle is cached. Outbox, meta (Drive link, lastSync, caches) and reviewNotes are therefore per vault.
+import { getActiveVaultId, dbNameFor } from '../vault/activeVault';
 const DB_VERSION = 2;   // bumped for the 'assignments' store — keep public/sw.js openDB in sync
 
 let dbPromise = null;
+let dbPromiseFor = null;
 
 export function openDB() {
-  if (dbPromise) return dbPromise;
+  if (dbPromise && dbPromiseFor === getActiveVaultId()) return dbPromise;
+  dbPromiseFor = getActiveVaultId();
   dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(dbNameFor(), DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('reviewNotes')) db.createObjectStore('reviewNotes', { keyPath: 'path' });
@@ -69,7 +74,7 @@ export const getAllAssignments = () =>
 
 // ── outbox ───────────────────────────────────────────────────────────────────
 export const addToOutbox = (entry) =>
-  tx('outbox', 'readwrite', (s) => { s.add({ ...entry, ts: Date.now() }); });
+  tx('outbox', 'readwrite', (s) => { s.add({ ...entry, vaultId: getActiveVaultId(), ts: Date.now() }); });
 
 export const getOutbox = () =>
   tx('outbox', 'readonly', (s) => reqValue(s.getAll(), {}));

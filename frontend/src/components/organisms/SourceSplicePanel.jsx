@@ -4,6 +4,7 @@ import { pdfPageUrl } from '../../utils/noteMedia';   // shared so offline warm 
 import RsvpReader from '../molecules/RsvpReader';
 import SegmentedTabs from '../molecules/SegmentedTabs';
 import MarkdownView from '../molecules/MarkdownView';
+import { mediaPrefix } from '../../vault/activeVault';
 import styles from './SourceSplicePanel.module.css';
 
 // Left panel of the review: the source, spliced to the region THIS note came from
@@ -230,8 +231,8 @@ function mediaUrl(ref) {
   if (/^https?:\/\//.test(ref || '')) return ref;
   const p = (ref || '').replace(/^\/+/, '');
   const enc = (rest) => rest.split('/').map(encodeURIComponent).join('/');
-  if (p.startsWith('_workspace/')) return '/workspace/' + enc(p.slice('_workspace/'.length));
-  if (p.startsWith('resources/'))  return '/vault-media/' + enc(p.slice('resources/'.length));
+  if (p.startsWith('_workspace/')) return mediaPrefix('workspace') + enc(p.slice('_workspace/'.length));
+  if (p.startsWith('resources/'))  return mediaPrefix('vault-media') + enc(p.slice('resources/'.length));
   return `/api/images/${encodeURIComponent(ref || '')}`;
 }
 function hrefFor(ref) { return /^https?:\/\//.test(ref) ? ref : mediaUrl(ref); }

@@ -234,7 +234,11 @@ Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAcc
 
 ---
 
+## Settings ▸ Vaults
+`SettingsPage` renders `VaultsPanel.jsx` first (list, register via host-fs `FolderPicker` + downtime confirm, switch, rename, archive/restore) — details in [../vault/FLOWS.md](../vault/FLOWS.md). `DriveSyncPanel` is the ACTIVE vault's sync and names it.
+
 ## Change Index
+| Vaults settings section | `VaultsPanel.jsx`, `SettingsPage.jsx` (mount point + `DriveSyncPanel` description) |
 
 | Thing to change | Where |
 |---|---|
