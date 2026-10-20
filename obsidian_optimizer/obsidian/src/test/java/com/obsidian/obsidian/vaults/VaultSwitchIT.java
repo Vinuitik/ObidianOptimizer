@@ -93,7 +93,51 @@ class VaultSwitchIT {
         jdbc.update("UPDATE vaults SET active = true WHERE id = 1");
         activeVault.set(1L, V1);
         jdbc.update("DELETE FROM vault_settings WHERE vault_id > 1");
-        mvc = MockMvcBuilders.standaloneSetup(new VaultController(vaults, activeVault)).build();
+        jdbc.update("DELETE FROM vaults WHERE id > 3");
+        wrapper = org.mockito.Mockito.mock(VaultWrapperClient.class);
+        mvc = MockMvcBuilders.standaloneSetup(new VaultController(vaults, activeVault, wrapper)).build();
+    }
+
+    VaultWrapperClient wrapper;
+
+    // ── POST /vaults (M6) ─────────────────────────────────────────────────────
+
+    @Test
+    void register_insertsInactiveRowAtVaultsId_callsWrapper_returns202() throws Exception {
+        org.mockito.Mockito.when(wrapper.register(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq("/h/new")))
+            .thenReturn(new VaultWrapperClient.Result(202, "{}"));
+        mvc.perform(post("/vaults").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\" Fourth \",\"hostPath\":\"/h/new\"}"))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.name").value("Fourth"))
+            .andExpect(jsonPath("$.active").value(false))
+            .andExpect(jsonPath("$.container_path").value("/vaults/4"));
+        org.mockito.Mockito.verify(wrapper).register(4L, "/h/new");
+        assertThat(activeVault.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void register_wrapperRejects_rollsBackRow_andRelaysStatus() throws Exception {
+        org.mockito.Mockito.when(wrapper.register(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn(new VaultWrapperClient.Result(409, "{\"error\":\"overlaps\"}"));
+        mvc.perform(post("/vaults").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"X\",\"hostPath\":\"/h/bad\"}"))
+            .andExpect(status().isConflict());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM vaults WHERE host_path = '/h/bad'", Integer.class)).isZero();
+    }
+
+    @Test
+    void register_wrapperDown_503_rollsBack_andBlankFieldsAre400() throws Exception {
+        org.mockito.Mockito.when(wrapper.register(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString()))
+            .thenThrow(new VaultException(503, "host helper unreachable"));
+        mvc.perform(post("/vaults").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"X\",\"hostPath\":\"/h/down\"}"))
+            .andExpect(status().isServiceUnavailable());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM vaults WHERE host_path = '/h/down'", Integer.class)).isZero();
+        mvc.perform(post("/vaults").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"X\"}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/vaults").contentType(MediaType.APPLICATION_JSON).content("{\"hostPath\":\"/h\"}"))
+            .andExpect(status().isBadRequest());
     }
 
     // ── vault_settings ────────────────────────────────────────────────────────

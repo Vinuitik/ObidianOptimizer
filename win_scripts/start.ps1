@@ -148,6 +148,7 @@ New-Item -ItemType Directory -Force "$vaultPath\resources"   | Out-Null
 New-Item -ItemType Directory -Force "$vaultPath\_workspace"  | Out-Null
 
 $composeArgs = @("-f", "$rootDir\docker-compose.yml")
+if (Test-Path "$rootDir\docker-compose.vaults.yml") { $composeArgs += @("-f", "$rootDir\docker-compose.vaults.yml") }
 if (Select-String -Path $envFile -Pattern '^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S' -Quiet) {
     Write-Host "Cloudflare tunnel token found in .env — starting with the 'tunnel' profile."
     $composeArgs += @("--profile", "tunnel")

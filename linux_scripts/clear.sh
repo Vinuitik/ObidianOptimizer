@@ -23,6 +23,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 COMPOSE="$ROOT_DIR/docker-compose.yml"
+VAULTS_YML="$ROOT_DIR/docker-compose.vaults.yml"
 
 if [[ ! -f "$COMPOSE" ]]; then
     echo "Error: docker-compose.yml not found at $COMPOSE" >&2
@@ -67,7 +68,7 @@ fi
 echo ""
 echo "Stopping containers..."
 # Include tunnel profile so cloudflared is torn down too if it was running.
-docker compose -f "$COMPOSE" --profile tunnel down
+docker compose -f "$COMPOSE" $([[ -f "$VAULTS_YML" ]] && echo "-f $VAULTS_YML") --profile tunnel down
 
 for v in "${TARGETS[@]}"; do
     if docker volume ls -q -f "name=$v" | grep -qx "$v"; then

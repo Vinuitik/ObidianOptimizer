@@ -184,3 +184,4 @@ generation agent (`embedder/flashcards/generate.py`).
 | Max output tokens | `.env → LLM_TEXT_MAX_TOKENS` / `LLM_VISION_MAX_TOKENS` |
 | CLI timeout | `.env → CLI_TIMEOUT_S` (default 180s) |
 | Add a provider | `llm_router._build_providers()` + priority chain |
+| Register a vault / compose override | `main.py register_vault()`, `render_vaults_override()`, `_run_compose()`; tests `tests/test_vaults.py` |

@@ -53,6 +53,7 @@ get_env_value() {
 }
 
 COMPOSE_ARGS=("-f" "$ROOT_DIR/docker-compose.yml")
+[[ -f "$ROOT_DIR/docker-compose.vaults.yml" ]] && COMPOSE_ARGS+=("-f" "$ROOT_DIR/docker-compose.vaults.yml")  # extra vaults (host-wrapper POST /vaults)
 
 if grep -qE "^\s*CLOUDFLARE_TUNNEL_TOKEN\s*=\s*\S" "$ENV_FILE"; then
     echo "Cloudflare tunnel token found in .env — starting with the 'tunnel' profile."

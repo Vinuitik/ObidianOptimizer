@@ -12,6 +12,7 @@
 # lie within [min,max] of the counts taken at dump start, dump end and verify time. Idle DB => exact.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+[[ -f docker-compose.vaults.yml ]] && export COMPOSE_FILE=docker-compose.yml:docker-compose.vaults.yml
 
 DB=obsidian; USR=obsidian
 IMAGE="paradedb/paradedb:latest"
