@@ -66,7 +66,7 @@ Claude Code: `claude mcp add --transport http obsidian http://localhost:8000/mcp
 
 To add a tool: `@mcp.tool()` function in `embedder/mcp_server.py`  
 To change DB access: `mcp_server._query_db` / `DATABASE_URL` env var  
-To change vault mount: `VAULT_DIR` env var + compose volume `${HOST_VAULT_PATH}:/vault:ro`
+To change vault mount: vault 1: compose volume `${HOST_VAULT_PATH}:/vault:ro`; others `/vaults/<id>` via docker-compose.vaults.yml (embedder reads `vault_paths` / `active_vault`, not VAULT_DIR)
 
 ---
 

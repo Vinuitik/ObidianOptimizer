@@ -96,7 +96,7 @@ Router introspection for debugging/dashboard:
 ## POST /process-image
 
 Request: `{"image_path": "/vault/folder/image.png"}` → Response: `{"text": str, "provider": str}`
-`/vault` prefix → translated to `VAULT_HOST_PATH`/`HOST_VAULT_PATH` (vault is shared volume)
+`/vault/...` → `VAULT_HOST_PATH`/`HOST_VAULT_PATH`; `/vaults/<id>/...` → `vaults.registry.json` host_path (`main._resolve_vault_image`, per-vault basename index; unknown id / `..` escape → not found)
 
 `main.process_image()`:
 → resolve host path → check exists (404 if not)

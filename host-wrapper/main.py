@@ -52,14 +52,20 @@ IMAGE_BATCH_PROMPT = (
 # basename→path index of every image in the vault and fall back to it. Rebuilt
 # lazily and at most once per TTL so newly-added images resolve within minutes.
 _IMAGE_INDEX_TTL = 300.0
-_image_index: dict = {}
-_image_index_built_at = 0.0
+_image_indexes: dict = {}   # vault id -> (built_at, {basename: Path})
 _image_index_lock = threading.Lock()
 
 
-def _build_image_index() -> dict:
+def _vault_host_root(vault_id: int):
+    """Host root for a vault id: 1 -> VAULT_HOST_PATH, others -> vaults.registry.json."""
+    if vault_id == 1:
+        return Path(VAULT_HOST_PATH)
+    host = _load_registry().get(vault_id)
+    return Path(host) if host else None
+
+
+def _build_image_index(root: Path) -> dict:
     index: dict = {}
-    root = Path(VAULT_HOST_PATH)
     if not root.exists():
         return index
     for p in root.rglob("*"):
@@ -68,23 +74,47 @@ def _build_image_index() -> dict:
     return index
 
 
-def _lookup_image_by_name(name: str):
-    global _image_index, _image_index_built_at
+def _lookup_image_by_name(name: str, vault_id: int = 1):
+    root = _vault_host_root(vault_id)
+    if root is None:
+        return None
     with _image_index_lock:
         now = time.monotonic()
-        if not _image_index or (now - _image_index_built_at) > _IMAGE_INDEX_TTL:
-            _image_index = _build_image_index()
-            _image_index_built_at = now
-        return _image_index.get(name.lower())
+        built_at, index = _image_indexes.get(vault_id, (0.0, {}))
+        if not index or (now - built_at) > _IMAGE_INDEX_TTL:
+            index = _build_image_index(root)
+            _image_indexes[vault_id] = (now, index)
+        return index.get(name.lower())
+
+
+def _split_container_path(container_path):
+    """'/vault/x' -> (1, 'x'); '/vaults/<id>/x' -> (id, 'x'); else None."""
+    parts = str(container_path).replace("\\", "/").split("/")
+    if len(parts) >= 2 and parts[0] == "":
+        if parts[1] == "vault":
+            return 1, "/".join(parts[2:])
+        if parts[1] == "vaults" and len(parts) >= 3 and parts[2].isdigit():
+            return int(parts[2]), "/".join(parts[3:])
+    return None
 
 
 def _resolve_vault_image(container_path):
-    # 1. Direct path — covers ![alt](folder/img.png) and already-resolved /vault paths.
-    host_path = Path(container_path.replace("/vault", VAULT_HOST_PATH, 1))
-    if host_path.exists():
+    split = _split_container_path(container_path)
+    if split is None:
+        # Not a container path: legacy relative ref against the primary vault.
+        vault_id, rel = 1, str(container_path).lstrip("/")
+    else:
+        vault_id, rel = split
+    root = _vault_host_root(vault_id)
+    if root is None:
+        return None, None  # unknown vault id
+    root_real = Path(os.path.realpath(root))
+    # 1. Direct path (must stay inside the vault root).
+    host_path = Path(os.path.realpath(root / rel))
+    if host_path.is_relative_to(root_real) and host_path.is_file():
         return host_path, MEDIA_TYPES.get(host_path.suffix.lower(), "image/png")
-    # 2. Bare Obsidian ref — resolve by basename, vault-wide (e.g. into resources/).
-    found = _lookup_image_by_name(Path(container_path).name)
+    # 2. Bare Obsidian ref — resolve by basename within that vault (e.g. into resources/).
+    found = _lookup_image_by_name(Path(rel).name, vault_id)
     if found is not None and found.exists():
         return found, MEDIA_TYPES.get(found.suffix.lower(), "image/png")
     return None, None

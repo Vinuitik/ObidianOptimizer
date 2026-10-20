@@ -17,9 +17,9 @@ Subsystem docs live next to the code they describe.
 ## Cross-Package Dependencies
 
 ```
-settings ← notes (FileRepository reads SettingsRepository.getVaultPath)
+settings ← notes (FileRepository reads ActiveVault.root()/rootFor(vaultId))
 settings ← chrono (ChronoService reads maxDailyReviews, bankruptcyLimit)
-settings ← media (MediaController reads SettingsRepository.getVaultPath)
+settings ← media (MediaController reads ActiveVault.root())
 notes    ← settings (FileRepository uses SettingsRepository)
 notes    ← chrono (ChronoService calls FileRepository.listMdPaths, triggerDeltaSync)
 ```
