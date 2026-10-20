@@ -7,8 +7,7 @@ import SegmentedTabs from '../components/molecules/SegmentedTabs';
 import styles from './LearnPage.module.css';
 
 // Learn = Today (Inbox review first, scheduled track items below) | Week (7-day grid + track editor).
-// Capture → ingest → proposed notes still lands in the Inbox. The Feed moved out (Sources page,
-// milestone L2): FeedView/feed store stay in-tree but are unmounted until then.
+// Capture → ingest → proposed notes lands in the Inbox. Feed lives on the Sources page.
 export default function LearnPage() {
   const fetchRootChildren = useStore(s => s.fetchRootChildren);
   const fetchNoteNames    = useStore(s => s.fetchNoteNames);

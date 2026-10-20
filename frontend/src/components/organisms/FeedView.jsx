@@ -135,7 +135,7 @@ function Stack() {
       <EmptyState
         icon="check"
         title="You're all caught up"
-        description="New videos and posts from your sources land here. Add sources in the Sources tab."
+        description="New videos and posts from your sources land here. Add them in the Subscriptions tab."
         action={{ label: 'Open Inbox', onClick: () => setLearnView('inbox') }}
       />
     );
@@ -170,7 +170,7 @@ function Stack() {
 const TABS = [
   { id: 'stack', label: 'Swipe' },
   { id: 'bin', label: 'Bin' },
-  { id: 'sources', label: 'Sources' },
+  { id: 'sources', label: 'Subscriptions' },
 ];
 
 export default function FeedView() {

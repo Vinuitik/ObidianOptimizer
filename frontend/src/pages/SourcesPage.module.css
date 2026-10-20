@@ -1,0 +1,6 @@
+/* Layout only. Tabs are SegmentedTabs; colours/type come from tokens + primitives. */
+.page { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.viewTabs { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.viewBody { flex: 1; overflow-y: auto; min-height: 0; }
+.gate { display: flex; align-items: center; justify-content: center; height: 100%; }
+.gateText { color: var(--text-3); font-size: var(--fs-14); }

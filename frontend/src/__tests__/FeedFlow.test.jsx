@@ -33,7 +33,7 @@ describe('Feed flow (W2)', () => {
     feed.fetchFeedItems.mockResolvedValue([item(1)]);
     feed.addFeedSource.mockResolvedValue({ id: 9, kind: 'youtube_channel', url: 'u', title: 'New Chan', autoAccept: null, pendingCount: 3 });
     mount();
-    fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Subscriptions' }));
     fireEvent.change(screen.getByLabelText('Source URL'), { target: { value: 'https://youtube.com/@x' } });
     fireEvent.click(screen.getByText('Preview'));
     await screen.findByText('Latest ep');
@@ -68,7 +68,7 @@ describe('Feed flow (W2)', () => {
 
   it('delete source is optimistic; Undo cancels the DELETE', async () => {
     mount();
-    fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Subscriptions' }));
     await screen.findByText('Blog');
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fireEvent.click(screen.getByLabelText('Delete Blog'));
@@ -81,7 +81,7 @@ describe('Feed flow (W2)', () => {
 
   it('delete source commits after the undo window', async () => {
     mount();
-    fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Subscriptions' }));
     await screen.findByText('Blog');
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fireEvent.click(screen.getByLabelText('Delete Blog'));

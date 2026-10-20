@@ -290,7 +290,7 @@ export default function SettingsPage() {
           {renderField(F.bankruptcyLimit)}
         </Group>
 
-        <Group title="Feed" description="Subscribed sources in Learn ▸ Feed.">
+        <Group title="Feed" description="Subscribed sources in Sources ▸ Subscriptions.">
           {renderField(F.feedAutoAccept)}
         </Group>
 

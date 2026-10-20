@@ -131,9 +131,10 @@ Three ways in, all landing in the Learn inbox via the ingest pipeline. `CaptureP
   → 303 redirect `/capture?shared=…`.
 Backend: `CaptureController.capture()` (url/text) / `captureFile()` (multipart) → capture queue →
 embedder `/ingest` (standalone, `find_home`).
-- **Track tagging (Phase 1b):** Link/Note modes show a track picker (existing track or
-  "+ New track…"); `trackOpts()` spreads `{trackId}`/`{newTrackTitle}` into the capture POST,
-  carried through the offline outbox too. Full flow: `.../tracks/FLOWS.md#capture-time-track-tagging-phase-1b`.
+- **No track tagging:** captures are never tagged to a track (raw intake is Sources-only);
+  `offlineApi.captureUrl/captureText` and `outbox.enqueue*` take no track opts. `CapturePage`
+  (modes Link/Note/File) is mounted inside `SourcesPage`; the Subscribe mode moved to Sources ▸ Feed ▸ Subscriptions.
+  PWA bottom tab is now Sources (`/sources`); `/capture` stays as the share-target landing.
 - Offline / 401 → `outbox.enqueueCapture()` (link) / `enqueueCaptureText()` (note) /
   SW `enqueueOutbox({kind:'captureFile', blob})` (file); all replayed server-direct by
   `outbox.flush()` on reconnect (ingestion needs the server anyway — no Drive mailbox kind).

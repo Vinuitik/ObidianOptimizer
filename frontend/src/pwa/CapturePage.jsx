@@ -2,9 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import useStore from '../store/useStore';
 import { captureUrl, captureText } from './offlineApi';
-import { addFeedSource } from '../api/feed';
 import { captureFile } from '../api/capture';
-import { ApiError } from '../api/notes';
 import useOffline from './useOffline';
 import Button from '../components/atoms/Button';
 import Input from '../components/atoms/Input';
@@ -12,11 +10,10 @@ import Textarea from '../components/atoms/Textarea';
 import SegmentedTabs from '../components/molecules/SegmentedTabs';
 import styles from './MobilePages.module.css';
 
-// Capture tab - four ways in, all landing in the Learn inbox via the ingest pipeline:
+// Capture tab - three ways in, all landing in the Learn inbox via the ingest pipeline:
 //   Link      - paste a URL (the share-sheet path is handled in public/sw.js).
 //   Note      - a rough brain dump; becomes its own source in the inbox.
 //   File      - pick a PDF/audio/video (online only: api/capture.captureFile, no outbox).
-//   Subscribe - add a feed source.
 // Every outcome says WHERE it went and links there (LEARN / SYNC below).
 const LEARN  = { to: '/learn',  label: 'Open Learn inbox' };
 const SYNC   = { to: '/sync',   label: 'View sync status' };
@@ -35,7 +32,6 @@ const MODES = [
   { id: 'link', label: 'Link' },
   { id: 'note', label: 'Note' },
   { id: 'file', label: 'File' },
-  { id: 'subscribe', label: 'Subscribe' },
 ];
 
 export default function CapturePage() {
@@ -53,7 +49,6 @@ export default function CapturePage() {
   const fileRef = useRef(null);
   const [status, setStatus] = useState(null); // { text, tone, links }
   const [busy, setBusy] = useState(false);
-  const [subUrl, setSubUrl] = useState('');
 
   // Where it went: sent -> Learn inbox ; queued -> Sync.
   function resultMsg(res) {
@@ -122,29 +117,6 @@ export default function CapturePage() {
     }
   }
 
-  async function submitSubscribe(e) {
-    e.preventDefault();
-    const link = subUrl.trim();
-    if (!link) return;
-    if (!online) {
-      setStatus({ text: "You're offline - try again once connected.", tone: 'warn', links: [] });
-      return;
-    }
-    setBusy(true);
-    try {
-      await addFeedSource(link);
-      setStatus({ text: 'Subscribed - new items show up in Learn > Feed.', tone: 'ok', links: [{ to: '/learn', label: 'Open Learn' }] });
-      setSubUrl('');
-    } catch (err) {
-      const clean4xx = err instanceof ApiError && err.status >= 400 && err.status < 500;
-      setStatus(clean4xx
-        ? failMsg(err)
-        : { text: "You're offline - try again once connected.", tone: 'warn', links: [] });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const sharedMsg = shared && SHARED_MSG[shared];
   const shown = status || sharedMsg || null;
 
@@ -204,20 +176,6 @@ export default function CapturePage() {
         </form>
       )}
 
-      {mode === 'subscribe' && (
-        <form onSubmit={submitSubscribe} className={styles.form}>
-          <Input
-            type="url"
-            inputMode="url"
-            placeholder="Channel, feed or page URL"
-            aria-label="Source URL"
-            value={subUrl}
-            onChange={e => setSubUrl(e.target.value)}
-          />
-          <Button type="submit" variant="primary" loading={busy} disabled={!subUrl.trim()}>Subscribe</Button>
-        </form>
-      )}
-
       {shown && (
         <div className={styles.result} role="status" aria-live="polite">
           <span className={styles[shown.tone] || ''}>{shown.text}</span>
@@ -229,7 +187,7 @@ export default function CapturePage() {
         </div>
       )}
 
-      {!isAuthenticated && mode !== 'subscribe' && (
+      {!isAuthenticated && (
         <p className={styles.hint}>You're signed out - captures queue until you sign in.</p>
       )}
 
@@ -238,9 +196,7 @@ export default function CapturePage() {
           ? 'Tip: once installed, share any link or file from another app and pick "Obsidian Optimizer".'
           : mode === 'note'
           ? "Rough notes you'd never revisit? Dump them here - the inbox makes you triage each one once."
-          : mode === 'file'
-          ? 'PDF, audio or video. Needs a connection - files are not queued offline.'
-          : 'Browsing a YouTube channel or blog? Subscribe and new items show up in Learn > Feed to swipe.'}
+          : 'PDF, audio or video. Needs a connection - files are not queued offline.'}
       </p>
     </div>
   );

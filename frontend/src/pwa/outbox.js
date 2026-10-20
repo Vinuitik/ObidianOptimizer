@@ -17,18 +17,17 @@ export function enqueueGrade(notePath, band) {
   return addToOutbox({ kind: 'grade', notePath, band, eventId: newId() });
 }
 
-// trackOpts (tracks/FLOWS.md Phase 1b): { trackId } or { newTrackTitle, newTrackType? } —
-// carried through the queue so an offline capture still lands on the right track once
-// flush() replays it. {} ⇒ today's exact untagged behavior.
-export function enqueueCapture(url, trackOpts = {}) {
-  return addToOutbox({ kind: 'capture', url, trackOpts, eventId: newId() });
+// Captures carry no track info (raw intake is Sources-only). Items queued by older builds may
+// still hold a `trackOpts` field; replay ignores it.
+export function enqueueCapture(url) {
+  return addToOutbox({ kind: 'capture', url, eventId: newId() });
 }
 
 // A typed raw note (brain dump) → text ingest → Learn inbox. Same durability path as
 // `capture`: server-direct when reachable, Drive mailbox as plan B when online-but-
 // server-down, local IndexedDB as the last resort when truly offline (mailbox.js).
-export function enqueueCaptureText(text, title, trackOpts = {}) {
-  return addToOutbox({ kind: 'captureText', text, title, trackOpts, eventId: newId() });
+export function enqueueCaptureText(text, title) {
+  return addToOutbox({ kind: 'captureText', text, title, eventId: newId() });
 }
 
 export function enqueueAssignment(assignmentId, notePath, answers) {
@@ -84,7 +83,7 @@ export async function flush() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ url: item.url, ...item.trackOpts }),
+          body: JSON.stringify({ url: item.url }),
         });
         if (!res.ok) throw new Error('capture ' + res.status);
       } else if (item.kind === 'captureText') {
@@ -92,7 +91,7 @@ export async function flush() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'same-origin',
-          body: JSON.stringify({ text: item.text, title: item.title, ...item.trackOpts }),
+          body: JSON.stringify({ text: item.text, title: item.title }),
         });
         if (!res.ok) throw new Error('captureText ' + res.status);
       } else if (item.kind === 'captureFile') {

@@ -4,9 +4,10 @@ import useStore from '../../store/useStore';
 // and the phone MobileTabBar. To add/rename a page: edit NAV_ITEMS only.
 // `primary` = lives in the phone bottom bar; everything else goes under "More".
 export const NAV_ITEMS = [
-  { to: '/',          label: 'Notes',     icon: 'file',     primary: true },
-  { to: '/learn',     label: 'Learn',     icon: 'sparkle',  primary: true },
   { to: '/review',    label: 'Review',    icon: 'clock',    primary: true, flashcardsOnly: true },
+  { to: '/sources',   label: 'Sources',   icon: 'plus',     primary: true },
+  { to: '/learn',     label: 'Learn',     icon: 'sparkle',  primary: true },
+  { to: '/notes',     label: 'Notes',     icon: 'file',     primary: true },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/failures',  label: 'Failures' },
   { to: '/get-app',   label: 'Get App' },
