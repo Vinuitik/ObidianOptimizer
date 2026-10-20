@@ -227,7 +227,7 @@ public class InboxController {
      *  paths only (matches the frontend's folder-tree destination datalist). Fails soft to
      *  null — same "no confident pick" contract as the per-note classifier. */
     private String groupSuggestion(List<String> paths) {
-        var result = ingestClient.submit(Map.of("paths", paths), "/placement/group");
+        var result = ingestClient.submit(ingestClient.scoped(activeVault.id(), Map.of("paths", paths)), "/placement/group");
         if (!result.ok()) return null;
         try {
             JsonNode root = objectMapper.readTree(result.body());

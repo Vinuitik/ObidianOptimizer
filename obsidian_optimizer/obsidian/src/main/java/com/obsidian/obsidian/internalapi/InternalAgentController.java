@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
@@ -93,10 +94,11 @@ public class InternalAgentController {
                                         @RequestBody CreateNoteRequest req) {
         if (badToken(token)) return unauthorized();
         try {
-            String absFolder = resolveFolder(req.folder());
-            String path = fileRepository.createNote(absFolder, req.name());
-            fileRepository.updateNote(path, req.content());
-            log.info("[internal.createNote] agent created {}", path);
+            long vid = vaultOf(req.vaultId());
+            String absFolder = resolveFolder(vid, req.folder());
+            String path = fileRepository.createNote(vid, absFolder, req.name());
+            fileRepository.updateNote(vid, path, req.content());
+            log.info("[internal.createNote] agent created {} (vault {})", path, vid);
             linkToTrack(req.captureId(), req.name(), path);
             return ResponseEntity.ok(Map.of("path", path));
         } catch (IOException e) {
@@ -130,7 +132,7 @@ public class InternalAgentController {
             return ResponseEntity.badRequest().body("title is required");
         }
         String type = (req.type() == null || req.type().isBlank()) ? "custom" : req.type();
-        return ResponseEntity.ok(trackRepo.create(activeVault.id(), req.title().trim(), type, "manual"));
+        return ResponseEntity.ok(trackRepo.create(vaultOf(req.vaultId()), req.title().trim(), type, "manual"));
     }
 
     /** MCP-originated track item append (ingest_resource/create_note with track_id — the
@@ -141,7 +143,8 @@ public class InternalAgentController {
                                           @PathVariable long id,
                                           @RequestBody AddTrackItemRequest req) {
         if (badToken(token)) return unauthorized();
-        if (trackRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
+        long vid = vaultOf(req.vaultId());
+        if (trackRepo.get(vid, id) == null) return ResponseEntity.notFound().build();
         if (req.title() == null || req.title().isBlank()) {
             return ResponseEntity.badRequest().body("title is required");
         }
@@ -152,7 +155,7 @@ public class InternalAgentController {
         String groupTitle = (cap != null && cap.title() != null && !cap.title().isBlank())
             ? cap.title() : req.title().trim();
         String sourceUrl = cap != null ? cap.sourceRef() : null;
-        long groupId = trackRepo.getOrCreateGroup(activeVault.id(), id, req.captureId(), groupTitle, sourceUrl).id();
+        long groupId = trackRepo.getOrCreateGroup(vid, id, req.captureId(), groupTitle, sourceUrl).id();
         return ResponseEntity.ok(trackRepo.addItem(id, req.title().trim(), req.notePath(), groupId));
     }
 
@@ -163,9 +166,10 @@ public class InternalAgentController {
      *  endpoint). Same internal-token gate as every other embedder-facing endpoint. */
     @GetMapping("/tracks/{id}/items")
     public ResponseEntity<?> trackItems(@RequestHeader(value = "X-Internal-Token", required = false) String token,
-                                        @PathVariable long id) {
+                                        @PathVariable long id,
+                                        @RequestParam(value = "vaultId", required = false) Long vaultId) {
         if (badToken(token)) return unauthorized();
-        Track track = trackRepo.get(activeVault.id(), id);
+        Track track = trackRepo.get(vaultOf(vaultId), id);
         if (track == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(Map.of("title", track.title(), "items", trackRepo.listItems(id)));
     }
@@ -176,8 +180,9 @@ public class InternalAgentController {
                                         @RequestBody UpdateNoteRequest req) {
         if (badToken(token)) return unauthorized();
         try {
-            String abs = resolveUnderVault(req.path()).toString();
-            fileRepository.updateNote(abs, req.content());
+            long vid = vaultOf(req.vaultId());
+            String abs = resolveUnderVault(vid, req.path()).toString();
+            fileRepository.updateNote(vid, abs, req.content());
             return ResponseEntity.ok().build();
         } catch (IOException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
@@ -194,14 +199,15 @@ public class InternalAgentController {
                                            @RequestBody CreateCaptureRequest req) {
         if (badToken(token)) return unauthorized();
         try {
-            Path sourcesDir = resolveUnderVault("_inbox/_sources");
+            long vid = vaultOf(req.vaultId());
+            Path sourcesDir = resolveUnderVault(vid, "_inbox/_sources");
             Files.createDirectories(sourcesDir);
             String filename = req.captureId() + ".md";
             Files.writeString(sourcesDir.resolve(filename), req.content());
             String sourcePath = "_inbox/_sources/" + filename;
 
             String title = req.sourceRef().replaceAll(".*[/\\\\]", "").replaceAll("\\.md$", "");
-            captureRepo.create(activeVault.id(), req.captureId(), "note", req.sourceRef(), sourcePath, title);
+            captureRepo.create(vid, req.captureId(), "note", req.sourceRef(), sourcePath, title);
             return ResponseEntity.ok(Map.of("sourcePath", sourcePath));
         } catch (IOException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
@@ -214,7 +220,7 @@ public class InternalAgentController {
                                           @RequestBody EnsureFolderRequest req) {
         if (badToken(token)) return unauthorized();
         try {
-            Path abs = resolveUnderVault(req.path());
+            Path abs = resolveUnderVault(vaultOf(req.vaultId()), req.path());
             Files.createDirectories(abs);
             return ResponseEntity.ok(Map.of("path", abs.toString()));
         } catch (IOException e) {
@@ -234,7 +240,7 @@ public class InternalAgentController {
         }
         try {
             byte[] bytes = Base64.getDecoder().decode(req.dataB64());
-            String stored = mediaController.storeResourceBytes(filename, bytes);
+            String stored = mediaController.storeResourceBytes(vaultOf(req.vaultId()), filename, bytes);
             return ResponseEntity.ok(Map.of("relPath", stored));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body("invalid base64");
@@ -243,14 +249,19 @@ public class InternalAgentController {
         }
     }
 
-    private String resolveFolder(String relFolder) throws IOException {
-        Path abs = resolveUnderVault(relFolder == null ? "" : relFolder);
+    /** The vault a callback belongs to: the id the embedder job carried, else vault 1 (requests
+     *  from before the embedder sent it). NEVER the active vault - a job that finishes after a
+     *  switch must write into its own vault. */
+    private static long vaultOf(Long vaultId) { return vaultId == null ? 1L : vaultId; }
+
+    private String resolveFolder(long vaultId, String relFolder) throws IOException {
+        Path abs = resolveUnderVault(vaultId, relFolder == null ? "" : relFolder);
         Files.createDirectories(abs);
         return abs.toString();
     }
 
-    private Path resolveUnderVault(String rel) throws IOException {
-        Path vault = activeVault.root().toAbsolutePath().normalize();
+    private Path resolveUnderVault(long vaultId, String rel) throws IOException {
+        Path vault = activeVault.rootFor(vaultId).toAbsolutePath().normalize();
         Path target = vault.resolve(rel == null ? "" : rel).normalize();
         if (!target.startsWith(vault)) {
             throw new IOException("path escapes vault: " + rel);
@@ -258,11 +269,11 @@ public class InternalAgentController {
         return target;
     }
 
-    record CreateNoteRequest(String folder, String name, String content, String captureId) {}
-    record UpdateNoteRequest(String path, String content) {}
-    record EnsureFolderRequest(String path) {}
-    record StoreMediaRequest(String filename, String dataB64) {}
-    record CreateCaptureRequest(String captureId, String sourceRef, String content) {}
-    record CreateTrackRequest(String title, String type) {}
-    record AddTrackItemRequest(String title, String notePath, String captureId) {}
+    record CreateNoteRequest(String folder, String name, String content, String captureId, Long vaultId) {}
+    record UpdateNoteRequest(String path, String content, Long vaultId) {}
+    record EnsureFolderRequest(String path, Long vaultId) {}
+    record StoreMediaRequest(String filename, String dataB64, Long vaultId) {}
+    record CreateCaptureRequest(String captureId, String sourceRef, String content, Long vaultId) {}
+    record CreateTrackRequest(String title, String type, Long vaultId) {}
+    record AddTrackItemRequest(String title, String notePath, String captureId, Long vaultId) {}
 }

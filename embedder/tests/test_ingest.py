@@ -2,6 +2,7 @@
 
 Whisper/ffmpeg are never invoked here: extractor is stubbed at the jobs layer.
 """
+from vault_paths import Vault
 import json
 import time
 
@@ -329,9 +330,10 @@ def test_link_track_item_passes_job_capture_id(monkeypatch):
     calls = []
     monkeypatch.setattr(ingest_publish, "add_track_item",
                         lambda *a, **k: calls.append((a, k)))
-    job = {"track_id": "trk1", "capture_id": "cap1"}
+    job = {"track_id": "trk1", "capture_id": "cap1", "vault_id": 1}
     ingest_jobs._link_track_item(job, "Note Title", "path/to/note.md")
-    assert calls == [(("trk1", "Note Title", "path/to/note.md"), {"capture_id": "cap1"})]
+    assert calls == [(("trk1", "Note Title", "path/to/note.md"),
+                      {"capture_id": "cap1", "vault_id": 1})]
 
 
 def test_link_track_item_missing_capture_id_key_defaults_none(monkeypatch):
@@ -339,9 +341,9 @@ def test_link_track_item_missing_capture_id_key_defaults_none(monkeypatch):
     calls = []
     monkeypatch.setattr(ingest_publish, "add_track_item",
                         lambda *a, **k: calls.append((a, k)))
-    job = {"track_id": "trk1"}
+    job = {"track_id": "trk1", "vault_id": 1}
     ingest_jobs._link_track_item(job, "Note Title", "path/to/note.md")
-    assert calls[0][1] == {"capture_id": None}
+    assert calls[0][1] == {"capture_id": None, "vault_id": 1}
 
 
 def test_link_track_item_no_track_id_skips_call(monkeypatch):
@@ -362,7 +364,10 @@ def client(monkeypatch, tmp_path):
     import main as embedder_main
     import mcp_server
 
-    monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
+    import vault_paths
+    monkeypatch.setattr(mcp_server, "active_vault", lambda: Vault(1, tmp_path))
+    # requests without vault_id/root (pre-multi-vault callers) resolve to vault 1 at DEFAULT_ROOT
+    monkeypatch.setattr(vault_paths, "DEFAULT_ROOT", str(tmp_path))
     monkeypatch.setattr(ingest_jobs, "BUNDLE_DIR", tmp_path / "bundles")
     return TestClient(embedder_main.app)
 

@@ -187,7 +187,14 @@ public class FileRepository {
     }
 
     public String createNote(String folderPath, String name) throws IOException {
-        requireInsideVault(folderPath);
+        return createNote(vid(), folderPath, name);
+    }
+
+    /** Vault-explicit variant for callbacks from in-flight jobs (embedder ingest): writes into
+     *  {@code vaultId}'s root, NOT whichever vault is active now. */
+    public String createNote(long vaultId, String folderPath, String name) throws IOException {
+        String root = rootOf(vaultId);
+        requireInsideVault(root, folderPath);
         requireSimpleName(name);
         File folder = new File(folderPath);
         if (!folder.exists() || !folder.isDirectory()) {
@@ -207,25 +214,31 @@ public class FileRepository {
 
         String path = noteFile.getAbsolutePath();
         FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(initialContent);
-        noteIndex.upsert(vid(), path, name.replace(".md", ""), meta, noteFile.lastModified());
-        noteLinkRepo.updateLinks(vid(), path, NoteLinkRepository.extractTargets(initialContent));
-        imageScanService.registerImages(vid(), path, initialContent);
-        syncQueueRepo.markPending(vid(), toRelative(path), ContentHashing.sha256(initialContent));
+        noteIndex.upsert(vaultId, path, name.replace(".md", ""), meta, noteFile.lastModified());
+        noteLinkRepo.updateLinks(vaultId, path, NoteLinkRepository.extractTargets(initialContent));
+        imageScanService.registerImages(vaultId, path, initialContent);
+        syncQueueRepo.markPending(vaultId, toRelative(root, path), ContentHashing.sha256(initialContent));
         return path;
     }
 
     public void updateNote(String path, String content) throws IOException {
-        requireInsideVault(path);
+        updateNote(vid(), path, content);
+    }
+
+    /** Vault-explicit variant (see {@link #createNote(long, String, String)}). */
+    public void updateNote(long vaultId, String path, String content) throws IOException {
+        String root = rootOf(vaultId);
+        requireInsideVault(root, path);
         File file = new File(path);
         if (!file.exists()) throw new IOException("Note not found: " + path);
         Files.writeString(Paths.get(path), content);
 
         String title = file.getName().replace(".md", "");
         FrontmatterParser.NoteMetadata meta = FrontmatterParser.parse(content);
-        noteIndex.upsert(vid(), path, title, meta, file.lastModified());
-        noteLinkRepo.updateLinks(vid(), path, NoteLinkRepository.extractTargets(content));
-        imageScanService.registerImages(vid(), path, content);
-        syncQueueRepo.markPending(vid(), toRelative(path), ContentHashing.sha256(content));
+        noteIndex.upsert(vaultId, path, title, meta, file.lastModified());
+        noteLinkRepo.updateLinks(vaultId, path, NoteLinkRepository.extractTargets(content));
+        imageScanService.registerImages(vaultId, path, content);
+        syncQueueRepo.markPending(vaultId, toRelative(root, path), ContentHashing.sha256(content));
     }
 
     public void patchNote(String path, List<PatchHunk> hunks) throws IOException {
@@ -449,9 +462,13 @@ public class FileRepository {
         }
     }
 
-    private String toRelative(String absPath) {
-        return Paths.get(root()).relativize(Paths.get(absPath)).toString().replace('\\', '/');
+    private String toRelative(String absPath) { return toRelative(root(), absPath); }
+
+    private static String toRelative(String root, String absPath) {
+        return Paths.get(root).relativize(Paths.get(absPath)).toString().replace('\\', '/');
     }
+
+    private String rootOf(long vaultId) { return activeVault.rootFor(vaultId).toString(); }
 
     /**
      * Re-index one note after something other than this class wrote it to disk
@@ -477,10 +494,14 @@ public class FileRepository {
      * any authenticated request could read or write arbitrary files.
      */
     Path requireInsideVault(String rawPath) throws IOException {
+        return requireInsideVault(root(), rawPath);
+    }
+
+    Path requireInsideVault(String root, String rawPath) throws IOException {
         if (rawPath == null || rawPath.isBlank()) {
             throw new IOException("Path required");
         }
-        Path vaultRoot = Paths.get(root()).toAbsolutePath().normalize();
+        Path vaultRoot = Paths.get(root).toAbsolutePath().normalize();
         Path candidate = Paths.get(rawPath).toAbsolutePath().normalize();
         if (!candidate.startsWith(vaultRoot)) {
             throw new IOException("Path is outside the vault: " + rawPath);

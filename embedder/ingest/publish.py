@@ -3,6 +3,9 @@
 All vault writes go through the Java backend's internal API — never direct
 file writes — so the notes index, embedding diff, and sync queue stay
 consistent. Auth: X-Internal-Token = MCP_API_TOKEN (shared service secret).
+
+Multi-vault: every callback carries `vaultId` (default 1) and Java routes the write by
+rootFor(vaultId), NOT by whichever vault is active when the (slow) job finishes.
 """
 import logging
 import os
@@ -129,7 +132,7 @@ def inject_block(content: str, embed_ref: str, body: str, sha: str) -> str:
     return content[:m.end()] + "\n\n" + block + content[m.end():]
 
 
-def find_home(text: str) -> str:
+def find_home(text: str, vault=None) -> str:
     """Folder for a new note from its OWN content (title + body) via the hierarchical
     centroid classifier (`placement`). Returns "" ("unsorted") when nothing is confident
     enough — so the triage UI shows no pre-pick instead of a confidently-wrong folder.
@@ -137,7 +140,7 @@ def find_home(text: str) -> str:
     kNN-vote's core failure)."""
     try:
         from ingest import placement
-        return placement.suggest_folder(text) or ""
+        return placement.suggest_folder(text, vault) or ""
     except Exception as e:
         log.warning("find_home failed: %s", e)
         return ""
@@ -197,10 +200,10 @@ def stamp_capture(content: str, capture_id: str, seq: int) -> str:
     return _insert_frontmatter(content, extra)
 
 
-def ensure_folder(folder: str) -> None:
+def ensure_folder(folder: str, vault_id: int = 1) -> None:
     """Make sure a vault-relative folder exists before create_note targets it."""
     res = httpx.post(f"{BACKEND_URL}/api/internal/folders", headers=_headers(),
-                     json={"path": folder}, timeout=30)
+                     json={"path": folder, "vaultId": vault_id}, timeout=30)
     if res.status_code != 200:
         raise PublishError(f"ensure_folder {res.status_code}: {res.text[:300]}")
 
@@ -211,15 +214,17 @@ def _headers():
     return {"X-Internal-Token": INTERNAL_TOKEN}
 
 
-def store_media(filename: str, data_b64: str) -> str:
+def store_media(filename: str, data_b64: str, vault_id: int = 1) -> str:
     res = httpx.post(f"{BACKEND_URL}/api/internal/media", headers=_headers(),
-                     json={"filename": filename, "dataB64": data_b64}, timeout=120)
+                     json={"filename": filename, "dataB64": data_b64, "vaultId": vault_id},
+                     timeout=120)
     if res.status_code != 200:
         raise PublishError(f"media store {res.status_code}: {res.text[:300]}")
     return res.json()["relPath"]
 
 
-def create_note(folder: str, title: str, content: str, capture_id: str | None = None) -> str:
+def create_note(folder: str, title: str, content: str, capture_id: str | None = None,
+                vault_id: int = 1) -> str:
     """Create via backend; on name collision retry with ' (2)', ' (3)'...
 
     capture_id (optional): passed through so the backend can auto-append the new note as
@@ -230,7 +235,7 @@ def create_note(folder: str, title: str, content: str, capture_id: str | None = 
         name = title if attempt == 1 else f"{title} ({attempt})"
         res = httpx.post(f"{BACKEND_URL}/api/internal/notes", headers=_headers(),
                          json={"folder": folder, "name": name, "content": content,
-                               "captureId": capture_id},
+                               "captureId": capture_id, "vaultId": vault_id},
                          timeout=60)
         if res.status_code == 200:
             return res.json()["path"]
@@ -239,25 +244,27 @@ def create_note(folder: str, title: str, content: str, capture_id: str | None = 
     raise PublishError(f"create_note: 5 name collisions for {title!r} in {folder!r}")
 
 
-def update_note(vault_rel_path: str, content: str) -> None:
+def update_note(vault_rel_path: str, content: str, vault_id: int = 1) -> None:
     res = httpx.put(f"{BACKEND_URL}/api/internal/notes", headers=_headers(),
-                    json={"path": vault_rel_path, "content": content}, timeout=60)
+                    json={"path": vault_rel_path, "content": content, "vaultId": vault_id},
+                    timeout=60)
     if res.status_code != 200:
         raise PublishError(f"update_note {res.status_code}: {res.text[:300]}")
 
 
-def create_track(title: str, type: str) -> dict:
+def create_track(title: str, type: str, vault_id: int = 1) -> dict:
     """MCP-only entry point (tracks/FLOWS.md Phase 1b `create_track` tool) — the embedder
     never carries a session cookie, so track creation from a conversation goes through
     this internal-token-gated mirror of the session-authed POST /tracks instead."""
     res = httpx.post(f"{BACKEND_URL}/api/internal/tracks", headers=_headers(),
-                     json={"title": title, "type": type}, timeout=30)
+                     json={"title": title, "type": type, "vaultId": vault_id}, timeout=30)
     if res.status_code != 200:
         raise PublishError(f"create_track {res.status_code}: {res.text[:300]}")
     return res.json()
 
 
-def add_track_item(track_id: str, title: str, note_path: str, capture_id: str | None = None) -> None:
+def add_track_item(track_id: str, title: str, note_path: str, capture_id: str | None = None,
+                   vault_id: int = 1) -> None:
     """Append a synthesized note as a track_items row. Called from the async ingest job
     path (jobs.py) once a note the MCP caller tagged with track_id actually lands — the
     tool call itself already returned before synthesis finishes, so this can't happen at
@@ -267,13 +274,14 @@ def add_track_item(track_id: str, title: str, note_path: str, capture_id: str | 
     capture_id (optional): groups sibling notes from the same job under one
     track_item_groups row (trackId, captureId) on the Java side."""
     res = httpx.post(f"{BACKEND_URL}/api/internal/tracks/{track_id}/items", headers=_headers(),
-                     json={"title": title, "notePath": note_path, "captureId": capture_id},
+                     json={"title": title, "notePath": note_path, "captureId": capture_id,
+                           "vaultId": vault_id},
                      timeout=30)
     if res.status_code != 200:
         raise PublishError(f"add_track_item {res.status_code}: {res.text[:300]}")
 
 
-def get_track_items(track_id: str) -> dict | None:
+def get_track_items(track_id: str, vault_id: int = 1) -> dict | None:
     """Fetch a Learning Track's title + attached items (GET /api/internal/tracks/{id}/items,
     step 1 of the mini-course feature) — the embedder never carries a session cookie, so
     tracks/minicourse_jobs.submit_outline's inputs come through this internal-token-gated
@@ -281,7 +289,7 @@ def get_track_items(track_id: str) -> dict | None:
     "doesn't exist" from a transport/5xx failure (raised as PublishError, same as every
     other function here)."""
     res = httpx.get(f"{BACKEND_URL}/api/internal/tracks/{track_id}/items",
-                    headers=_headers(), timeout=30)
+                    params={"vaultId": vault_id}, headers=_headers(), timeout=30)
     if res.status_code == 404:
         return None
     if res.status_code != 200:
@@ -289,12 +297,13 @@ def get_track_items(track_id: str) -> dict | None:
     return res.json()
 
 
-def create_capture(capture_id: str, source_ref: str, content: str) -> str:
+def create_capture(capture_id: str, source_ref: str, content: str, vault_id: int = 1) -> str:
     """Stash a pre-rewrite snapshot of an in-place note as its Capture source —
     a note can hold multiple embeds, so the note itself (not any one embed) is
     always the single source. Returns the vault-relative snapshot path."""
     res = httpx.post(f"{BACKEND_URL}/api/internal/capture", headers=_headers(),
-                     json={"captureId": capture_id, "sourceRef": source_ref, "content": content},
+                     json={"captureId": capture_id, "sourceRef": source_ref, "content": content,
+                           "vaultId": vault_id},
                      timeout=30)
     if res.status_code != 200:
         raise PublishError(f"create_capture {res.status_code}: {res.text[:300]}")

@@ -13,16 +13,18 @@ import time
 
 from download import downloader
 from job_registry import JobRegistry, PerCallThread, public_view
+from vault_paths import Vault
 
 log = logging.getLogger("embedder.download.jobs")
 
 _registry = JobRegistry(PerCallThread())
 
 
-def submit(url: str) -> dict:
+def submit(url: str, vault=None) -> dict:
+    vault = vault or Vault.default()
     job_id = _registry.new_id()
     job = {
-        "id": job_id, "url": url, "status": "queued",
+        "id": job_id, "url": url, "status": "queued", "vault_id": vault.id, "_vault": vault,
         "progress": 0.0, "speed": "", "eta": "", "filename": "",
         "error": None, "created_at": time.time(),
     }
@@ -53,7 +55,13 @@ def _run(job: dict):
             job["filename"] = p["filename"] or job["filename"]
 
     try:
-        filename = downloader.download_sync(job["url"], hook)
+        # Vault 1 keeps the legacy DOWNLOAD_DIR mount (dest None = downloader.DOWNLOAD_DIR);
+        # every other vault downloads into its own <root>/_workspace.
+        vault = job["_vault"]
+        if vault.legacy:
+            filename = downloader.download_sync(job["url"], hook)
+        else:
+            filename = downloader.download_sync(job["url"], hook, dest_dir=vault.workspace_dir())
         job["filename"] = filename
         job["progress"] = 100.0
         job["status"] = "done"

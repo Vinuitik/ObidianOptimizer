@@ -11,11 +11,10 @@ import mcp_server
 from mcp_server import mcp, _resolve_in_vault, _vector_candidates
 from model_runtime import embed_texts
 
-# NOTE: VAULT_DIR is read as `mcp_server.VAULT_DIR` (module-qualified), not
-# imported as a bare name, on purpose — tests monkeypatch the attribute on
-# the mcp_server module object (`monkeypatch.setattr(mcp_server, "VAULT_DIR", ...)`),
-# which a bare `from mcp_server import VAULT_DIR` would snapshot at import
-# time and never see updated.
+# NOTE: the active vault is read as `mcp_server.active_vault()` (module-qualified), not
+# imported as a bare name, on purpose — tests monkeypatch the attribute on the mcp_server
+# module object, which a bare `from mcp_server import active_vault` would snapshot at import
+# time and never see updated. Each tool resolves the vault ONCE per call.
 
 log = logging.getLogger("embedder.mcp")
 
@@ -35,10 +34,11 @@ def find_home_for_note(proposed_title: str, content: str = "") -> dict:
 
     `similar_notes`/`name_examples` are extra context (nearest existing notes + their naming),
     NOT a placement vote. Still verify with get_vault_tree() / list_folder() before filing."""
+    vault = mcp_server.active_vault()
     text = (proposed_title + "\n\n" + content).strip() if content else proposed_title
     try:
         from ingest import placement
-        suggested = placement.suggest_folder(text)
+        suggested = placement.suggest_folder(text, vault)
     except Exception as e:
         log.warning("placement failed in find_home_for_note: %s", e)
         suggested = None
@@ -47,9 +47,9 @@ def find_home_for_note(proposed_title: str, content: str = "") -> dict:
     # old tool suggest _inbox back to itself can't reappear here either).
     query_vec = embed_texts([text[:4000]], kind="query")[0]
     similar_notes: list[str] = []
-    for row in _vector_candidates(query_vec):
+    for row in _vector_candidates(query_vec, vault.id):
         note_path = row[0]
-        if "/_inbox/" in note_path or note_path.startswith(("ingest/", "/vault/ingest/")):
+        if "/_inbox/" in note_path or note_path.startswith(("ingest/", f"{vault.root}/ingest/")):
             continue
         if note_path not in similar_notes:
             similar_notes.append(note_path)
@@ -67,7 +67,8 @@ def find_home_for_note(proposed_title: str, content: str = "") -> dict:
 def get_vault_tree(max_depth: int = 3) -> list[dict]:
     """Read-only map of the vault's folder structure: every folder (down to
     max_depth) with its direct note count, e.g.
-    [{"folder": "/vault/Programming/Cloud", "noteCount": 12}, ...].
+    [{"folder": "/vault/Programming/Cloud", "noteCount": 12}, ...] (absolute paths in
+    the ACTIVE vault; the prefix differs per vault).
 
     Embedding-based suggestions (search_notes, find_home_for_note) are
     imperfect — when deciding where a note belongs, start here to see what
@@ -75,7 +76,8 @@ def get_vault_tree(max_depth: int = 3) -> list[dict]:
     naming conventions. Skips media/system folders (resources, _workspace,
     _reports, dotfolders)."""
     max_depth = max(1, min(max_depth, 8))
-    root = mcp_server.VAULT_DIR.resolve()
+    vault = mcp_server.active_vault()
+    root = vault.root.resolve()
     out: list[dict] = []
 
     def walk(d: Path, depth: int):
@@ -86,7 +88,7 @@ def get_vault_tree(max_depth: int = 3) -> list[dict]:
         note_count = sum(1 for e in entries if e.is_file() and e.suffix == ".md")
         rel = d.relative_to(root).as_posix()
         out.append({
-            "folder": "/vault" if rel == "." else f"/vault/{rel}",
+            "folder": vault.folder_label(rel),
             "noteCount": note_count,
         })
         if depth >= max_depth:
@@ -100,14 +102,16 @@ def get_vault_tree(max_depth: int = 3) -> list[dict]:
 
 
 @mcp.tool()
-def list_folder(folder_path: str = "/vault", include_notes: bool = False) -> dict:
+def list_folder(folder_path: str = "", include_notes: bool = False) -> dict:
     """List ONE vault folder read-only. By default returns subfolder names and
     a note COUNT only (folders can hold hundreds of notes — keep the signal).
     Pass include_notes=true to also get the note names (capped at 200,
     notesTruncated flags it) — do this when you need a folder's scope and
-    naming conventions before filing a note there. Accepts '/vault/...' or a
-    vault-relative path. Use after get_vault_tree."""
-    resolved = _resolve_in_vault(folder_path)
+    naming conventions before filing a note there. Accepts the absolute folder paths
+    get_vault_tree returns, or a vault-relative path; empty = the vault root. Use after
+    get_vault_tree."""
+    vault = mcp_server.active_vault()
+    resolved = _resolve_in_vault(folder_path, vault)
     if not resolved.is_dir():
         raise ValueError(f"Not a folder in the vault: {folder_path}")
     subfolders: list[str] = []
@@ -119,9 +123,9 @@ def list_folder(folder_path: str = "/vault", include_notes: bool = False) -> dic
             subfolders.append(e.name)
         elif e.is_file() and e.suffix == ".md":
             notes.append(e.stem)
-    rel = resolved.relative_to(mcp_server.VAULT_DIR.resolve()).as_posix()
+    rel = resolved.relative_to(vault.root.resolve()).as_posix()
     out = {
-        "folder": "/vault" if rel == "." else f"/vault/{rel}",
+        "folder": vault.folder_label(rel),
         "subfolders": subfolders,
         "noteCount": len(notes),
     }

@@ -83,3 +83,15 @@ def _reset_ingest_jobs():
     except Exception:
         pass
     yield
+
+
+@pytest.fixture(autouse=True)
+def _default_active_vault(monkeypatch):
+    """No DB in unit tests: the MCP/browser-facing "active vault" is vault 1 at the legacy root
+    unless a test patches `mcp_server.active_vault` itself (multi-vault tests do)."""
+    try:
+        import mcp_server
+        from vault_paths import Vault
+    except Exception:
+        return
+    monkeypatch.setattr(mcp_server, "active_vault", lambda: Vault.default())

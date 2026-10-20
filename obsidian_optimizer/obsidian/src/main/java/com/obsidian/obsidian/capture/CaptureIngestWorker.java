@@ -192,7 +192,7 @@ public class CaptureIngestWorker {
             if (c.bundleRef() == null || c.bundleRef().isBlank()) continue;  // nothing to resume
             if (!captureRepo.claimDeferred(c.id())) continue;                // a concurrent retry won it
             IngestClient.Result res = ingestClient.resume(
-                c.bundleRef(), c.id(), c.sourceRef(), c.sourceType(), c.title(), null);
+                c.vaultId(), c.bundleRef(), c.id(), c.sourceRef(), c.sourceType(), c.title(), null);
             if (res.ok()) {
                 log.info("[CaptureIngestWorker] resumed synthesis for capture {}", c.id());
                 // outcome (DONE / DEFERRED again / FAILED) is reconciled by pollFailures
@@ -420,9 +420,9 @@ public class CaptureIngestWorker {
             if (text == null || text.isBlank()) {
                 return new IngestClient.Result(false, 422, null, "text resource missing");
             }
-            return ingestClient.submitText(c.id(), text, c.title());
+            return ingestClient.submitText(c.vaultId(), c.id(), text, c.title());
         }
-        return ingestClient.submitStandalone(c.id(), c.sourceRef(), c.sourceType());
+        return ingestClient.submitStandalone(c.vaultId(), c.id(), c.sourceRef(), c.sourceType());
     }
 
     private String readTextResource(long vaultId, String vaultRelPath) throws Exception {

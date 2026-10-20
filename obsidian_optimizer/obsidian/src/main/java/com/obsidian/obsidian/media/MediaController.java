@@ -92,12 +92,17 @@ public class MediaController {
 
     /** Byte-array variant for the internal agent API (keyframes etc.). */
     public String storeResourceBytes(String filename, byte[] bytes) throws IOException {
+        return storeResourceBytes(activeVault.id(), filename, bytes);
+    }
+
+    /** Vault-explicit variant: an in-flight embedder job stores into ITS vault, not the active one. */
+    public String storeResourceBytes(long vaultId, String filename, byte[] bytes) throws IOException {
         String subdir = subdirFor(filename);
-        Path targetDir = activeVault.root().resolve("resources").resolve(subdir);
+        Path targetDir = activeVault.rootFor(vaultId).resolve("resources").resolve(subdir);
         Files.createDirectories(targetDir);
         Files.write(targetDir.resolve(filename), bytes);
         String relPath = "resources/" + subdir + "/" + filename;
-        syncQueueRepo.markPending(activeVault.id(), relPath, ContentHashing.sha256(bytes));
+        syncQueueRepo.markPending(vaultId, relPath, ContentHashing.sha256(bytes));
         log.info("[storeResourceBytes] saved {} ({} bytes)", relPath, bytes.length);
         return relPath;
     }

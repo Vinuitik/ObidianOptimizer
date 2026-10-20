@@ -63,9 +63,12 @@ class AgentReport:
     full story in order. All methods are no-ops when AGENT_REPORTS=off.
     """
 
-    def __init__(self, agent: str, subject: str):
+    def __init__(self, agent: str, subject: str, reports_dir: str | None = None):
         self.agent = agent
         self.subject = subject
+        # None = the legacy REPORTS_DIR (vault 1); multi-vault callers pass Vault.reports_dir()
+        # so a vault's debug reports land in that vault's own _reports/.
+        self.reports_dir = reports_dir
         self.started = time.time()
         self.sections: list[tuple[str, str]] = []
 
@@ -88,7 +91,7 @@ class AgentReport:
         if not ENABLED:
             return
         try:
-            out_dir = Path(REPORTS_DIR) / self.agent
+            out_dir = Path(self.reports_dir or REPORTS_DIR) / self.agent
             out_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")
             path = out_dir / f"{ts}_{status}_{_slug(self.subject)}.md"

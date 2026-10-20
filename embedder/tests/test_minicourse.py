@@ -1,6 +1,7 @@
 """Mini-course generation tests — bundle building, course-level outline schema/retry,
 lesson expansion. All LLM calls stubbed (`minicourse._complete`), same convention as
 test_synthesize.py."""
+from vault_paths import Vault
 import json
 
 import pytest
@@ -24,7 +25,7 @@ def _write_note(tmp_path, rel_path, content):
 # ── build_course_bundle ──────────────────────────────────────────────────
 
 def test_build_course_bundle_spans_multiple_notes(tmp_path, monkeypatch):
-    monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
+    monkeypatch.setattr(mcp_server, "active_vault", lambda: Vault(1, tmp_path))
     _write_note(tmp_path, "a.md", NOTE_A)
     _write_note(tmp_path, "b.md", NOTE_B)
 
@@ -44,7 +45,7 @@ def test_build_course_bundle_spans_multiple_notes(tmp_path, monkeypatch):
 
 
 def test_build_course_bundle_skips_items_without_note_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
+    monkeypatch.setattr(mcp_server, "active_vault", lambda: Vault(1, tmp_path))
     _write_note(tmp_path, "a.md", NOTE_A)
 
     items = [{"title": "Note A", "notePath": "a.md", "status": "done"},

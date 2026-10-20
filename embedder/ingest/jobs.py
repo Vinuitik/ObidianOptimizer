@@ -17,6 +17,8 @@ import time
 import uuid
 from pathlib import Path
 
+from vault_paths import Vault
+
 log = logging.getLogger("embedder.ingest.jobs")
 
 BUNDLE_DIR = Path(os.environ.get("MODEL_CACHE", "/models")) / "ingest_bundles"
@@ -32,7 +34,8 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
            embed_ref: str | None = None, capture_id: str | None = None,
            text: str | None = None, source_type: str | None = None,
            title: str | None = None, resume_bundle: str | None = None,
-           track_id: str | None = None) -> dict:
+           track_id: str | None = None, vault: Vault | None = None) -> dict:
+    vault = vault or Vault.default()    # no vault given = a pre-multi-vault caller = vault 1
     # In-place dedup: never run two jobs for the same (note, embed) at once —
     # the auto-scanner re-fires on every save until the marker lands.
     if note_path and embed_ref:
@@ -40,6 +43,7 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
             for j in _jobs.values():
                 if (j.get("note_path") == note_path
                         and j.get("embed_ref") == embed_ref
+                        and j.get("vault_id") == vault.id
                         and j["status"] in ("QUEUED", "RUNNING")):
                     return public_view(j)
     # In-place resume (INGEST_DURABILITY_PRIORITY §4): a prior synthesis for this (note,
@@ -48,7 +52,7 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
     # Covers the in-memory DEFERRED job (embedder stayed up) AND the durable sidecar (after
     # a restart). Skip when this call is itself a resume, extract-only, or the text route.
     if note_path and embed_ref and not resume_bundle and not extract_only and text is None:
-        saved = _find_deferred_inplace_bundle(note_path, embed_ref)
+        saved = _find_deferred_inplace_bundle(note_path, embed_ref, vault.id)
         if saved:
             resume_bundle = saved["bundle_path"]
             source_type = source_type or saved.get("source_type")
@@ -68,11 +72,14 @@ def submit(ref: str, resolved_path, force_whisper: bool = False,
         with _lock:
             for jid in [k for k, v in _jobs.items()
                         if v.get("note_path") == note_path and v.get("embed_ref") == embed_ref
-                        and v.get("status") == "DEFERRED"]:
+                        and v.get("vault_id") == vault.id and v.get("status") == "DEFERRED"]:
                 del _jobs[jid]
     job_id = uuid.uuid4().hex[:12]
     job = {
         "id": job_id, "ref": ref, "status": "QUEUED", "stage": None,
+        # The vault this job belongs to: ALL its file I/O, DB reads and backend callbacks
+        # use it, so a job that finishes after the user switched vaults still lands in its own.
+        "vault_id": vault.id, "_vault": vault,
         "created_at": time.time(), "error": None, "bundle_path": None,
         "force_whisper": force_whisper, "extract_only": extract_only,
         "note_path": note_path, "embed_ref": embed_ref,
@@ -110,19 +117,20 @@ def public_view(job: dict) -> dict:
     return {k: v for k, v in job.items() if not k.startswith("_")}
 
 
-def _find_deferred_inplace_bundle(note_path: str, embed_ref: str) -> dict | None:
+def _find_deferred_inplace_bundle(note_path: str, embed_ref: str, vault_id: int = 1) -> dict | None:
     """A resumable bundle for this (note, embed) from a prior DEFERRED in-place synthesis,
     or None. In-memory DEFERRED job first (fast path, embedder stayed up); the durable
     sidecar second (survives restart). Returns {'bundle_path', 'source_type', 'title'}."""
     with _lock:
         for j in _jobs.values():
             if (j.get("note_path") == note_path and j.get("embed_ref") == embed_ref
+                    and j.get("vault_id") == vault_id
                     and j.get("status") == "DEFERRED" and j.get("bundle_path")
                     and os.path.isfile(j["bundle_path"])):
                 return {"bundle_path": j["bundle_path"],
                         "source_type": j.get("source_type"), "title": j.get("title")}
     from ingest import inplace_resume
-    return inplace_resume.lookup(note_path, embed_ref)
+    return inplace_resume.lookup(note_path, embed_ref, vault_id)
 
 
 def _ensure_worker():
@@ -153,7 +161,7 @@ def _worker_loop():
             if job.get("note_path") and job.get("embed_ref"):
                 try:
                     from ingest import inplace_resume
-                    inplace_resume.drop(job["note_path"], job["embed_ref"])
+                    inplace_resume.drop(job["note_path"], job["embed_ref"], job["vault_id"])
                 except Exception:
                     pass
             _maybe_escalate(job)   # AGENT_ESCALATION: hand recoverable failures to the agent
@@ -162,7 +170,7 @@ def _worker_loop():
                 source="ingest", stage=job.get("stage") or "unknown",
                 input_payload={"ref": job.get("ref"), "note_path": job.get("note_path"),
                                 "capture_id": job.get("capture_id")},
-                error=e, bundle_ref=job.get("bundle_path"),
+                error=e, bundle_ref=job.get("bundle_path"), vault_id=job["vault_id"],
             )
         finally:
             # Once the burst drains, release the bursty ingest models so VRAM/RAM
@@ -268,7 +276,7 @@ def _run(job: dict):
             source="ingest", stage="video_download",
             input_payload={"ref": job.get("ref"), "note_path": job.get("note_path"),
                             "capture_id": job.get("capture_id")},
-            error=e, bundle_ref=job.get("bundle_path"),
+            error=e, bundle_ref=job.get("bundle_path"), vault_id=job["vault_id"],
         )
 
     # Re-save now that keyframes + local media are attached, so the on-disk bundle is the
@@ -307,7 +315,8 @@ def _fanout_web_videos(job: dict) -> None:
         return
     for v in videos:
         try:
-            submit(v, None, capture_id=job.get("capture_id"), source_type="video")
+            submit(v, None, capture_id=job.get("capture_id"), source_type="video",
+                   vault=job["_vault"])
             log.info("web fan-out: queued embedded video %s under capture %s",
                      v, job.get("capture_id"))
         except Exception as e:
@@ -352,7 +361,7 @@ def _synthesize(job: dict, bundle: dict) -> None:
                 from ingest import inplace_resume
                 inplace_resume.record(job["note_path"], job["embed_ref"], job["bundle_path"],
                                       ref=job.get("ref"), source_type=job.get("source_type"),
-                                      title=job.get("title"))
+                                      title=job.get("title"), vault_id=job["vault_id"])
             log.warning("ingest job %s DEFERRED — all LLM providers cooling; "
                         "will retry from bundle: %s", job["id"], e)
             import failures
@@ -360,7 +369,7 @@ def _synthesize(job: dict, bundle: dict) -> None:
                 source="ingest", stage="synthesize",
                 input_payload={"ref": job.get("ref"), "note_path": job.get("note_path"),
                                 "capture_id": job.get("capture_id")},
-                error=e, bundle_ref=job.get("bundle_path"),
+                error=e, bundle_ref=job.get("bundle_path"), vault_id=job["vault_id"],
             )
             return
         raise
@@ -369,7 +378,7 @@ def _synthesize(job: dict, bundle: dict) -> None:
     # future re-ingest (source changed) extracts fresh rather than resuming this stale bundle.
     if job.get("note_path") and job.get("embed_ref"):
         from ingest import inplace_resume
-        inplace_resume.drop(job["note_path"], job["embed_ref"])
+        inplace_resume.drop(job["note_path"], job["embed_ref"], job["vault_id"])
     log.info("ingest job %s: %d segments, %d note(s) from %s",
              job["id"], len(bundle["segments"]),
              len(job.get("notes_created", [])), job["ref"])
@@ -388,28 +397,23 @@ def _attach_keyframes(job: dict, bundle: dict, video_path: Path):
                     job["ref"], e)
 
 
-def _store_media(bundle: dict) -> set[str]:
+def _store_media(bundle: dict, vault_id: int = 1) -> set[str]:
     """Persist agent-produced media (keyframes, PDF figures) via the Java
     internal API so the ![[…]] embeds resolve. Returns the stored basenames."""
     from ingest import publish
     stored_names = set()
     for m in bundle.get("media", []):
         if "data_b64" in m:
-            publish.store_media(m["path"], m.pop("data_b64"))
+            publish.store_media(m["path"], m.pop("data_b64"), vault_id)
         stored_names.add(m["path"].rsplit("/", 1)[-1])
     return stored_names
 
 
-def _vault_rel(p) -> str:
-    """Container path → vault-relative path used in note bodies (mediaUrl resolves these):
-    /resources/… → resources/… , /workspace/… → _workspace/… , /vault/… → …"""
-    s = str(p)
-    for prefix, rel in (("/resources/", "resources/"),
-                        ("/workspace/", "_workspace/"),
-                        ("/vault/", "")):
-        if s.startswith(prefix):
-            return rel + s[len(prefix):]
-    return s
+def _vault_rel(p, vault: Vault | None = None) -> str:
+    """Container path → vault-relative path used in note bodies (mediaUrl resolves these).
+    Vault 1: /resources/… → resources/… , /workspace/… → _workspace/… , /vault/… → …
+    Any vault: <its root>/… → …  (see Vault.rel)"""
+    return (vault or Vault.default()).rel(p)
 
 
 def _sniff_is_pdf(url: str) -> bool:
@@ -440,7 +444,7 @@ def _prefetch_to_resources(job: dict, kind: str) -> Path:
 
     ref = job["ref"]
     sub = "pdf" if kind == "pdf" else "media"
-    dest_dir = os.path.join(os.environ.get("RESOURCE_DIR", "/resources"), sub)
+    dest_dir = os.path.join(job["_vault"].resources_dir(), sub)
     os.makedirs(dest_dir, exist_ok=True)
     name = _re.sub(r"[^\w.\-]", "_", os.path.basename(unquote(urlparse(ref).path)))[:120] or "download"
     if kind == "pdf" and not name.lower().endswith(".pdf"):
@@ -470,16 +474,16 @@ def _ensure_local_copy(job: dict, bundle: dict, resolved):
     ref = job.get("ref") or ""
     if ref and router.route(ref) == "youtube":
         from download import downloader
-        dest = os.path.join(os.environ.get("RESOURCE_DIR", "/resources"), "media")
+        dest = os.path.join(job["_vault"].resources_dir(), "media")
         job["stage"] = "download:resources"
         path = downloader.download_sync(ref, dest_dir=dest)
-        src["local"] = _vault_rel(path)
+        src["local"] = _vault_rel(path, job["_vault"])
         # We now HAVE the video (transcription used subtitles only) → pull keyframes from it
         # so YouTube notes get diagrams/screenshots, not just transcript. Best-effort inside.
         if not bundle.get("media"):
             _attach_keyframes(job, bundle, Path(path))
     elif resolved is not None:
-        src["local"] = _vault_rel(str(resolved))
+        src["local"] = _vault_rel(str(resolved), job["_vault"])
 
 
 def _synthesize_and_inject(job: dict, bundle: dict):
@@ -491,8 +495,9 @@ def _synthesize_and_inject(job: dict, bundle: dict):
     from ingest import bundle as bundle_util
     from mcp_server import _resolve_in_vault
 
-    stored_names = _store_media(bundle)
-    plans = synthesize.outline(bundle)
+    vault = job["_vault"]
+    stored_names = _store_media(bundle, vault.id)
+    plans = synthesize.outline(bundle, reports_dir=vault.reports_dir())
     job["planned_notes"] = [p["title"] for p in plans]
     numbered = bundle_util.number_segments(bundle)
     block = synthesize.build_inplace_body(bundle, plans, numbered)
@@ -503,17 +508,17 @@ def _synthesize_and_inject(job: dict, bundle: dict):
 
     resolved = Path(job["_resolved_path"]) if job["_resolved_path"] else None
     sha = hashlib.sha256(resolved.read_bytes()).hexdigest()[:16] if resolved else "live"
-    content = _resolve_in_vault(job["note_path"]).read_text(encoding="utf-8")
+    content = _resolve_in_vault(job["note_path"], vault).read_text(encoding="utf-8")
 
     # The note is the Capture's source — not the embed — since a note can hold
     # multiple embeds and a Capture always has exactly one source. Snapshot the
     # pre-rewrite content before injecting so the Inbox can show what changed.
     capture_id = uuid.uuid4().hex[:12]
-    publish.create_capture(capture_id, job["note_path"], content)
+    publish.create_capture(capture_id, job["note_path"], content, vault.id)
 
     new_content = publish.inject_block(content, job["embed_ref"], block, sha)
     new_content = publish.stamp_capture(new_content, capture_id, 1)
-    publish.update_note(job["note_path"], new_content)
+    publish.update_note(job["note_path"], new_content, vault.id)
     job["notes_created"] = [job["note_path"]]
     job["capture_id"] = capture_id
 
@@ -569,7 +574,8 @@ def _synthesize_and_inject_v2(job: dict, bundle: dict):
     from ingest import publish, synthesize
     from mcp_server import _resolve_in_vault
 
-    stored_names = _store_media(bundle)
+    vault = job["_vault"]
+    stored_names = _store_media(bundle, vault.id)
     res = _run_pipeline_v2(job, bundle)
     drafted = [{"title": n.title, "body": n.body, "span": n.unit.locator_span}
                for n in res.notes]
@@ -582,13 +588,13 @@ def _synthesize_and_inject_v2(job: dict, bundle: dict):
 
     resolved = Path(job["_resolved_path"]) if job["_resolved_path"] else None
     sha = hashlib.sha256(resolved.read_bytes()).hexdigest()[:16] if resolved else "live"
-    content = _resolve_in_vault(job["note_path"]).read_text(encoding="utf-8")
+    content = _resolve_in_vault(job["note_path"], vault).read_text(encoding="utf-8")
 
     capture_id = uuid.uuid4().hex[:12]
-    publish.create_capture(capture_id, job["note_path"], content)
+    publish.create_capture(capture_id, job["note_path"], content, vault.id)
     new_content = publish.inject_block(content, job["embed_ref"], block, sha)
     new_content = publish.stamp_capture(new_content, capture_id, 1)
-    publish.update_note(job["note_path"], new_content)
+    publish.update_note(job["note_path"], new_content, vault.id)
     job["notes_created"] = [job["note_path"]]
     job["capture_id"] = capture_id
 
@@ -605,7 +611,8 @@ def _link_track_item(job: dict, title: str, path: str) -> None:
         return
     from ingest import publish
     try:
-        publish.add_track_item(track_id, title, path, capture_id=job.get("capture_id"))
+        publish.add_track_item(track_id, title, path, capture_id=job.get("capture_id"),
+                               vault_id=job["vault_id"])
     except Exception as e:
         log.warning("track item link failed (track_id=%s, note=%r): %s", track_id, title, e)
 
@@ -615,7 +622,8 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     `synthesize.assemble` via a span→segs shim; one bad note never sinks its siblings."""
     from ingest import linking, publish, synthesize
 
-    stored_names = _store_media(bundle)
+    vault = job["_vault"]
+    stored_names = _store_media(bundle, vault.id)
     res = _run_pipeline_v2(job, bundle)
 
     # Folder suggestion is PER NOTE, from each note's own content (title + body) — not once
@@ -627,7 +635,7 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     capture_id = job.get("capture_id") or uuid.uuid4().hex[:12]
     job["capture_id"] = capture_id
     inbox_dir = publish.inbox_folder(capture_id)
-    publish.ensure_folder(inbox_dir)
+    publish.ensure_folder(inbox_dir, vault.id)
     ensured_dirs = {inbox_dir}
     chapters = bundle["source"].get("chapters") or []
     mini_bundle = {"source": bundle["source"], "media": bundle.get("media", [])}
@@ -647,7 +655,7 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             chapter_title = publish.chapter_for_page(min(pages), chapters) if pages else ""
             note_dir = publish.inbox_folder(capture_id, chapter_title) if chapter_title else inbox_dir
             if note_dir not in ensured_dirs:
-                publish.ensure_folder(note_dir)
+                publish.ensure_folder(note_dir, vault.id)
                 ensured_dirs.add(note_dir)
             prev_title = titles[seq - 1] if seq > 0 else None
             next_title = titles[seq + 1] if seq < len(titles) - 1 else None
@@ -655,7 +663,7 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             # SEMANTIC links (§5): ANN over the EXISTING vault index for the closest prior
             # notes (best-effort — no index / DB down → no links). Excludes self + siblings.
             related = linking.related_block(
-                linking.related_links(n.body, exclude_stems=sibling_stems))
+                linking.related_links(n.body, exclude_stems=sibling_stems, vault_id=vault.id))
             # loop guard: an approved note is re-scanned; demote any A/V/PDF embed so it
             # never re-ingests the source (images stay embeds → still captioned). §9/loop.
             body = publish.demote_resource_embeds(n.body)
@@ -668,12 +676,12 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             problems = publish.validate_note(note_md, stored_names)
             if problems:
                 raise publish.PublishError("; ".join(problems))
-            suggested = publish.find_home(n.title + "\n\n" + n.body)
+            suggested = publish.find_home(n.title + "\n\n" + n.body, vault)
             note_md = publish.stamp_inbox(note_md, source_ref, suggested, source_title, chapter_title)
             note_md = publish.stamp_capture(note_md, capture_id, seq)
             path = publish.create_note(note_dir,
                                        synthesize.slugify(n.title), note_md,
-                                       capture_id=capture_id)
+                                       capture_id=capture_id, vault_id=vault.id)
             created.append(path)
             _link_track_item(job, n.title, path)
         except Exception as e:  # one bad note must not sink its siblings
@@ -692,9 +700,10 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     from ingest import bundle as bundle_util
 
     # store media first so embeds resolve at validation time
-    stored_names = _store_media(bundle)
+    vault = job["_vault"]
+    stored_names = _store_media(bundle, vault.id)
 
-    plans = synthesize.outline(bundle)
+    plans = synthesize.outline(bundle, reports_dir=vault.reports_dir())
     job["planned_notes"] = [p["title"] for p in plans]
     numbered = bundle_util.number_segments(bundle)
 
@@ -707,7 +716,7 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     capture_id = job.get("capture_id") or uuid.uuid4().hex[:12]
     job["capture_id"] = capture_id
     inbox_dir = publish.inbox_folder(capture_id)
-    publish.ensure_folder(inbox_dir)
+    publish.ensure_folder(inbox_dir, vault.id)
     ensured_dirs = {inbox_dir}
     chapters = bundle["source"].get("chapters") or []
     by_id = {s["id"]: s for s in numbered}
@@ -732,19 +741,19 @@ def _synthesize_and_publish(job: dict, bundle: dict):
             chapter_title = publish.chapter_for_page(min(pages), chapters) if pages else ""
             note_dir = publish.inbox_folder(capture_id, chapter_title) if chapter_title else inbox_dir
             if note_dir not in ensured_dirs:
-                publish.ensure_folder(note_dir)
+                publish.ensure_folder(note_dir, vault.id)
                 ensured_dirs.add(note_dir)
-            suggested = publish.find_home(plan["title"] + "\n\n" + note_md)
+            suggested = publish.find_home(plan["title"] + "\n\n" + note_md, vault)
             note_md = publish.stamp_inbox(note_md, source_ref, suggested, source_title, chapter_title)
             note_md = publish.stamp_capture(note_md, capture_id, seq)
             # Append links LAST so they sit at the very end of the note, verbatim.
             prev_stem = sibling_stems[seq - 1] if seq > 0 else None
             semantic = linking.semantic_link_stems(
-                plan["title"], note_md, exclude_stems=sibling_stems)
+                plan["title"], note_md, exclude_stems=sibling_stems, vault_id=vault.id)
             note_md = linking.append_links(note_md, ([prev_stem] if prev_stem else []) + semantic)
             path = publish.create_note(note_dir,
                                        synthesize.slugify(plan["title"]), note_md,
-                                       capture_id=capture_id)
+                                       capture_id=capture_id, vault_id=vault.id)
             created.append(path)
             _link_track_item(job, plan["title"], path)
         except Exception as e:  # one bad note must not sink its siblings

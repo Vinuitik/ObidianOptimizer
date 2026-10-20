@@ -6,6 +6,7 @@ The DB is monkeypatched at the _query_db seam; embeddings come from the
 mock model installed by test_main's autouse fixture pattern (re-declared
 here so this module is self-contained).
 """
+from vault_paths import Vault
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -216,17 +217,18 @@ def test_get_vault_tree_and_list_folder(tmp_path, monkeypatch):
     (tmp_path / "AI" / "ML" / "sgd.md").write_text("x")
     (tmp_path / "AI" / "ML" / "adam.md").write_text("x")
     (tmp_path / "root.md").write_text("x")
-    monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
+    monkeypatch.setattr(mcp_server, "active_vault", lambda: Vault(1, tmp_path))
 
     tree = {t["folder"]: t["noteCount"] for t in mcp_server.get_vault_tree()}
-    assert tree["/vault"] == 1
-    assert tree["/vault/AI"] == 1
-    assert tree["/vault/AI/ML"] == 2
+    root = str(tmp_path)               # folders are absolute paths under the ACTIVE vault's root
+    assert tree[root] == 1
+    assert tree[f"{root}/AI"] == 1
+    assert tree[f"{root}/AI/ML"] == 2
     assert not any("resources" in f or ".obsidian" in f for f in tree)
 
     # default: folders + count only — note names are opt-in
     listing = mcp_server.list_folder("AI/ML")
-    assert listing["folder"] == "/vault/AI/ML"
+    assert listing["folder"] == f"{tmp_path}/AI/ML"
     assert listing["noteCount"] == 2
     assert "notes" not in listing
     assert listing["subfolders"] == []
@@ -274,13 +276,13 @@ def test_get_note_content_rejects_path_escape(client):
 # ---------------------------------------------------------------------------
 
 def test_resolve_in_vault_accepts_relative(tmp_path, monkeypatch):
-    monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
+    monkeypatch.setattr(mcp_server, "active_vault", lambda: Vault(1, tmp_path))
     (tmp_path / "note.md").write_text("hi")
     assert mcp_server._resolve_in_vault("note.md").name == "note.md"
 
 
 def test_resolve_in_vault_rejects_traversal(tmp_path, monkeypatch):
-    monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
+    monkeypatch.setattr(mcp_server, "active_vault", lambda: Vault(1, tmp_path))
     with pytest.raises(ValueError):
         mcp_server._resolve_in_vault("../outside.md")
 
@@ -288,7 +290,7 @@ def test_resolve_in_vault_rejects_traversal(tmp_path, monkeypatch):
 def test_resolve_in_vault_rejects_absolute_outside(tmp_path, monkeypatch):
     # NB: a "C:/..." path is only absolute on Windows; on POSIX it's a weird
     # relative subpath, so use a genuinely absolute outside path instead.
-    monkeypatch.setattr(mcp_server, "VAULT_DIR", tmp_path)
+    monkeypatch.setattr(mcp_server, "active_vault", lambda: Vault(1, tmp_path))
     with pytest.raises(ValueError):
         mcp_server._resolve_in_vault(str(tmp_path.parent / "outside.md"))
 
@@ -298,13 +300,13 @@ def test_resolve_in_vault_rejects_absolute_outside(tmp_path, monkeypatch):
 def _stub_publish(monkeypatch):
     """Mock the backend-write seam so create_note runs without the Java internal API."""
     from ingest import publish
-    monkeypatch.setattr(publish, "find_home", lambda t: "Study")
-    monkeypatch.setattr(publish, "ensure_folder", lambda f: None)
+    monkeypatch.setattr(publish, "find_home", lambda t, vault=None: "Study")
+    monkeypatch.setattr(publish, "ensure_folder", lambda f, vault_id=1: None)
     monkeypatch.setattr(publish, "stamp_inbox", lambda md, *a, **k: md)
     monkeypatch.setattr(publish, "stamp_auto_filed",
                         lambda md, suggested_folder="": md + f"\nSUGGESTED={suggested_folder}")
     monkeypatch.setattr(publish, "create_note",
-                        lambda folder, name, content: f"{folder}/{name}.md")
+                        lambda folder, name, content, **kw: f"{folder}/{name}.md")
 
 
 def test_create_note_default_stages_as_is_no_job(monkeypatch):
@@ -358,7 +360,7 @@ def test_create_note_grouped_folder_still_gets_suggested_folder(monkeypatch):
     written = {}
     from ingest import publish
     monkeypatch.setattr(publish, "create_note",
-                        lambda folder, name, content: written.setdefault("content", content) or f"{folder}/{name}.md")
+                        lambda folder, name, content, **kw: written.setdefault("content", content) or f"{folder}/{name}.md")
 
     res = mcp_server.create_note("a short thought", folder="Some Group")
     assert res["status"] == "DONE"
@@ -372,12 +374,12 @@ def test_generate_minicourse_fetches_track_and_submits_outline(monkeypatch):
     from tracks import minicourse_jobs
 
     monkeypatch.setattr(publish, "get_track_items",
-                        lambda track_id: {"title": "My Track",
+                        lambda track_id, vault_id=1: {"title": "My Track",
                                           "items": [{"title": "A", "notePath": "a.md",
                                                      "status": "DONE"}]})
     calls = []
     monkeypatch.setattr(minicourse_jobs, "submit_outline",
-                        lambda tid, title, items: calls.append((tid, title, items)) or
+                        lambda tid, title, items, vault=None: calls.append((tid, title, items)) or
                         {"id": "job-1", "status": "QUEUED"})
 
     res = mcp_server.generate_minicourse("track-1")
@@ -390,7 +392,7 @@ def test_generate_minicourse_fetches_track_and_submits_outline(monkeypatch):
 def test_generate_minicourse_unknown_track_raises(monkeypatch):
     from ingest import publish
 
-    monkeypatch.setattr(publish, "get_track_items", lambda track_id: None)
+    monkeypatch.setattr(publish, "get_track_items", lambda track_id, vault_id=1: None)
 
     with pytest.raises(ValueError):
         mcp_server.generate_minicourse("no-such-track")

@@ -14,24 +14,9 @@ from mcp_server import mcp, _resolve_in_vault
 
 log = logging.getLogger("embedder.mcp_tools.write")
 
-_NON_CONTENT_TOP_LEVEL = {"_inbox", "_trash", "resources", "_workspace", "_reports"}
-
-
-def _top_level_folders_hint() -> str:
-    """Comma list of the vault's real top-level folders, for grounding create_note's
-    `folder` docstring in actual taxonomy instead of the agent inventing names blind.
-    Filesystem read (no DB/embedder dependency) so it's safe at import time. Computed
-    ONCE, at process start — not live: a folder added after the embedder container is
-    up won't show here until the next restart. Fine for top-level areas (rarely change);
-    would need a real fix if this ever needs to reflect same-session vault edits."""
-    try:
-        names = sorted(
-            p.name for p in mcp_server.VAULT_DIR.iterdir()
-            if p.is_dir() and not p.name.startswith(".") and p.name not in _NON_CONTENT_TOP_LEVEL
-        )
-        return ", ".join(names) if names else "(vault has no top-level folders yet)"
-    except OSError:
-        return "(unavailable)"
+# (Tool docstrings are built once at import, so they cannot list the ACTIVE vault's real
+# top-level folders any more - that depends on which vault is active per call. Agents are told
+# to call get_vault_tree instead.)
 
 
 @mcp.tool()
@@ -50,12 +35,14 @@ def ingest_resource(ref: str, force_whisper: bool = False, track_id: str = "") -
     from ingest import router as ingest_router
 
     ingest_router.route(ref)  # raises ValueError on unroutable input
+    vault = mcp_server.active_vault()
     resolved = None
     if not ref.startswith(("http://", "https://")):
-        resolved = _resolve_in_vault(ref)
+        resolved = _resolve_in_vault(ref, vault)
         if not resolved.exists():
             raise ValueError(f"not in vault: {ref}")
-    return ingest_jobs.submit(ref, resolved, force_whisper, track_id=(track_id.strip() or None))
+    return ingest_jobs.submit(ref, resolved, force_whisper, track_id=(track_id.strip() or None),
+                              vault=vault)
 
 
 @mcp.tool()
@@ -72,7 +59,8 @@ def create_track(title: str, type: str = "") -> dict:
 
     if not title or not title.strip():
         raise ValueError("title is empty")
-    return publish.create_track(title.strip(), type.strip() or "custom")
+    return publish.create_track(title.strip(), type.strip() or "custom",
+                                vault_id=mcp_server.active_vault().id)
 
 
 @mcp.tool()
@@ -83,10 +71,11 @@ def generate_minicourse(track_id: str) -> dict:
     from ingest import publish
     from tracks import minicourse_jobs
 
-    track = publish.get_track_items(track_id)
+    vault = mcp_server.active_vault()
+    track = publish.get_track_items(track_id, vault.id)
     if track is None:
         raise ValueError(f"unknown track: {track_id}")
-    return minicourse_jobs.submit_outline(track_id, track["title"], track["items"])
+    return minicourse_jobs.submit_outline(track_id, track["title"], track["items"], vault=vault)
 
 
 @mcp.tool()
@@ -124,8 +113,9 @@ def split_note(note_path: str) -> dict:
     rewrite the original as a hub of [[links]]. Synchronous — a few LLM calls."""
     from ingest import split_note as splitter
 
-    content = _resolve_in_vault(note_path).read_text(encoding="utf-8")
-    return splitter.split(note_path, content)
+    vault = mcp_server.active_vault()
+    content = _resolve_in_vault(note_path, vault).read_text(encoding="utf-8")
+    return splitter.split(note_path, content, vault)
 
 
 def create_note(text: str, title: str = "", already_processed: bool = True, folder: str = "",
@@ -137,15 +127,17 @@ def create_note(text: str, title: str = "", already_processed: bool = True, fold
 
     # Default: LLM-authored content is already good — stage it as-is (no tokens, no queue,
     # durable synchronous write). See [[mcp-ingest-durability-gap]] for the reasoning.
+    vault = mcp_server.active_vault()
     if already_processed:
-        return _stage_note_as_is(text.strip(), title, folder.strip(), track_id.strip())
+        return _stage_note_as_is(text.strip(), title, folder.strip(), track_id.strip(), vault)
 
     split_min = int(os.environ.get("INGEST_SPLIT_MIN_WORDS", "700"))
     if len(text.split()) < split_min:
-        return _stage_note_as_is(text.strip(), title, folder.strip(), track_id.strip())
+        return _stage_note_as_is(text.strip(), title, folder.strip(), track_id.strip(), vault)
 
     return ingest_jobs.submit("", None, text=text, source_type="text",
-                              title=(title or None), track_id=(track_id.strip() or None))
+                              title=(title or None), track_id=(track_id.strip() or None),
+                              vault=vault)
 
 
 # Built once at import time — see _top_level_folders_hint's docstring for why this can't
@@ -162,8 +154,8 @@ create_note.__doc__ = f"""Create a note from text YOU authored. Don't hand-write
     of landing flat. The note is stamped `ingest-auto-filed: true` so the user can see at a
     glance it didn't go through LLM re-synthesis. `folder` only applies to the synchronous
     as-is path below — the async re-process path always still goes to the inbox root.
-    Existing top-level vault areas, for context/judgment when naming `folder` (NOT a menu
-    it must match — this only ever creates a subfolder under `_inbox`): {_top_level_folders_hint()}.
+    To see the active vault's real top-level areas (context for naming `folder` - NOT a menu
+    it must match, this only ever creates a subfolder under `_inbox`), call get_vault_tree.
     You do NOT need to guess a real destination here — every note (grouped or not) already
     gets a `suggested_folder` computed automatically from its own content and shown to the
     user at review time; `find_home_for_note` is there if you want to preview that pick.
@@ -187,7 +179,8 @@ create_note.__doc__ = f"""Create a note from text YOU authored. Don't hand-write
 create_note = mcp.tool()(create_note)
 
 
-def _stage_note_as_is(text: str, title: str = "", folder: str = "", track_id: str = "") -> dict:
+def _stage_note_as_is(text: str, title: str = "", folder: str = "", track_id: str = "",
+                      vault=None) -> dict:
     """Short-note path: stage the text with NO LLM (no split, no re-synthesis) — the note
     is its own source. Reuses the ingest publish helpers so it lands in the vault exactly
     like a synthesized note, minus the token spend. `folder` set → a NAMED SUBFOLDER OF
@@ -198,12 +191,13 @@ def _stage_note_as_is(text: str, title: str = "", folder: str = "", track_id: st
     track item (synchronous, since this whole path is synchronous) — best-effort, a
     track-tagging hiccup must never fail the note write itself."""
     from ingest import publish, synthesize
+    vault = vault or mcp_server.active_vault()
     t = (title or "").strip() or _title_from_text(text)
     bundle = {"source": {"ref": "", "title": t, "type": "text"}, "media": []}
     note_md = synthesize.assemble(bundle, {"title": t, "tags": []}, [], text)
     # Computed regardless of grouping — batching notes into a named review-queue subfolder
     # (below) shouldn't cost a note its individual placement suggestion.
-    suggested = publish.find_home(t)
+    suggested = publish.find_home(t, vault)
     sub = folder.strip().strip("/")
     if sub:
         # Always nested under the inbox — strip an accidental leading "_inbox/" from the
@@ -218,11 +212,11 @@ def _stage_note_as_is(text: str, title: str = "", folder: str = "", track_id: st
     else:
         target = publish.INBOX_FOLDER
         note_md = publish.stamp_inbox(note_md, "", suggested)
-    publish.ensure_folder(target)
-    path = publish.create_note(target, synthesize.slugify(t), note_md)
+    publish.ensure_folder(target, vault.id)
+    path = publish.create_note(target, synthesize.slugify(t), note_md, vault_id=vault.id)
     if track_id:
         try:
-            publish.add_track_item(track_id, t, path)
+            publish.add_track_item(track_id, t, path, vault_id=vault.id)
         except Exception as e:
             log.warning("track item link failed (track_id=%s, note=%r): %s", track_id, t, e)
     return {"status": "DONE", "ingested": False, "words": len(text.split()),

@@ -103,7 +103,7 @@ class InternalAgentControllerTest {
     @Test
     void createNote_captureHasTrackId_createsGroupThenAddsItemWithGroupId() throws Exception {
         activeVault.set(1L, java.nio.file.Path.of(String.valueOf("/tmp")));
-        when(fileRepository.createNote("/tmp", "Note1")).thenReturn("/tmp/Note1.md");
+        when(fileRepository.createNote(1L, "/tmp", "Note1")).thenReturn("/tmp/Note1.md");
         CaptureRepository.Capture cap = new CaptureRepository.Capture(1L, 
             "cap-1", "video", "https://example.com/v1", null, "My Video", "processing",
             null, 0L, null, null, 7L, 0, null);
@@ -124,7 +124,7 @@ class InternalAgentControllerTest {
     @Test
     void createNote_captureHasNoTrackId_neitherGroupNorItemTouched() throws Exception {
         activeVault.set(1L, java.nio.file.Path.of(String.valueOf("/tmp")));
-        when(fileRepository.createNote("/tmp", "Note1")).thenReturn("/tmp/Note1.md");
+        when(fileRepository.createNote(1L, "/tmp", "Note1")).thenReturn("/tmp/Note1.md");
         CaptureRepository.Capture cap = new CaptureRepository.Capture(1L, 
             "cap-2", "video", "https://example.com/v2", null, "Other Video", "processing",
             null, 0L, null, null, null, 0, null);

@@ -40,6 +40,12 @@ public class TrackAgentClient {
     @Value("${embedder.url:http://localhost:8000}")
     private String embedderUrl;
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    public TrackAgentClient(com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
+    }
+
     @Value("${ingest.submit.timeout-ms:10000}")
     private long timeoutMs;
 
@@ -52,8 +58,9 @@ public class TrackAgentClient {
         }
     }
 
-    public Result submitMinicourse(long trackId) {
-        return post("/tracks/minicourse", Map.of("track_id", trackId));
+    public Result submitMinicourse(long vaultId, long trackId) {
+        return post("/tracks/minicourse", Map.of("track_id", trackId, "vault_id", vaultId,
+            "root", activeVault.rootFor(vaultId).toString()));
     }
 
     public Result pollMinicourse(String jobId) {

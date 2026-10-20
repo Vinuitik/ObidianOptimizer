@@ -59,7 +59,3 @@ Delete `FileRepository.updateVaultPath`, `NoteIndexRepository.forceResync`; Sett
 - D6 vault_id in PKs: yes.
 - D7 delete vault: soft-hide (`archived_at`); vault folder on disk NEVER touched. Chrono GC job: archived >15 days and not restored → purge that vault's DB rows. Inactive (non-archived) vaults: no proactive cards/chunking/embedding; GC may purge regenerable data after N days (see open question G1).
 - D8 ~20s downtime at registration: acceptable behind confirm.
-
-## Carry-overs found during M3
-- FileRepository/SyncService/ChronoService/TodayPlanService/TrackProgressService read ActiveVault themselves → callbacks from in-flight jobs (e.g. InternalAgentController.createNote from embedder ingest) write to the vault active NOW, not the job's vault. M5 must make embedder callbacks carry vault_id and route FileRepository writes via rootFor(vaultId).
-- Rabbit messages without vaultId (queued pre-deploy) = vault 1.

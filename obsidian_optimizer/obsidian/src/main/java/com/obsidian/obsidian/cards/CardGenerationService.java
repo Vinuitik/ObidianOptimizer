@@ -27,6 +27,12 @@ public class CardGenerationService {
     @Value("${embedder.url:http://localhost:8000}")
     private String embedderUrl;
 
+    private final com.obsidian.obsidian.vaults.ActiveVault activeVault;
+
+    public CardGenerationService(com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+        this.activeVault = activeVault;
+    }
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     // HTTP_1_1: uvicorn embedder can't do the JDK client's default h2c upgrade,
     // which drops POST bodies (422). See ResourceScanService for the full detail.
@@ -35,8 +41,9 @@ public class CardGenerationService {
 
     /** Returns the embedder's result summary, or null on failure (logged). */
     public JsonNode generateFor(long vaultId, String notePath, String sourceHash) {
-        // vault_id rides along for the embedder (M5 starts scoping on it; ignored until then).
+        // vault_id + root ride along: the embedder reads the note from, and stores cards in, THIS vault.
         return post(objectMapper.createObjectNode().put("vault_id", vaultId)
+            .put("root", activeVault.rootFor(vaultId).toString())
             .put("note_path", notePath).put("source_hash", sourceHash), notePath);
     }
 
@@ -48,6 +55,7 @@ public class CardGenerationService {
      */
     public JsonNode regenerate(long vaultId, String notePath, String sourceHash, int targetCount, java.util.List<String> feedback) {
         var body = objectMapper.createObjectNode().put("vault_id", vaultId)
+            .put("root", activeVault.rootFor(vaultId).toString())
             .put("note_path", notePath).put("source_hash", sourceHash)
             .put("target_count", Math.max(1, targetCount));
         var arr = body.putArray("feedback");

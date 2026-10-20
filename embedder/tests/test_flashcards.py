@@ -17,7 +17,7 @@ def _no_image_db(monkeypatch):
     """generate_for_note enriches with image descriptions from the DB; in unit
     tests there's no DB, so default it to a no-op. Tests that exercise the
     formatting call _format_with_descriptions directly (pure, no I/O)."""
-    monkeypatch.setattr(gen, "_with_image_descriptions", lambda note_path, content: content)
+    monkeypatch.setattr(gen, "_with_image_descriptions", lambda note_path, content, vault_id=1: content)
     # Don't write agent debug reports to /reports during unit tests.
     monkeypatch.setattr(agent_reports, "ENABLED", False)
 
@@ -187,7 +187,7 @@ def test_generate_happy_path(monkeypatch):
 
     stored = {}
     monkeypatch.setattr(gen, "_complete", fake_complete)
-    monkeypatch.setattr(gen, "_store", lambda path, sh, cards: stored.update(
+    monkeypatch.setattr(gen, "_store", lambda path, sh, cards, vid=1: stored.update(
         {"path": path, "source_hash": sh, "cards": cards}) or {"stored": len(cards), "archived": 0})
 
     result = gen.generate_for_note("/vault/ml/FSRS.md", "note content", "hash123")
@@ -204,7 +204,7 @@ def test_generate_self_check_drops_wrong_mcq(monkeypatch):
         return json.dumps(GOOD_CARDS)
 
     monkeypatch.setattr(gen, "_complete", fake_complete)
-    monkeypatch.setattr(gen, "_store", lambda path, sh, cards: {"stored": len(cards), "archived": 0})
+    monkeypatch.setattr(gen, "_store", lambda path, sh, cards, vid=1: {"stored": len(cards), "archived": 0})
 
     result = gen.generate_for_note("/vault/n.md", "content", "h")
     assert result["self_check_dropped"] == 1
@@ -218,7 +218,7 @@ def test_generate_retries_on_validation_errors_then_stores_survivors(monkeypatch
         json.dumps({"0": 0}),                                # self-check
     ]
     monkeypatch.setattr(gen, "_complete", lambda p: bad_then_good.pop(0))
-    monkeypatch.setattr(gen, "_store", lambda path, sh, cards: {"stored": len(cards), "archived": 0})
+    monkeypatch.setattr(gen, "_store", lambda path, sh, cards, vid=1: {"stored": len(cards), "archived": 0})
 
     result = gen.generate_for_note("/vault/n.md", "content", "h")
     assert result["stored"] == 2

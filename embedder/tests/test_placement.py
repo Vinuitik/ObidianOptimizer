@@ -1,4 +1,6 @@
 """Pure tests for the hierarchical centroid folder classifier (no DB, no embedder)."""
+from pathlib import Path
+from vault_paths import Vault
 import numpy as np
 import pytest
 
@@ -70,11 +72,12 @@ def test_subtree_centroid_is_count_weighted():
 def test_suggest_group_averages_member_vectors(monkeypatch):
     # Two inbox notes, both pulling toward AI/Agents — the group mean should land there too,
     # same as if it were a single note with that averaged content.
-    monkeypatch.setattr(placement, "_model", lambda: _model())
+    monkeypatch.setattr(placement, "_model", lambda vault: _model())
     monkeypatch.setattr(placement, "_note_vectors",
-                        lambda paths: [np.asarray([1.0, 0.0, 0.0], dtype=np.float32),
+                        lambda paths, vault_id: [np.asarray([1.0, 0.0, 0.0], dtype=np.float32),
                                        np.asarray([0.9, 0.1, 0.0], dtype=np.float32)])
-    got = placement.suggest_group(["/vault/_inbox/x/a.md", "/vault/_inbox/x/b.md"])
+    got = placement.suggest_group(["/vault/_inbox/x/a.md", "/vault/_inbox/x/b.md"],
+                                  Vault(1, Path("/vault")))
     assert got == "/vault/AI/Agents"
 
 
@@ -84,5 +87,5 @@ def test_suggest_group_empty_paths_returns_none():
 
 def test_suggest_group_no_vectors_returns_none(monkeypatch):
     # None of the group's notes are embedded yet (fresh inbox burst) → no crash, just None.
-    monkeypatch.setattr(placement, "_note_vectors", lambda paths: [])
+    monkeypatch.setattr(placement, "_note_vectors", lambda paths, vault_id: [])
     assert placement.suggest_group(["/vault/_inbox/x/a.md"]) is None

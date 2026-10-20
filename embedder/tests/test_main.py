@@ -167,14 +167,14 @@ def test_minicourse_submit_fetches_track_and_submits_outline(client, monkeypatch
     from tracks import minicourse_jobs
 
     fetched = {}
-    def fake_get_track_items(track_id):
+    def fake_get_track_items(track_id, vault_id=1):
         fetched["id"] = track_id
         return {"title": "My Track", "items": [{"title": "A", "notePath": "a.md",
                                                  "status": "DONE"}]}
     monkeypatch.setattr(publish, "get_track_items", fake_get_track_items)
     calls = []
     monkeypatch.setattr(minicourse_jobs, "submit_outline",
-                        lambda tid, title, items: calls.append((tid, title, items)) or
+                        lambda tid, title, items, vault=None: calls.append((tid, title, items)) or
                         {"id": "job-1", "status": "QUEUED"})
 
     resp = client.post("/tracks/minicourse", json={"track_id": "track-1"})
@@ -190,7 +190,7 @@ def test_minicourse_submit_404_when_track_missing(client, monkeypatch):
     from ingest import publish
     from tracks import minicourse_jobs
 
-    monkeypatch.setattr(publish, "get_track_items", lambda track_id: None)
+    monkeypatch.setattr(publish, "get_track_items", lambda track_id, vault_id=1: None)
     called = []
     monkeypatch.setattr(minicourse_jobs, "submit_outline",
                         lambda *a: called.append(a) or {})

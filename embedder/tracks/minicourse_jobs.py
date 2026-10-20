@@ -19,22 +19,24 @@ from ingest import bundle as bundle_util
 from ingest.synthesize import SynthesisError
 from job_registry import JobRegistry, PerCallThread, public_view
 from tracks import minicourse
+from vault_paths import Vault
 
 log = logging.getLogger("embedder.tracks.minicourse_jobs")
 
 _registry = JobRegistry(PerCallThread())
 
 
-def submit_outline(track_id: str, track_title: str, items: list[dict]) -> dict:
+def submit_outline(track_id: str, track_title: str, items: list[dict], vault=None) -> dict:
+    vault = vault or Vault.default()
     job_id = _registry.new_id()
     job = {
         "id": job_id, "status": "QUEUED", "stage": None,
-        "track_id": track_id, "course_title": None, "error": None,
+        "track_id": track_id, "vault_id": vault.id, "_vault": vault, "course_title": None, "error": None,
         "created_at": time.time(),
         "plan": None, "results": None, "lesson_failures": None,
     }
     _registry.create(job_id, job)
-    _registry.dispatch(_run_outline, job, track_id, track_title, items,
+    _registry.dispatch(_run_outline, job, track_id, track_title, items, vault,
                        name=f"minicourse-outline-{job_id}")
     return public_view(job)
 
@@ -70,16 +72,17 @@ def list_jobs() -> list[dict]:
     return _registry.list_jobs()
 
 
-def _run_outline(job: dict, track_id: str, track_title: str, items: list[dict]) -> None:
+def _run_outline(job: dict, track_id: str, track_title: str, items: list[dict],
+                 vault: Vault) -> None:
     job["status"] = "RUNNING"
     job["stage"] = "outline"
     try:
-        bundle = minicourse.build_course_bundle(track_id, track_title, items)
+        bundle = minicourse.build_course_bundle(track_id, track_title, items, vault)
         if not bundle["segments"]:
             job["status"] = "FAILED"
             job["error"] = "no items had a readable note — nothing to build a course from"
             return
-        plan = minicourse.outline_course(bundle)
+        plan = minicourse.outline_course(bundle, reports_dir=vault.reports_dir())
     except SynthesisError as e:
         job["status"] = "FAILED"
         job["error"] = str(e)[:500]

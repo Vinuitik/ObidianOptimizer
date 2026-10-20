@@ -202,10 +202,10 @@ def test_split_creates_children_and_hub(monkeypatch):
     created, updated = [], {}
     monkeypatch.setattr(synthesize, "_complete", fake_complete)
     monkeypatch.setattr(publish, "create_note",
-                        lambda folder, title, content: created.append(
+                        lambda folder, title, content, **kw: created.append(
                             (folder, title)) or f"/vault/{folder}/{title}.md")
     monkeypatch.setattr(publish, "update_note",
-                        lambda path, content: updated.update({path: content}))
+                        lambda path, content, vault_id=1: updated.update({path: content}))
 
     res = split_note.split("study/Big Note.md", content)
 

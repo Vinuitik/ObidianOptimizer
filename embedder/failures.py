@@ -44,17 +44,18 @@ def ensure_schema(conn) -> None:
 
 
 def record_failure(source: str, stage: str, input_payload: dict,
-                    error: Exception, bundle_ref: str | None = None) -> None:
+                    error: Exception, bundle_ref: str | None = None,
+                    vault_id: int = 1) -> None:
     """Best-effort — recording a failure must never itself mask the original error."""
     try:
         with psycopg.connect(DATABASE_URL) as conn:
             ensure_schema(conn)
             conn.execute(
                 "INSERT INTO pipeline_failures "
-                "(source, stage, input_payload, error_type, error_message, bundle_ref) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
+                "(source, stage, input_payload, error_type, error_message, bundle_ref, vault_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (source, stage, json.dumps(input_payload), type(error).__name__,
-                 str(error)[:2000], bundle_ref),
+                 str(error)[:2000], bundle_ref, vault_id),
             )
             conn.commit()
     except Exception:
