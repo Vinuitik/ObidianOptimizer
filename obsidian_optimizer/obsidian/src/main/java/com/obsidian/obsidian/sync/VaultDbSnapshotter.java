@@ -34,6 +34,8 @@ import java.util.zip.ZipOutputStream;
  *   <li>global = everything else (app_settings, bandit_arms, the vaults registry ...). Only the
  *       PRIMARY vault's snapshot carries globals; a restore of the primary replaces them, except the
  *       registry (tables FK-referenced by scoped tables) which is exported but never imported.</li>
+ *   <li>device-local keys ({@link #DEVICE_LOCAL_VAULT_KEYS}/{@link #DEVICE_LOCAL_GLOBAL_KEYS}: Drive refresh
+ *       token, passphrase, device id, ...) are kept from THIS device on restore, never taken from the backup.</li>
  * </ul>
  */
 final class VaultDbSnapshotter {
@@ -41,6 +43,56 @@ final class VaultDbSnapshotter {
     private static final Logger log = LoggerFactory.getLogger(VaultDbSnapshotter.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     static final int FORMAT = 1;
+
+    /** Per-device credentials/identity/paths in {@code vault_settings}: a restore NEVER overwrites this device's values. */
+    static final List<String> DEVICE_LOCAL_VAULT_KEYS = List.of(
+        "sync.refresh_token", "sync.account_email", "sync.device_id", "syncPassphrase",
+        "sync.drive.folder_id", "resourcePath");
+    /** Same for global {@code app_settings} (OAuth app creds, host path, legacy pre-per-vault copies). */
+    static final List<String> DEVICE_LOCAL_GLOBAL_KEYS = List.of(
+        "syncClientId", "syncClientSecret", "sync.oauth.redirect_uri", "vaultPath",
+        "sync.refresh_token", "sync.account_email", "sync.device_id", "syncPassphrase", "sync.drive.folder_id");
+
+    record Kept(long vaultId, String key, String value) {}   // vaultId 0 = app_settings
+
+    private static String in(List<String> keys) { return "(" + String.join(",", Collections.nCopies(keys.size(), "?")) + ")"; }
+
+    private List<Kept> keepVault(String vaultFilter, Object... args) {
+        List<Object> a = new ArrayList<>(List.of(args)); a.addAll(DEVICE_LOCAL_VAULT_KEYS);
+        return jdbc.query("SELECT vault_id, key, value FROM vault_settings WHERE " + vaultFilter + " key IN " + in(DEVICE_LOCAL_VAULT_KEYS),
+            (rs, i) -> new Kept(rs.getLong(1), rs.getString(2), rs.getString(3)), a.toArray());
+    }
+
+    private List<Kept> keepGlobal() {
+        return jdbc.query("SELECT key, value FROM app_settings WHERE key IN " + in(DEVICE_LOCAL_GLOBAL_KEYS),
+            (rs, i) -> new Kept(0, rs.getString(1), rs.getString(2)), DEVICE_LOCAL_GLOBAL_KEYS.toArray());
+    }
+
+    /** Re-impose this device's values: drop whatever the restore brought for these keys, re-insert the kept ones
+     *  (absent locally = absent after). {@code vaultIds} null = all vaults. */
+    private void reimpose(List<Kept> kept, Collection<Long> vaultIds, boolean globals) {
+        if (vaultIds == null) jdbc.update("DELETE FROM vault_settings WHERE key IN " + in(DEVICE_LOCAL_VAULT_KEYS), DEVICE_LOCAL_VAULT_KEYS.toArray());
+        else for (long v : vaultIds) {
+            List<Object> a = new ArrayList<>(); a.add(v); a.addAll(DEVICE_LOCAL_VAULT_KEYS);
+            jdbc.update("DELETE FROM vault_settings WHERE vault_id = ? AND key IN " + in(DEVICE_LOCAL_VAULT_KEYS), a.toArray());
+        }
+        if (globals) jdbc.update("DELETE FROM app_settings WHERE key IN " + in(DEVICE_LOCAL_GLOBAL_KEYS), DEVICE_LOCAL_GLOBAL_KEYS.toArray());
+        for (Kept k : kept) {
+            if (k.vaultId() == 0) { if (globals) jdbc.update("INSERT INTO app_settings(key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", k.key(), k.value()); }
+            else jdbc.update("INSERT INTO vault_settings(vault_id, key, value) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM vaults WHERE id = ?) "
+                + "ON CONFLICT (vault_id, key) DO UPDATE SET value = EXCLUDED.value", k.vaultId(), k.key(), k.value(), k.vaultId());
+        }
+    }
+
+    /** Legacy whole-DB pg_restore: capture every device-local row first... */
+    List<Kept> captureDeviceLocalAll() {
+        List<Kept> all = new ArrayList<>(keepVault(""));
+        all.addAll(keepGlobal());
+        return all;
+    }
+
+    /** ...and put them back afterwards. */
+    void reapplyDeviceLocalAll(List<Kept> kept) { reimpose(kept, null, true); }
 
     private final JdbcTemplate jdbc;
 
@@ -200,6 +252,8 @@ final class VaultDbSnapshotter {
             Integer reg = jdbc.queryForObject("SELECT COUNT(*) FROM vaults WHERE id = ?", Integer.class, vaultId);
             if (reg == null || reg == 0) throw new IllegalStateException("Vault " + vaultId + " is not registered on this device — add it first");
             List<Tbl> tbls = discover(vaultId);
+            final List<Kept> kept = new ArrayList<>(keepVault("vault_id = ? AND", vaultId));
+            if (withGlobals) kept.addAll(keepGlobal());
             jdbc.execute((Connection con) -> {
                 try {
                     CopyManager cm = con.unwrap(PGConnection.class).getCopyAPI();
@@ -226,6 +280,7 @@ final class VaultDbSnapshotter {
                         }
                         realignSequences(t);
                     }
+                    reimpose(kept, List.of(vaultId), withGlobals);
                     return null;
                 } catch (IOException | java.sql.SQLException e) {
                     throw new IllegalStateException("vault snapshot restore failed: " + e.getMessage(), e);

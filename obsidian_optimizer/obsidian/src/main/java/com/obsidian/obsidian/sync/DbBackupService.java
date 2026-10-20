@@ -1,6 +1,7 @@
 package com.obsidian.obsidian.sync;
 
 import com.obsidian.obsidian.sync.DriveService.DbBackupInfo;
+import com.obsidian.obsidian.vaults.VaultBackup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,7 +30,7 @@ import java.util.Optional;
  * janitor and file-sync deliberately skip.
  */
 @Service
-public class DbBackupService {
+public class DbBackupService implements VaultBackup {
 
     private static final Logger log = LoggerFactory.getLogger(DbBackupService.class);
     /** Per-vault snapshot (zip of COPY files); anything else ending .enc is a legacy whole-DB pg_dump. */
@@ -74,9 +75,29 @@ public class DbBackupService {
     /** per-vault COPY snapshot → encrypt → upload to _db/ → prune to `keep`. Best-effort file drain first
      *  so the dump ≈ what's on Drive. Meant to run on the sync lane (single-flight). */
     public void backupNow(long vaultId) {
-        if (!encryptionService.isConfigured(vaultId)) { log.warn("[DbBackup] encryption not configured — skipping"); return; }
-        if (!driveService.isConfigured(vaultId))      { log.warn("[DbBackup] Drive not configured — skipping"); return; }
+        String blocked = blockedReason(vaultId);
+        if (blocked != null) { log.warn("[DbBackup] {} — skipping", blocked); return; }
+        doBackup(vaultId);
+    }
 
+    /** {@link VaultBackup} port (pre-delete backup): same snapshot, but never skips — throws when
+     *  Drive/encryption is missing or the upload fails, so the deletion worker purges nothing. */
+    @Override
+    public void backup(long vaultId) {
+        String blocked = blockedReason(vaultId);
+        if (blocked != null) throw new IllegalStateException(blocked);
+        doBackup(vaultId);
+    }
+
+    /** Null if a Drive+encrypted backup can run for this vault. */
+    @Override
+    public String blockedReason(long vaultId) {
+        if (!encryptionService.isConfigured(vaultId)) return "encryption passphrase not configured for vault " + vaultId;
+        if (!driveService.isConfigured(vaultId))      return "Google Drive not configured for vault " + vaultId;
+        return null;
+    }
+
+    private void doBackup(long vaultId) {
         backupRunning = true;
         try {
             // Note: we deliberately DON'T drain the file queue here — that's the upload
@@ -116,7 +137,7 @@ public class DbBackupService {
     // ── Restore ─────────────────────────────────────────────────────────────────
 
     /**
-     * Download the latest dump → decrypt → pg_restore → materialize vault files quietly.
+     * Download the latest dump → decrypt → restore (device-local credentials/identity kept) → materialize vault files quietly.
      * Guarded: refuses on a non-empty DB unless {@code force} (restore is destructive —
      * pg_restore --clean drops existing objects). Meant to run on the sync lane.
      */
@@ -151,9 +172,11 @@ public class DbBackupService {
                 log.warn("[DbBackup] {} is a legacy whole-DB dump — restoring ALL vaults", backup.name());
                 restorePhase = "pg_restore (legacy)";
                 Db db = parseJdbc(jdbcUrl);
+                var deviceLocal = snapshotter.captureDeviceLocalAll();   // pg_restore --clean would clobber these
                 runPg(List.of("pg_restore", "--clean", "--if-exists", "--no-owner",
                               "-h", db.host, "-p", db.port, "-U", dbUser, "-d", db.name,
                               tmp.toString()), "pg_restore");
+                snapshotter.reapplyDeviceLocalAll(deviceLocal);
             }
 
             restorePhase = "materializing vault files";

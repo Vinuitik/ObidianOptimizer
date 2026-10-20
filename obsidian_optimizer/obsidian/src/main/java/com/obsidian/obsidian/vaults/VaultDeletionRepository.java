@@ -19,9 +19,11 @@ public class VaultDeletionRepository {
 
     private final JdbcTemplate jdbc;
 
-    public VaultDeletionRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    private final VaultBackup backup;
 
-    /** Enqueue (409 active / primary / last remaining; 404 unknown). Already QUEUED/RUNNING = no-op; FAILED = requeued. */
+    public VaultDeletionRepository(JdbcTemplate jdbc, VaultBackup backup) { this.jdbc = jdbc; this.backup = backup; }
+
+    /** Enqueue (409 active / primary / last remaining / no Drive+encryption for the pre-delete backup; 404 unknown). Already QUEUED/RUNNING = no-op; FAILED = requeued. */
     @Transactional
     public Map<String, Object> enqueue(long id) {
         List<Map<String, Object>> rows = jdbc.queryForList("SELECT * FROM vaults WHERE id = ? FOR UPDATE", id);
@@ -34,6 +36,8 @@ public class VaultDeletionRepository {
               AND NOT EXISTS (SELECT 1 FROM vault_deletion_jobs j WHERE j.target_vault_id = v.id AND j.status <> 'FAILED')
             """, Integer.class, id);
         if (others == null || others == 0) throw VaultException.conflict("can't delete the last vault");
+        String blocked = backup.blockedReason(id);
+        if (blocked != null) throw VaultException.conflict("can't delete: " + blocked);
         jdbc.update("""
             INSERT INTO vault_deletion_jobs(target_vault_id, status) VALUES (?, 'QUEUED')
             ON CONFLICT (target_vault_id) DO UPDATE SET status = 'QUEUED', error = NULL, updated_at = now()
