@@ -20,18 +20,20 @@ import java.util.Optional;
 
 /**
  * Backs up the Postgres database (all derived intelligence — embeddings, cards, image
- * OCR, review state) to Google Drive as an encrypted pg_dump, and restores it on a fresh
+ * OCR, review state) to Google Drive as an encrypted PER-VAULT snapshot (see VaultDbSnapshotter: only that vault's
+ * rows; globals only for the primary vault), and restores it on a fresh
  * device. Vault FILES are handled by the per-file sync; this covers the expensive-to-
  * regenerate DB so a device move doesn't re-run the whole embed/caption/card pipeline.
  *
- * <p>Runs the actual pg_dump / pg_restore via the postgresql18-client installed in the
- * backend image (see Dockerfile). Dumps live in Drive's {@code _db/} folder, which the
+ * <p>Legacy whole-DB pg_dump files (.pgdump.enc) can still be restored via pg_restore. Dumps live in Drive's {@code _db/} folder, which the
  * janitor and file-sync deliberately skip.
  */
 @Service
 public class DbBackupService {
 
     private static final Logger log = LoggerFactory.getLogger(DbBackupService.class);
+    /** Per-vault snapshot (zip of COPY files); anything else ending .enc is a legacy whole-DB pg_dump. */
+    static final String SNAPSHOT_SUFFIX = ".vdb.enc";
     private static final DateTimeFormatter TS =
         DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
 
@@ -40,6 +42,7 @@ public class DbBackupService {
     private final SyncService             syncService;
     private final DeviceIdentityService   deviceIdentityService;
     private final JdbcTemplate            jdbc;
+    private final VaultDbSnapshotter      snapshotter;
 
     @Value("${spring.datasource.url}")      private String jdbcUrl;
     @Value("${spring.datasource.username}") private String dbUser;
@@ -63,30 +66,28 @@ public class DbBackupService {
         this.syncService           = syncService;
         this.deviceIdentityService = deviceIdentityService;
         this.jdbc                  = jdbc;
+        this.snapshotter           = new VaultDbSnapshotter(jdbc);
     }
 
     // ── Backup ──────────────────────────────────────────────────────────────────
 
-    /** pg_dump → encrypt → upload to _db/ → prune to `keep`. Best-effort file drain first
+    /** per-vault COPY snapshot → encrypt → upload to _db/ → prune to `keep`. Best-effort file drain first
      *  so the dump ≈ what's on Drive. Meant to run on the sync lane (single-flight). */
     public void backupNow(long vaultId) {
         if (!encryptionService.isConfigured(vaultId)) { log.warn("[DbBackup] encryption not configured — skipping"); return; }
         if (!driveService.isConfigured(vaultId))      { log.warn("[DbBackup] Drive not configured — skipping"); return; }
 
         backupRunning = true;
-        Path tmp = null;
         try {
             // Note: we deliberately DON'T drain the file queue here — that's the upload
             // cron's job (every 6h) and coupling it would make each backup a full sync.
             // The dump snapshots current DB; for a perfectly-consistent snapshot, Sync first.
-            tmp = Files.createTempFile("obsidian-db", ".pgdump");
-            Db db = parseJdbc(jdbcUrl);
-            log.info("[DbBackup] pg_dump starting ({}:{}/{})", db.host, db.port, db.name);
-            runPg(List.of("pg_dump", "-Fc", "-h", db.host, "-p", db.port,
-                          "-U", dbUser, "-d", db.name, "-f", tmp.toString()), "pg_dump");
+            boolean primary = isPrimary(vaultId);
+            log.info("[DbBackup] vault {} snapshot starting (globals={})", vaultId, primary);
+            byte[] snapshot = snapshotter.export(vaultId, primary);
 
-            byte[] enc = encryptionService.encrypt(vaultId, Files.readAllBytes(tmp));
-            String name = "obsidian-db-" + TS.format(ZonedDateTime.now(ZoneOffset.UTC)) + ".pgdump.enc";
+            byte[] enc = encryptionService.encrypt(vaultId, snapshot);
+            String name = "obsidian-db-v" + vaultId + "-" + TS.format(ZonedDateTime.now(ZoneOffset.UTC)) + SNAPSHOT_SUFFIX;
             String id = driveService.uploadDbBackup(vaultId, enc, name, serverVersion(), deviceIdentityService.getDeviceId(vaultId));
             log.info("[DbBackup] uploaded {} ({} bytes encrypted, driveId={})", name, enc.length, id);
 
@@ -95,7 +96,6 @@ public class DbBackupService {
             log.error("[DbBackup] backup failed: {}", e.getMessage());
             throw new RuntimeException(e);
         } finally {
-            deleteQuietly(tmp);
             backupRunning = false;
         }
     }
@@ -123,7 +123,7 @@ public class DbBackupService {
     public void restore(long vaultId, boolean force) {
         if (!encryptionService.isConfigured(vaultId)) throw new IllegalStateException("Encryption passphrase not set — set it before restoring");
         if (!driveService.isConfigured(vaultId))      throw new IllegalStateException("Google Drive not connected");
-        if (!force && !isDbEmpty())            throw new IllegalStateException("Database is not empty — pass force=true to overwrite");
+        if (!force && !isDbEmpty(vaultId))     throw new IllegalStateException("Database is not empty — pass force=true to overwrite");
 
         restoring = true;
         Path tmp = null;
@@ -136,15 +136,25 @@ public class DbBackupService {
             restorePhase = "downloading";
             byte[] enc = driveService.downloadFile(vaultId, backup.fileId());
             byte[] dump = encryptionService.decrypt(vaultId, enc);
-            tmp = Files.createTempFile("obsidian-restore", ".pgdump");
-            Files.write(tmp, dump);
+            if (!backup.name().endsWith(SNAPSHOT_SUFFIX)) {
+                tmp = Files.createTempFile("obsidian-restore", ".pgdump");
+                Files.write(tmp, dump);
+            }
             log.info("[DbBackup] restoring from {} ({} bytes)", backup.name(), dump.length);
 
-            restorePhase = "pg_restore";
-            Db db = parseJdbc(jdbcUrl);
-            runPg(List.of("pg_restore", "--clean", "--if-exists", "--no-owner",
-                          "-h", db.host, "-p", db.port, "-U", dbUser, "-d", db.name,
-                          tmp.toString()), "pg_restore");
+            if (backup.name().endsWith(SNAPSHOT_SUFFIX)) {
+                restorePhase = "restoring vault rows";
+                snapshotter.restore(vaultId, isPrimary(vaultId), dump);
+            } else {
+                // Legacy whole-DB pg_dump (pre per-vault backups). Overwrites ALL vaults — kept only so
+                // old backups stay restorable on a fresh device.
+                log.warn("[DbBackup] {} is a legacy whole-DB dump — restoring ALL vaults", backup.name());
+                restorePhase = "pg_restore (legacy)";
+                Db db = parseJdbc(jdbcUrl);
+                runPg(List.of("pg_restore", "--clean", "--if-exists", "--no-owner",
+                              "-h", db.host, "-p", db.port, "-U", dbUser, "-d", db.name,
+                              tmp.toString()), "pg_restore");
+            }
 
             restorePhase = "materializing vault files";
             encryptionService.reload(vaultId);               // passphrase may live in restored settings
@@ -165,7 +175,7 @@ public class DbBackupService {
     public String restoreBlockedReason(long vaultId, boolean force) {
         if (!encryptionService.isConfigured(vaultId)) return "Encryption passphrase not set — set it first";
         if (!driveService.isConfigured(vaultId))      return "Google Drive not connected";
-        if (!force && !isDbEmpty())            return "Database is not empty — confirm to overwrite";
+        if (!force && !isDbEmpty(vaultId))     return "Database is not empty — confirm to overwrite";
         try {
             if (driveService.latestDbBackup(vaultId).isEmpty()) return "No DB backup found in Drive";
         } catch (Exception e) {
@@ -188,7 +198,7 @@ public class DbBackupService {
     /** Fields merged into GET /sync/status. */
     public Map<String, Object> statusFragment(long vaultId) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("dbEmpty",       isDbEmpty());
+        m.put("dbEmpty",       isDbEmpty(vaultId));
         m.put("dbBackupRunning", backupRunning);
         m.put("dbRestoring",   restoring);
         m.put("dbRestorePhase", restorePhase);
@@ -211,12 +221,22 @@ public class DbBackupService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private boolean isDbEmpty() {
+    /** True when this vault has no notes yet (other vaults' rows don't block a per-vault restore). */
+    private boolean isDbEmpty(long vaultId) {
         try {
-            Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM notes", Integer.class);
+            Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM notes WHERE vault_id = ?", Integer.class, vaultId);
             return n == null || n == 0;
         } catch (Exception e) {
             return true; // table absent → fresh DB
+        }
+    }
+
+    private boolean isPrimary(long vaultId) {
+        try {
+            Boolean b = jdbc.queryForObject("SELECT is_primary FROM vaults WHERE id = ?", Boolean.class, vaultId);
+            return Boolean.TRUE.equals(b);
+        } catch (Exception e) {
+            return false; // unknown vault → never ship globals
         }
     }
 
