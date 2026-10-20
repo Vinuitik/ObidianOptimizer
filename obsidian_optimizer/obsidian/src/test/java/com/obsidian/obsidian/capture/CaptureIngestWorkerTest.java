@@ -19,6 +19,7 @@ import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -86,12 +87,12 @@ class CaptureIngestWorkerTest {
     void submitsClaimedUrlResourceStandalone() {
         when(repo.findQueued(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(url("abc")));
         when(repo.claim("abc")).thenReturn(true);
-        when(ingest.submitStandalone("abc", "https://youtu.be/abc", "video"))
+        when(ingest.submitStandalone(1L, "abc", "https://youtu.be/abc", "video"))
             .thenReturn(new IngestClient.Result(true, 200, "job1", "{}"));
 
         worker.drain();
 
-        verify(ingest).submitStandalone("abc", "https://youtu.be/abc", "video");
+        verify(ingest).submitStandalone(1L, "abc", "https://youtu.be/abc", "video");
         verify(repo, never()).updateStatus(eq("abc"), any());   // stays 'processing' on ok
     }
 
@@ -109,7 +110,7 @@ class CaptureIngestWorkerTest {
     void fourxxRejectionDeadLettersImmediately_noLadder() {
         when(repo.findQueued(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(url("bad")));
         when(repo.claim("bad")).thenReturn(true);
-        when(ingest.submitStandalone(any(), any(), any()))
+        when(ingest.submitStandalone(anyLong(), any(), any(), any()))
             .thenReturn(new IngestClient.Result(false, 422, null, "unroutable"));
 
         worker.drain();
@@ -125,7 +126,7 @@ class CaptureIngestWorkerTest {
     void transportFailureRidesTheLadder_rung1() {
         when(repo.findQueued(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(url("down")));
         when(repo.claim("down")).thenReturn(true);
-        when(ingest.submitStandalone(any(), any(), any()))
+        when(ingest.submitStandalone(anyLong(), any(), any(), any()))
             .thenReturn(IngestClient.Result.unreachable());   // status 0
 
         worker.drain();
@@ -139,7 +140,7 @@ class CaptureIngestWorkerTest {
     @Test
     void ladderRedelivery_advancesToNextRung() {
         when(repo.get("cap-r2")).thenReturn(processing("cap-r2"));
-        when(ingest.submitStandalone(any(), any(), any()))
+        when(ingest.submitStandalone(anyLong(), any(), any(), any()))
             .thenReturn(IngestClient.Result.unreachable());
 
         worker.onCaptureMessage(messageFor("cap-r2", 1));   // already failed rung 1 once
@@ -152,7 +153,7 @@ class CaptureIngestWorkerTest {
     @Test
     void ladderExhausted_deadLetters() {
         when(repo.get("cap-r3")).thenReturn(processing("cap-r3"));
-        when(ingest.submitStandalone(any(), any(), any()))
+        when(ingest.submitStandalone(anyLong(), any(), any(), any()))
             .thenReturn(IngestClient.Result.unreachable());
 
         worker.onCaptureMessage(messageFor("cap-r3", 3));   // last rung just expired, still failing
@@ -222,12 +223,12 @@ class CaptureIngestWorkerTest {
         when(repo.findDeferred(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(cap));
         when(noteIndex.findNotesByCapture(1L, "cap-3")).thenReturn(List.of());  // no notes yet
         when(repo.claimDeferred("cap-3")).thenReturn(true);
-        when(ingest.resume(any(), any(), any(), any(), any(), any()))
+        when(ingest.resume(anyLong(), any(), any(), any(), any(), any(), any()))
             .thenReturn(new IngestClient.Result(true, 200, "job9", "{}"));
 
         worker.drainDeferred();
 
-        verify(ingest).resume("/models/ingest_bundles/b.json", "cap-3",
+        verify(ingest).resume(1L, "/models/ingest_bundles/b.json", "cap-3",
             "https://youtu.be/cap-3", "video", "cap-3", null);
         // outcome reconciled by pollFailures — no direct status write on success
         verify(repo, never()).updateStatus(eq("cap-3"), any());
@@ -254,7 +255,7 @@ class CaptureIngestWorkerTest {
         when(repo.findDeferred(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(cap));
         when(noteIndex.findNotesByCapture(1L, "cap-5")).thenReturn(List.of());
         when(repo.claimDeferred("cap-5")).thenReturn(true);
-        when(ingest.resume(any(), any(), any(), any(), any(), any()))
+        when(ingest.resume(anyLong(), any(), any(), any(), any(), any(), any()))
             .thenReturn(new IngestClient.Result(false, 404, null, "bundle not found"));
 
         worker.drainDeferred();
@@ -268,7 +269,7 @@ class CaptureIngestWorkerTest {
         when(repo.findDeferred(org.mockito.ArgumentMatchers.eq(1L), anyInt())).thenReturn(List.of(cap));
         when(noteIndex.findNotesByCapture(1L, "cap-6")).thenReturn(List.of());
         when(repo.claimDeferred("cap-6")).thenReturn(true);
-        when(ingest.resume(any(), any(), any(), any(), any(), any()))
+        when(ingest.resume(anyLong(), any(), any(), any(), any(), any(), any()))
             .thenReturn(IngestClient.Result.unreachable());
 
         worker.drainDeferred();

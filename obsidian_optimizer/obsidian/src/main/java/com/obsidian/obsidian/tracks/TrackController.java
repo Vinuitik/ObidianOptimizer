@@ -206,7 +206,7 @@ public class TrackController {
     @PostMapping("{id}/minicourse")
     public ResponseEntity<String> generateMinicourse(@PathVariable long id) {
         if (trackRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
-        return toResponse(trackAgentClient.submitMinicourse(id));
+        return toResponse(trackAgentClient.submitMinicourse(activeVault.id(), id));
     }
 
     @GetMapping("minicourse/{jobId}")

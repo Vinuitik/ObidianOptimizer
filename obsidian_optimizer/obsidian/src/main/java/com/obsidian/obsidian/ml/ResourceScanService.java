@@ -161,7 +161,7 @@ public class ResourceScanService {
         String relPath = toRelative(vaultId, absNotePath);
         if (relPath == null) return;           // note is outside the vault
         for (String embed : embeds) {
-            trigger(relPath, embed);
+            trigger(vaultId, relPath, embed);
         }
     }
 
@@ -194,11 +194,11 @@ public class ResourceScanService {
         return out;
     }
 
-    private void trigger(String relNotePath, String embed) {
+    private void trigger(long vaultId, String relNotePath, String embed) {
         // Off-thread + best-effort: submitting must never block a note write, and a down
         // embedder is fine — the note stays ingest_pending and retryPendingIngests re-fires.
         pool.submit(() -> {
-            IngestClient.Result r = ingestClient.submitInPlace(embed, relNotePath);
+            IngestClient.Result r = ingestClient.submitInPlace(vaultId, embed, relNotePath);
             if (r.ok()) {
                 log.info("[ResourceScanService] queued ingest of {} in {}", embed, relNotePath);
             } else {

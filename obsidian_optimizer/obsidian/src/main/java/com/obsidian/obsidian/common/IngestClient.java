@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import com.obsidian.obsidian.vaults.ActiveVault;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -46,6 +47,22 @@ public class IngestClient {
 
     @Value("${embedder.url:http://localhost:8000}")
     private String embedderUrl;
+
+    private final ActiveVault activeVault;
+
+    public IngestClient(ActiveVault activeVault) {
+        this.activeVault = activeVault;
+    }
+
+    /** Every embedder request that touches vault files/DB carries the vault it belongs to
+     *  ({@code vault_id}) and that vault's container root ({@code root}); the embedder never
+     *  guesses "the" vault. Callers pass the id of the row/job, not necessarily the active one. */
+    public Map<String, Object> scoped(long vaultId, Map<String, Object> payload) {
+        Map<String, Object> p = new LinkedHashMap<>(payload);
+        p.put("vault_id", vaultId);
+        p.put("root", activeVault.rootFor(vaultId).toString());
+        return p;
+    }
 
     @Value("${ingest.submit.timeout-ms:10000}")
     private long submitTimeoutMs;
@@ -98,22 +115,22 @@ public class IngestClient {
     // ── typed helpers (the vocabulary of the pipeline) ───────────────────────────
 
     /** In-place: synthesize a block and inject it below {@code ref} in {@code notePath}. */
-    public Result submitInPlace(String ref, String notePath) {
-        return submit(Map.of("ref", ref, "note_path", notePath));
+    public Result submitInPlace(long vaultId, String ref, String notePath) {
+        return submit(scoped(vaultId, Map.of("ref", ref, "note_path", notePath)));
     }
 
     /** Standalone URL/file resource → new note(s), tracked by {@code captureId}. */
-    public Result submitStandalone(String captureId, String ref, String sourceType) {
+    public Result submitStandalone(long vaultId, String captureId, String ref, String sourceType) {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("capture_id", captureId);
         p.put("ref", ref);
         if (sourceType != null) p.put("source_type", sourceType);
-        return submit(p);
+        return submit(scoped(vaultId, p));
     }
 
     /** Resume a DEFERRED synthesis from its saved bundle — no re-extract. Called by the
      *  capture queue when LLM providers recover (embedder {@code POST /ingest/resume}). */
-    public Result resume(String bundleRef, String captureId, String ref,
+    public Result resume(long vaultId, String bundleRef, String captureId, String ref,
                          String sourceType, String title, String notePath) {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("bundle_path", bundleRef);
@@ -122,17 +139,17 @@ public class IngestClient {
         if (sourceType != null) p.put("source_type", sourceType);
         if (title != null)      p.put("title", title);
         if (notePath != null)   p.put("note_path", notePath);
-        return submit(p, "/ingest/resume");
+        return submit(scoped(vaultId, p), "/ingest/resume");
     }
 
     /** Standalone captured prose (no fetch) → new note(s), tracked by {@code captureId}. */
-    public Result submitText(String captureId, String text, String title) {
+    public Result submitText(long vaultId, String captureId, String text, String title) {
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("capture_id", captureId);
         p.put("text", text);
         p.put("source_type", "text");
         if (title != null) p.put("title", title);
-        return submit(p);
+        return submit(scoped(vaultId, p));
     }
 
     // ── the single transport ─────────────────────────────────────────────────────

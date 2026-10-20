@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.reset;
@@ -137,19 +138,19 @@ class CaptureRabbitFlowIT {
 
     @Test
     void capture_submittedViaRabbitListener_notPollFallback() throws Exception {
-        when(ingestClient.submitStandalone(anyString(), eq("https://youtu.be/happy"), eq("video")))
+        when(ingestClient.submitStandalone(anyLong(), anyString(), eq("https://youtu.be/happy"), eq("video")))
             .thenReturn(new IngestClient.Result(true, 200, "job-happy", "{}"));
 
         String captureId = enqueueViaOutboxOnly("https://youtu.be/happy");
 
         waitUntil(() -> "processing".equals(statusOf(captureId)), 5000);
         org.mockito.Mockito.verify(ingestClient)
-            .submitStandalone(eq(captureId), eq("https://youtu.be/happy"), eq("video"));
+            .submitStandalone(anyLong(), eq(captureId), eq("https://youtu.be/happy"), eq("video"));
     }
 
     @Test
     void capture_persistentFailure_ridesLadderThenDeadLetters() throws Exception {
-        when(ingestClient.submitStandalone(anyString(), eq("https://youtu.be/broken"), eq("video")))
+        when(ingestClient.submitStandalone(anyLong(), anyString(), eq("https://youtu.be/broken"), eq("video")))
             .thenReturn(IngestClient.Result.unreachable());
 
         String captureId = enqueueViaOutboxOnly("https://youtu.be/broken");

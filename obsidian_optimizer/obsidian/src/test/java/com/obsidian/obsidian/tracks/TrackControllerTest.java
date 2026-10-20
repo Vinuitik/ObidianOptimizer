@@ -64,7 +64,7 @@ class TrackControllerTest {
         mvc.perform(post("/tracks/99/minicourse"))
             .andExpect(status().isNotFound());
 
-        verify(trackAgentClient, never()).submitMinicourse(anyLong());
+        verify(trackAgentClient, never()).submitMinicourse(anyLong(), anyLong());
     }
 
     @Test
@@ -72,7 +72,7 @@ class TrackControllerTest {
         Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(),
             null, null, null);
         when(trackRepo.get(1L, 1L)).thenReturn(track);
-        when(trackAgentClient.submitMinicourse(1L))
+        when(trackAgentClient.submitMinicourse(1L, 1L))
             .thenReturn(new TrackAgentClient.Result(true, 200, "{\"id\":\"job1\",\"status\":\"pending\"}"));
 
         mvc.perform(post("/tracks/1/minicourse"))
@@ -85,7 +85,7 @@ class TrackControllerTest {
         Track track = new Track(1L, "Rust Book", "book", "active", "manual", null, null, true, Instant.now(),
             null, null, null);
         when(trackRepo.get(1L, 1L)).thenReturn(track);
-        when(trackAgentClient.submitMinicourse(1L))
+        when(trackAgentClient.submitMinicourse(1L, 1L))
             .thenReturn(new TrackAgentClient.Result(false, 503, "{\"error\":\"embedder unreachable\"}"));
 
         mvc.perform(post("/tracks/1/minicourse"))

@@ -460,7 +460,8 @@ public class CaptureController {
             return jsonError(400, "url required");
         }
         try {
-            String payload = objectMapper.writeValueAsString(Map.of("url", url.trim()));
+            String payload = objectMapper.writeValueAsString(Map.of("url", url.trim(),
+                "vault_id", activeVault.id(), "root", activeVault.root().toString()));
             HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(embedderUrl + "/download"))
                 .timeout(Duration.ofSeconds(10))
