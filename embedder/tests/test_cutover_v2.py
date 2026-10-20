@@ -61,7 +61,7 @@ def test_v2_publish_branch_one_note_per_unit(monkeypatch):
     monkeypatch.setattr(synthesize, "_complete", lambda p, s: "Drafted body text.")
     # semantic linking hits the DB/embedder — stub it to a fixed neighbour here
     monkeypatch.setattr(linking, "related_links",
-                        lambda body, exclude_stems=(): ["Neighbor"])
+                        lambda body, exclude_stems=(), **kw: ["Neighbor"])
     # Small Units (< 600-word ceiling) never trigger Stage B, so the embedder is never
     # called; patch it if importable, else jobs falls back to the deterministic split.
     try:
@@ -72,15 +72,16 @@ def test_v2_publish_branch_one_note_per_unit(monkeypatch):
     except Exception:
         pass
     created = []
-    monkeypatch.setattr(publish, "find_home", lambda t: "Study")
-    monkeypatch.setattr(publish, "ensure_folder", lambda f: None)
+    monkeypatch.setattr(publish, "find_home", lambda t, vault=None: "Study")
+    monkeypatch.setattr(publish, "ensure_folder", lambda f, vault_id=1: None)
     monkeypatch.setattr(publish, "validate_note", lambda md, names: [])
     monkeypatch.setattr(publish, "stamp_inbox", lambda md, *a, **k: md)
     monkeypatch.setattr(publish, "create_note",
                         lambda folder, title, md, **kw: created.append((folder, title, md))
                         or f"/vault/{folder}/{title}.md")
 
-    job = {}
+    from vault_paths import Vault
+    job = {"_vault": Vault.default(), "vault_id": 1}
     jobs._synthesize_and_publish_v2(job, _text_bundle())
 
     assert len(created) == 2                          # boundaries from segment.py (2 headings)

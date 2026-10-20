@@ -79,7 +79,7 @@ def _complete(prompt: str, system: str) -> str:
     return resp.json()["text"]
 
 
-def build_course_bundle(track_id: str, track_title: str, items: list[dict]) -> dict:
+def build_course_bundle(track_id: str, track_title: str, items: list[dict], vault=None) -> dict:
     """Reads each item's note off the vault mount and splits it on '## ' headings into
     segments, shaped into the same bundle dict `ingest/bundle.py`'s helpers expect.
     Items with no notePath yet (nothing to read) are skipped."""
@@ -91,7 +91,7 @@ def build_course_bundle(track_id: str, track_title: str, items: list[dict]) -> d
         if not note_path:
             continue
         try:
-            content = _resolve_in_vault(note_path).read_text(encoding="utf-8")
+            content = _resolve_in_vault(note_path, vault).read_text(encoding="utf-8")
         except (OSError, ValueError) as e:
             log.warning("minicourse: skipping unreadable note %s: %s", note_path, e)
             continue
@@ -127,10 +127,10 @@ def _segment_note(note_title: str, content: str) -> list[dict]:
     return segments
 
 
-def outline_course(bundle: dict) -> dict:
+def outline_course(bundle: dict, reports_dir: str | None = None) -> dict:
     segs = bundle_util.number_segments(bundle)
     subject = bundle["source"].get("title") or bundle["source"].get("ref", "untitled")
-    rep = AgentReport("minicourse", subject)
+    rep = AgentReport("minicourse", subject, reports_dir=reports_dir)
     rep.input("source", {k: bundle["source"].get(k) for k in ("type", "title", "ref")})
     rep.input("segments", bundle_util.render_segments(segs))
     try:

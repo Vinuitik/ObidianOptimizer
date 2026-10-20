@@ -188,7 +188,7 @@ def ensure_schema(conn) -> None:
     # embedder creates the table on a fresh install.
 
 
-def _store(note_path: str, source_hash: str, cards: list[dict]) -> dict:
+def _store(note_path: str, source_hash: str, cards: list[dict], vault_id: int = 1) -> dict:
     with psycopg.connect(DATABASE_URL) as conn:
         ensure_schema(conn)
         # NOTE: cards from older versions of this note are intentionally NOT archived.
@@ -200,14 +200,16 @@ def _store(note_path: str, source_hash: str, cards: list[dict]) -> dict:
         for card in cards:
             ch = validate.card_hash(card)
             cur = conn.execute("""
-                INSERT INTO cards (note_path, type, payload, difficulty, card_hash, source_hash)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO cards (note_path, type, payload, difficulty, card_hash, source_hash,
+                                   vault_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (note_path, card_hash, vault_id) DO UPDATE SET
                   source_hash = EXCLUDED.source_hash,
                   -- Never resurrect a user-flagged card: if the agent regenerates the
                   -- identical bad question, it stays FLAGGED (out of the draw pool).
                   status = CASE WHEN cards.status = 'FLAGGED' THEN 'FLAGGED' ELSE 'ACTIVE' END
-                """, (note_path, card["type"], json.dumps(card), card["difficulty"], ch, source_hash))
+                """, (note_path, card["type"], json.dumps(card), card["difficulty"], ch, source_hash,
+                      vault_id))
             inserted += cur.rowcount
         conn.commit()
     return {"stored": inserted, "archived": archived}
@@ -227,7 +229,7 @@ def _format_with_descriptions(content: str, descriptions: list[str]) -> str:
             f"{block}\n")
 
 
-def _with_image_descriptions(note_path: str, content: str) -> str:
+def _with_image_descriptions(note_path: str, content: str, vault_id: int = 1) -> str:
     """The card generator reads the raw note, which only has ![[image]] refs — not
     what the images SAY. The image worker has already OCR/VLM-extracted each image
     into note_chunks(source='image'); pull those and append them so cards can be
@@ -238,8 +240,8 @@ def _with_image_descriptions(note_path: str, content: str) -> str:
         with psycopg.connect(DATABASE_URL) as conn:
             rows = conn.execute(
                 "SELECT text FROM note_chunks WHERE note_path = %s AND source = 'image' "
-                "ORDER BY chunk_index",
-                (note_path,)).fetchall()
+                "AND vault_id = %s ORDER BY chunk_index",
+                (note_path, vault_id)).fetchall()
     except Exception as e:  # noqa: BLE001 — never fail generation over enrichment
         log.warning("[flashcards] image-description lookup failed for %s: %s", note_path, e)
         return content
@@ -264,12 +266,14 @@ def _regen_preamble(target_count: int, feedback: list[str] | None) -> str:
 
 def generate_for_note(note_path: str, content: str, source_hash: str,
                       target_count: int | None = None,
-                      feedback: list[str] | None = None) -> dict:
-    content = _with_image_descriptions(note_path, content)
+                      feedback: list[str] | None = None, vault=None) -> dict:
+    from vault_paths import Vault
+    vault = vault or Vault.default()
+    content = _with_image_descriptions(note_path, content, vault.id)
     prompt = GEN_PROMPT.format(n_mcq=N_MCQ, n_open=N_OPEN, n_ex=N_EX, content=content)
     if target_count and target_count > 0:
         prompt = _regen_preamble(target_count, feedback) + prompt
-    rep = AgentReport("flashcards", note_path)
+    rep = AgentReport("flashcards", note_path, reports_dir=vault.reports_dir())
     rep.input("note_content (post image-enrichment)", content)
     rep.input("prompt", prompt)
     valid: list[dict] = []
@@ -310,7 +314,7 @@ def generate_for_note(note_path: str, content: str, source_hash: str,
     # replacement per flagged card, even if the agent produced extras.
     if target_count and target_count > 0:
         valid = valid[:target_count]
-    result = _store(note_path, source_hash, valid)
+    result = _store(note_path, source_hash, valid, vault.id)
     result.update({"note_path": note_path,
                    "self_check_dropped": before - len(valid),
                    "rejected": len(errors)})

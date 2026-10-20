@@ -78,7 +78,8 @@ def _chunks(text: str) -> list[str]:
 
 def related_links(body: str, exclude_stems=(), embed_fn: Optional[EmbedFn] = None,
                   candidates_fn: Optional[CandidatesFn] = None,
-                  floor: Optional[float] = None, cap: Optional[int] = None) -> list[str]:
+                  floor: Optional[float] = None, cap: Optional[int] = None,
+                  vault_id: Optional[int] = None) -> list[str]:
     """Note prose → up to `cap` link STEMS (basenames) of the closest existing notes
     scoring ≥ `floor`. `exclude_stems` drops self + same-source siblings. Deterministic
     given the same index; `embed_fn`/`candidates_fn` are injectable for tests."""
@@ -95,7 +96,7 @@ def related_links(body: str, exclude_stems=(), embed_fn: Optional[EmbedFn] = Non
             embed_fn = lambda ts: embed_texts(ts, kind="query")   # note body is the QUERY side
         if candidates_fn is None:
             from mcp_server import _vector_candidates
-            candidates_fn = _vector_candidates
+            candidates_fn = lambda v: _vector_candidates(v, vault_id)   # None = active vault
         best: dict[str, float] = {}
         for vec in embed_fn(chunks):
             for row in candidates_fn(vec):
@@ -184,7 +185,8 @@ def generate_probes(title: str, body: str, n: Optional[int] = None,
 
 def semantic_link_stems(title: str, body: str, exclude_stems=(), cap: Optional[int] = None,
                         complete_fn: Optional[CompleteFn] = None,
-                        search_fn: Optional[SearchFn] = None) -> list[str]:
+                        search_fn: Optional[SearchFn] = None,
+                        vault_id: Optional[int] = None) -> list[str]:
     """Note → up to `cap` link STEMS: LLM probes → hybrid `search_notes` per probe →
     aggregate by best (lowest) rank across probes → top `cap` after excluding self +
     same-source siblings. `search_fn`/`complete_fn` injectable for tests."""
@@ -196,8 +198,9 @@ def semantic_link_stems(title: str, body: str, exclude_stems=(), cap: Optional[i
     if not probes:
         return []
     if search_fn is None:
-        from mcp_server import search_notes
-        search_fn = search_notes
+        from mcp_server import active_vault, search_in_vault
+        vid = active_vault().id if vault_id is None else vault_id
+        search_fn = lambda q, n: search_in_vault(q, n, vid)
 
     best_rank: dict[str, int] = {}   # note_path → best position seen across all probes
     for q in probes:

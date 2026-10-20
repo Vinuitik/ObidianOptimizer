@@ -12,7 +12,7 @@ This file owns the shared machinery every tool depends on: the FastMCP
 instance, DB access, vault-path resolution, RRF merging, and the auth
 middleware. The tools themselves (query Postgres directly — same
 note_chunks table the Java backend maintains — and read note files from
-the read-only /vault mount) live in mcp_tools/, grouped by concern:
+the read-only vault mounts) live in mcp_tools/, grouped by concern:
   mcp_tools/search.py — search_notes, get_note_content
   mcp_tools/vault.py  — find_home_for_note, get_vault_tree, list_folder
   mcp_tools/write.py  — ingest_resource, split_note, create_note, create_track,
@@ -41,7 +41,11 @@ log = logging.getLogger("embedder.mcp")
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql://obsidian:obsidian@postgres:5432/obsidian")
-VAULT_DIR = Path(os.environ.get("VAULT_DIR", "/vault"))
+
+# Multi-vault: there is no import-time VAULT_DIR any more. Tools resolve the ACTIVE vault per
+# call (vault_paths.active(), ~5s cache) and scope every DB query by its id. Tests patch
+# `mcp_server.active_vault`; always call it module-qualified from mcp_tools.
+from vault_paths import Vault, active as active_vault  # noqa: E402
 
 RRF_K = 60          # reciprocal-rank-fusion constant (matches Java SearchService)
 FETCH_LIMIT = 60    # candidates fetched per ranking before the RRF merge
@@ -97,38 +101,40 @@ def _vec_literal(vec: list[float]) -> str:
     return "[" + ",".join(f"{x:.8f}" for x in vec) + "]"
 
 
-def _vector_candidates(query_vec: list[float]) -> list[tuple]:
+def _vector_candidates(query_vec: list[float], vault_id: int | None = None) -> list[tuple]:
     # 4th column: cosine similarity (1 - distance) — the interpretable score
     # surfaced to callers. Tests monkeypatch _query_db with 3-tuples, so all
-    # consumers must tolerate a missing similarity column.
+    # consumers must tolerate a missing similarity column. vault_id None = the active vault.
+    vault_id = active_vault().id if vault_id is None else vault_id
     return _query_db(
         """
         SELECT note_path, chunk_index, text, 1 - (embedding <=> %s::vector) AS similarity
         FROM note_chunks
-        WHERE embedding IS NOT NULL
+        WHERE embedding IS NOT NULL AND vault_id = %s
         ORDER BY embedding <=> %s::vector
         LIMIT %s
         """,
-        (_vec_literal(query_vec), _vec_literal(query_vec), FETCH_LIMIT),
+        (_vec_literal(query_vec), vault_id, _vec_literal(query_vec), FETCH_LIMIT),
     )
 
 
-def _text_candidates(query: str) -> list[tuple]:
+def _text_candidates(query: str, vault_id: int | None = None) -> list[tuple]:
     # Real BM25 keyword ranking via ParadeDB pg_search (Tantivy), NOT stock
     # Postgres ts_rank_cd. paradedb.match() tokenizes the query safely — the raw
     # `@@@ 'string'` form throws a Tantivy parse error on punctuation ("C++",
     # "a/b", ":"), match() treats the input as plain terms. Ranked by BM25 score.
     if not query or not query.strip():
         return []
+    vault_id = active_vault().id if vault_id is None else vault_id
     return _query_db(
         """
         SELECT note_path, chunk_index, text
         FROM note_chunks
-        WHERE id @@@ paradedb.match('text', %s)
+        WHERE id @@@ paradedb.match('text', %s) AND vault_id = %s
         ORDER BY paradedb.score(id) DESC
         LIMIT %s
         """,
-        (query, FETCH_LIMIT),
+        (query, vault_id, FETCH_LIMIT),
     )
 
 
@@ -171,16 +177,10 @@ def _rrf_merge(rankings: list[tuple[str, list[tuple]]], limit: int) -> list[dict
     return results
 
 
-def _resolve_in_vault(note_path: str) -> Path:
-    """Resolve a vault-relative or absolute path, refusing anything outside /vault."""
-    candidate = Path(note_path)
-    if not candidate.is_absolute():
-        candidate = VAULT_DIR / candidate
-    resolved = candidate.resolve()
-    vault_root = VAULT_DIR.resolve()
-    if not resolved.is_relative_to(vault_root):
-        raise ValueError(f"Path escapes the vault: {note_path}")
-    return resolved
+def _resolve_in_vault(note_path: str, vault: Vault | None = None) -> Path:
+    """Resolve a vault-relative or absolute path, refusing anything outside the vault.
+    `vault` None = the active vault (MCP/browser callers); backend-driven work passes its own."""
+    return (vault or active_vault()).resolve(note_path)
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ class ApiKeyMiddleware:
 # does `from mcp_server import mcp, ...`, which needs those names to already
 # exist in this module's namespace. Order between the three doesn't matter.
 # ---------------------------------------------------------------------------
-from mcp_tools.search import search_notes, get_note_content
+from mcp_tools.search import search_notes, search_in_vault, get_note_content
 from mcp_tools.vault import find_home_for_note, get_vault_tree, list_folder
 from mcp_tools.write import (ingest_resource, split_note, create_note,
                              generate_minicourse, check_minicourse, approve_minicourse)

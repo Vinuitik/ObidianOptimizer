@@ -42,7 +42,7 @@ def make_plan(n_lessons=3):
 def test_submit_outline_reaches_awaiting_approval(monkeypatch):
     plan = make_plan()
     monkeypatch.setattr(minicourse, "build_course_bundle", lambda *a: make_bundle())
-    monkeypatch.setattr(minicourse, "outline_course", lambda b: plan)
+    monkeypatch.setattr(minicourse, "outline_course", lambda b, **kw: plan)
 
     job = minicourse_jobs.submit_outline("track-1", "My Track",
                                          [{"title": "A", "notePath": "a.md"}])
@@ -61,7 +61,7 @@ def test_submit_outline_empty_bundle_fails_without_calling_outline(monkeypatch):
     monkeypatch.setattr(minicourse, "build_course_bundle", lambda *a: empty_bundle)
     called = []
     monkeypatch.setattr(minicourse, "outline_course",
-                        lambda b: called.append(1) or make_plan())
+                        lambda b, **kw: called.append(1) or make_plan())
 
     job = minicourse_jobs.submit_outline("track-1", "My Track",
                                          [{"title": "A", "notePath": None}])
@@ -74,7 +74,7 @@ def test_submit_outline_empty_bundle_fails_without_calling_outline(monkeypatch):
 
 def test_submit_outline_synthesis_error_fails_with_message(monkeypatch):
     monkeypatch.setattr(minicourse, "build_course_bundle", lambda *a: make_bundle())
-    def raise_err(b):
+    def raise_err(b, **kw):
         raise SynthesisError("outline_course failed after 3 attempts: bad json")
     monkeypatch.setattr(minicourse, "outline_course", raise_err)
 
@@ -91,7 +91,7 @@ def test_submit_outline_synthesis_error_fails_with_message(monkeypatch):
 def _awaiting_job(monkeypatch, n_lessons=3):
     plan = make_plan(n_lessons)
     monkeypatch.setattr(minicourse, "build_course_bundle", lambda *a: make_bundle())
-    monkeypatch.setattr(minicourse, "outline_course", lambda b: plan)
+    monkeypatch.setattr(minicourse, "outline_course", lambda b, **kw: plan)
     job = minicourse_jobs.submit_outline("track-1", "My Track",
                                          [{"title": "A", "notePath": "a.md"}])
     return _poll(job["id"])
@@ -148,7 +148,7 @@ def test_approve_one_bad_lesson_does_not_sink_others(monkeypatch):
 
 
 def test_approve_while_still_running_returns_error_without_starting_lessons(monkeypatch):
-    def slow_outline(b):
+    def slow_outline(b, **kw):
         time.sleep(0.3)
         return make_plan()
     monkeypatch.setattr(minicourse, "build_course_bundle", lambda *a: make_bundle())

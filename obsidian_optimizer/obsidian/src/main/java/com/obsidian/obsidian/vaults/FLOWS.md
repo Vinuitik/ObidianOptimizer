@@ -1,8 +1,8 @@
 # Vaults — FLOWS
 
-Files: VaultRepository.java, ActiveVault.java, VaultController.java, VaultException.java, VaultSwitchedEvent.java, VaultKeys.java, VaultHeaderFilter.java, VaultMigrationIT.java + VaultScopingIT.java + VaultSwitchIT.java + VaultHeaderFilterTest.java (tests); settings: ../settings/SettingsRepository.java; sync: ../sync/SyncWorker.java; plan: architecture_plans/VAULTS_PLAN.md
+Files: VaultRepository.java, ActiveVault.java, VaultInternalRoutingIT.java (test), ../internalapi/InternalAgentController.java, ../common/IngestClient.java, embedder/vault_paths.py, VaultController.java, VaultException.java, VaultSwitchedEvent.java, VaultKeys.java, VaultHeaderFilter.java, VaultMigrationIT.java + VaultScopingIT.java + VaultSwitchIT.java + VaultHeaderFilterTest.java (tests); settings: ../settings/SettingsRepository.java; sync: ../sync/SyncWorker.java; plan: architecture_plans/VAULTS_PLAN.md
 
-Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id) + M3 (Java scoping: every vault-scoped query filters on `vault_id`, paths come from `ActiveVault`, `X-Vault-Id` filter) + M4 (`vault_settings`, symmetric per-vault Drive sync, per-vault chrono date, switching + rescan, registry REST). Everything marked [NOT IMPLEMENTED] is a later milestone.
+Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id) + M3 (Java scoping: every vault-scoped query filters on `vault_id`, paths come from `ActiveVault`, `X-Vault-Id` filter) + M4 (`vault_settings`, symmetric per-vault Drive sync, per-vault chrono date, switching + rescan, registry REST) + M5 (Python scoping: embedder requests/callbacks carry the vault). Everything marked [NOT IMPLEMENTED] is a later milestone.
 
 ## Boot: registry + backfill
 Spring start → `VaultRepository.initSchema()` (@PostConstruct) → CREATE `vaults` + partial unique index `uq_vaults_single_active` → seed vault 1 (`ON CONFLICT DO NOTHING`) → `setval` on the id sequence
@@ -48,8 +48,14 @@ Listeners rerun for the new vault: `FileRepository.onVaultSwitched` (startup dis
 Inactive vaults: no scanners, no card gen/chunking/embedding (D5). In-flight queue work finishes in its own vault (`rootFor(vaultId)`).
 To change what reruns on a switch: add/remove an `@EventListener` on `VaultSwitchedEvent`.
 
+## Embedder scoping (M5)
+Java → embedder: every request that touches vault files/DB carries `vault_id` + `root` (`ActiveVault.rootFor(vaultId)`): `IngestClient.scoped(vaultId, payload)` (`submitInPlace/submitStandalone/submitText/resume(vaultId, …)`, `/placement/group`), `CardGenerationService` (generate/regenerate), `TrackAgentClient.submitMinicourse(vaultId, trackId)`, `CaptureController.download`. The vault is the ROW's (`Capture.vaultId`, the note's vault), not necessarily the active one. `/embed`, `/flashcards/roll|judge`, `/playlist/expand`, `/subs`, `/subscriptions/discover` touch no vault state → unscoped.
+Embedder → Java (`/api/internal/**`): bodies carry `vaultId` (GET tracks: `?vaultId=`; absent = vault 1) → `InternalAgentController.vaultOf()` → `FileRepository.createNote/updateNote(vaultId, …)`, `MediaController.storeResourceBytes(vaultId, …)`, `captureRepo.create(vaultId, …)`, `trackRepo.*(vaultId, …)`, `resolveUnderVault(vaultId, rel)` (root = `rootFor(vaultId)`, escape-guarded). Never `ActiveVault.id()/root()` — an ingest finishing after a switch writes into its own vault. `SyncService` was already vault-explicit (M4).
+Embedder internals: `embedder/vault_paths.py` + `embedder/ingest/FLOWS.md` (Multi-vault scoping rows). MCP + `/pdf-page` + `/media-rendition` resolve the ACTIVE vault per call (~5s cache), `placement` uses `vault_id = %s` instead of `LIKE '/vault/%%'`.
+Tests: `VaultInternalRoutingIT` (callback after switch, no-vaultId = vault 1, escape guard), `embedder/tests/test_multivault.py`.
+
 ## Not yet
-- Python scoping [NOT IMPLEMENTED] (M5); mounts/host-wrapper `POST /vaults` [NOT IMPLEMENTED] (M6); frontend [NOT IMPLEMENTED] (M7); GC job (M7b); DROP DEFAULT (M8) [NOT IMPLEMENTED]
+- mounts/host-wrapper `POST /vaults` [NOT IMPLEMENTED] (M6) — the embedder already computes `<root>/_reports|_workspace|resources` for non-1 vaults but nothing mounts them rw yet; frontend [NOT IMPLEMENTED] (M7); GC job (M7b); DROP DEFAULT (M8) [NOT IMPLEMENTED]
 
 ## Technology Notes
 - Schema management is `CREATE/ALTER ... IF NOT EXISTS` at bean init, no Flyway: no versioning, no rollback; bean order is the only ordering guarantee (hence `@DependsOn`). A repo missing `@DependsOn` can fail on a fresh DB (FK to a not-yet-created `vaults`).
@@ -61,7 +67,9 @@ To change what reruns on a switch: add/remove an `@EventListener` on `VaultSwitc
 - `switchTo` is `synchronized` and the DB update commits before the in-memory flip; if the process dies in between, the next boot loads the DB flag, so the DB wins.
 - Dropping a vault's `syncEnabled` / archiving only stops SyncWorker/backup from picking it; manual endpoints still act on the ACTIVE vault regardless.
 - The nightly DB backup is a whole-database `pg_dump` (every vault's rows) encrypted with, and uploaded to, EACH sync-enabled vault's own folder — a vault's Drive folder therefore holds a copy of the other vaults' data, encrypted under that vault's passphrase. Restore (`DbBackupService.restore(v, force)`) is whole-DB too.
-- `FileRepository` is an active-vault facade: a queue consumer that calls it (e.g. `InternalAgentController.createNote` driven by an embedder callback) writes to the vault that is active NOW, not the job's vault. The embedder side carries `vault_id` from M5.
+- `FileRepository`'s no-vault methods are still an active-vault facade (UI request path). Queue consumers / embedder callbacks MUST use the `(long vaultId, …)` overloads (`createNote`, `updateNote`); calling the facade from a job writes to the vault active NOW.
+- Embedder side: a job's vault is fixed at submit time and lives in the in-memory job dict (lost on embedder restart, like the job itself; the Java capture row keeps `vault_id` and resubmits with it). `active()` for MCP is a 5s cache, so a tool call right after a switch can still see the previous vault for up to 5s. A request with a non-1 `vault_id` but no `root` is rejected (422) rather than guessed.
+- `escalation.FIXES_DIR` (agent fix-log) is still the global `AGENT_FIXES_DIR`, not per vault (debug log, no vault data).
 - Rabbit payloads without `vaultId` (queued before the M3 deploy) are treated as vault 1.
 - Seed hardcodes id 1 and container_path `/vault` (must match the compose mount). If `/vault` is changed, the UNIQUE(container_path) seed insert for id 1 is skipped when a row already exists, silently keeping the old value.
 - Only one `active` row is allowed (partial unique index); the seed is `ON CONFLICT DO NOTHING`, so an install that already has some other active vault keeps it.
@@ -84,6 +92,10 @@ To change what reruns on a switch: add/remove an `@EventListener` on `VaultSwitc
 | Job's vault filesystem root | `ActiveVault.rootFor(vaultId)` |
 | Rabbit payload carries vaultId | `OutboxRepository.enqueue(vaultId, queue, payload)` |
 | Test helpers | `ActiveVault.set(id, root)`, `ActiveVault.forTest(id, root)` |
+| Embedder request carries vault | `IngestClient.scoped(vaultId, payload)`; `CardGenerationService`, `TrackAgentClient.submitMinicourse`, `CaptureController.download` (add `vault_id`/`root`) |
+| Embedder callback routes by vault | `InternalAgentController.vaultOf()`, `FileRepository.createNote/updateNote(long vaultId, …)`, `MediaController.storeResourceBytes(long vaultId, …)` |
+| Embedder-side vault object / paths | `embedder/vault_paths.py` (`Vault`, `active()`); per-endpoint `main._vault_of(req)` |
+| M5 tests | `VaultInternalRoutingIT`, `embedder/tests/test_multivault.py` |
 | Per-vault setting keys | `SettingsRepository.PER_VAULT_KEYS`, `getForVault/setForVault` |
 | vault_settings DDL + legacy copy | `SettingsRepository.initSchema()` |
 | Switch vault | `ActiveVault.switchTo()`, `VaultRepository.activate()`, `VaultController.setActive()` |

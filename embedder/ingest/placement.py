@@ -32,10 +32,10 @@ import numpy as np
 
 log = logging.getLogger("embedder.ingest.placement")
 
-VAULT_ROOT = "/vault"
+DEFAULT_ROOT = "/vault"      # legacy vault 1 root; other vaults pass their own (Vault.root)
 _EXCLUDE_SEG = {"_inbox", "ingest", "resources", "_workspace", "_reports"}
 
-MIN_DEPTH = int(os.environ.get("PLACEMENT_MIN_DEPTH", "2"))            # folder segments under /vault
+MIN_DEPTH = int(os.environ.get("PLACEMENT_MIN_DEPTH", "2"))            # folder segments under the vault root
 MIN_SIM = float(os.environ.get("PLACEMENT_MIN_SIM", "0.35"))          # else → unsorted
 MIN_FOLDER_NOTES = int(os.environ.get("PLACEMENT_MIN_FOLDER_NOTES", "3"))
 CACHE_TTL_S = int(os.environ.get("PLACEMENT_CACHE_TTL_S", "600"))
@@ -56,14 +56,16 @@ def _excluded(folder: str) -> bool:
     return any(p in _EXCLUDE_SEG or p.startswith(".") for p in parts)
 
 
-def _depth(path: str) -> int:
-    # segments under /vault: '/vault/AI/Agents' → 2
-    return max(0, len([p for p in path.split("/") if p]) - 1)
+def _depth(path: str, root: str = DEFAULT_ROOT) -> int:
+    # segments under the vault root: '/vault/AI/Agents' → 2 ('/vaults/2/AI/Agents' too)
+    return max(0, len([p for p in path.split("/") if p]) - len([p for p in root.split("/") if p]))
 
 
-def build_model(rows: list[tuple]) -> dict[str, _Node]:
+def build_model(rows: list[tuple], root: str = DEFAULT_ROOT) -> dict[str, _Node]:
     """`rows` = (folder_path, centroid ndarray, note_count) for each DIRECT folder → a node
-    tree with count-weighted subtree centroids. Pure."""
+    tree with count-weighted subtree centroids, rooted at the vault's container `root`. Pure."""
+    root = root.rstrip("/")
+    n_root = len([p for p in root.split("/") if p])
     nodes: dict[str, _Node] = {}
 
     def get(path: str) -> _Node:
@@ -72,14 +74,14 @@ def build_model(rows: list[tuple]) -> dict[str, _Node]:
             n = nodes[path] = _Node(path=path)
         return n
 
-    get(VAULT_ROOT)
+    get(root)
     for folder, cen, n in rows:
-        if not folder.startswith(VAULT_ROOT + "/") or _excluded(folder):
+        if not folder.startswith(root + "/") or _excluded(folder[len(root):]):
             continue
         node = get(folder)
         node.direct_c, node.direct_n = np.asarray(cen, dtype=np.float32), int(n)
         parts = folder.split("/")                 # ['', 'vault', 'AI', 'Agents']
-        for i in range(2, len(parts)):            # link every ancestor edge down from /vault
+        for i in range(1 + n_root, len(parts)):   # link every ancestor edge down from the root
             get("/".join(parts[:i])).children["/".join(parts[:i + 1])] = get("/".join(parts[:i + 1]))
 
     def compute(node: _Node) -> None:
@@ -94,7 +96,7 @@ def build_model(rows: list[tuple]) -> dict[str, _Node]:
         if total:
             node.sub_c, node.sub_n = acc / total, total
 
-    compute(nodes[VAULT_ROOT])
+    compute(nodes[root])
     return nodes
 
 
@@ -105,10 +107,11 @@ def _cos(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (na * nb))
 
 
-def suggest(model: dict[str, _Node], vec: np.ndarray) -> Optional[str]:
+def suggest(model: dict[str, _Node], vec: np.ndarray, root: str = DEFAULT_ROOT) -> Optional[str]:
     """Descend the centroid tree for note embedding `vec` → a folder path (depth ≥ MIN_DEPTH),
     or None ("unsorted") when nothing is confident enough. Pure."""
-    root = model.get(VAULT_ROOT)
+    root_str = root.rstrip("/")
+    root = model.get(root_str)
     if root is None or not root.children:
         return None
 
@@ -127,23 +130,24 @@ def suggest(model: dict[str, _Node], vec: np.ndarray) -> Optional[str]:
             break
         node_sim = _cos(vec, node.sub_c) if node.sub_c is not None else -1.0
         # Descend while it gets MORE specific-and-closer, OR we're still shallower than allowed.
-        if _cos(vec, child.sub_c) >= node_sim or _depth(node.path) < MIN_DEPTH:
+        if _cos(vec, child.sub_c) >= node_sim or _depth(node.path, root_str) < MIN_DEPTH:
             node = child
         else:
             break
 
-    return node.path if _depth(node.path) >= MIN_DEPTH else None
+    return node.path if _depth(node.path, root_str) >= MIN_DEPTH else None
 
 
 # ── DB / embedder-backed entry point (cached) ─────────────────────────────────
 
 _lock = threading.Lock()
-_cache: dict = {"ts": 0.0, "model": None}
+_cache: dict = {}      # vault_id -> {"ts": float, "model": dict}
 
 
-def _folder_rows() -> list[tuple]:
-    """Per-DIRECT-folder centroid + note count from the live vector index. `AVG(embedding)`
-    (pgvector) → parsed to an ndarray. Staging/media folders are filtered in `build_model`."""
+def _folder_rows(vault_id: int) -> list[tuple]:
+    """Per-DIRECT-folder centroid + note count from the live vector index, for ONE vault.
+    `AVG(embedding)` (pgvector) → parsed to an ndarray. Staging/media folders are filtered in
+    `build_model`."""
     from mcp_server import _query_db
     rows = _query_db(
         """
@@ -151,9 +155,9 @@ def _folder_rows() -> list[tuple]:
                AVG(embedding)::text AS centroid,
                COUNT(*) AS n
         FROM note_chunks
-        WHERE embedding IS NOT NULL AND note_path LIKE '/vault/%%'
+        WHERE embedding IS NOT NULL AND vault_id = %s
         GROUP BY 1
-        """)
+        """, (vault_id,))
     out = []
     for folder, cen_txt, n in rows:
         try:
@@ -163,21 +167,29 @@ def _folder_rows() -> list[tuple]:
     return out
 
 
-def _model() -> dict[str, _Node]:
+def _model(vault) -> dict[str, _Node]:
     now = time.time()
     with _lock:
-        if _cache["model"] is None or now - _cache["ts"] > CACHE_TTL_S:
-            _cache["model"] = build_model(_folder_rows())
-            _cache["ts"] = now
-        return _cache["model"]
+        ent = _cache.get(vault.id)
+        if ent is None or now - ent["ts"] > CACHE_TTL_S:
+            ent = _cache[vault.id] = {
+                "model": build_model(_folder_rows(vault.id), str(vault.root)), "ts": now}
+        return ent["model"]
 
 
 def invalidate_cache() -> None:
     with _lock:
-        _cache["model"], _cache["ts"] = None, 0.0
+        _cache.clear()
 
 
-def _note_vectors(paths: list[str]) -> list[np.ndarray]:
+def _resolve_vault(vault):
+    if vault is not None:
+        return vault
+    from mcp_server import active_vault
+    return active_vault()
+
+
+def _note_vectors(paths: list[str], vault_id: int) -> list[np.ndarray]:
     """Per-note embedding = the mean of that note's OWN chunks, one vector per path — so a
     long note doesn't outweigh a short one when the group is averaged in `suggest_group`.
     Missing/unembedded paths are silently skipped (fresh inbox notes may not be indexed
@@ -190,9 +202,9 @@ def _note_vectors(paths: list[str]) -> list[np.ndarray]:
         f"""
         SELECT AVG(embedding)::text AS centroid
         FROM note_chunks
-        WHERE embedding IS NOT NULL AND note_path IN ({placeholders})
+        WHERE embedding IS NOT NULL AND vault_id = %s AND note_path IN ({placeholders})
         GROUP BY note_path
-        """, tuple(paths))
+        """, (vault_id, *paths))
     out = []
     for (cen_txt,) in rows:
         try:
@@ -202,7 +214,7 @@ def _note_vectors(paths: list[str]) -> list[np.ndarray]:
     return out
 
 
-def suggest_group(paths: list[str]) -> Optional[str]:
+def suggest_group(paths: list[str], vault=None) -> Optional[str]:
     """Best folder for a GROUP of notes — a whole ingest source, or one of its chapter
     subfolders — computed exactly like a single note: average the group's own note vectors
     into one vector, walk the same centroid tree (`suggest`). This is the "symmetric at any
@@ -210,23 +222,25 @@ def suggest_group(paths: list[str]) -> Optional[str]:
     same as a folder in the vault is modeled as the centroid of its notes. None on empty
     input or failure — the triage UI just shows no group pre-pick."""
     try:
-        vecs = _note_vectors(paths)
+        vault = _resolve_vault(vault)
+        vecs = _note_vectors(paths, vault.id)
         if not vecs:
             return None
         vec = np.mean(vecs, axis=0)
-        return suggest(_model(), vec)
+        return suggest(_model(vault), vec, str(vault.root))
     except Exception as e:
         log.warning("placement.suggest_group failed: %s", e)
         return None
 
 
-def suggest_folder(text: str) -> Optional[str]:
+def suggest_folder(text: str, vault=None) -> Optional[str]:
     """Best folder for a note's own content (title + body), or None ("unsorted"). One embed
     call; centroids are cached. Never raises — a failure just yields None so ingest continues."""
     try:
         from model_runtime import embed_texts
+        vault = _resolve_vault(vault)
         vec = np.asarray(embed_texts([text[:4000]], "document")[0], dtype=np.float32)
-        return suggest(_model(), vec)
+        return suggest(_model(vault), vec, str(vault.root))
     except Exception as e:
         log.warning("placement.suggest_folder failed: %s", e)
         return None

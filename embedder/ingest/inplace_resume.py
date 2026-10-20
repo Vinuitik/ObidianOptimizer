@@ -40,8 +40,11 @@ def _index_path():
     return jobs.BUNDLE_DIR / "inplace_deferred.json"
 
 
-def _key(note_path: str, embed_ref: str) -> str:
-    return f"{note_path}\x00{embed_ref}"
+def _key(note_path: str, embed_ref: str, vault_id: int = 1) -> str:
+    # Vault 1 keeps the pre-multi-vault key shape (existing index files stay valid); note
+    # paths are vault-relative so every other vault is namespaced.
+    base = f"{note_path}\x00{embed_ref}"
+    return base if vault_id == 1 else f"v{vault_id}\x00{base}"
 
 
 def _load() -> dict:
@@ -60,20 +63,20 @@ def _save(idx: dict) -> None:
 
 
 def record(note_path, embed_ref, bundle_path,
-           ref=None, source_type=None, title=None) -> None:
+           ref=None, source_type=None, title=None, vault_id: int = 1) -> None:
     """A DEFERRED in-place job's bundle is resume-ready — remember it for this (note, embed).
     Idempotent: re-recording the same key (repeated cooldown re-defers) just refreshes it."""
     if not (note_path and embed_ref and bundle_path):
         return
     with _lock:
         idx = _load()
-        idx[_key(note_path, embed_ref)] = {
+        idx[_key(note_path, embed_ref, vault_id)] = {
             "bundle_path": bundle_path, "ref": ref,
             "source_type": source_type, "title": title, "ts": time.time()}
         _save(idx)
 
 
-def lookup(note_path, embed_ref):
+def lookup(note_path, embed_ref, vault_id: int = 1):
     """The saved bundle entry for (note, embed) if one exists AND its bundle file is still
     present, else None. A dangling entry (bundle swept away) is pruned so the caller falls
     back to a fresh extract rather than resuming a ghost."""
@@ -81,7 +84,7 @@ def lookup(note_path, embed_ref):
         return None
     with _lock:
         idx = _load()
-        key = _key(note_path, embed_ref)
+        key = _key(note_path, embed_ref, vault_id)
         entry = idx.get(key)
         if not entry:
             return None
@@ -93,12 +96,12 @@ def lookup(note_path, embed_ref):
         return entry
 
 
-def drop(note_path, embed_ref) -> None:
+def drop(note_path, embed_ref, vault_id: int = 1) -> None:
     """Forget (note, embed) — called when its synthesis finally settles (DONE or terminal
     FAIL), so a genuine future re-ingest of a changed source extracts fresh. No-op if absent."""
     if not (note_path and embed_ref):
         return
     with _lock:
         idx = _load()
-        if idx.pop(_key(note_path, embed_ref), None) is not None:
+        if idx.pop(_key(note_path, embed_ref, vault_id), None) is not None:
             _save(idx)

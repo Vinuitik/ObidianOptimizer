@@ -134,10 +134,10 @@ def _json_object(text: str):
 
 # ── pass 1: outline ──────────────────────────────────────────────────────
 
-def outline(bundle: dict) -> list[dict]:
+def outline(bundle: dict, reports_dir: str | None = None) -> list[dict]:
     segs = bundle_util.number_segments(bundle)
     subject = bundle["source"].get("title") or bundle["source"].get("ref", "untitled")
-    rep = AgentReport("ingest-outline", subject)
+    rep = AgentReport("ingest-outline", subject, reports_dir=reports_dir)
     rep.input("source", {k: bundle["source"].get(k) for k in ("type", "title", "ref")})
     rep.input("segments", bundle_util.render_segments(segs))
     plans = []

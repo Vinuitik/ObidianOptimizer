@@ -9,6 +9,7 @@ from pydantic import BaseModel
 import model_runtime
 from model_runtime import state
 from mcp_server import ApiKeyMiddleware, mcp
+from vault_paths import Vault
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +54,8 @@ class EmbedResponse(BaseModel):
 
 class GenerateCardsRequest(BaseModel):
     note_path: str
+    vault_id: int | None = None     # which vault this belongs to (Java sends it; absent = vault 1)
+    root: str | None = None         # that vault's container root
     content: str | None = None      # omitted → read from the /vault mount
     source_hash: str | None = None  # omitted → sha256(content)
     # Feedback-aware regen (nightly refill of user-flagged cards): generate about
@@ -76,9 +79,13 @@ class JudgeRequest(BaseModel):
 
 class PlacementGroupRequest(BaseModel):
     paths: List[str]                # absolute note paths — a source's notes, or one chapter's
+    vault_id: int | None = None     # which vault this belongs to (Java sends it; absent = vault 1)
+    root: str | None = None         # that vault's container root
 
 
 class IngestRequest(BaseModel):
+    vault_id: int | None = None     # which vault this belongs to (Java sends it; absent = vault 1)
+    root: str | None = None         # that vault's container root
     ref: str = ""                   # /vault-relative path or URL (blank for text route)
     force_whisper: bool = False     # re-transcribe even if captions exist
     extract_only: bool = False      # stop after the bundle (skip synthesis)
@@ -91,6 +98,8 @@ class IngestRequest(BaseModel):
 
 
 class ResumeRequest(BaseModel):
+    vault_id: int | None = None     # which vault this belongs to (Java sends it; absent = vault 1)
+    root: str | None = None         # that vault's container root
     bundle_path: str                # the saved bundle to synthesize from (under BUNDLE_DIR)
     ref: str = ""                   # original source ref (for logging / note source)
     capture_id: str | None = None   # links proposed notes back to the Java capture row
@@ -102,10 +111,14 @@ class ResumeRequest(BaseModel):
 
 class SplitNoteRequest(BaseModel):
     note_path: str                  # vault-relative .md path
+    vault_id: int | None = None     # which vault this belongs to (Java sends it; absent = vault 1)
+    root: str | None = None         # that vault's container root
 
 
 class MinicourseSubmitRequest(BaseModel):
     track_id: str
+    vault_id: int | None = None     # which vault this belongs to (Java sends it; absent = vault 1)
+    root: str | None = None         # that vault's container root
 
 
 class MinicourseApproveRequest(BaseModel):
@@ -118,6 +131,8 @@ class ImportCsvRequest(BaseModel):
 
 class DownloadRequest(BaseModel):
     url: str                        # video / playlist URL for offline download
+    vault_id: int | None = None     # which vault this belongs to (Java sends it; absent = vault 1)
+    root: str | None = None         # that vault's container root
 
 
 class SubsRequest(BaseModel):
@@ -128,6 +143,16 @@ class SubsRequest(BaseModel):
 class SubscriptionDiscoverRequest(BaseModel):
     source_url: str
     source_type: str                # youtube_channel | feed | page_watch | youtube_posts
+
+
+def _vault_of(req) -> Vault:
+    """The vault a backend request belongs to (vault_id + root from Java). Neither = a caller
+    that predates multi-vault = vault 1. Never "whichever is active" - that is what lets a job
+    submitted before a switch finish in its own vault."""
+    try:
+        return Vault.of(req.vault_id, req.root)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +249,7 @@ def _parse_box(box: str | None):
 # No client-side (de)compression: the rendition is a normal, smaller, already-playable file.
 _VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi"}
 _AUDIO_EXTS = {".mp3", ".m4a", ".wav", ".ogg", ".flac"}
-_RENDITION_DIR = "/reports/_renditions"        # writable, excluded from vault scans
+_RENDITION_SUBDIR = "_renditions"              # under the vault's reports dir: writable, excluded from vault scans
 _RENDITION_TIMEOUT_S = int(os.environ.get("RENDITION_TIMEOUT_S", "1200"))
 _RENDITION_HEIGHT = os.environ.get("RENDITION_HEIGHT", "480")   # video rendition max height (px)
 
@@ -243,10 +268,11 @@ def media_rendition(path: str, mode: str = "auto"):
     from pathlib import Path
 
     from fastapi.responses import FileResponse
-    from mcp_server import _resolve_in_vault
+    from mcp_server import _resolve_in_vault, active_vault
 
+    vault = active_vault()    # browser-facing GET: no request-scoped vault, so the active one
     try:
-        src = _resolve_in_vault(path)
+        src = _resolve_in_vault(path, vault)
     except ValueError:
         raise HTTPException(status_code=400, detail="path escapes the vault")
     ext = src.suffix.lower()
@@ -256,10 +282,10 @@ def media_rendition(path: str, mode: str = "auto"):
     audio_only = mode == "audio" or ext in _AUDIO_EXTS
     st = src.stat()
     key = hashlib.sha256(
-        f"{path}|{st.st_mtime_ns}|{st.st_size}|{'a' if audio_only else 'v' + _RENDITION_HEIGHT}|v1"
+        f"{vault.id}|{path}|{st.st_mtime_ns}|{st.st_size}|{'a' if audio_only else 'v' + _RENDITION_HEIGHT}|v1"
         .encode()).hexdigest()[:16]
     out_ext = ".m4a" if audio_only else ".mp4"
-    cache_dir = Path(_RENDITION_DIR)
+    cache_dir = Path(vault.reports_dir()) / _RENDITION_SUBDIR
     cache_dir.mkdir(parents=True, exist_ok=True)
     out = cache_dir / f"{key}{out_ext}"
 
@@ -309,17 +335,19 @@ def generate_cards(req: GenerateCardsRequest):
     from flashcards import generate as card_gen
     from mcp_server import _resolve_in_vault
 
+    vault = _vault_of(req)
     content = req.content
     if content is None:
         try:
-            content = _resolve_in_vault(req.note_path).read_text(encoding="utf-8")
+            content = _resolve_in_vault(req.note_path, vault).read_text(encoding="utf-8")
         except (ValueError, OSError) as e:
             raise HTTPException(status_code=404, detail=f"cannot read note: {e}")
 
     source_hash = req.source_hash or hashlib.sha256(content.encode("utf-8")).hexdigest()
     try:
         return card_gen.generate_for_note(req.note_path, content, source_hash,
-                                          target_count=req.target_count, feedback=req.feedback)
+                                          target_count=req.target_count, feedback=req.feedback,
+                                          vault=vault)
     except card_gen.LLMUnavailable as e:
         # No LLM answered (wrapper down or all providers exhausted). Fail loud —
         # a 200 "0 cards" here would silently hide a missing/unreachable LLM.
@@ -376,11 +404,12 @@ def ingest_submit(req: IngestRequest):
     from ingest import jobs as ingest_jobs
     from ingest import router as ingest_router
 
+    vault = _vault_of(req)
     # Text route: the captured prose is the content — no ref to route or resolve.
     if req.text is not None and req.text.strip():
         return ingest_jobs.submit(
             req.ref or "", None, capture_id=req.capture_id, text=req.text,
-            source_type=req.source_type or "text", title=req.title)
+            source_type=req.source_type or "text", title=req.title, vault=vault)
 
     in_place = bool(req.note_path)
     target = req.embed_ref or req.ref if in_place else req.ref
@@ -392,14 +421,14 @@ def ingest_submit(req: IngestRequest):
 
     resolved = None
     if not target.startswith(("http://", "https://")):
-        resolved = _resolve_embed(target)
+        resolved = _resolve_embed(target, vault)
         if resolved is None:
             raise HTTPException(status_code=404, detail=f"not in vault: {target}")
 
     if in_place:
         from mcp_server import _resolve_in_vault
         try:
-            note = _resolve_in_vault(req.note_path)
+            note = _resolve_in_vault(req.note_path, vault)
         except (ValueError, OSError) as e:
             raise HTTPException(status_code=404, detail=f"bad note_path: {e}")
         if not note.is_file():
@@ -408,17 +437,18 @@ def ingest_submit(req: IngestRequest):
     return ingest_jobs.submit(
         target, resolved, req.force_whisper, req.extract_only,
         note_path=req.note_path, embed_ref=(target if in_place else None),
-        capture_id=req.capture_id, source_type=req.source_type, title=req.title)
+        capture_id=req.capture_id, source_type=req.source_type, title=req.title, vault=vault)
 
 
-def _resolve_embed(ref: str):
+def _resolve_embed(ref: str, vault: Vault | None = None):
     """Resolve a vault embed to a file. Tries the path as written; if that
     misses (Obsidian embeds are usually bare basenames while the file lives
     under resources/…), searches the vault for a matching basename."""
-    from mcp_server import VAULT_DIR, _resolve_in_vault
+    from mcp_server import _resolve_in_vault, active_vault
 
+    vault = vault or active_vault()
     try:
-        p = _resolve_in_vault(ref)
+        p = _resolve_in_vault(ref, vault)
         if p.exists():
             return p
     except (ValueError, OSError):
@@ -428,7 +458,7 @@ def _resolve_embed(ref: str):
     # so we never descend into them. rglob() did, which walked Git's huge object
     # store — wasted work AND triggered ENOMEM ([Errno 12]) on memory-tight hosts.
     from pathlib import Path
-    for dirpath, dirnames, filenames in os.walk(VAULT_DIR):
+    for dirpath, dirnames, filenames in os.walk(vault.root):
         dirnames[:] = [d for d in dirnames
                        if not d.startswith(".") and d not in ("_trash", "_reports")]
         if base in filenames:
@@ -454,7 +484,8 @@ def ingest_resume(req: ResumeRequest):
     return ingest_jobs.submit(
         req.ref or "", None, resume_bundle=bp,
         note_path=req.note_path, embed_ref=req.embed_ref,
-        capture_id=req.capture_id, source_type=req.source_type, title=req.title)
+        capture_id=req.capture_id, source_type=req.source_type, title=req.title,
+        vault=_vault_of(req))
 
 
 @app.post("/placement/group")
@@ -466,7 +497,7 @@ def placement_group(req: PlacementGroupRequest):
     note here — same walk, just a group-mean vector instead of one note's."""
     from ingest import placement
 
-    return {"suggestedFolder": placement.suggest_group(req.paths)}
+    return {"suggestedFolder": placement.suggest_group(req.paths, _vault_of(req))}
 
 
 @app.post("/ingest/split-note")
@@ -476,12 +507,13 @@ def split_note(req: SplitNoteRequest):
     from ingest import split_note as splitter
     from mcp_server import _resolve_in_vault
 
+    vault = _vault_of(req)
     try:
-        content = _resolve_in_vault(req.note_path).read_text(encoding="utf-8")
+        content = _resolve_in_vault(req.note_path, vault).read_text(encoding="utf-8")
     except (ValueError, OSError) as e:
         raise HTTPException(status_code=404, detail=f"cannot read note: {e}")
     try:
-        return splitter.split(req.note_path, content)
+        return splitter.split(req.note_path, content, vault)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -496,14 +528,16 @@ def minicourse_submit(req: MinicourseSubmitRequest):
     from ingest import publish
     from tracks import minicourse_jobs
 
+    vault = _vault_of(req)
     try:
-        track = publish.get_track_items(req.track_id)
+        track = publish.get_track_items(req.track_id, vault.id)
     except (publish.PublishError, httpx.HTTPError) as e:
         raise HTTPException(status_code=502, detail=f"track fetch failed: {e}")
     if track is None:
         raise HTTPException(status_code=404, detail=f"unknown track: {req.track_id}")
 
-    return minicourse_jobs.submit_outline(req.track_id, track["title"], track["items"])
+    return minicourse_jobs.submit_outline(req.track_id, track["title"], track["items"],
+                                          vault=vault)
 
 
 @app.post("/tracks/import")
@@ -570,7 +604,7 @@ def download_submit(req: DownloadRequest):
     url = (req.url or "").strip()
     if not url:
         raise HTTPException(status_code=422, detail="url cannot be empty")
-    return download_jobs.submit(url)
+    return download_jobs.submit(url, _vault_of(req))
 
 
 @app.get("/download/{job_id}")

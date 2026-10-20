@@ -4,8 +4,19 @@ Split out of mcp_server.py for readability — the FastMCP instance and the
 DB/vault-path helpers these tools depend on still live there; this module
 just registers @mcp.tool() functions onto it.
 """
+import mcp_server
 from mcp_server import mcp, _resolve_in_vault, _vector_candidates, _text_candidates, _rrf_merge
 from model_runtime import embed_texts
+
+
+def search_in_vault(query: str, limit: int, vault_id: int) -> list[dict]:
+    """Hybrid search scoped to ONE vault (the shared core of the search_notes tool and the
+    ingest linker, which searches the vault its job belongs to, not "the active one")."""
+    limit = max(1, min(limit, 50))
+    query_vec = embed_texts([query], kind="query")[0]
+    vector_rows = _vector_candidates(query_vec, vault_id)
+    text_rows = _text_candidates(query, vault_id)
+    return _rrf_merge([("semantic", vector_rows), ("keyword", text_rows)], limit)
 
 
 @mcp.tool()
@@ -26,11 +37,7 @@ def search_notes(query: str, limit: int = 10) -> list[dict]:
       both rankers is the strongest relevance signal.
     Results are candidates, not ground truth: for filing/placement decisions
     verify against the real structure with get_vault_tree / list_folder."""
-    limit = max(1, min(limit, 50))
-    query_vec = embed_texts([query], kind="query")[0]
-    vector_rows = _vector_candidates(query_vec)
-    text_rows = _text_candidates(query)
-    return _rrf_merge([("semantic", vector_rows), ("keyword", text_rows)], limit)
+    return search_in_vault(query, limit, mcp_server.active_vault().id)
 
 
 @mcp.tool()

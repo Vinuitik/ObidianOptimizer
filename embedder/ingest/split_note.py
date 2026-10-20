@@ -18,7 +18,9 @@ _HEADING = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
 _FM = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
 
 
-def split(note_rel_path: str, content: str) -> dict:
+def split(note_rel_path: str, content: str, vault=None) -> dict:
+    from vault_paths import Vault
+    vault = vault or Vault.default()
     body = _FM.sub("", content, count=1)
     if len(body) < SPLIT_MIN_CHARS:
         raise ValueError(
@@ -33,7 +35,7 @@ def split(note_rel_path: str, content: str) -> dict:
         "media": [],
     }
 
-    plans = synthesize.outline(bundle)
+    plans = synthesize.outline(bundle, reports_dir=vault.reports_dir())
     if len(plans) < 2:
         raise ValueError("outline produced a single note — nothing to split")
 
@@ -43,11 +45,11 @@ def split(note_rel_path: str, content: str) -> dict:
     for plan in plans:
         note_md = synthesize.write_note(bundle, plan, numbered)
         child_title = synthesize.slugify(plan["title"])
-        path = publish.create_note(folder, child_title, note_md)
+        path = publish.create_note(folder, child_title, note_md, vault_id=vault.id)
         children.append({"title": child_title, "path": path,
                          "hint": plan.get("summary_hint", "")})
 
-    publish.update_note(note_rel_path, _hub(content, title, children))
+    publish.update_note(note_rel_path, _hub(content, title, children), vault.id)
     return {"children": children}
 
 

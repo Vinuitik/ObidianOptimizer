@@ -24,7 +24,7 @@ def test_add_track_item_includes_capture_id_in_body(monkeypatch):
     publish.add_track_item("trk1", "Note Title", "path/to/note.md", capture_id="cap1")
 
     assert captured["json"] == {"title": "Note Title", "notePath": "path/to/note.md",
-                                "captureId": "cap1"}
+                                "captureId": "cap1", "vaultId": 1}
 
 
 def test_add_track_item_omitted_capture_id_sends_null(monkeypatch):
