@@ -5,6 +5,7 @@ import { addToOutbox, getOutbox, deleteFromOutbox } from './db';
 import { gradeNote, submitAttempt, completeAssignment, flagCard } from '../api/notes';
 import { fileInboxNote, discardInboxNote, acknowledgeCapture } from '../api/inbox';
 import { acceptFeedItem, binFeedItem, restoreFeedItem } from '../api/feed';
+import { getActiveVaultId } from '../vault/activeVault';
 import { captureSentNotifyEnabled, notifyCaptureSent } from './captureSentNotify';
 
 // eventId makes mailbox replay idempotent — the server dedupes on it (consumed_events).
@@ -71,7 +72,10 @@ export async function flush() {
   const items = await getOutbox();
   let sent = 0, failed = 0;
   const notifyOn = await captureSentNotifyEnabled();
+  const activeId = getActiveVaultId();
   for (const item of items) {
+    // Per-vault outbox: an entry queued under another vault never replays into this one.
+    if (item.vaultId != null && item.vaultId !== activeId) continue;
     try {
       if (item.kind === 'grade') {
         await gradeNote(item.notePath, item.band);

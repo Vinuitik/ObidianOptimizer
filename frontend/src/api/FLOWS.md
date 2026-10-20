@@ -61,7 +61,11 @@ offline search/link fallback — see `utils/FLOWS.md` "offlineSearch.js".
 · `fetchFeedSources / addFeedSource({url}) / patchFeedSource / deleteFeedSource / pollFeedSource`. All throw `ApiError(status)`.
 `pollTrackNow` removed from `tracks.js` (old `/tracks/{id}/poll-now`).
 
+## vaults.js
+`/api/vaults` registry client (`fetchVaults/registerVault/renameVault/archiveVault/restoreVault/switchVault`); header + 409 handling live in `vault/activeVault.js` — see [../vault/FLOWS.md](../vault/FLOWS.md).
+
 ## Change Index
+| `X-Vault-Id` header / 409 reload | `vault/activeVault.js vaultFetch()` |
 
 | Thing to change | Where |
 |---|---|

@@ -14,7 +14,10 @@ import { getCreds } from './setup';
 import { getAccessToken, driveFindByVaultPath, driveDownload } from './drive';
 import { deriveKey, decrypt } from './crypto';
 
-const MEDIA_CACHE = 'obsopt-media';   // must match public/sw.js + syncOffline.js
+import { mediaCacheNameFor, mediaPrefix } from '../vault/activeVault';
+
+// Cache name is per vault ('obsopt-media' / 'obsopt-media-v<id>'; must match public/sw.js) and read
+// lazily: the active id is only known after bootVault() runs, which is after module import.
 // Only prune URLs the warm itself manages — never touch app icons or anything else the SW
 // may have parked in this cache. Tested against the PATHNAME (query stripped).
 const MANAGED_RE = /^\/(vault-media|workspace|api\/images|pdf-page)(\/|$)/;
@@ -41,16 +44,16 @@ function phaseOf(key) {
 // content is generated, not a file that exists anywhere). Only these map 1:1 onto a file the
 // vault sync already mirrors to Drive (SyncService.java), so only these get a Drive fallback.
 function isRawVaultResource(entry) {
-  return entry.fetch === entry.key && entry.key.startsWith('/vault-media/');
+  return entry.fetch === entry.key && /^\/vault-media\//.test(entry.key);
 }
 
 // /vault-media/<subdir>/<name> (URL-encoded) → the vault-relative path the SAME file was
 // uploaded under (DriveService.uploadFile's appProperties.vault_path) — see vaultMediaUrl's
 // forward mapping in utils/noteMedia.js, inverted.
 function vaultRelPathFromKey(key) {
-  const m = key.match(/^\/vault-media\/(.+)$/);
-  if (!m) return null;
-  try { return 'resources/' + m[1].split('/').map(decodeURIComponent).join('/'); }
+  const pre = mediaPrefix('vault-media');   // '/vault-media/' or '/vault-media/<id>/'
+  if (!key.startsWith(pre)) return null;
+  try { return 'resources/' + key.slice(pre.length).split('/').map(decodeURIComponent).join('/'); }
   catch { return null; }
 }
 
@@ -113,7 +116,7 @@ export async function warmReviewMedia({ onProgress } = {}) {
   for (const it of inbox) for (const e of mediaEntriesForNote(it.content, it.source)) entries.set(e.key, e);
   const wanted = new Set(entries.keys());   // keys are already pathname(+search)
 
-  const cache = await caches.open(MEDIA_CACHE);
+  const cache = await caches.open(mediaCacheNameFor());
   const present = new Set((await cache.keys()).map(r => idOf(r.url)));
 
   // 1. Fetch what's wanted but not yet cached, stored under the canonical player URL (`key`)

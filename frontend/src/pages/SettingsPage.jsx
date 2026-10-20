@@ -17,6 +17,8 @@ import Card from '../components/molecules/Card';
 import Field from '../components/molecules/Field';
 import PageHeader from '../components/molecules/PageHeader';
 import useAutosaveSettings from './useAutosaveSettings';
+import useVaults from '../vault/useVaults';
+import VaultsPanel from './VaultsPanel';
 import styles from './SettingsPage.module.css';
 
 const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
@@ -256,13 +258,15 @@ export default function SettingsPage() {
       <PageHeader title="Settings" subtitle="Changes save automatically." />
 
       <div className={styles.groups}>
-        <Group title="Vault" description="Where your notes live.">
+        <VaultsPanel isAuthenticated={isAuthenticated} />
+
+        <Group title="Vault" description="Where the active vault's notes live.">
           <div className={styles.fieldRow}>
             <Field
               label="Vault folder"
               hint={hostError
                 ? 'Needs the helper app running on your computer, and it isn’t right now.'
-                : 'The folder on your computer that the app reads and writes. To change it, edit HOST_VAULT_PATH in .env and restart.'}
+                : 'The folder on your computer that the app reads and writes. Add or switch vaults in the Vaults section above.'}
             >
               <Input
                 className={styles.mono} readOnly value={hostPath ?? ''}
@@ -337,6 +341,7 @@ export default function SettingsPage() {
 // Credentials keep an explicit Save button; the auto-sync toggle autosaves.
 
 function DriveSyncPanel({ loaded, isAuthenticated }) {
+  const { active: activeVault } = useVaults();
   const settings      = useStore(s => s.settings);
   const applySettings = useStore(s => s.applySettings);
 
@@ -449,7 +454,7 @@ function DriveSyncPanel({ loaded, isAuthenticated }) {
   return (
     <Group
       title="Sync"
-      description="Encrypted backup of your vault to your own Google Drive. Google never sees plaintext."
+      description={`Encrypted backup of ${activeVault ? `the “${activeVault.name}” vault` : 'your vault'} to your own Google Drive. Each vault has its own folder, passphrase and connection; this section acts on the active vault. Google never sees plaintext.`}
     >
       <div className={styles.fieldRow}>
         <Field label="Status">

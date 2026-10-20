@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchWorkspaceFiles } from '../../api/workspace';
 import useStore from '../../store/useStore';
+import { mediaPrefix } from '../../vault/activeVault';
 import styles from './ResourcePanel.module.css';
 
 const TABS = [
@@ -87,7 +88,7 @@ export default function ResourcePanel({ resourceType, onResourceTypeChange, onVi
 }
 
 function Viewer({ type, name, onOrientation }) {
-  const src = `/workspace/${encodeURIComponent(name)}`;
+  const src = `${mediaPrefix('workspace')}${encodeURIComponent(name)}`;
 
   if (type === 'video') {
     // Detect portrait (shorts) vs landscape from the real pixel size — no ffprobe

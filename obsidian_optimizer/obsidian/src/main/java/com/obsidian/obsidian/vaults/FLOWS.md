@@ -65,7 +65,10 @@ Every compose invocation must include the override when it exists (`start.sh`, `
 Tests: `VaultSwitchIT` (register_*), `VaultWrapperClientTest`, `host-wrapper/tests/test_vaults.py`.
 
 ## Not yet
-- frontend [NOT IMPLEMENTED] (M7: media URL builders in `frontend/src/utils/media.js`/`noteMedia.js` still emit bare `/vault-media/`; there are no Java/Python URL builders); GC job (M7b); DROP DEFAULT (M8) [NOT IMPLEMENTED]
+- GC job (M7b); DROP DEFAULT (M8) [NOT IMPLEMENTED]
+
+## Frontend (M7 + M4b client)
+Details: `frontend/src/vault/FLOWS.md`. Client sends `X-Vault-Id` on every `/api/**` call (`activeVault.vaultFetch`), refreshes the active id from `GET /vaults` at boot, reloads on 409. Switcher in `NavBar` + `pwa/TopBar` → `PUT /vaults/active` → reload. Settings ▸ Vaults (`VaultsPanel`) registers via host-fs picker + downtime confirm, polls `GET /vaults` until the 202 recreate finishes. Offline: IDB `obsopt-offline` (vault 1) / `obsopt-offline-v<id>`, active id in `obsopt-meta` for `sw.js`; media cache `obsopt-media[-v<id>]`; media URLs `/vault-media/<id>/`, `/workspace/<id>/` for id >= 2. Archiving does not delete client IDB/caches.
 
 ## Technology Notes
 - Mounts are only applied by a compose recreate: a registered vault is unusable until the wrapper's detached `up -d` finishes (the 202 does not wait). The wrapper is unauthenticated and writes compose files + runs docker: same trust model as before. The registry file is the source of truth for the override; delete a vault by editing `vaults.registry.json` + regenerating (no unregister endpoint yet). `/vaults/<id>` is a nested rw bind under an ro bind in the embedder: needs the three subdirs to exist on the host (the wrapper creates them). Windows host paths are passed as-is (forward slashes) and untested.
@@ -117,4 +120,5 @@ Tests: `VaultSwitchIT` (register_*), `VaultWrapperClientTest`, `host-wrapper/tes
 | Register a vault | `VaultController.register()`, `VaultRepository.register()/deleteRegistration()`, `VaultWrapperClient.register()` |
 | Per-vault compose binds / override file | host-wrapper `render_vaults_override()`, `register_vault()`, `_run_compose()`; files `docker-compose.vaults.yml` + `vaults.registry.json` (gitignored) |
 | Per-vault media URLs | `frontend/nginx.conf.template` (`/vault-media/<id>/`, `/workspace/<id>/`) |
+| Client vault scoping (header, 409, IDB/cache names, media URLs) | `frontend/src/vault/activeVault.js` |
 | M6 tests | `VaultSwitchIT`, `VaultWrapperClientTest`, `host-wrapper/tests/test_vaults.py` |

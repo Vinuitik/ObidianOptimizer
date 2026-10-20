@@ -1,3 +1,5 @@
+import { mediaPrefix } from '../vault/activeVault';
+
 // Media helpers shared by CM6 embeds, markdown.js and the offline warm.
 
 // ── Module-level blob registry: filename → blobURL (for pre-save rendering) ──
@@ -105,6 +107,6 @@ function subdirFor(filename) {
 // or the review renderer's request misses the cache and images blank out offline. Single
 // source of truth — do not hand-build `/vault-media/...` for embeds anywhere else.
 export function mediaUrl(filename) {
-  return `/vault-media/${subdirFor(filename)}/${encodeURIComponent(filename)}`;
+  return `${mediaPrefix('vault-media')}${subdirFor(filename)}/${encodeURIComponent(filename)}`;
 }
 

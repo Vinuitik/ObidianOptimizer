@@ -6,6 +6,7 @@ import Button from '../atoms/Button';
 import Badge from '../atoms/Badge';
 import RefreshButton from '../atoms/RefreshButton';
 import QuickCapture from '../molecules/QuickCapture';
+import VaultSwitcher from '../molecules/VaultSwitcher';
 import useNavItems from './useNavItems';
 import styles from './NavBar.module.css';
 
@@ -44,6 +45,7 @@ export default function NavBar() {
       </div>
 
       <div className={styles.right}>
+        {isAuthenticated && <VaultSwitcher />}
         {isAuthenticated && <QuickCapture />}
         <RefreshButton />
         <span className={styles.avatar}>V</span>

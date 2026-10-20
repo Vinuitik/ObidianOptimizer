@@ -29,12 +29,31 @@ const MEDIA_CACHE = 'obsopt-media'; // unversioned: managed by the offline sync,
 const SHELL_URLS = ['/', '/index.html', '/manifest.webmanifest'];
 
 // ── IndexedDB outbox (mirrors src/pwa/db.js — kept inline so the SW is standalone) ──
-const DB_NAME = 'obsopt-offline';
+// Per-vault DB/cache names (VAULTS_PLAN M7) — mirrors src/vault/activeVault.js. The page writes
+// the active vault id into the tiny `obsopt-meta` IDB (store 'kv', key 'activeVaultId'); the SW has
+// no localStorage, so it reads it from there. Missing/unreadable => vault 1.
+function activeVaultId() {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open('obsopt-meta', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('kv', { keyPath: 'key' });
+      req.onsuccess = () => {
+        const g = req.result.transaction('kv', 'readonly').objectStore('kv').get('activeVaultId');
+        g.onsuccess = () => { req.result.close(); resolve(Number.isInteger(g.result?.value) ? g.result.value : 1); };
+        g.onerror = () => resolve(1);
+      };
+      req.onerror = () => resolve(1);
+    } catch { resolve(1); }
+  });
+}
+const dbNameFor = (id) => (id === 1 ? 'obsopt-offline' : `obsopt-offline-v${id}`);
+const mediaCacheNameFor = (id) => (id === 1 ? 'obsopt-media' : `obsopt-media-v${id}`);
 const DB_VERSION = 2;   // keep in sync with src/pwa/db.js (added 'assignments' store)
 
-function openDB() {
+async function openDB(vaultId) {
+  const name = dbNameFor(vaultId ?? await activeVaultId());
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(name, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('reviewNotes')) db.createObjectStore('reviewNotes', { keyPath: 'path' });
@@ -48,10 +67,11 @@ function openDB() {
 }
 
 async function enqueueOutbox(entry) {
-  const db = await openDB();
+  const vaultId = await activeVaultId();
+  const db = await openDB(vaultId);
   return new Promise((resolve, reject) => {
     const tx = db.transaction('outbox', 'readwrite');
-    tx.objectStore('outbox').add({ ...entry, ts: Date.now() });
+    tx.objectStore('outbox').add({ ...entry, vaultId, ts: Date.now() });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -142,7 +162,7 @@ self.addEventListener('fetch', (event) => {
 
   // Same-origin media → cache-first (populated by the offline sync).
   if (url.origin === self.location.origin && isMedia(url.pathname)) {
-    event.respondWith(cacheFirst(request, MEDIA_CACHE));
+    event.respondWith(activeVaultId().then((id) => cacheFirst(request, mediaCacheNameFor(id))));
     return;
   }
 
