@@ -7,6 +7,7 @@ import Checkbox from '../atoms/Checkbox';
 import Skeleton from '../atoms/Skeleton';
 import Card from '../molecules/Card';
 import EmptyState from '../molecules/EmptyState';
+import { isInboxNotePath } from '../../utils/sourceColor';
 import { listItem } from '../motion/presets';
 import styles from './TracksPlan.module.css';
 
@@ -23,7 +24,7 @@ function writeReviewPref(trackId, v) {
 }
 
 export default function TodayPlan({ onCreateTrack, onManage }) {
-  const todayItems     = useStore(s => s.todayItems);
+  const allTodayItems  = useStore(s => s.todayItems);
   const todayMode      = useStore(s => s.todayMode);
   const todayOverBudget = useStore(s => s.todayOverBudget);
   const todayCapacity  = useStore(s => s.todayCapacity);
@@ -68,6 +69,8 @@ export default function TodayPlan({ onCreateTrack, onManage }) {
     }
   }
 
+  // Items whose note is still in _inbox are covered by the queue's Today units (InboxReview).
+  const todayItems = allTodayItems.filter(i => !isInboxNotePath(i.notePath));
   const focus = todayMode === 'lockin';
 
   if (!loaded) {

@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { parseSourceRegion } from '../../utils/inboxParse';
 import { pdfPageUrl } from '../../utils/noteMedia';   // shared so offline warm caches identical keys
-import RsvpReader from '../molecules/RsvpReader';
-import SegmentedTabs from '../molecules/SegmentedTabs';
-import MarkdownView from '../molecules/MarkdownView';
+import { sourceKind } from '../../utils/sourceKind';
 import { mediaPrefix } from '../../vault/activeVault';
 import styles from './SourceSplicePanel.module.css';
 
@@ -21,10 +19,6 @@ export default function SourceSplicePanel({ item, onOrientation }) {
   // with a downloaded .mp4 plays as local video, not an external iframe). Falls back to the
   // external ref when there's no local copy yet.
   const kind = item ? sourceKind(region.local || region.ref, item) : null;
-
-  // Text sources default to the rendered Read view; RSVP (one word at a time) is the opt-in
-  // secondary mode. Sticky across notes.
-  const [textMode, setTextMode] = useState('read');   // 'read' | 'rsvp'
 
   // Report split orientation so the review layout matches the source shape (landscape
   // video → wide → horizontal split; portrait/other → vertical). YouTube is ~always
@@ -48,24 +42,15 @@ export default function SourceSplicePanel({ item, onOrientation }) {
         )}
         {region.startSeconds != null && <span className={styles.at}>{fmtRange(region.startSeconds, region.endSeconds)}</span>}
         {region.pages.length > 0 && <span className={styles.at}>{pageRange(region.pages)}</span>}
-        {kind === 'text' && (
-          <SegmentedTabs
-            className={styles.toggle}
-            aria-label="Text view"
-            tabs={[{ id: 'read', label: 'Read' }, { id: 'rsvp', label: 'RSVP' }]}
-            value={textMode}
-            onChange={setTextMode}
-          />
-        )}
       </div>
       <div className={styles.viewer}>
-        <Viewer kind={kind} region={region} item={item} textMode={textMode} onOrientation={onOrientation} />
+        <Viewer kind={kind} region={region} item={item} onOrientation={onOrientation} />
       </div>
     </div>
   );
 }
 
-function Viewer({ kind, region, item, textMode, onOrientation }) {
+function Viewer({ kind, region, item, onOrientation }) {
   if (kind === 'youtube') {
     const id = youtubeId(region.ref);
     const start = region.startSeconds || 0;
@@ -109,12 +94,8 @@ function Viewer({ kind, region, item, textMode, onOrientation }) {
     }
     return <iframe className={styles.frame} src={region.ref} title="source page" />;
   }
-  // text / unknown → 'read' (default) renders the note (MarkdownView, the real
-  // renderer); 'rsvp' flashes it a word at a time.
-  if (textMode === 'read') {
-    return <div className={styles.readbox}><MarkdownView content={item.content} resetKey={item.path} /></div>;
-  }
-  return <RsvpReader text={item.content} />;
+  // text / unknown: InboxReview never mounts this panel for them (the note IS the source).
+  return null;
 }
 
 // A video bounded to [start, end] — the note's own span. We DON'T trust the `#t=start,end`
@@ -207,15 +188,6 @@ function vaultPdfPath(ref) {
 const KIND_LABEL = { youtube: 'YouTube', video: 'Video', pdf: 'PDF', web: 'Web page', text: 'Text' };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-function sourceKind(ref, item) {
-  const r = (ref || '').toLowerCase();
-  if (/youtube\.com|youtu\.be/.test(r)) return 'youtube';
-  if (/\.(mp4|mkv|webm|mov|avi|mp3|m4a|wav|ogg|flac)(\?|#|$)/.test(r)) return 'video';
-  if (/\.pdf(\?|#|$)/.test(r)) return 'pdf';
-  if (/^https?:\/\//.test(r)) return 'web';
-  if ((item?.source || '').trim() === '' || /text/i.test(item?.sourceType || '')) return 'text';
-  return 'text';
-}
 
 function youtubeId(url) {
   const m = /(?:v=|youtu\.be\/|embed\/)([\w-]{11})/.exec(url || '');

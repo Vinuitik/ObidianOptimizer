@@ -1,38 +1,14 @@
-// Color-code inbox notes by their source (capture), so every note the ingest agent produced
-// from ONE source shares a hue and reads as a band in the queue (InboxReview).
-//
+// Inbox grouping helpers for the Learn queue (InboxReview): group key, reading order, tree.
 import { parseSourceRegion } from './inboxParse';
-//
-// Strategy: assign hues by the source's FIRST-APPEARANCE order using the golden angle
-// (~137.5°). Consecutive sources land far apart on the wheel — no two adjacent groups look
-// alike (the old hash-into-fixed-palette let near-duplicates like violet/periwinkle collide).
-// Fixed S/L tuned to sit on the dark amethyst theme (styles/tokens.css). To retune spacing/
-// vividness: GOLDEN_ANGLE / SAT / LIGHT below.
-const GOLDEN_ANGLE = 137.508;
-const SAT = 72;    // %
-const LIGHT = 63;  // % — bright enough to read as a 3px bar + 8px dot on #0e0d15
 
 // A note's grouping key: its capture (ingest pipeline), else its on-disk _inbox subfolder
 // (agent `create_note(folder=)` sessions + the user's own drag-drop mini-folders), else its
 // own path (a note loose in _inbox root is its own group). This one key drives color banding,
 // contiguous ordering, AND the folder tree, so all three agree on what "one group" means.
-export const inboxGroupKey = it => it.captureId || it.inboxFolder || it.path;
+// A track item whose note still sits in _inbox is already shown by the Learn queue's units.
+export const isInboxNotePath = p => /(^|[/\\])_inbox[/\\]/.test(p || '');
 
-// Map of source key → color, keyed on the group key above.
-// Built from an ordered list so the i-th distinct source gets hue = i * goldenAngle.
-export function buildSourceColors(items) {
-  const colors = new Map();
-  let i = 0;
-  for (const it of items) {
-    const key = inboxGroupKey(it);
-    if (!colors.has(key)) {
-      const hue = Math.round((i * GOLDEN_ANGLE) % 360);
-      colors.set(key, `hsl(${hue} ${SAT}% ${LIGHT}%)`);
-      i++;
-    }
-  }
-  return colors;
-}
+export const inboxGroupKey = it => it.captureId || it.inboxFolder || it.path;
 
 // Reorder so notes from the same source are contiguous (color bands read as groups),
 // preserving each source's first-appearance order. WITHIN a source, order by the note's
