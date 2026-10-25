@@ -197,7 +197,10 @@ To change threshold: `FeedView.jsx SWIPE_PX`. Auto-accept tri-state: `FeedSource
 Offline: `decideFeed`/`restoreFeedItem` route through `pwa/offlineApi.js`; Sources stay online-only.
 `FeedCard` "Subscribe to this channel" (youtube.com/youtu.be items) → `subscribeToChannel(url)` → `addFeedSource` (direct, no preview).
 ## InboxReview (organism)
-`load({preferGroup})` after file/discard: next note in the same group, else the first note of the next group (no dead stop). Enter = Save & file (Save & acknowledge for in-place): window listener, skipped while typing / on focused non-row buttons / picker open; Ctrl/Cmd+Enter works inside the editor. Preview strips a leading `# Title` equal to the note title (`stripLeadingTitle`, display only). Queue row: folder chip shrinks first (`.rowTag`), title `min-width: 12ch`. `loading` starts true (Skeleton, not the empty message). `SourceSplicePanel` text sources default to Read, RSVP secondary.
+`load({preferGroup})` after file/discard: next note in the same group, else the first note of the next group (no dead stop). Enter = Save & file (Save & acknowledge for in-place): window listener, skipped while typing / on focused non-row buttons / picker open; Ctrl/Cmd+Enter works inside the editor. Preview strips a leading `# Title` equal to the note title (`stripLeadingTitle`, display only). Queue row: folder chip shrinks first (`.rowTag`), title `min-width: 12ch`. `loading` starts true (Skeleton, not the empty message). 
+**Note-first (W1/W5):** `InboxReview` mount → `fetchTodayPlan()` (store `todayUnits`, `todayBacklogCount`) + `fetchTracks()`; inbox loads but NOTHING is auto-selected → queue drawer open → `select()` closes it (after file/discard auto-advance still picks the next note). Drawer = **Today** (`renderToday`: `todayUnits` in order, expandable, `trackTitle` muted; note→unit via `unitKeyOf` = `captureId[/chapter slug from inboxFolder]`) + collapsed **Backlog (N)** (`renderTree`: everything not in a unit, incl. capture-less notes). `todayUnits === null` (tracks off / plan failed) → single plain tree. Mobile (<=768px): drawer is a bottom sheet + `.scrim`. No per-source colours. To change: `InboxReview.unitKeyOf()`, `.queue` CSS.
+Note body = one column (`.column`, 72ch). `itemSourceKind()` (`utils/sourceKind.js`): `text` → no source panel, no compare; header "Speed read" (ghost) swaps in `RsvpReader` with Back. video/youtube/pdf/web → "Compare with source" toggle (`localStorage learn:compareSource`, off by default) → `LearnLayout` split (desktop) / Source|Note tabs (mobile). Track selector "Track: X ▾" (any note with a captureId) → `moveUnit(captureId, chapterSlug, trackId)` (store → `PUT /tracks/units` → `fetchTodayPlan()`). Action bar: primary Save & file / Save & acknowledge, folder picker, "⋯" popover (`data-popover`; Escape / outside mousedown closes) with Split + Discard. `TodayPlan` hides track items whose `notePath` is under `_inbox/` (`isInboxNotePath`; covered by units); `LearnPage` mounts it only if any non-inbox item remains.
+Technology note: compare preference and drawer state are per-browser/in-memory (localStorage may throw → defaults off; drawer state resets on reload). Unit move needs the backend `/tracks/units`; offline it fails with a status message (no queueing).
 Tests: `__tests__/InboxFlow.test.jsx`, `FeedFlow.test.jsx`, `LearnPage.test.jsx`.
 Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so events are synthesized).
 
@@ -207,6 +210,9 @@ Tests: `__tests__/FeedView.test.jsx` (API mocked; jsdom lacks PointerEvent so ev
 
 | Thing to change | Where |
 |---|---|
+| Learn compare toggle / key | `organisms/InboxReview.jsx COMPARE_KEY`, `utils/sourceKind.js itemSourceKind()` |
+| Learn Today/Backlog split | `organisms/InboxReview.jsx unitKeyOf()/renderToday()`; data `store.fetchTodayPlan` |
+| Learn track move | `store.moveUnit` → `api/tracks.js moveUnit()` |
 | Note editor internals | `editor/FLOWS.md` Change Index |
 | Read-only markdown rendering | `utils/markdown.js` |
 | Semantic search dropdown style | `molecules/SearchBar.module.css .dropdown*` |

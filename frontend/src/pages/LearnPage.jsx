@@ -3,10 +3,11 @@ import useStore from '../store/useStore';
 import InboxReview from '../components/organisms/InboxReview';
 import TodayPlan from '../components/organisms/TodayPlan';
 import WeekPlan from '../components/organisms/WeekPlan';
+import { isInboxNotePath } from '../utils/sourceColor';
 import SegmentedTabs from '../components/molecules/SegmentedTabs';
 import styles from './LearnPage.module.css';
 
-// Learn = Today (Inbox review first, scheduled track items below) | Week (7-day grid + track editor).
+// Learn = Today (queue drawer + note review; scheduled track items below ONLY if not already units) | Week (7-day grid + track editor).
 // Capture → ingest → proposed notes lands in the Inbox. Feed lives on the Sources page.
 export default function LearnPage() {
   const fetchRootChildren = useStore(s => s.fetchRootChildren);
@@ -14,6 +15,7 @@ export default function LearnPage() {
   const isAuthenticated   = useStore(s => s.isAuthenticated);
   const vaultRoot         = useStore(s => s.vaultRoot);
   const tracksEnabled     = useStore(s => s.settings.tracksEnabled ?? true);
+  const todayItems        = useStore(s => s.todayItems) || [];
   const [view, setView]   = useState('today');
 
   useEffect(() => {
@@ -32,6 +34,8 @@ export default function LearnPage() {
 
   if (!tracksEnabled) return <div className={styles.page}><div className={styles.viewBody}><InboxReview /></div></div>;
 
+  // Inbox-note track items are the queue's units; only non-inbox items still need this list.
+  const showPlan = todayItems.some(i => !isInboxNotePath(i.notePath));
   const tabs = [{ id: 'today', label: 'Today' }, { id: 'week', label: 'Week' }];
 
   return (
@@ -43,7 +47,7 @@ export default function LearnPage() {
         {view === 'week' ? <WeekPlan /> : (
           <div className={styles.todayStack}>
             <InboxReview />
-            <TodayPlan onCreateTrack={() => setView('week')} onManage={() => setView('week')} />
+            {showPlan && <TodayPlan onCreateTrack={() => setView('week')} onManage={() => setView('week')} />}
           </div>
         )}
       </div>

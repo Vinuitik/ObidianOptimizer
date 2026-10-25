@@ -18,7 +18,7 @@ import {
   addTrackItem as apiAddTrackItem, updateTrackItem as apiUpdateTrackItem,
   deleteTrackItem as apiDeleteTrackItem, completeTrackItem as apiCompleteTrackItem,
   fetchTrackSchedule as apiFetchTrackSchedule, saveTrackSchedule as apiSaveTrackSchedule,
-  fetchTodayPlan as apiFetchTodayPlan,
+  fetchTodayPlan as apiFetchTodayPlan, moveUnit as apiMoveUnit,
   fetchCapacity as apiFetchCapacity, saveCapacity as apiSaveCapacity,
   setTrackMode as apiSetTrackMode,
   fetchTrackProgress as apiFetchTrackProgress,
@@ -231,6 +231,8 @@ const initialDataState = () => ({
   tracks: [],
   todayItems: [],
   todayMode: 'normal',
+  todayUnits: null,    // W5: [{groupKey,captureId,chapter,title,noteCount,trackId,trackTitle}]; null = not loaded
+  todayBacklogCount: 0,
   todayOverBudget: false,
   todayPlanned: null,
   todayCapacity: null,
@@ -478,12 +480,18 @@ const useStore = create((set, get) => ({
     try {
       const plan = await apiFetchTodayPlan();
       set({ todayItems: plan.items, todayMode: plan.mode, todayOverBudget: plan.overBudget,
-        todayPlanned: plan.planned ?? null, todayCapacity: plan.capacity ?? null });
+        todayPlanned: plan.planned ?? null, todayCapacity: plan.capacity ?? null,
+        todayUnits: plan.units ?? null, todayBacklogCount: plan.backlogCount ?? 0 });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
-        set({ todayItems: [], todayMode: 'normal', todayOverBudget: false, todayPlanned: null, todayCapacity: null });
+        set({ todayItems: [], todayMode: 'normal', todayOverBudget: false, todayPlanned: null, todayCapacity: null, todayUnits: null, todayBacklogCount: 0 });
       } else throw e;
     }
+  },
+
+  moveUnit: async (captureId, chapter, trackId) => {
+    await apiMoveUnit(captureId, chapter, trackId);
+    await get().fetchTodayPlan();
   },
 
   setTrackMode: async (mode) => {

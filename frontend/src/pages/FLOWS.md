@@ -88,7 +88,7 @@ components stay in-tree, unimported (restore by reinstating the view toggle in `
 
 - **Inbox review** (`InboxReview.jsx` + `api/inbox.js`): the ingest consume layer
   (INGESTION_V2_FLOWS §7). Layout REUSES the old Library shell the user liked:
-  `[collapsible queue] · LearnLayout( ORIGINAL | NEW ) · [proposed-folder bar]`.
+  `[queue drawer: Today units / Backlog] · NOTE (compare-with-source opt-in -> LearnLayout) · [action bar]` — see `components/FLOWS.md` InboxReview. (Folder-tree details below now apply to Backlog only, without colours / emoji.)
   - **The queue itself is now a collapsible folder tree, not a flat list**
     (`utils/sourceColor.js buildInboxTree` + `InboxReview.jsx renderTree`). Standalone notes
     group into a source-folder node (color band + note count + a "📁 <suggestion> · File

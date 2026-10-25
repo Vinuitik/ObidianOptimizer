@@ -219,3 +219,14 @@ export async function commitImport({ tracks, items }) {
   });
   return res.json();
 }
+
+// -- Learn units -----------------------------------------------------------------
+// Re-home one inbox unit (a capture, or one chapter of it) to a track. chapter optional.
+export async function moveUnit(captureId, chapter, trackId) {
+  const res = await req(`${BASE}/tracks/units`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ captureId, chapter: chapter || null, trackId }),
+  });
+  return res.json();
+}
