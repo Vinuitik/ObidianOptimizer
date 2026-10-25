@@ -5,6 +5,7 @@
 import { setMeta, getMeta } from './db';
 import { getAccessToken, driveFindFirstFile, driveDownload } from './drive';
 import { deriveKey, decryptText } from './crypto';
+import { readVaultPath } from './vaultPath';
 
 const CREDS_KEY = 'driveCreds';
 
@@ -56,7 +57,7 @@ export async function proofReadNote() {
   const key = await deriveKey(creds.passphrase);
   const text = await decryptText(key, bytes);
   return {
-    path: noteFile.appProperties?.vault_path || noteFile.name,
+    path: readVaultPath(noteFile.appProperties) || noteFile.name,
     preview: text.slice(0, 240),
   };
 }

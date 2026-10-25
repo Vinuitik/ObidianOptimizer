@@ -48,7 +48,7 @@ function isRawVaultResource(entry) {
 }
 
 // /vault-media/<subdir>/<name> (URL-encoded) → the vault-relative path the SAME file was
-// uploaded under (DriveService.uploadFile's appProperties.vault_path) — see vaultMediaUrl's
+// uploaded under (DriveService.uploadFile's appProperties.vault_path, or chunked vault_path_N — see vaultPath.js) — see vaultMediaUrl's
 // forward mapping in utils/noteMedia.js, inverted.
 function vaultRelPathFromKey(key) {
   const pre = mediaPrefix('vault-media');   // '/vault-media/' or '/vault-media/<id>/'

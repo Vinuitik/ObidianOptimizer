@@ -1,6 +1,6 @@
 # Sync Domain Flows
 
-Files: SyncController.java, SyncOAuthService.java, SyncService.java, SyncWorker.java, SyncQueueRepository.java, VaultEncryptionService.java, DriveService.java, DeviceIdentityService.java, DbBackupService.java
+Files: SyncController.java, SyncOAuthService.java, SyncService.java, SyncWorker.java, SyncQueueRepository.java, VaultEncryptionService.java, DriveService.java, VaultPathProps.java, DeviceIdentityService.java, DbBackupService.java
 
 ---
 
@@ -98,6 +98,8 @@ ExecutorService pool(SYNC_UPLOAD_CONCURRENCY, default 3):
       → withRetry(...): files().update(existingFileId) or files().create(); exp backoff +
         jitter (0.5→8s, maxRetries attempts) on 429 / 5xx / 403-rate-limit
       → appProperties: {vault_path, content_hash, device_id, uploaded_at}
+        (path > 114 bytes → vault_path_0..n-1 + vault_path_n + vault_path_sha1, see Technology Notes)
+        To change: VaultPathProps.write()/read(); PWA mirror frontend/src/pwa/vaultPath.js
     syncQueueRepo.markDoneIfHashMatches(path, driveFileId, entry.contentHash)
       → conditional UPDATE (WHERE content_hash matches): note edited mid-upload → DONE
         refused, newer content uploads next pass (closes the lost-edit race)
@@ -389,6 +391,12 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 ---
 
 ## Technology Notes
+
+- **Drive appProperties limit: 124 bytes per property (UTF-8 key+value), 30 per file.** Longer
+  `vault_path` used to 403 `propertyLengthLimitExceeded` (permanent; now excluded in
+  `DriveService.isTransient`, fails fast). `VaultPathProps` chunks on code-point boundaries into
+  `vault_path_0..n-1` + `vault_path_n` + `vault_path_sha1` (exact lookup: PWA `driveFindByVaultPath`).
+  Paths > 2000 bytes are rejected (IOException). Legacy files keep `vault_path`; readers accept both.
 
 - **OAuth scope is `drive.file`** — the app can only see/touch files it created. No
   "read all your Drive" consent screen, no collision with user files, and the by-name
