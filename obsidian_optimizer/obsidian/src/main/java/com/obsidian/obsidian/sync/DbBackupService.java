@@ -1,7 +1,6 @@
 package com.obsidian.obsidian.sync;
 
 import com.obsidian.obsidian.sync.DriveService.DbBackupInfo;
-import com.obsidian.obsidian.vaults.VaultBackup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,7 +29,7 @@ import java.util.Optional;
  * janitor and file-sync deliberately skip.
  */
 @Service
-public class DbBackupService implements VaultBackup {
+public class DbBackupService {
 
     private static final Logger log = LoggerFactory.getLogger(DbBackupService.class);
     /** Per-vault snapshot (zip of COPY files); anything else ending .enc is a legacy whole-DB pg_dump. */
@@ -80,9 +79,7 @@ public class DbBackupService implements VaultBackup {
         doBackup(vaultId);
     }
 
-    /** {@link VaultBackup} port (pre-delete backup): same snapshot, but never skips — throws when
-     *  Drive/encryption is missing or the upload fails, so the deletion worker purges nothing. */
-    @Override
+    /** Same snapshot as {@link #backupNow}, but never skips — throws when Drive/encryption is missing or the upload fails. */
     public void backup(long vaultId) {
         String blocked = blockedReason(vaultId);
         if (blocked != null) throw new IllegalStateException(blocked);
@@ -90,7 +87,6 @@ public class DbBackupService implements VaultBackup {
     }
 
     /** Null if a Drive+encrypted backup can run for this vault. */
-    @Override
     public String blockedReason(long vaultId) {
         if (!encryptionService.isConfigured(vaultId)) return "encryption passphrase not configured for vault " + vaultId;
         if (!driveService.isConfigured(vaultId))      return "Google Drive not configured for vault " + vaultId;

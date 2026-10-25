@@ -1,5 +1,6 @@
 package com.obsidian.obsidian.notes;
 
+import com.obsidian.obsidian.bin.BinRepository;
 import com.obsidian.obsidian.common.ContentHashing;
 import com.obsidian.obsidian.ml.ImageScanService;
 import com.obsidian.obsidian.settings.SettingsRepository;
@@ -44,19 +45,22 @@ public class FileRepository {
     private final ImageScanService    imageScanService;
     private final SyncQueueRepository syncQueueRepo;
     private final ActiveVault         activeVault;
+    private final BinRepository       binRepo;
 
     public FileRepository(NoteLinkRepository noteLinkRepo,
                           SettingsRepository settingsRepo,
                           NoteIndexRepository noteIndex,
                           ImageScanService imageScanService,
                           SyncQueueRepository syncQueueRepo,
-                          ActiveVault activeVault) {
+                          ActiveVault activeVault,
+                          BinRepository binRepo) {
         this.noteLinkRepo  = noteLinkRepo;
         this.settingsRepo  = settingsRepo;
         this.noteIndex     = noteIndex;
         this.imageScanService = imageScanService;
         this.syncQueueRepo = syncQueueRepo;
         this.activeVault   = activeVault;
+        this.binRepo       = binRepo;
     }
 
     /** Active vault root / id. Everything this class does targets the active vault only. */
@@ -385,6 +389,7 @@ public class FileRepository {
         }
 
         if (!file.renameTo(dest)) throw new IOException("Failed to move note to trash");
+        binRepo.record(vid(), "note", toRelative(dest.getAbsolutePath()), toRelative(path), file.getName().replace(".md", ""));
 
         noteIndex.delete(vid(), path);
         noteLinkRepo.deleteSource(vid(), path);
@@ -412,6 +417,7 @@ public class FileRepository {
                 + "_" + System.currentTimeMillis() + (dot >= 0 ? base.substring(dot) : ""));
         }
         if (!file.renameTo(dest)) throw new IOException("Failed to move file to trash: " + path);
+        binRepo.record(vid(), "file", toRelative(dest.getAbsolutePath()), toRelative(path), file.getName());
     }
 
     /**
@@ -460,6 +466,64 @@ public class FileRepository {
         if (!folder.renameTo(dest)) {
             throw new IOException("Failed to move folder to trash: " + path);
         }
+        binRepo.record(vid(), "folder", toRelative(dest.getAbsolutePath()), toRelative(folder.getAbsolutePath()), folder.getName());
+    }
+
+    /**
+     * Bin restore: move {@code <root>/trashRel} back to {@code <root>/originalRel} (parent dirs recreated;
+     * " (restored)" / " (restored 2)"... suffix if the name is taken), then re-index every note inside
+     * (note index + links + images + Drive-sync markPending). Folders restore as a unit, recursively.
+     * Returns the restored vault-relative path. {@link java.nio.file.NoSuchFileException} if the trash copy is gone.
+     * Not atomic with the DB bookkeeping: a crash after the move leaves the file back but un-indexed
+     * until the next startup disk sync.
+     */
+    public String restoreFromTrash(String trashRel, String originalRel) throws IOException {
+        Path rootP = Paths.get(root()).toAbsolutePath().normalize();
+        Path trashDir = rootP.resolve("_trash").normalize();
+        Path src = rootP.resolve(trashRel).normalize();
+        Path dest = rootP.resolve(originalRel).normalize();
+        if (!src.startsWith(trashDir) || src.equals(trashDir)) throw new IOException("Not inside _trash: " + trashRel);
+        if (!dest.startsWith(rootP) || dest.equals(rootP)) throw new IOException("Bad restore target: " + originalRel);
+        if (!Files.exists(src)) throw new java.nio.file.NoSuchFileException(trashRel);
+
+        Files.createDirectories(dest.getParent());
+        if (Files.exists(dest)) {
+            String name = dest.getFileName().toString();
+            int dot = Files.isDirectory(src) ? -1 : name.lastIndexOf('.');
+            String base = dot > 0 ? name.substring(0, dot) : name;
+            String ext = dot > 0 ? name.substring(dot) : "";
+            int i = 1;
+            do {
+                dest = dest.resolveSibling(base + " (restored" + (i == 1 ? "" : " " + i) + ")" + ext);
+                i++;
+            } while (Files.exists(dest));
+        }
+        boolean dir = Files.isDirectory(src);
+        Files.move(src, dest);
+
+        List<Path> toIndex = new ArrayList<>();
+        if (dir) {
+            try (java.util.stream.Stream<Path> walk = Files.walk(dest)) {
+                walk.filter(p -> Files.isRegularFile(p) && p.getFileName().toString().endsWith(".md")).forEach(toIndex::add);
+            }
+        } else if (dest.getFileName().toString().endsWith(".md")) {
+            toIndex.add(dest);
+        }
+        for (Path p : toIndex) {
+            boolean excluded = false;
+            for (Path seg : rootP.relativize(p).getParent() == null ? List.<Path>of() : toList(rootP.relativize(p).getParent())) {
+                if (EXCLUDED_DIRS.contains(seg.toString())) { excluded = true; break; }
+            }
+            if (excluded) continue;   // e.g. _inbox/_sources snapshots are never indexed
+            reindexAfterExternalWrite(p.toString());
+        }
+        return rootP.relativize(dest).toString().replace('\\', '/');
+    }
+
+    private static List<Path> toList(Path p) {
+        List<Path> out = new ArrayList<>();
+        p.forEach(out::add);
+        return out;
     }
 
     private String toRelative(String absPath) { return toRelative(root(), absPath); }

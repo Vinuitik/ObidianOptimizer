@@ -48,7 +48,8 @@ class FileRepositoryPatchTest {
         // requireInsideVault needs a vault root — init() against the temp dir
         activeVault.set(1L, java.nio.file.Path.of(tmp.toString()));
         org.mockito.Mockito.when(settingsRepo.getStartupSyncMode(1L)).thenReturn("blocking");
-        repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex, imageScanService, syncQueueRepo, activeVault);
+        repo = new FileRepository(noteLinkRepo, settingsRepo, noteIndex, imageScanService, syncQueueRepo, activeVault,
+            org.mockito.Mockito.mock(com.obsidian.obsidian.bin.BinRepository.class));
         repo.init();
     }
 

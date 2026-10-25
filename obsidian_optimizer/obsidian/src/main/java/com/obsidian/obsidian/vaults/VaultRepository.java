@@ -35,18 +35,6 @@ public class VaultRepository {
               created_at     TIMESTAMPTZ DEFAULT now()
             )
             """);
-        // Deliberately NOT named vault_id and no FK: the purge discovers tables by a vault_id column
-        // and must keep this row (status/audit) after the registration is gone.
-        jdbc.execute("""
-            CREATE TABLE IF NOT EXISTS vault_deletion_jobs (
-              target_vault_id BIGINT PRIMARY KEY,
-              status          TEXT NOT NULL DEFAULT 'QUEUED',
-              backup_done     BOOLEAN NOT NULL DEFAULT false,
-              error           TEXT,
-              created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-              updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-            )
-            """);
         jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_vaults_single_active ON vaults(active) WHERE active");
         String host = hostVaultPath == null || hostVaultPath.isBlank() ? null : hostVaultPath;
         jdbc.update("""
@@ -79,8 +67,7 @@ public class VaultRepository {
     }
 
     private static final String VIEW_COLS =
-        "id, name, host_path, container_path, active, is_primary, archived_at, created_at, "
-        + "(SELECT j.status FROM vault_deletion_jobs j WHERE j.target_vault_id = vaults.id) AS deletion_status";
+        "id, name, host_path, container_path, active, is_primary, archived_at, created_at";
 
     public List<Map<String, Object>> listAll() {
         return jdbc.queryForList("SELECT " + VIEW_COLS + " FROM vaults ORDER BY id");
@@ -103,8 +90,6 @@ public class VaultRepository {
     public void activate(long id) {
         Map<String, Object> v = require(id);
         if (v.get("archived_at") != null) throw VaultException.conflict("vault " + id + " is archived");
-        Integer del = jdbc.queryForObject("SELECT count(*) FROM vault_deletion_jobs WHERE target_vault_id = ? AND status IN ('QUEUED','RUNNING')", Integer.class, id);
-        if (del != null && del > 0) throw VaultException.conflict("vault " + id + " is being deleted");
         jdbc.update("UPDATE vaults SET active = false WHERE active AND id <> ?", id);
         jdbc.update("UPDATE vaults SET active = true WHERE id = ?", id);
     }

@@ -76,7 +76,7 @@ GET    /feed/sources                → SourceRepository.list()  (includes live 
 POST   /feed/sources/resolve {url}  → FeedController.resolveSource()  -- preview only, see below
 PATCH  /feed/sources/{id} {autoAccept?, status?, title?}
   -- explicit JSON null for autoAccept clears to "inherit global"; a stray targetTrackId in the body is ignored
-DELETE /feed/sources/{id}           → ON DELETE CASCADE drops its feed_items; already-ingested notes untouched
+DELETE /feed/sources/{id}           → SOFT: sources.deleted_at; its feed_items vanish (FeedRepository joins sources on deleted_at IS NULL); notes untouched; restore via Bin (bin/FLOWS.md)
 POST   /feed/sources/{id}/poll      → SourcePollWorker.pollNowAsync(id)  -- 202, bypasses the interval gate
 ```
 
@@ -310,3 +310,7 @@ updating the frontend in the same change.
 | Offline swipe outbox kinds | `pwa/outbox.js` `enqueueFeedAccept`/`enqueueFeedBin`/`enqueueFeedRestore` + `flush()` |
 | Offline swipe cache (phone) | `pwa/offlineApi.js` `pulledFeed()`/`dropFromFeed()` → IDB meta `feedItems` |
 | Vault scoping (M3) | `SourceRepository`/`FeedRepository` take `long vaultId` first; `FeedService.accept/bin/restore(vaultId, …)`; `SourcePollWorker.drain()` pins `activeVault.id()` (scanner) and passes it down; `storePostText` root = `ActiveVault.rootFor(vaultId)` (replaces `SettingsRepository.getVaultPath()`) |
+
+
+## Bin
+Binned items (`status='binned'`) and soft-deleted sources are restored/purged by `bin/BinService`. "Delete forever" on a feed item sets `status='dismissed'` (`FeedRepository.dismissBinned`) rather than deleting the row, because `item_url` is the poller's dedup key. Re-subscribing a URL whose source is in the bin hard-deletes the binned copy first (`SourceRepository.create`; UNIQUE (vault_id,url)).

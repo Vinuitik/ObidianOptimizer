@@ -116,7 +116,7 @@ class TrackRepositoryIT {
     }
 
     @Test
-    void delete_cascadesItemsAndSchedule() {
+    void delete_softDeletesTrackAndItems_keepsScheduleForRestore() {
         Track t = repo.create(1L, "Rust Book", "book", "manual");
         repo.addItem(t.id(), "Ch1", null);
         repo.setSchedule(t.id(), Map.of(0, 2));
@@ -125,7 +125,7 @@ class TrackRepositoryIT {
 
         assertThat(repo.get(1L, t.id())).isNull();
         assertThat(repo.listItems(t.id())).isEmpty();
-        assertThat(repo.getSchedule(t.id())).isEmpty();
+        assertThat(repo.getSchedule(t.id())).isEqualTo(Map.of(0, 2));   // kept so restore is full
     }
 
     @Test

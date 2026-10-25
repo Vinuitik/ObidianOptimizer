@@ -285,7 +285,7 @@ DriveService.uploadDbBackup(v, enc, "obsidian-db-v<id>-<ts>.vdb.enc", pgVersion,
 prune()                                      — hard-delete dumps beyond SYNC_DBBACKUP_KEEP (3)
 ```
 
-**Pre-delete backup (B1)** — `DbBackupService implements vaults.VaultBackup`: `VaultDeletionWorker` → `backup(v)` → `blockedReason(v)` (encryption? Drive?) → THROW if blocked, else `doBackup(v)` (same snapshot→encrypt→upload→prune as the nightly path; upload failure also throws). Nightly cron `backupNow(v)` → same `blockedReason` → WARN + skip. `VaultDeletionRepository.enqueue()` calls `blockedReason` too → `POST /vaults/{id}/delete` 409. To change: `DbBackupService.backup()` / `blockedReason()`.
+**Backup gate** — nightly cron `backupNow(v)` → `blockedReason(v)` (encryption? Drive?) → WARN + skip if blocked, else `doBackup(v)` (snapshot→encrypt→upload→prune). `backup(v)` is the throwing variant (no remaining production caller since vault deletion was removed). To change: `DbBackupService.backupNow()` / `blockedReason()`.
 
 **Device-local keys are never restored** (`VaultDbSnapshotter.DEVICE_LOCAL_VAULT_KEYS` / `DEVICE_LOCAL_GLOBAL_KEYS`): restore captures this device's rows first (`keepVault`/`keepGlobal`), runs the DELETE/COPY, then `reimpose()` drops whatever the backup brought for those keys and re-inserts the local ones (absent locally = absent after). Vault keys: `sync.refresh_token`, `sync.account_email`, `sync.device_id`, `syncPassphrase`, `sync.drive.folder_id`, `resourcePath`. Global (`app_settings`, primary restore only): `syncClientId`, `syncClientSecret`, `sync.oauth.redirect_uri`, `vaultPath`, and the legacy global copies of the five sync keys. Legacy `.pgdump.enc` path: `captureDeviceLocalAll()` before / `reapplyDeviceLocalAll()` after `pg_restore`.
 
@@ -553,5 +553,5 @@ the retry cap (self-healing — a transient Drive error no longer strands a file
 | Auto-created Drive root name | `DriveService.rootFolderId()`: vault 1 `ObsidianOptimizer`, others `ObsidianOptimizer-v<id>` |
 | Rabbit sync-upload vault | `SyncService.onSyncUploadMessage()` reads `vaultId` from payload (absent = 1), skips if that vault's sync is off |
 | OAuth connect target vault | `SyncOAuthService.buildAuthUrl(vaultId, origin)` stores it in the pending state; `handleCallback` writes the token to that vault |
-| Pre-delete backup / enqueue gate | `DbBackupService.backup()`, `blockedReason()` |
+| Backup skip gate (Drive/encryption missing) | `DbBackupService.blockedReason()` |
 | Which keys a restore preserves | `VaultDbSnapshotter.DEVICE_LOCAL_VAULT_KEYS`, `DEVICE_LOCAL_GLOBAL_KEYS` |

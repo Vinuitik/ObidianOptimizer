@@ -103,8 +103,13 @@ class SourceRepositoryIT {
         feed.insertIfNew(1L, s.id(), "https://a/2", "2", null, null, null);
         assertThat(repo.get(1L, s.id()).pendingCount()).isEqualTo(2);
         assertThat(repo.delete(1L, s.id())).isTrue();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM feed_items", Integer.class)).isZero();
+        // soft delete: row kept (Bin), but invisible to every read, and its feed items are hidden with it
+        assertThat(repo.get(1L, s.id())).isNull();
+        assertThat(repo.list(1L)).isEmpty();
+        assertThat(feed.list(1L, "pending", 50)).isEmpty();
         assertThat(repo.delete(1L, s.id())).isFalse();
+        assertThat(repo.purge(1L, s.id())).isTrue();   // delete forever -> cascades
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM feed_items", Integer.class)).isZero();
     }
 
     @Test

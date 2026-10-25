@@ -112,6 +112,9 @@ public class TrackRepository {
         jdbc.execute("ALTER TABLE tracks ALTER COLUMN vault_id DROP DEFAULT");
         jdbc.execute("ALTER TABLE track_item_groups ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
         jdbc.execute("ALTER TABLE track_item_groups ALTER COLUMN vault_id DROP DEFAULT");
+        // Bin (bin/FLOWS.md): deletes are soft; every read below filters deleted_at IS NULL.
+        jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
+        jdbc.execute("ALTER TABLE track_items ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
     }
 
     /** Mon-Fri=4, Sat/Sun=6 ("weekends 1.5x") — plain per-day numbers, hand-tunable later
@@ -140,7 +143,7 @@ public class TrackRepository {
      *  could), found by source='passive-feed'. Used by feed/ accept (see feed/FLOWS.md). */
     public Track getOrCreatePassive(long vaultId) {
         List<Track> rows = jdbc.query(
-            "SELECT * FROM tracks WHERE vault_id = ? AND source = 'passive-feed' ORDER BY id LIMIT 1",
+            "SELECT * FROM tracks WHERE vault_id = ? AND source = 'passive-feed' AND deleted_at IS NULL ORDER BY id LIMIT 1",
             TrackRepository::mapTrack, vaultId);
         if (!rows.isEmpty()) return rows.get(0);
         Track t = create(vaultId, "Passive", "custom", "passive-feed");
@@ -148,19 +151,19 @@ public class TrackRepository {
     }
 
     public Track get(long vaultId, long id) {
-        List<Track> rows = jdbc.query("SELECT * FROM tracks WHERE vault_id = ? AND id = ?",
+        List<Track> rows = jdbc.query("SELECT * FROM tracks WHERE vault_id = ? AND id = ? AND deleted_at IS NULL",
             TrackRepository::mapTrack, vaultId, id);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     public List<Track> listAll(long vaultId) {
-        return jdbc.query("SELECT * FROM tracks WHERE vault_id = ? ORDER BY created_at DESC",
+        return jdbc.query("SELECT * FROM tracks WHERE vault_id = ? AND deleted_at IS NULL ORDER BY created_at DESC",
             TrackRepository::mapTrack, vaultId);
     }
 
     public List<Track> listActive(long vaultId) {
         return jdbc.query(
-            "SELECT * FROM tracks WHERE vault_id = ? AND status = 'active' ORDER BY created_at DESC",
+            "SELECT * FROM tracks WHERE vault_id = ? AND status = 'active' AND deleted_at IS NULL ORDER BY created_at DESC",
             TrackRepository::mapTrack, vaultId);
     }
 
@@ -182,8 +185,71 @@ public class TrackRepository {
         return get(vaultId, id);
     }
 
+    /** Soft delete (Bin): the track and every live item get the SAME timestamp, so restore can tell
+     *  "deleted with the track" from "deleted on its own earlier". Schedule rows are left in place. */
     public void delete(long vaultId, long id) {
-        jdbc.update("DELETE FROM tracks WHERE id = ? AND vault_id = ?", id, vaultId);
+        Timestamp now = Timestamp.from(Instant.now());
+        if (jdbc.update("UPDATE tracks SET deleted_at = ? WHERE id = ? AND vault_id = ? AND deleted_at IS NULL",
+                now, id, vaultId) > 0) {
+            jdbc.update("UPDATE track_items SET deleted_at = ? WHERE track_id = ? AND deleted_at IS NULL", now, id);
+        }
+    }
+
+    // ── Bin support (bin/BinService) ─────────────────────────────────────────
+
+    public record BinTrack(long id, String title, Instant deletedAt) {}
+    public record BinTrackItem(long id, String title, String trackTitle, Instant deletedAt) {}
+
+    public List<BinTrack> listDeletedTracks(long vaultId) {
+        return jdbc.query("SELECT id, title, deleted_at FROM tracks WHERE vault_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+            (rs, n) -> new BinTrack(rs.getLong("id"), rs.getString("title"), rs.getTimestamp("deleted_at").toInstant()), vaultId);
+    }
+
+    /** Items deleted on their own, whose track is still alive (items deleted with a track ride that track's entry). */
+    public List<BinTrackItem> listDeletedItems(long vaultId) {
+        return jdbc.query("""
+            SELECT ti.id, ti.title, ti.deleted_at, t.title AS track_title
+            FROM track_items ti JOIN tracks t ON t.id = ti.track_id
+            WHERE t.vault_id = ? AND ti.deleted_at IS NOT NULL AND t.deleted_at IS NULL
+            ORDER BY ti.deleted_at DESC
+            """, (rs, n) -> new BinTrackItem(rs.getLong("id"), rs.getString("title"), rs.getString("track_title"),
+                rs.getTimestamp("deleted_at").toInstant()), vaultId);
+    }
+
+    /** Full restore: the track plus the items that were deleted with it (same timestamp). Schedule/status untouched. */
+    public boolean restoreTrack(long vaultId, long id) {
+        List<Timestamp> ts = jdbc.queryForList("SELECT deleted_at FROM tracks WHERE id = ? AND vault_id = ? AND deleted_at IS NOT NULL",
+            Timestamp.class, id, vaultId);
+        if (ts.isEmpty()) return false;
+        jdbc.update("UPDATE track_items SET deleted_at = NULL WHERE track_id = ? AND deleted_at = ?", id, ts.get(0));
+        jdbc.update("UPDATE tracks SET deleted_at = NULL WHERE id = ?", id);
+        return true;
+    }
+
+    /** Restore one item; false if unknown, not deleted, or its track is itself in the bin. */
+    public boolean restoreItem(long vaultId, long itemId) {
+        return jdbc.update("""
+            UPDATE track_items SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL
+              AND track_id IN (SELECT id FROM tracks WHERE vault_id = ? AND deleted_at IS NULL)
+            """, itemId, vaultId) > 0;
+    }
+
+    public boolean purgeTrack(long vaultId, long id) {
+        return jdbc.update("DELETE FROM tracks WHERE id = ? AND vault_id = ? AND deleted_at IS NOT NULL", id, vaultId) > 0;
+    }
+
+    public boolean purgeItem(long vaultId, long itemId) {
+        return jdbc.update("""
+            DELETE FROM track_items WHERE id = ? AND deleted_at IS NOT NULL
+              AND track_id IN (SELECT id FROM tracks WHERE vault_id = ?)
+            """, itemId, vaultId) > 0;
+    }
+
+    /** Hard-delete everything in the bin older than {@code cutoff}; returns rows removed. */
+    public int purgeDeletedBefore(Instant cutoff) {
+        Timestamp c = Timestamp.from(cutoff);
+        int n = jdbc.update("DELETE FROM tracks WHERE deleted_at IS NOT NULL AND deleted_at < ?", c);
+        return n + jdbc.update("DELETE FROM track_items WHERE deleted_at IS NOT NULL AND deleted_at < ?", c);
     }
 
     // ── Items ────────────────────────────────────────────────────────────────
@@ -219,20 +285,20 @@ public class TrackRepository {
     /** Vault-checked item lookup (items inherit their vault through their track). */
     public TrackItem getItem(long vaultId, long id) {
         List<TrackItem> rows = jdbc.query(
-            "SELECT ti.* FROM track_items ti JOIN tracks t ON t.id = ti.track_id WHERE ti.id = ? AND t.vault_id = ?",
+            "SELECT ti.* FROM track_items ti JOIN tracks t ON t.id = ti.track_id WHERE ti.id = ? AND t.vault_id = ? AND ti.deleted_at IS NULL AND t.deleted_at IS NULL",
             TrackRepository::mapItem, id, vaultId);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     public TrackItem getItem(long id) {
         List<TrackItem> rows = jdbc.query(
-            "SELECT * FROM track_items WHERE id = ?", TrackRepository::mapItem, id);
+            "SELECT * FROM track_items WHERE id = ? AND deleted_at IS NULL", TrackRepository::mapItem, id);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
     public List<TrackItem> listItems(long trackId) {
         return jdbc.query(
-            "SELECT * FROM track_items WHERE track_id = ? ORDER BY position", TrackRepository::mapItem, trackId);
+            "SELECT * FROM track_items WHERE track_id = ? AND deleted_at IS NULL ORDER BY position", TrackRepository::mapItem, trackId);
     }
 
     public TrackItem updateItemTitle(long itemId, String title) {
@@ -263,7 +329,7 @@ public class TrackRepository {
     }
 
     public void deleteItem(long itemId) {
-        jdbc.update("DELETE FROM track_items WHERE id = ?", itemId);
+        jdbc.update("UPDATE track_items SET deleted_at = now() WHERE id = ? AND deleted_at IS NULL", itemId);
     }
 
     /** Marks an item done. Returns false if it was already done (no-op, idempotent guard). */
@@ -282,7 +348,8 @@ public class TrackRepository {
         jdbc.query("""
             SELECT (ti.completed_at AT TIME ZONE ?)::date AS day, ti.track_id, COUNT(*) AS n
             FROM track_items ti JOIN tracks t ON t.id = ti.track_id
-            WHERE t.vault_id = ? AND ti.status = 'done' AND ti.completed_at IS NOT NULL
+            WHERE t.vault_id = ? AND t.deleted_at IS NULL AND ti.deleted_at IS NULL
+              AND ti.status = 'done' AND ti.completed_at IS NOT NULL
               AND (ti.completed_at AT TIME ZONE ?)::date >= ? AND (ti.completed_at AT TIME ZONE ?)::date < ?
             GROUP BY 1, 2
             """, rs -> {
@@ -297,14 +364,14 @@ public class TrackRepository {
     public List<TrackItem> nextPendingItems(long trackId, int limit) {
         if (limit <= 0) return List.of();
         return jdbc.query("""
-            SELECT * FROM track_items WHERE track_id = ? AND status = 'pending'
+            SELECT * FROM track_items WHERE track_id = ? AND status = 'pending' AND deleted_at IS NULL
             ORDER BY position LIMIT ?
             """, TrackRepository::mapItem, trackId, limit);
     }
 
     public int countPendingItems(long trackId) {
         Integer n = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM track_items WHERE track_id = ? AND status = 'pending'", Integer.class, trackId);
+            "SELECT COUNT(*) FROM track_items WHERE track_id = ? AND status = 'pending' AND deleted_at IS NULL", Integer.class, trackId);
         return n == null ? 0 : n;
     }
 
@@ -389,8 +456,8 @@ public class TrackRepository {
                    COUNT(ti.id) AS items_total,
                    COUNT(ti.id) FILTER (WHERE ti.status = 'done') AS items_done
             FROM tracks t
-            LEFT JOIN track_items ti ON ti.track_id = t.id
-            WHERE t.vault_id = ? AND t.include_in_progress = true AND t.status = 'active'
+            LEFT JOIN track_items ti ON ti.track_id = t.id AND ti.deleted_at IS NULL
+            WHERE t.vault_id = ? AND t.deleted_at IS NULL AND t.include_in_progress = true AND t.status = 'active'
             GROUP BY t.id
             ORDER BY t.created_at DESC
             """, (rs, rowNum) -> new TrackProgressRow(

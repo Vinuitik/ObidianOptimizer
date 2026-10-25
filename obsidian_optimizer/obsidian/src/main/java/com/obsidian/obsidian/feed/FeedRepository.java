@@ -59,7 +59,8 @@ public class FeedRepository {
     }
 
     private static final String SELECT = """
-        SELECT fi.*, s.title AS source_title FROM feed_items fi JOIN sources s ON s.id = fi.source_id
+        SELECT fi.*, s.title AS source_title FROM feed_items fi
+        JOIN sources s ON s.id = fi.source_id AND s.deleted_at IS NULL
         """;
 
     /** Insert a pending item with no body (every kind except youtube_posts). */
@@ -109,6 +110,24 @@ public class FeedRepository {
             UPDATE feed_items SET status = 'binned', decided_at = now()
             WHERE id = ? AND status = 'pending'
             """, id);
+    }
+
+    // ── Bin support (bin/BinService) ─────────────────────────────────────────
+
+    /** "Delete forever" for a binned item: status 'dismissed' (never listed) instead of a row delete,
+     *  because the row's item_url is the poller's dedup key; deleting it would let the item come back. */
+    public boolean dismissBinned(long vaultId, long id) {
+        return jdbc.update("UPDATE feed_items SET status = 'dismissed' WHERE id = ? AND vault_id = ? AND status = 'binned'",
+            id, vaultId) > 0;
+    }
+
+    public int dismissAllBinned(long vaultId) {
+        return jdbc.update("UPDATE feed_items SET status = 'dismissed' WHERE vault_id = ? AND status = 'binned'", vaultId);
+    }
+
+    public int dismissBinnedBefore(Instant cutoff) {
+        return jdbc.update("UPDATE feed_items SET status = 'dismissed' WHERE status = 'binned' AND decided_at < ?",
+            Timestamp.from(cutoff));
     }
 
     /** → pending, clearing the decision and capture link. */
