@@ -1241,6 +1241,20 @@ const useStore = create((set, get) => ({
     }
   },
 
+  // trackId: number | null (null = General, the default)
+  setFeedSourceTrack: async (id, trackId) => {
+    const prev = get().feedSources;
+    const title = trackId == null ? null : get().tracks.find(t => t.id === trackId)?.title ?? null;
+    set(s => ({ feedSources: s.feedSources.map(x => x.id === id ? { ...x, targetTrackId: trackId, targetTrackTitle: title } : x) }));
+    try {
+      const updated = await apiPatchFeedSource(id, { targetTrackId: trackId });
+      set(s => ({ feedSources: s.feedSources.map(x => x.id === id ? { ...x, ...updated } : x) }));
+    } catch {
+      set({ feedSources: prev });
+      get().setFeedNotice("Couldn't update source track.");
+    }
+  },
+
   // Optimistic + Undo: the row (and its pending/binned items) leaves the UI at once; the
   // DELETE is held DELETE_UNDO_MS so Undo can cancel it. Closing the tab inside that window
   // keeps the source (nothing was sent yet).

@@ -117,4 +117,18 @@ class SourceRepositoryIT {
         repo.initSchema();
         repo.initSchema();
     }
+
+    @Test
+    void targetTrack_setClearAndTitleJoin() {
+        long tid = jdbc.queryForObject(
+            "INSERT INTO tracks(title, type, vault_id) VALUES ('Rust Book', 'custom', 1) RETURNING id", Long.class);
+        var s = repo.create(1L, "rss", "https://t.example/", null, "T", null);
+        assertThat(s.targetTrackId()).isNull();
+        assertThat(repo.trackExists(1L, tid)).isTrue();
+        assertThat(repo.trackExists(1L, tid + 100)).isFalse();
+        var set = repo.setTargetTrack(1L, s.id(), tid);
+        assertThat(set.targetTrackId()).isEqualTo(tid);
+        assertThat(set.targetTrackTitle()).isEqualTo("Rust Book");
+        assertThat(repo.setTargetTrack(1L, s.id(), null).targetTrackId()).isNull();
+    }
 }

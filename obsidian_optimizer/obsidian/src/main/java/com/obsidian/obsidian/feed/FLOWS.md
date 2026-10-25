@@ -49,7 +49,7 @@ right (accept): POST /feed/items/{id}/accept → FeedController.accept() → Fee
   → FeedRepository.claimAccepted(id, captureId)   -- atomic pending|binned → accepted, WHERE status <> 'accepted'
        false (already accepted, incl. concurrent 2nd call) → return the existing captureId (idempotent)
   → true → CaptureRepository.enqueue(captureId, classifyUrl(url), url, null, title)
-         (I1: NO track tagging - accept goes capture -> Inbox only; Sources.target_track_id is gone from the API)
+         (I1: NO track tagging - accept goes capture -> Inbox only; sources.target_track_id is now user-set via PATCH and routes the capture's Learn unit, see Source lifecycle)
          + CaptureIngestWorker.nudge()             -- same ingest path the extension/PWA already use
        enqueue throws → FeedRepository.markPending(id)   -- don't strand an 'accepted' row with no capture
 
@@ -74,7 +74,7 @@ POST /feed/sources {url, title?, autoAccept?}  → FeedController.createSource()
 
 GET    /feed/sources                → SourceRepository.list()  (includes live pendingCount per source)
 POST   /feed/sources/resolve {url}  → FeedController.resolveSource()  -- preview only, see below
-PATCH  /feed/sources/{id} {autoAccept?, status?, title?}
+PATCH  /feed/sources/{id} {autoAccept?, status?, title?, targetTrackId?|null}  -- targetTrackId: FeedController.patchSource() -> SourceRepository.trackExists() (404 unknown) -> setTargetTrack(); null = General. GET list returns targetTrackId + targetTrackTitle. UI: FeedSources.jsx 'Track' select -> store setFeedSourceTrack. Consumed by TrackRepository (feed capture -> sources.target_track_id) / TrackUnitService
   -- explicit JSON null for autoAccept clears to "inherit global"; a stray targetTrackId in the body is ignored
 DELETE /feed/sources/{id}           → SOFT: sources.deleted_at; its feed_items vanish (FeedRepository joins sources on deleted_at IS NULL); notes untouched; restore via Bin (bin/FLOWS.md)
 POST   /feed/sources/{id}/poll      → SourcePollWorker.pollNowAsync(id)  -- 202, bypasses the interval gate

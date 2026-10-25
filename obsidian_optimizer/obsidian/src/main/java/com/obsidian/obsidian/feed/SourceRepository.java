@@ -30,7 +30,8 @@ public class SourceRepository {
     /** {@code autoAccept} null = inherit the global {@code feedAutoAccept} setting. */
     public record Source(long id, String kind, String url, String feedUrl, String title,
                          Boolean autoAccept, String status,
-                         Instant lastCheckedAt, Instant createdAt, int pendingCount) {}
+                         Instant lastCheckedAt, Instant createdAt, int pendingCount,
+                         Long targetTrackId, String targetTrackTitle) {}
 
     @PostConstruct
     public void initSchema() {
@@ -42,7 +43,7 @@ public class SourceRepository {
               feed_url        TEXT,
               title           TEXT,
               auto_accept     BOOLEAN,
-              target_track_id BIGINT,   -- LEGACY: unused since I1 (accept never attaches to a track)
+              target_track_id BIGINT,   -- Learn track this subscription's accepted items route to (null = General)
               last_checked_at TIMESTAMPTZ,
               created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
               status          TEXT NOT NULL DEFAULT 'active'
@@ -57,7 +58,8 @@ public class SourceRepository {
 
     private static final String SELECT = """
         SELECT s.*, (SELECT COUNT(*) FROM feed_items fi WHERE fi.source_id = s.id AND fi.status = 'pending')
-               AS pending_count
+               AS pending_count,
+               (SELECT t.title FROM tracks t WHERE t.id = s.target_track_id AND t.deleted_at IS NULL) AS target_track_title
         FROM sources s
         """;
 
@@ -99,6 +101,17 @@ public class SourceRepository {
         if (status != null) jdbc.update("UPDATE sources SET status = ? WHERE id = ?", status, id);
         if (title != null) jdbc.update("UPDATE sources SET title = ? WHERE id = ?", title, id);
         return get(vaultId, id);
+    }
+
+    /** Set or clear (null) the Learn track this subscription feeds. Caller validates the track. */
+    public Source setTargetTrack(long vaultId, long id, Long trackId) {
+        jdbc.update("UPDATE sources SET target_track_id = ? WHERE id = ? AND vault_id = ?", trackId, id, vaultId);
+        return get(vaultId, id);
+    }
+
+    public boolean trackExists(long vaultId, long trackId) {
+        return !jdbc.queryForList("SELECT 1 FROM tracks WHERE id = ? AND vault_id = ? AND deleted_at IS NULL",
+            Integer.class, trackId, vaultId).isEmpty();
     }
 
     /** Poll cursor — advances even for a valid-but-empty feed. */
@@ -152,6 +165,7 @@ public class SourceRepository {
             rs.getString("feed_url"), rs.getString("title"), auto,
             rs.getString("status"),
             checked == null ? null : checked.toInstant(), rs.getTimestamp("created_at").toInstant(),
-            rs.getInt("pending_count"));
+            rs.getInt("pending_count"), (Long) rs.getObject("target_track_id"),
+            rs.getString("target_track_title"));
     }
 }

@@ -143,12 +143,20 @@ public class FeedController {
     @PatchMapping("sources/{id}")
     public ResponseEntity<?> patchSource(@PathVariable long id, @RequestBody Map<String, Object> body) {
         if (sourceRepo.get(activeVault.id(), id) == null) return ResponseEntity.notFound().build();
+        Long trackId = null;
+        boolean setTrack = body.containsKey("targetTrackId");
+        if (setTrack && body.get("targetTrackId") != null) {
+            if (!(body.get("targetTrackId") instanceof Number n)) return ResponseEntity.badRequest().body("targetTrackId must be a number or null");
+            trackId = n.longValue();
+            if (!sourceRepo.trackExists(activeVault.id(), trackId)) return ResponseEntity.notFound().build();
+        }
         Boolean auto = body.get("autoAccept") instanceof Boolean b ? b : null;
         String status = body.get("status") instanceof String s ? s : null;
         if (status != null && !status.equals("active") && !status.equals("paused")) {
             return ResponseEntity.badRequest().body("status must be active|paused");
         }
         String title = body.get("title") instanceof String t && !t.isBlank() ? t.trim() : null;
+        if (setTrack) sourceRepo.setTargetTrack(activeVault.id(), id, trackId);
         return ResponseEntity.ok(sourceRepo.update(activeVault.id(), id,
             auto, body.containsKey("autoAccept") && body.get("autoAccept") == null,
             status, title));

@@ -27,6 +27,17 @@ const AUTO_OPTIONS = [
   { value: 'off', label: 'Auto-accept: off' },
 ];
 
+// "General (default)" = null; a source's track missing from the store list still shows its title.
+function trackOptions(tracks, src) {
+  const opts = [{ value: '', label: 'Track: General (default)' }];
+  const list = (tracks ?? []).filter(t => t.status !== 'archived');
+  list.forEach(t => opts.push({ value: String(t.id), label: `Track: ${t.title}` }));
+  if (src.targetTrackId != null && !list.some(t => t.id === src.targetTrackId)) {
+    opts.push({ value: String(src.targetTrackId), label: `Track: ${src.targetTrackTitle ?? src.targetTrackId}` });
+  }
+  return opts;
+}
+
 // Subscribe = preview -> confirm (same two steps as the extension): "Preview" resolves the URL
 // without persisting; "Subscribe" creates the source, then onSubscribed() flips to Swipe.
 export default function FeedSources({ onSubscribed }) {
@@ -35,6 +46,9 @@ export default function FeedSources({ onSubscribed }) {
   const resolve = useStore(s => s.resolveFeedSource);
   const add = useStore(s => s.addFeedSource);
   const setAuto = useStore(s => s.setFeedSourceAutoAccept);
+  const setTrack = useStore(s => s.setFeedSourceTrack);
+  const tracks = useStore(s => s.tracks);
+  const fetchTracks = useStore(s => s.fetchTracks);
   const del = useStore(s => s.deleteFeedSource);
   const check = useStore(s => s.checkFeedSource);
   const [url, setUrl] = useState('');
@@ -43,6 +57,7 @@ export default function FeedSources({ onSubscribed }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => { Promise.resolve(fetchSources()).finally(() => setLoaded(true)); }, [fetchSources]);
+  useEffect(() => { Promise.resolve(fetchTracks?.()).catch(() => {}); }, [fetchTracks]);
 
   async function doPreview(e) {
     e.preventDefault();
@@ -105,6 +120,12 @@ export default function FeedSources({ onSubscribed }) {
                     aria-label={`Auto-accept for ${src.title || src.url}`}
                     options={AUTO_OPTIONS}
                     value={toVal(src.autoAccept)} onChange={e => setAuto(src.id, fromVal(e.target.value))}
+                  />
+                  <Select
+                    aria-label={`Track for ${src.title || src.url}`}
+                    options={trackOptions(tracks, src)}
+                    value={src.targetTrackId == null ? '' : String(src.targetTrackId)}
+                    onChange={e => setTrack(src.id, e.target.value === '' ? null : Number(e.target.value))}
                   />
                   <Button size="sm" onClick={() => check(src.id)}>Check now</Button>
                   <Button size="sm" variant="danger" onClick={() => del(src.id)} aria-label={`Delete ${src.title || src.url}`}>Delete</Button>
