@@ -46,7 +46,7 @@ export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDrag
           <button
             className={styles.deleteBtn}
             onClick={e => { e.stopPropagation(); onDelete(); }}
-            title="Move to trash"
+            title="Move to bin"
           >
             🗑
           </button>

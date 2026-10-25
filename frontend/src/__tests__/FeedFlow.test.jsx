@@ -21,7 +21,7 @@ beforeEach(() => {
   feed.fetchFeedSources.mockResolvedValue([blog]);
   feed.deleteFeedSource.mockResolvedValue();
   useStore.setState({
-    feedPending: [item(1), item(2)], feedBinned: [], feedSources: [],
+    feedPending: [item(1), item(2)], feedSources: [],
     feedLastDecision: null, feedLoaded: true, toast: null, learnView: null,
   });
 });

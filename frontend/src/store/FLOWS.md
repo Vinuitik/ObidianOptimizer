@@ -180,7 +180,7 @@ Files: useStore.js (feed* slice), api/feed.js
 `decideFeed('accept'|'bin')` → pop `feedPending[0]` (card gone instantly) + set `feedLastDecision` → `POST /feed/items/{id}/accept|bin`
 → ok: `setFeedNotice('Sent to Inbox','view')` / `('Binned.','undo')` (global Toast; View → `setLearnView('inbox')`) ‖ fail: card back at front + error toast ("Couldn't accept — try again.").
 `undoFeed()` → `restoreFeedItem(lastDecision.item)` → `POST .../restore` → 409: "Already ingesting — discard it in Inbox."
-Bin tab: `fetchFeedBin()`; `restoreFeedItem(item)` (Restore), `ingestFeedItem(item)` (= accept).
+`restoreFeedItem(item)` = Undo only. The bin list lives in Settings ▸ Bin (`pages/BinPanel.jsx`); `fetchFeedBin`/`ingestFeedItem`/`feedBinned` removed.
 Sources: `fetchFeedSources / addFeedSource(url) → POST /feed/sources / setFeedSourceAutoAccept(id, true|false|null) / deleteFeedSource / checkFeedSource (poll, 202)`.
 Toast: `setFeedNotice(message, 'undo'|'view'|null)` → global `showToast` (`feedNotice` state is gone). `feedLoaded` = first fetch settled (gates skeleton vs empty); `learnView` = legacy Learn tab flag; LearnPage no longer reads it (Today|Week is local state).
 `deleteFeedSource(id)` is optimistic + 7 s Undo toast (`DELETE_UNDO_MS`; the DELETE is only sent after the window). `resolveFeedSource(url)` = subscribe preview (`POST /feed/sources/resolve`, nothing persisted).

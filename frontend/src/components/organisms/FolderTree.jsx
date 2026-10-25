@@ -68,7 +68,7 @@ function TreeNode({ name, node, depth, query, currentNotePath, onOpenNote }) {
           depth={depth}
           onClick={() => (onOpenNote ? onOpenNote(node.fullPath) : openTab(node.fullPath))}
           onDelete={() => {
-            if (window.confirm(`Move "${displayName}" to trash?`)) deleteNote(node.fullPath);
+            if (window.confirm(`Move "${displayName}" to bin?`)) deleteNote(node.fullPath);
           }}
         />
       </div>
@@ -152,7 +152,7 @@ function TreeNode({ name, node, depth, query, currentNotePath, onOpenNote }) {
         onAddFolder={handleAddFolder}
         onAdd={() => startNewNote(node.fullPath)}
         onDelete={() => {
-          if (window.confirm(`Move folder "${name}" and everything inside it to trash?`)) {
+          if (window.confirm(`Move folder "${name}" and everything inside it to bin?`)) {
             deleteFolder(node.fullPath);
           }
         }}

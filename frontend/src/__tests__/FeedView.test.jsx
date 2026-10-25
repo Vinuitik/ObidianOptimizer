@@ -34,7 +34,7 @@ beforeEach(() => {
   feed.fetchFeedItems.mockResolvedValue([]);
   feed.fetchFeedSources.mockResolvedValue([]);
   useStore.setState({
-    feedPending: [item(1), item(2)], feedBinned: [], feedSources: [],
+    feedPending: [item(1), item(2)], feedSources: [],
     feedLastDecision: null, feedLoaded: true, toast: null,
   });
 });
@@ -77,6 +77,12 @@ describe('FeedView', () => {
     await waitFor(() => expect(feed.binFeedItem).toHaveBeenCalledWith(2));
   });
 
+  it('has no Bin tab (bin lives in Settings)', () => {
+    mount();
+    expect(screen.queryByRole('tab', { name: 'Bin' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Subscriptions' })).toBeTruthy();
+  });
+
   it('keys are ignored while typing in an input', () => {
     mount();
     fireEvent.click(screen.getByRole('tab', { name: 'Subscriptions' }));
@@ -115,18 +121,6 @@ describe('FeedView', () => {
     useStore.setState({ feedPending: [] });
     mount();
     expect(screen.getByText(/all caught up/i)).toBeTruthy();
-  });
-
-  it('Bin tab: Restore and Ingest anyway', async () => {
-    feed.fetchFeedItems.mockResolvedValue([item(5, { status: 'binned' }), item(6, { status: 'binned' })]);
-    mount();
-    fireEvent.click(screen.getByRole('tab', { name: 'Bin' }));
-    await screen.findByText('Video 5');
-    fireEvent.click(screen.getAllByText('Restore')[0]);
-    await waitFor(() => expect(feed.restoreFeedItem).toHaveBeenCalledWith(5));
-    fireEvent.click(screen.getByText('Ingest anyway'));
-    await waitFor(() => expect(feed.acceptFeedItem).toHaveBeenCalledWith(6));
-    expect(screen.getByText('Bin is empty.')).toBeTruthy();
   });
 
   it('shows "Subscribe to this channel" only for YouTube items, and subscribes on click', async () => {

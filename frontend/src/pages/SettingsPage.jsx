@@ -19,6 +19,7 @@ import PageHeader from '../components/molecules/PageHeader';
 import useAutosaveSettings from './useAutosaveSettings';
 import useVaults from '../vault/useVaults';
 import VaultsPanel from './VaultsPanel';
+import BinPanel from './BinPanel';
 import styles from './SettingsPage.module.css';
 
 const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
@@ -295,6 +296,8 @@ export default function SettingsPage() {
         </Group>
 
         <DriveSyncPanel loaded={loaded} isAuthenticated={isAuthenticated} />
+
+        <BinPanel isAuthenticated={isAuthenticated} />
 
         <Group title="Advanced" description="Startup behaviour and background jobs.">
           {renderField(F.startupSyncMode)}

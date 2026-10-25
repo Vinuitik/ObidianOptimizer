@@ -73,36 +73,6 @@ function FeedCard({ item, onDecide }) {
   );
 }
 
-function BinList() {
-  const binned = useStore(s => s.feedBinned);
-  const fetchFeedBin = useStore(s => s.fetchFeedBin);
-  const ingest = useStore(s => s.ingestFeedItem);
-  const restore = useStore(s => s.restoreFeedItem);
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => { Promise.resolve(fetchFeedBin()).finally(() => setLoaded(true)); }, [fetchFeedBin]);
-
-  if (!loaded && !binned.length) return <Skeleton lines={4} height={44} />;
-  if (!binned.length) return <p className={styles.empty}>Bin is empty.</p>;
-  return (
-    <ul className={styles.list}>
-      {binned.map(item => (
-        <li key={item.id}>
-          <ListRow
-            title={item.title}
-            meta={item.sourceTitle}
-            trailing={
-              <span className={styles.rowActions}>
-                <Button size="sm" onClick={() => ingest(item)}>Ingest anyway</Button>
-                <Button size="sm" variant="ghost" onClick={() => restore(item)}>Restore</Button>
-              </span>
-            }
-          />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function Stack() {
   const pending = useStore(s => s.feedPending);
   const loaded = useStore(s => s.feedLoaded);
@@ -169,7 +139,6 @@ function Stack() {
 
 const TABS = [
   { id: 'stack', label: 'Swipe' },
-  { id: 'bin', label: 'Bin' },
   { id: 'sources', label: 'Subscriptions' },
 ];
 
@@ -183,7 +152,6 @@ export default function FeedView() {
       </div>
       <div className={styles.body}>
         {tab === 'stack' && <Stack />}
-        {tab === 'bin' && <BinList />}
         {tab === 'sources' && <FeedSources onSubscribed={() => setTab('stack')} />}
       </div>
     </div>

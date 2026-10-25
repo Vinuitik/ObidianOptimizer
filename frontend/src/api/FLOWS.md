@@ -58,6 +58,7 @@ offline search/link fallback — see `utils/FLOWS.md` "offlineSearch.js".
 
 ## feed.js (contract: `feed/FLOWS_feed.md` P1a)
 `fetchFeedItems(status)` GET `/feed/items` · `acceptFeedItem` POST `.../accept` (→ `{captureId}`) · `binFeedItem` · `restoreFeedItem` (409 → `ApiError(409)`)
+`bin.js`: `fetchBin` GET `/bin` · `restoreBinItem(kind,id)` POST `/bin/restore` (404/409/410 → `ApiError`) · `deleteBinItem` DELETE `/bin/{kind}/{id}` · `emptyBin` DELETE `/bin`. `vaults.js` has no delete (endpoint gone).
 · `fetchFeedSources / addFeedSource({url}) / patchFeedSource / deleteFeedSource / pollFeedSource`. All throw `ApiError(status)`.
 `pollTrackNow` removed from `tracks.js` (old `/tracks/{id}/poll-now`).
 
