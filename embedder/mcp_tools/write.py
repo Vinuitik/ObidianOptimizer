@@ -20,12 +20,16 @@ log = logging.getLogger("embedder.mcp_tools.write")
 
 
 @mcp.tool()
-def ingest_resource(ref: str, force_whisper: bool = False) -> dict:
+def ingest_resource(ref: str, force_whisper: bool = False, title: str = "") -> dict:
     """Turn a resource into Obsidian notes (async job). ref is a vault-relative
     path (resources/videos/x.mp4, folder/slides.pdf) or a URL (article,
     YouTube). Returns the job descriptor — poll status via job id at
     GET /ingest/{id}. Pipeline: deterministic extraction (whisper/PyMuPDF/
     trafilatura/keyframes) → constrained LLM synthesis → notes via backend.
+
+    `title`: ALWAYS pass a short human name for the resource (e.g. "Karpathy – Tokenizers
+    lecture"). It becomes the Inbox folder the notes are reviewed/scheduled under; without it
+    the folder is named after the source's own title (or a hash if it has none).
 
     Notes land in the Inbox; group them into a Learning Track afterwards (tracks only
     reference existing notes)."""
@@ -39,7 +43,8 @@ def ingest_resource(ref: str, force_whisper: bool = False) -> dict:
         resolved = _resolve_in_vault(ref, vault)
         if not resolved.exists():
             raise ValueError(f"not in vault: {ref}")
-    return ingest_jobs.submit(ref, resolved, force_whisper, vault=vault)
+    return ingest_jobs.submit(ref, resolved, force_whisper, title=(title.strip() or None),
+                              vault=vault)
 
 
 @mcp.tool()
@@ -138,7 +143,11 @@ def create_note(text: str, title: str = "", already_processed: bool = True, fold
 create_note.__doc__ = f"""Create a note from text YOU authored. Don't hand-write a note file — pass the
     whole body here.
 
-    `folder` (optional, default ""): leave empty to stage the note directly in the Learn
+    `folder` (optional, default ""): WHEN ADDING MORE THAN ONE NOTE IN A CONVERSATION, ALWAYS
+    pass the SAME short human-readable `folder` name (e.g. "Mobile PWA Notes") for all of them,
+    so they review and schedule as ONE unit. Notes with a folder are stamped with a stable
+    synthetic `capture-id` derived from the folder name, which is what groups them.
+    Leave empty to stage the note directly in the Learn
     Inbox root. Pass a name (e.g. "Mobile PWA Notes") to group several notes from one
     conversation into their OWN named subfolder — but this is ALWAYS created under the
     Inbox (`_inbox/<folder>/`), NEVER elsewhere in the vault. There is no way to write
@@ -195,6 +204,10 @@ def _stage_note_as_is(text: str, title: str = "", folder: str = "", vault=None) 
             sub = sub[len(prefix):]
         target = f"{publish.INBOX_FOLDER}/{sub}" if sub else publish.INBOX_FOLDER
         note_md = publish.stamp_auto_filed(note_md, suggested)
+        # Stable synthetic capture-id per (vault, folder) → the folder is ONE Learn unit
+        # (Java TrackUnitService groups on capture-id). seq = arrival order within the folder.
+        seq = _count_notes(vault.root / publish.INBOX_FOLDER / sub)
+        note_md = publish.stamp_capture(note_md, publish.mcp_capture_id(vault.id, sub), seq)
     else:
         target = publish.INBOX_FOLDER
         note_md = publish.stamp_inbox(note_md, "", suggested)
@@ -202,6 +215,13 @@ def _stage_note_as_is(text: str, title: str = "", folder: str = "", vault=None) 
     path = publish.create_note(target, synthesize.slugify(t), note_md, vault_id=vault.id)
     return {"status": "DONE", "ingested": False, "words": len(text.split()),
             "notes_created": [path]}
+
+
+def _count_notes(d) -> int:
+    try:
+        return sum(1 for _ in d.rglob("*.md"))
+    except OSError:
+        return 0
 
 
 def _title_from_text(text: str) -> str:

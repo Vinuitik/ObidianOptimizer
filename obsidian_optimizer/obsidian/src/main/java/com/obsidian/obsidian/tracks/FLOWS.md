@@ -333,3 +333,5 @@ Schema: `track_item_groups.chapter`, unique index `uq_track_item_groups_unit` on
 
 ## Bin / soft delete
 Every read in `TrackRepository` filters `deleted_at IS NULL` on `tracks` and `track_items` (get, listAll, listActive, getOrCreatePassive, getItem, listItems, nextPendingItems, countPendingItems, completionsByDay, listProgressRows). To change: `TrackRepository.delete()/restoreTrack()/restoreItem()/purge*`. Bin flows: `bin/FLOWS.md`.
+
+Note: unit key = frontmatter capture-id; 1st `_inbox` path segment is only a readable folder name (TrackUnitService.INBOX_PATH, inboxGroups); chapter = 2nd segment. Capture-less title falls back to folder name.
