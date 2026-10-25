@@ -116,3 +116,7 @@ that SQL and embedder `publish.INBOX_FOLDER`.
 | Group (folder-level) find_home | `InboxController.withGroupSuggestions()` / `groupSuggestion()` → embedder `POST /placement/group` |
 | Split sibling stays in its source's subfolder | `InboxController.split()` (`Paths.get(req.path()).getParent()`, was the flat `_inbox` dir) |
 | Vault scoping (M3) | `InboxController` root = `ActiveVault.root()`; `noteIndex.findNotesByCapture/countUnfiledNotesForCapture`, `captureRepo.listAll` take `activeVault.id()` |
+
+## Units (consumer: tracks/)
+`tracks/TrackUnitService` reads staged inbox notes via `NoteIndexRepository.listInboxCaptureNotes()` (notes.capture_id + path under `_inbox/`) and groups them as `<captureId>[/<chapterSlug>]` to schedule Learn units on Today. See tracks/FLOWS.md "Units". InboxController itself is unchanged.
+To change: group-key derivation → `TrackUnitService.INBOX_PATH` (must match `InboxItem.inboxFolder`).

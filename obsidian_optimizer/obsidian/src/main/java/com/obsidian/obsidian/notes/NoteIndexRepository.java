@@ -91,6 +91,17 @@ public class NoteIndexRepository {
             """, String.class, vaultId, captureId);
     }
 
+    public record InboxNoteRow(String captureId, String path, Integer captureSeq) {}
+
+    /** Every indexed note still under _inbox/ that carries a capture-id (staged ingest notes). */
+    public List<InboxNoteRow> listInboxCaptureNotes(long vaultId) {
+        return jdbc.query("""
+            SELECT capture_id, path, capture_seq FROM notes
+            WHERE vault_id = ? AND capture_id IS NOT NULL AND path LIKE '%/_inbox/%'
+            """, (rs, i) -> new InboxNoteRow(rs.getString("capture_id"), rs.getString("path"),
+                (Integer) rs.getObject("capture_seq")), vaultId);
+    }
+
     /** How many of a capture's notes are still parked in _inbox/ awaiting triage.
      *  When this hits zero the capture is fully filed (InboxController flips status). */
     public int countUnfiledNotesForCapture(long vaultId, String captureId) {

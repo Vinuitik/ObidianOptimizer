@@ -46,13 +46,14 @@ class TrackControllerTest {
     @Mock TrackReviewHandoff reviewHandoff;
     @Mock TrackProgressService progressService;
     @Mock TrackAgentClient trackAgentClient;
+    @Mock TrackUnitService unitService;
 
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         TrackController controller = new TrackController(
-            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, activeVault);
+            trackRepo, todayPlan, reviewHandoff, progressService, trackAgentClient, activeVault, unitService);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

@@ -56,7 +56,17 @@ public class TodayPlanService {
      *  the frontend uses to show a "you're behind — switch to Lock-in?" banner. Never set
      *  in Lock-in mode (there's no capacity ceiling to overflow). */
     public record TodayPlan(List<TodayItem> items, String mode, boolean overBudget,
-                            int planned, int capacity) {}
+                            int planned, int capacity,
+                            List<TrackUnitService.Unit> units, int backlogCount) {
+        public TodayPlan(List<TodayItem> items, String mode, boolean overBudget, int planned, int capacity) {
+            this(items, mode, overBudget, planned, capacity, List.of(), 0);
+        }
+
+        /** Learn units picked by {@link TrackUnitService} (tracks/FLOWS.md "Units"). */
+        public TodayPlan withUnits(TrackUnitService.UnitsResult u) {
+            return new TodayPlan(items, mode, overBudget, planned, capacity, u.units(), u.backlogCount());
+        }
+    }
 
     private static String dueLabel(LocalDate date, LocalDate deadline) {
         if (deadline.isBefore(date)) return "Overdue";

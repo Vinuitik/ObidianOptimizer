@@ -112,6 +112,23 @@ public class TrackRepository {
         jdbc.execute("ALTER TABLE tracks ALTER COLUMN vault_id DROP DEFAULT");
         jdbc.execute("ALTER TABLE track_item_groups ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
         jdbc.execute("ALTER TABLE track_item_groups ALTER COLUMN vault_id DROP DEFAULT");
+        // Learn units (tracks/FLOWS.md "Units"): a group row doubles as a unit->track assignment.
+        // chapter = per-chapter unit of a book; key is (track, capture, chapter) with NULL chapter
+        // still unique per capture (COALESCE), so the old (track_id, capture_id) constraint goes.
+        jdbc.execute("ALTER TABLE track_item_groups ADD COLUMN IF NOT EXISTS chapter TEXT");
+        jdbc.execute("ALTER TABLE track_item_groups DROP CONSTRAINT IF EXISTS track_item_groups_track_id_capture_id_key");
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_track_item_groups_unit ON track_item_groups(track_id, capture_id, (COALESCE(chapter, '')))");
+        // Today picker pin: which units were chosen for a day (carry-over + no refill after finishing).
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS today_units (
+              vault_id    BIGINT NOT NULL REFERENCES vaults(id),
+              plan_date   DATE NOT NULL,
+              capture_id  TEXT NOT NULL,
+              chapter     TEXT NOT NULL DEFAULT '',
+              position    INTEGER NOT NULL,
+              PRIMARY KEY (vault_id, plan_date, capture_id, chapter)
+            )
+            """);
         // Bin (bin/FLOWS.md): deletes are soft; every read below filters deleted_at IS NULL.
         jdbc.execute("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
         jdbc.execute("ALTER TABLE track_items ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ");
@@ -274,12 +291,99 @@ public class TrackRepository {
      *  poller. ON CONFLICT DO NOTHING + re-select makes concurrent calls for the same
      *  (trackId, captureId) converge on the same group instead of racing two inserts. */
     public TrackItemGroup getOrCreateGroup(long vaultId, long trackId, String captureId, String title, String sourceUrl) {
+        return getOrCreateGroup(vaultId, trackId, captureId, null, title, sourceUrl);
+    }
+
+    public TrackItemGroup getOrCreateGroup(long vaultId, long trackId, String captureId, String chapter,
+                                           String title, String sourceUrl) {
         jdbc.update("""
-            INSERT INTO track_item_groups(track_id, capture_id, title, source_url, vault_id) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (track_id, capture_id) DO NOTHING
-            """, trackId, captureId, title, sourceUrl, vaultId);
-        return jdbc.queryForObject("SELECT * FROM track_item_groups WHERE track_id = ? AND capture_id = ?",
-            TrackRepository::mapGroup, trackId, captureId);
+            INSERT INTO track_item_groups(track_id, capture_id, chapter, title, source_url, vault_id) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (track_id, capture_id, (COALESCE(chapter, ''))) DO NOTHING
+            """, trackId, captureId, chapter, title, sourceUrl, vaultId);
+        return jdbc.queryForObject("""
+            SELECT * FROM track_item_groups WHERE track_id = ? AND capture_id = ? AND COALESCE(chapter, '') = COALESCE(?, '')
+            """, TrackRepository::mapGroup, trackId, captureId, chapter);
+    }
+
+    // ── Learn units (unit = inbox group, assigned to exactly one track) ─────────
+
+    /** Unit key {@code captureId[/chapter]} -> track id, live tracks only (a unit whose track
+     *  was binned reads as unassigned, so lazy assignment re-homes it). */
+    public Map<String, Long> unitAssignments(long vaultId) {
+        Map<String, Long> out = new LinkedHashMap<>();
+        jdbc.query("""
+            SELECT DISTINCT ON (g.capture_id, COALESCE(g.chapter, '')) g.capture_id, g.chapter, g.track_id
+            FROM track_item_groups g JOIN tracks t ON t.id = g.track_id
+            WHERE g.vault_id = ? AND g.capture_id IS NOT NULL AND t.deleted_at IS NULL
+            ORDER BY g.capture_id, COALESCE(g.chapter, ''), g.id
+            """, rs -> {
+                String ch = rs.getString("chapter");
+                out.put(rs.getString("capture_id") + (ch == null ? "" : "/" + ch), rs.getLong("track_id"));
+            }, vaultId);
+        return out;
+    }
+
+    /** Point the unit at {@code trackId}: re-home its existing group row, else insert one. */
+    public void assignUnit(long vaultId, String captureId, String chapter, String title, long trackId) {
+        List<Long> ids = jdbc.queryForList("""
+            SELECT id FROM track_item_groups
+            WHERE vault_id = ? AND capture_id = ? AND COALESCE(chapter, '') = COALESCE(?, '') ORDER BY id
+            """, Long.class, vaultId, captureId, chapter);
+        if (ids.isEmpty()) {
+            getOrCreateGroup(vaultId, trackId, captureId, chapter, title == null ? captureId : title, null);
+            return;
+        }
+        jdbc.update("DELETE FROM track_item_groups WHERE vault_id = ? AND capture_id = ? AND COALESCE(chapter, '') = COALESCE(?, '') AND id <> ? AND NOT EXISTS (SELECT 1 FROM track_items WHERE group_id = track_item_groups.id)",
+            vaultId, captureId, chapter, ids.get(0));
+        jdbc.update("UPDATE track_item_groups SET track_id = ? WHERE id = ?", trackId, ids.get(0));
+    }
+
+    /** Subscription's track for a capture accepted from a feed (sources.target_track_id), or null. */
+    public Long subscriptionTrackId(long vaultId, String captureId) {
+        List<Long> rows = jdbc.queryForList("""
+            SELECT s.target_track_id FROM feed_items fi JOIN sources s ON s.id = fi.source_id
+            WHERE fi.capture_id = ? AND s.vault_id = ? AND s.target_track_id IS NOT NULL
+            """, Long.class, captureId, vaultId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /** The auto-created default track (source='general'); idempotent, budget 1/day Mon..Sun. */
+    public Track getOrCreateGeneral(long vaultId) {
+        List<Track> rows = jdbc.query(
+            "SELECT * FROM tracks WHERE vault_id = ? AND source = 'general' AND deleted_at IS NULL ORDER BY id LIMIT 1",
+            TrackRepository::mapTrack, vaultId);
+        if (!rows.isEmpty()) return rows.get(0);
+        Track t = create(vaultId, "General", "custom", "general");
+        Map<Integer, Integer> budgets = new LinkedHashMap<>();
+        for (int d = 0; d <= 6; d++) budgets.put(d, 1);
+        setSchedule(t.id(), budgets);
+        return t;
+    }
+
+    public List<String> todayUnitKeys(long vaultId, LocalDate date) {
+        return jdbc.queryForList("""
+            SELECT capture_id || CASE WHEN chapter = '' THEN '' ELSE '/' || chapter END
+            FROM today_units WHERE vault_id = ? AND plan_date = ? ORDER BY position
+            """, String.class, vaultId, java.sql.Date.valueOf(date));
+    }
+
+    public LocalDate latestPlanDateBefore(long vaultId, LocalDate date) {
+        List<java.sql.Date> rows = jdbc.queryForList(
+            "SELECT MAX(plan_date) FROM today_units WHERE vault_id = ? AND plan_date < ?",
+            java.sql.Date.class, vaultId, java.sql.Date.valueOf(date));
+        return rows.isEmpty() || rows.get(0) == null ? null : rows.get(0).toLocalDate();
+    }
+
+    /** keys are {@code captureId[/chapter]}; chapter segment may not contain '/'. */
+    public void saveTodayUnits(long vaultId, LocalDate date, List<String> keys) {
+        int pos = 0;
+        for (String k : keys) {
+            int i = k.indexOf('/');
+            jdbc.update("""
+                INSERT INTO today_units(vault_id, plan_date, capture_id, chapter, position) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT DO NOTHING
+                """, vaultId, java.sql.Date.valueOf(date), i < 0 ? k : k.substring(0, i), i < 0 ? "" : k.substring(i + 1), pos++);
+        }
     }
 
     /** Vault-checked item lookup (items inherit their vault through their track). */
