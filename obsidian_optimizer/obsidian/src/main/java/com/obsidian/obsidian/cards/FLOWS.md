@@ -179,11 +179,34 @@ POST /api/assignments {scope, points}        scope = note path or folder prefix
         ids already picked this session). `points` is now an optional cap.
       exercises rolled NOW via embedder /flashcards/roll → params + rendered +
       expected answer frozen into assignments.variants
+      → AssignmentService.orderCards(): alternate hard/easy (hard = difficulty>=3
+        or open), open cards in the earliest hard slots (their background judges
+        start early), leftover pool appended by ascending difficulty.
+        To change: AssignmentService.orderCards()
 POST /api/attempts {assignmentId, cardId, answer}
   → mcq: index compare · exercise: frozen expected (numeric tolerance /
-    normalized string) · open: embedder /flashcards/judge (cosine bands
-    0.30/0.85, middle band → wrapper CLI judge with key_points rubric)
+    normalized string) · open: TWO-PASS judge (below)
   → verdict CORRECT (full difficulty points) / PARTIAL (half) / WRONG (0)
+  → response {verdict, provisional, referenceAnswer (open only), pointsEarned,
+    maxPoints, feedback}
+
+open answer, hard budget JUDGE_WAIT_MS (1000) total:
+  → AssignmentService.submitAttempt(): POST /flashcards/judge {llm:false}   ~0.4s cosine
+  → clear band (CORRECT >=0.85 / WRONG <=0.30) → final, insertAttempt, done
+  → mid band (PARTIAL, judge_used=false) → startFullJudge(): POST {llm:true}
+      on bounded pool (4 threads, queue 64) → embedder judge → host-wrapper
+      /complete tier=fast priority=high (small model, JUDGE_LLM_TIMEOUT_S=15)
+      → full.get(remaining budget)
+        arrived → final verdict + feedback, provisional=false
+        late    → insertAttempt(PARTIAL, provisional=true) and return
+                  {provisional:true, referenceAnswer, feedback:null};
+                  registerRefinement(): when the future lands →
+                  AssignmentRepository.refineAttempt() UPDATEs verdict/points/
+                  judge_used/feedback, provisional=false
+        pool saturated / judge error → cosine PARTIAL kept (final)
+POST /api/assignments/{id}/complete
+  → AssignmentService.awaitPendingRefinements(): wait <= JUDGE_COMPLETE_WAIT_MS
+    (8000) for this assignment's pending stages (usually 0s)
 POST /api/assignments/{id}/complete
   → per-note score = Σ earned / Σ difficulty (GROUP BY note)
   → ReviewService.Band.fromScore → grade() → FSRS + bandit → due dates
@@ -239,6 +262,10 @@ AFTER answering, so it teaches the reasoning without leaking answers mid-test.
 `code` cards: [NOT IMPLEMENTED] — needs the code-runner container (see ARCH).
 
 ## Technology Notes
+- **Provisional open-answer refinements are in-memory** (`AssignmentService.pendingRefinements`, a ConcurrentMap of CompletableFutures on a 4-thread daemon pool). A backend restart loses them: those attempts stay `provisional=true` with the cosine PARTIAL forever. Nothing re-runs them. If `complete()` fires before a refinement lands (fast tapper, >8s) FSRS grades with the stored provisional PARTIAL; the late UPDATE still lands but no longer affects that FSRS grade.
+- **Judge budgets**: 1000ms is TOTAL from submit (includes the ~0.4s cosine call), so the LLM gets ~0.6s; most mid-band answers will be provisional unless the fast tier answers in <0.6s. Pool saturation (>4 running + 64 queued) degrades to cosine PARTIAL, final.
+- Config: `judge.wait-ms`, `judge.complete-wait-ms` Spring properties (defaults 1000 / 8000).
+- `attempts.provisional` / `attempts.feedback` added by inline `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `AssignmentRepository.initSchema()`.
 
 - **Solver sandbox**: AST whitelist (math/itertools + safe builtins, no imports,
   no attribute access off non-modules, denied-name list) + subprocess with 2s
@@ -299,3 +326,7 @@ AFTER answering, so it teaches the reasoning without leaking answers mid-test.
 | Content hashing | `common/ContentHashing.sha256` (single hash fn for all pipelines) |
 | Open-answer cosine floor/ceiling | `embedder/flashcards/judge.py → COSINE_LOW / COSINE_HIGH` (env overrides) |
 | Vault scoping (M3) | `CardRepository`/`NoteReviewRepository`/`AssignmentRepository` methods take `long vaultId` first (SQL `vault_id = ?`, inserts write it); `AssignmentService`/`ReviewService`/`FsrsStateWriter`/`ReviewPreparationService` pass it through; controllers pass `activeVault.id()`; `CardJobWorker.drain()` + `FlaggedCardRegenService.run()` pin `activeVault.id()` (scanners = active vault only); `vault_id` rides in the `/flashcards/generate` body (Python reads it in M5) |
+| Judge wait budget / complete wait | `AssignmentService.judgeWaitMs` / `judgeCompleteWaitMs` (`judge.wait-ms`, `judge.complete-wait-ms`) |
+| Card order in a session | `AssignmentService.orderCards()` / `isHard()` |
+| Provisional refine UPDATE | `AssignmentRepository.refineAttempt()`; wiring `AssignmentService.registerRefinement()` |
+| Judge pool size | `AssignmentService.judgePool` (4 threads, queue 64) |

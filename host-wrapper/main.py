@@ -347,7 +347,8 @@ def process_images():
 def complete():
     """Text completion through the router (free providers first, Claude CLI last).
 
-    Request:  {"prompt": str, "system"?: str, "model"?: str}
+    Request:  {"prompt": str, "system"?: str, "model"?: str, "priority"?: str,
+               "tier"?: "fast"}   # fast = LLM_FAST_ORDER small models only
     Response: {"text": str, "provider": str} or {"error": str}
     The "model" field only applies when the claude-cli provider is reached.
     """
@@ -359,7 +360,7 @@ def complete():
     try:
         text, provider = router.complete_text(
             prompt, system=data.get("system"), cli_model=data.get("model"),
-            priority=data.get("priority", "medium"))
+            priority=data.get("priority", "medium"), tier=data.get("tier"))
     except llm_router.RouterError as e:
         return jsonify({"error": str(e)}), 503
 

@@ -33,8 +33,7 @@ def test_low_cosine_is_wrong_without_judge(monkeypatch):
 
 def test_middle_band_goes_to_llm_judge(monkeypatch):
     _mock_embeddings(monkeypatch, 0.78)
-    from flashcards import generate
-    monkeypatch.setattr(generate, "_complete",
+    monkeypatch.setattr(judge, "_complete_fast",
                         lambda p: '{"verdict": "WRONG", "feedback": "misses negation"}')
     out = judge.judge_open_answer("Q", "X causes Y", ["X does not cause Y"], ["negation"])
     assert out["verdict"] == "WRONG" and out["judge_used"]
@@ -43,10 +42,56 @@ def test_middle_band_goes_to_llm_judge(monkeypatch):
 
 def test_middle_band_judge_failure_falls_back_partial(monkeypatch):
     _mock_embeddings(monkeypatch, 0.78)
-    from flashcards import generate
-    monkeypatch.setattr(generate, "_complete", lambda p: "not json")
+    monkeypatch.setattr(judge, "_complete_fast", lambda p: "not json")
     out = judge.judge_open_answer("Q", "answer", ["reference"])
     assert out["verdict"] == "PARTIAL" and not out["judge_used"]
+
+
+def test_llm_false_mid_band_is_partial_without_call(monkeypatch):
+    _mock_embeddings(monkeypatch, 0.78)
+
+    def boom(p):
+        raise AssertionError("LLM must not be called")
+    monkeypatch.setattr(judge, "_complete_fast", boom)
+    out = judge.judge_open_answer("Q", "a", ["r"], llm=False)
+    assert out["verdict"] == "PARTIAL" and not out["judge_used"]
+    assert out["similarity"] == pytest.approx(0.78, abs=1e-3)
+
+
+def test_llm_false_clear_bands_unchanged(monkeypatch):
+    _mock_embeddings(monkeypatch, 0.95)
+    assert judge.judge_open_answer("Q", "a", ["r"], llm=False)["verdict"] == "CORRECT"
+    _mock_embeddings(monkeypatch, 0.1)
+    assert judge.judge_open_answer("Q", "a", ["r"], llm=False)["verdict"] == "WRONG"
+
+
+def test_judge_llm_call_uses_fast_tier_high_priority_short_timeout(monkeypatch):
+    import httpx
+    seen = {}
+
+    class R:
+        def raise_for_status(self): pass
+        def json(self): return {"text": "ok"}
+
+    def fake_post(url, json=None, timeout=None):
+        seen.update(url=url, json=json, timeout=timeout)
+        return R()
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert judge._complete_fast("p") == "ok"
+    assert seen["json"]["tier"] == "fast" and seen["json"]["priority"] == "high"
+    assert seen["timeout"] == judge.JUDGE_LLM_TIMEOUT_S == 15.0
+    assert "model" not in seen["json"]
+
+
+def test_endpoint_passes_llm_flag(client, monkeypatch):
+    _mock_embeddings(monkeypatch, 0.78)
+
+    def boom(p):
+        raise AssertionError("no LLM")
+    monkeypatch.setattr(judge, "_complete_fast", boom)
+    r = client.post("/flashcards/judge", json={"question": "Q", "answer": "a",
+                                               "reference_answers": ["r"], "llm": False})
+    assert r.status_code == 200 and r.json()["verdict"] == "PARTIAL"
 
 
 def test_empty_answer_is_wrong():

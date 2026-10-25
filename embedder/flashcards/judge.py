@@ -19,6 +19,7 @@ log = logging.getLogger("embedder.flashcards.judge")
 
 COSINE_HIGH = float(os.environ.get("COSINE_HIGH", "0.85"))
 COSINE_LOW = float(os.environ.get("COSINE_LOW", "0.30"))
+JUDGE_LLM_TIMEOUT_S = float(os.environ.get("JUDGE_LLM_TIMEOUT_S", "15"))
 JUDGE_BAND = os.environ.get("JUDGE_BAND", "on").lower() != "off"
 
 JUDGE_PROMPT = """Grade a student's answer against the rubric. Output ONLY JSON:
@@ -30,9 +31,21 @@ Reference answers: {references}
 Student answer: {answer}"""
 
 
+def _complete_fast(prompt: str) -> str:
+    """Judge LLM call: host-wrapper fast tier (small models), high priority, short
+    timeout. Deliberately NOT generate._complete (240s synth timeout, big model)."""
+    import httpx
+    from .generate import WRAPPER_URL
+    resp = httpx.post(f"{WRAPPER_URL}/complete",
+                      json={"prompt": prompt, "tier": "fast", "priority": "high"},
+                      timeout=JUDGE_LLM_TIMEOUT_S)
+    resp.raise_for_status()
+    return resp.json()["text"]
+
+
 def judge_open_answer(question: str, answer: str, reference_answers: list[str],
-                      key_points: list[str] | None = None) -> dict:
-    """Returns {"verdict": CORRECT|PARTIAL|WRONG, "similarity": float,
+                      key_points: list[str] | None = None, llm: bool = True) -> dict:
+    """llm=False -> cosine only (mid band -> PARTIAL, no LLM call). Returns {"verdict": CORRECT|PARTIAL|WRONG, "similarity": float,
                 "judge_used": bool, "feedback": str|None}."""
     if not answer or not answer.strip():
         return {"verdict": "WRONG", "similarity": 0.0, "judge_used": False, "feedback": None}
@@ -44,12 +57,12 @@ def judge_open_answer(question: str, answer: str, reference_answers: list[str],
         return {"verdict": "CORRECT", "similarity": similarity, "judge_used": False, "feedback": None}
     if similarity <= COSINE_LOW:
         return {"verdict": "WRONG", "similarity": similarity, "judge_used": False, "feedback": None}
-    if not JUDGE_BAND:
+    if not JUDGE_BAND or not llm:
         return {"verdict": "PARTIAL", "similarity": similarity, "judge_used": False, "feedback": None}
 
-    from .generate import _complete, _extract_json  # late import: shares wrapper plumbing
+    from .generate import _extract_json  # late import
     try:
-        out = _extract_json(_complete(JUDGE_PROMPT.format(
+        out = _extract_json(_complete_fast(JUDGE_PROMPT.format(
             question=question, answer=answer,
             key_points=json.dumps(key_points or []),
             references=json.dumps(reference_answers))))

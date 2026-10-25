@@ -349,3 +349,27 @@ def test_status_reports_all_providers(router):
     assert status["gemini"]["configured"] is True
     for entry in status.values():
         assert {"configured", "in_flight", "cooldown_s", "ok", "failed"} <= set(entry)
+
+
+# -- fast tier ----------------------------------------------------------------
+
+def test_fast_chain_follows_fast_order(router, monkeypatch):
+    monkeypatch.setattr(llm_router, "FAST_ORDER", [("groq", "m-small"), ("gemini", "m-lite")])
+    assert [p.name for p in router._chain("text-fast")] == ["groq", "gemini"]
+
+
+def test_fast_tier_uses_small_model_and_falls_over(router, no_rate_spacing, monkeypatch):
+    monkeypatch.setattr(llm_router, "FAST_ORDER", [("groq", "m-small"), ("gemini", "m-lite")])
+    r = no_rate_spacing(router)
+    calls = []
+
+    def fake_openai(p, model, messages, max_tokens):
+        calls.append((p.name, model))
+        if p.name == "groq":
+            raise RuntimeError("HTTP 500: boom")
+        return "ok"
+
+    monkeypatch.setattr(llm_router, "_openai_chat", fake_openai)
+    text, provider = r.complete_text("p", tier="fast", priority="high")
+    assert (text, provider) == ("ok", "gemini")
+    assert calls == [("groq", "m-small"), ("gemini", "m-lite")]
