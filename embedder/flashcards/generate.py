@@ -47,7 +47,16 @@ EVERY card MUST include an "explanation": 1-3 sentences saying WHY the answer is
 correct (and, for mcq, why the right option beats the distractors). The student
 sees this only AFTER answering, so make it teach the reasoning, not just restate.
 
-Card schemas:
+EVERY card MUST include an "angle" — the kind of thinking the question demands:
+  what  = recall a definition/fact.            e.g. "What does stability measure in FSRS?"
+  why   = reason it is true / why it exists.   e.g. "Why does FSRS schedule by target recall instead of fixed intervals?"
+  how   = perform or apply the procedure.      e.g. "How would you compute the next interval after a 'Good' grade?"
+  where = a real situation to apply it.        e.g. "Where would a lapse-heavy deck need a higher retention target?"
+Mix: at most 25% of cards are "what"; spread the rest across why / how / where.
+"open" cards are NEVER "what". Rule: a question answerable by quoting one sentence
+of the note is a "what" question — prefer questions that need reasoning beyond that.
+
+Card schemas (each also carries "angle":"what"|"why"|"how"|"where"):
 mcq:      {{"type":"mcq","question":str,"options":[str,2-6 unique],"correct":int_index,"explanation":str,"difficulty":1-5}}
           Distractors must be plausible misconceptions, not noise.
 open:     {{"type":"open","question":str,"reference_answers":[str,str,...>=2 distinct phrasings],
@@ -101,6 +110,25 @@ def _extract_json(text: str):
         text = fence.group(1)
     start = min((i for i in (text.find("["), text.find("{")) if i >= 0), default=0)
     return json.loads(text[start:])
+
+
+ANGLES = ("what", "why", "how", "where")
+
+
+def _normalize_angles(cards: list[dict]) -> dict:
+    """Keep a valid `angle` on each card; unknown/missing -> field dropped.
+    Open cards can't be `what` (prompt rule) -> field dropped too. Returns the mix."""
+    mix: dict[str, int] = {}
+    for c in cards:
+        a = c.get("angle")
+        a = a.strip().lower() if isinstance(a, str) else None
+        if a not in ANGLES or (c.get("type") == "open" and a == "what"):
+            c.pop("angle", None)
+            a = "none"
+        else:
+            c["angle"] = a
+        mix[a] = mix.get(a, 0) + 1
+    return mix
 
 
 # ── Pass 2: blind self-check ─────────────────────────────────────────────────
@@ -310,7 +338,9 @@ def generate_for_note(note_path: str, content: str, source_hash: str,
 
     before = len(valid)
     valid = _self_check(valid)
-    rep.add("self-check", {"kept": len(valid), "dropped": before - len(valid)})
+    mix = _normalize_angles(valid)
+    log.info("[flashcards] %s angle mix: %s", note_path, mix)
+    rep.add("self-check", {"kept": len(valid), "dropped": before - len(valid), "angle_mix": mix})
     # Regen mode: keep the note's card count consistent — store at most one
     # replacement per flagged card, even if the agent produced extras.
     if target_count and target_count > 0:

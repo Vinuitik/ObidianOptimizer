@@ -303,3 +303,22 @@ def test_store_conflict_target_includes_vault_id(monkeypatch):
     assert "ON CONFLICT (note_path, card_hash, vault_id) DO UPDATE" in inserts[0]
     ddl = [s for s in executed if "CREATE TABLE IF NOT EXISTS cards" in s][0]
     assert "UNIQUE (note_path, card_hash, vault_id)" in ddl
+
+
+def test_generate_angle_passthrough_and_mix_logged(monkeypatch, caplog):
+    cards = [dict(c) for c in GOOD_CARDS]
+    cards[0]["angle"] = "why"
+    cards[1]["angle"] = "what"          # open + what -> dropped
+    stored = {}
+    monkeypatch.setattr(gen, "_complete", lambda p: json.dumps({"0": 0, "1": 0})
+                        if p.startswith("Answer these quiz") else json.dumps(cards))
+    monkeypatch.setattr(gen, "_store", lambda path, sh, cs, vid=1: stored.update(cards=cs)
+                        or {"stored": len(cs), "archived": 0})
+    with caplog.at_level("INFO", logger="embedder.flashcards"):
+        gen.generate_for_note("/vault/n.md", "content", "h")
+    assert [c.get("angle") for c in stored["cards"]] == ["why", None]
+    assert "angle mix" in caplog.text and "'why': 1" in caplog.text
+    assert "angle" in gen.GEN_PROMPT and "quoting one sentence" in gen.GEN_PROMPT
+    bogus = [{"type": "mcq", "angle": "banana"}, {"type": "mcq", "angle": " How "}]
+    assert gen._normalize_angles(bogus) == {"none": 1, "how": 1}
+    assert "angle" not in bogus[0] and bogus[1]["angle"] == "how"
