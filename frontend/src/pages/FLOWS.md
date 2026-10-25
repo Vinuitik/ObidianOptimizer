@@ -264,16 +264,17 @@ Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAcc
 | MCQ long-press/scroll guard | `FlashcardSession.jsx McqOptions` (`LONG_PRESS_MS`, `MOVE_PX`), CSS `.option` |
 | Flag form per card | `FlashcardSession.jsx` `<FlagControl key={card.id}>` |
 
-## Flow — review order (interleaved flashcard / read)
+## Flow — review order (reads first, flashcard closes each group)
 Files: reviewOrder.js, ReviewPage.jsx
-Auto-open + `handleClose` → `ReviewPage.pickNext(notes, donePath)` → `reviewOrder.pickNextInterleaved(notes, donePath, orderHist.current)` → `nextTrack(C, R, hist)` (C/R = remaining flashcard/read counts, recomputed every call, no stored plan) → `pickNextInOrder(thatTrackOnly, donePath)` (DFS, wraps) → `advanceHistory` updates the `orderHist` ref `{lastTrack, run}`.
-- Rule: nothing yet → card; after a card → read; in a read run → card once `run >= round((R+run)/(C+1))`. 2 cards/8 reads → C RRRR C RRRR; 3/3 → CRCRCR; C=0 or R=0 → plain DFS. To change: `reviewOrder.nextTrack()`.
-- History lives only in a ref (session-local, lost on reload → ratio just recomputes from what is left; manual note clicks don't update it). Left-hand list keeps server order.
+Auto-open + `handleClose` → `ReviewPage.pickNext(notes)` → `reviewOrder.pickNextPlanned(notes, orderPlan ref)` → head of stored plan; plan rebuilt via `orderQueue` only at start, right after a flashcard completes, when notes appear, or >1 planned item vanished. `orderQueue` splits the REMAINING reads (n) into f groups (f = remaining flashcards) as evenly as possible, larger groups first, each followed by one flashcard; consumed between rebuilds, so reads do not reshuffle groups.
+- 11N/3F → NNNN F NNNN F NNN F; 2N/4F → N F N F F F; f=0 → all N; n=0 → all F. Always starts with a read (if any) and ends on a flashcard. Within a track: DFS (`comparePaths`). To change: `reviewOrder.orderQueue()`.
+- After each flashcard the rest is re-split (11N/3F → 4,4,3; after first F: 7/2 → 4,3). Left-hand list keeps server order.
 
 | Touchable | Where |
 |---|---|
-| Interleave rule | `reviewOrder.nextTrack()` |
-| Within-track order | `reviewOrder.pickNextInOrder()` / `comparePaths()` |
+| Group rule | `reviewOrder.orderQueue()` |
+| When plan rebuilds | `reviewOrder.pickNextPlanned()` |
+| Within-track order | `reviewOrder.comparePaths()` |
 | Call sites | `ReviewPage.pickNext`, auto-open effect, `handleClose` |
 
 ## Settings ▸ Bin

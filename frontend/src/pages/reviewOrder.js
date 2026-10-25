@@ -48,37 +48,50 @@ export function pickNextInOrder(reviewNotes, excludePath) {
   return after ?? sorted[0];
 }
 
-// ---- Interleaving flashcard-track and read-track notes ----------------------------
-// Goal: spread the (few) flashcard notes evenly among the (many) read notes, with the
-// ratio derived from what is LEFT (C cards, R reads) every time — no stored plan.
-// 2 cards / 8 reads -> C RRRR C RRRR; 3/3 -> C R C R C R.
-//
-// `hist` = { lastTrack, run }: track of the note just opened and, for reads, how many
-// reads in a row since the last card. Right after a card -> read. During a read run
-// the run's target length is round((R + run) / (C + 1)) (re-derived from the remaining
-// reads plus those already done); a card is due once the run reaches it.
-export function nextTrack(C, R, hist = {}) {
-  if (C <= 0) return 'read';
-  if (R <= 0) return 'flashcard';
-  const { lastTrack = null, run = 0 } = hist;
-  if (lastTrack == null) return 'flashcard';
-  if (lastTrack === 'flashcard') return 'read';
-  const gap = Math.round((R + run) / (C + 1));
-  return run >= gap ? 'flashcard' : 'read';
+// ---- Daily queue order: read notes first, flashcard last in each group -----------
+// With n reads and f flashcards REMAINING, split the reads into f groups as evenly as
+// possible (larger groups first), each group followed by one flashcard, so the queue
+// always ends on a flashcard: 11R/3F -> RRRR F RRRR F RRR F; 2R/4F -> R F R F F F.
+// f=0 -> all reads; n=0 -> all flashcards. Within each track: DFS order (comparePaths).
+// Pure and stateless: recomputed from what is left every time the queue is (re)built.
+export function orderQueue(reviewNotes) {
+  const byPath = (a, b) => comparePaths(a.fullPath, b.fullPath);
+  const cards = reviewNotes.filter(n => n.track === 'flashcard').sort(byPath);
+  const reads = reviewNotes.filter(n => n.track !== 'flashcard').sort(byPath);
+  const f = cards.length;
+  if (!f) return reads;
+  const base = Math.floor(reads.length / f);
+  const extra = reads.length % f;
+  const out = [];
+  let r = 0;
+  for (let g = 0; g < f; g++) {
+    const size = base + (g < extra ? 1 : 0);
+    for (let k = 0; k < size; k++) out.push(reads[r++]);
+    out.push(cards[g]);
+  }
+  return out;
 }
 
-// History after opening a note of `track`.
-export function advanceHistory(hist, track) {
-  if (track === 'flashcard') return { lastTrack: 'flashcard', run: 0 };
-  return { lastTrack: 'read', run: hist?.lastTrack === 'read' ? hist.run + 1 : 1 };
+// Stateful wrapper: consume a stored plan, rebuild only at session start, right after a
+// flashcard completes, when new notes appear, or when more than the just-finished head
+// vanished. Plan = ordered note objects whose head is the currently picked note, so a
+// read completing does NOT reshuffle the groups (11N/3F stays NNNN F NNNN F NNN F).
+// Returns { note, plan } — caller keeps `plan` (e.g. in a ref) and passes it back.
+export function pickNextPlanned(reviewNotes, plan) {
+  if (!reviewNotes.length) return { note: null, plan: [] };
+  const paths = new Set(reviewNotes.map(n => n.fullPath));
+  const live = (plan ?? []).filter(n => paths.has(n.fullPath));
+  const head = plan?.[0];
+  const headDone = head && !paths.has(head.fullPath);
+  const rebuild = !plan || !plan.length
+    || (headDone && head.track === 'flashcard')
+    || live.length !== reviewNotes.length       // a note appeared
+    || plan.length - live.length > 1;           // more than the finished head vanished
+  const next = rebuild ? orderQueue(reviewNotes) : live;
+  return { note: next[0], plan: next };
 }
 
-// Picks the next note: chooses the track via nextTrack, then the next note of that
-// track in DFS order after `excludePath` (wrapping). Notes without `track` count as read.
-export function pickNextInterleaved(reviewNotes, excludePath, hist = {}) {
-  if (!reviewNotes.length) return null;
-  const cards = reviewNotes.filter(n => n.track === 'flashcard');
-  const reads = reviewNotes.filter(n => n.track !== 'flashcard');
-  const t = nextTrack(cards.length, reads.length, hist);
-  return pickNextInOrder(t === 'flashcard' ? cards : reads, excludePath);
+// The auto-picked note from scratch = first of the freshly built order (null if empty).
+export function pickNextInterleaved(reviewNotes) {
+  return orderQueue(reviewNotes)[0] ?? null;
 }
