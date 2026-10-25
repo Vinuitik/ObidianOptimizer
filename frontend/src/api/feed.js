@@ -38,7 +38,7 @@ export async function restoreFeedItem(id) {
 
 // ── Sources ──────────────────────────────────────────────────────────────────
 
-// → [{ id, kind, url, feedUrl, title, autoAccept|null, status, lastCheckedAt, pendingCount }]
+// → [{ id, kind, url, feedUrl, title, autoAccept|null, status, lastCheckedAt, pendingCount, targetTrackId|null, targetTrackTitle|null }]
 export async function fetchFeedSources() {
   const res = await req(`${BASE}/feed/sources`);
   return res.json();
@@ -60,7 +60,7 @@ export async function resolveFeedSource(url) {
   return res.json();
 }
 
-// patch: any of { autoAccept (true|false|null=inherit), status, title }
+// patch: any of { autoAccept (true|false|null=inherit), status, title, targetTrackId (id|null=General; 404 unknown track) }
 export async function patchFeedSource(id, patch) {
   const res = await req(`${BASE}/feed/sources/${id}`, {
     method: 'PATCH', headers: JSON_HDR, body: JSON.stringify(patch),

@@ -108,4 +108,17 @@ describe('Feed flow (W2)', () => {
     await act(async () => { vi.advanceTimersByTime(8000); });
     expect(feed.deleteFeedSource).toHaveBeenCalledWith(3);
   });
+
+  it('track selector patches targetTrackId (and null for General)', async () => {
+    useStore.setState({ tracks: [{ id: 5, title: 'Rust Book', status: 'active' }], fetchTracks: async () => {} });
+    feed.patchFeedSource.mockResolvedValue({ ...blog, targetTrackId: 5, targetTrackTitle: 'Rust Book' });
+    mount();
+    fireEvent.click(screen.getByRole('tab', { name: 'Subscriptions' }));
+    await screen.findByText('Blog');
+    fireEvent.change(screen.getByLabelText('Track for Blog'), { target: { value: '5' } });
+    await waitFor(() => expect(feed.patchFeedSource).toHaveBeenCalledWith(3, { targetTrackId: 5 }));
+    feed.patchFeedSource.mockResolvedValue({ ...blog, targetTrackId: null });
+    fireEvent.change(screen.getByLabelText('Track for Blog'), { target: { value: '' } });
+    await waitFor(() => expect(feed.patchFeedSource).toHaveBeenCalledWith(3, { targetTrackId: null }));
+  });
 });
