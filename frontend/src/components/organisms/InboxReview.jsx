@@ -553,7 +553,7 @@ export default function InboxReview({ onCount }) {
         <button className={styles.drawerBtn} onClick={() => setDrawerOpen(o => !o)}
                 aria-expanded={drawerOpen} aria-label={drawerOpen ? 'Hide queue' : 'Show queue'}
                 title={drawerOpen ? 'Hide queue' : 'Show queue'}>
-          <Icon name="folder" size={16} />
+          <Icon name="panel" size={16} />
         </button>
         <span className={styles.noteTitle} title={current?.title}>{current?.title || 'New note'}</span>
         {canPickTrack && (
@@ -695,7 +695,7 @@ export default function InboxReview({ onCount }) {
                     </Button>
                     <span className={styles.popWrap} data-popover>
                       <Button variant="ghost" aria-label="More actions" aria-haspopup="menu" aria-expanded={menuOpen}
-                              onClick={() => { setMenuOpen(o => !o); setTrackMenu(false); }}>⋯</Button>
+                              onClick={() => { setMenuOpen(o => !o); setTrackMenu(false); }}><Icon name="more" size={16} /></Button>
                       {menuOpen && (
                         <div className={`${styles.popover} ${styles.popoverUp}`} role="menu" aria-label="More actions">
                           <button role="menuitem" className={styles.popItem} disabled={busy}
