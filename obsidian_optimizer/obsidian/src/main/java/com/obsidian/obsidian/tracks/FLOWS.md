@@ -1,7 +1,7 @@
 # Tracks Domain Flows
 
-Files: TrackRepository.java, TrackController.java, TodayPlanService.java, TrackProgressService.java, TrackReviewHandoff.java
-Tests: TrackRepositoryIT.java, TodayPlanServiceTest.java, TrackProgressServiceTest.java, TrackReviewHandoffTest.java
+Files: TrackRepository.java, TrackController.java, TodayPlanService.java, TrackProgressService.java, TrackReviewHandoff.java, TrackUnitService.java
+Tests: TrackUnitServiceIT.java, TrackRepositoryIT.java, TodayPlanServiceTest.java, TrackProgressServiceTest.java, TrackReviewHandoffTest.java
 Frontend: frontend/src/pages/TracksPage.jsx, frontend/src/api/tracks.js, frontend/src/store/useStore.js (Tracks section)
 Plan: /home/victor/.claude/plans/adaptive-finding-bubble.md (Phase 1 of the full Learning Tracks plan)
 Sub-flow: [FLOWS_feed.md](../feed/FLOWS_feed.md) — Passive Feed design/plan (P0–P4 phasing). Backend (P1a) is
@@ -230,6 +230,21 @@ Left (unused, harmless): `TrackRepository.getOrCreatePassive()/getOrCreateGroup(
 **only** whether the Tracks tab shows in `NavBar` (`tracksOnly` filter, mirrors
 `flashcardsOnly`). Turning it off does not delete any data — `/tracks` stays reachable directly. Toggle: Settings → Learning Tracks.
 
+## Units — Learn Today picker (IMPLEMENTED, W5 backend)
+Unit = one inbox group `<captureId>[/<chapterSlug>]` (chapterSlug = folder segment under `_inbox/<captureId>/`, i.e. InboxItem.inboxFolder's 2nd segment). Finished = no `_inbox/` notes left for it.
+GET /tracks/today → `TrackController.today()` → `TodayPlanService.today()` `.withUnits(` `TrackUnitService.today(date))`
+→ `TrackRepository.getOrCreateGeneral()` (source='general', budget 1/day Mon..Sun, idempotent)
+→ `NoteIndexRepository.listInboxCaptureNotes()` → regex group by capture/chapter, capture order = `capture.created_at`, then `capture_seq`
+→ LAZY ASSIGN (also the backfill): unit with no `track_item_groups` row → `subscriptionTrackId()` (feed_items.capture_id → sources.target_track_id) else General → `assignUnit()`
+→ PICK: if `today_units` has rows for the date, reuse them (still-unfinished only; no refill after finishing); else carry unfinished units from the latest earlier plan date, then per active track with `track_schedule` budget N fill up to N unfinished units; pin via `saveTodayUnits()`
+→ `backlogCount` = unfinished units not in today's set.
+Response adds `units: [{groupKey, captureId, chapter, title, noteCount, trackId, trackTitle}]` and `backlogCount`.
+Move: PUT /tracks/units `{captureId, chapter, trackId}` → `TrackUnitService.move()` → `assignUnit()` (re-homes the group row; today's pin is by unit, so it stays on today).
+To change: pick rule `TrackUnitService.today()`; default track `TrackRepository.getOrCreateGeneral()`; subscription mapping `TrackRepository.subscriptionTrackId()`.
+Schema: `track_item_groups.chapter`, unique index `uq_track_item_groups_unit` on (track_id, capture_id, COALESCE(chapter,'')); table `today_units`.
+[NOT IMPLEMENTED] MCP `track` param (ingest_resource/create_note); notes with no capture-id (MCP as-is notes) and in-place (non-`_inbox`) notes are not units.
+[NOT IMPLEMENTED] `sources.target_track_id` is a LEGACY column nothing writes today, so subscription mapping only works once a UI sets it.
+
 ## Technology Notes
 
 - **No FK enforcement on `note_path`**: `track_items.note_path` is a soft reference by
@@ -310,6 +325,10 @@ Left (unused, harmless): `TrackRepository.getOrCreatePassive()/getOrCreateGroup(
 | MCP track creation (internal) | `InternalAgentController.createTrack()`; `publish.create_track()`; `mcp_tools/write.py create_track` |
 | Discover HTTP client (shared with `feed/`) | `TrackAgentClient.discover()` / `Candidate` |
 | Vault scoping (M3) | `TrackRepository` methods take `long vaultId` first; item routes vault-check via `TrackRepository.getItem(vaultId, id)` (items inherit their vault through `tracks`); `TodayPlanService`/`TrackProgressService`/`TrackController` use `activeVault.id()` |
+| Learn unit picker / carry-over | `TrackUnitService.today()` |
+| General track | `TrackRepository.getOrCreateGeneral()` |
+| Move unit to track | `PUT /tracks/units` → `TrackUnitService.move()` |
+| Unit key / chapter parsing | `TrackUnitService.INBOX_PATH`, `groupKey()` |
 
 
 ## Bin / soft delete

@@ -24,11 +24,14 @@ public class TrackController {
     private final TrackReviewHandoff reviewHandoff;
     private final TrackProgressService progressService;
     private final TrackAgentClient trackAgentClient;
+    private final TrackUnitService unitService;
 
     TrackController(TrackRepository trackRepo, TodayPlanService todayPlan,
                     TrackReviewHandoff reviewHandoff, TrackProgressService progressService,
                     TrackAgentClient trackAgentClient,
-            com.obsidian.obsidian.vaults.ActiveVault activeVault) {
+            com.obsidian.obsidian.vaults.ActiveVault activeVault,
+            TrackUnitService unitService) {
+        this.unitService = unitService;
         this.activeVault = activeVault;
         this.trackRepo = trackRepo;
         this.todayPlan = todayPlan;
@@ -154,7 +157,22 @@ public class TrackController {
 
     @GetMapping("today")
     public TodayPlan today() {
-        return todayPlan.today();
+        return todayPlan.today().withUnits(unitService.today(LocalDate.now()));
+    }
+
+    public record MoveUnitRequest(String captureId, String chapter, Long trackId) {}
+
+    /** Re-home a Learn unit ({@code captureId[/chapter]}) onto another track. */
+    @PutMapping("units")
+    public ResponseEntity<?> moveUnit(@RequestBody MoveUnitRequest req) {
+        if (req == null || req.captureId() == null || req.captureId().isBlank() || req.trackId() == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "captureId and trackId required"));
+        }
+        TrackRepository.Track t = unitService.move(req.captureId(), req.chapter(), req.trackId());
+        if (t == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(Map.of(
+            "groupKey", TrackUnitService.groupKey(req.captureId(), req.chapter() == null || req.chapter().isBlank() ? null : req.chapter()),
+            "trackId", t.id(), "trackTitle", t.title()));
     }
 
     /** Optional {@code start} (ISO date): earlier than today shows past days as actual completions. */
