@@ -46,11 +46,12 @@
 .markdown-body p { margin-bottom: var(--sp-3); }
 
 .markdown-body a {
-  color: var(--accent);
-  text-decoration: none;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
   transition: opacity var(--dur-1) ease;
 }
-.markdown-body a:hover { opacity: 0.8; text-decoration: underline; }
+.markdown-body a:hover { text-decoration-color: var(--text-2); }
 
 .markdown-body code {
   font-family: var(--font-mono);
@@ -59,7 +60,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   padding: 1px 5px;
-  color: var(--accent);
+  color: var(--text-2);
 }
 
 .markdown-body pre {
@@ -115,31 +116,31 @@
 .markdown-body th {
   background: var(--raised);
   color: var(--text-2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: var(--fs-13);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .wiki-link {
-  color: var(--accent);
+  color: var(--text);
   text-decoration: none;
-  border-bottom: 1px solid var(--accent-line);
+  border-bottom: 1px solid var(--line-strong);
   cursor: pointer;
   transition: color var(--dur-1) ease, border-color var(--dur-1) ease;
 }
 
 .wiki-link:hover {
   color: var(--text);
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--text-2);
 }
 
 .md-tag {
   display: inline-block;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 0.85em;
-  color: var(--accent);
-  background: var(--accent-tint);
+  color: var(--text-2);
+  background: var(--raised);
   border-radius: 4px;
   padding: 1px 6px;
 }
@@ -154,7 +155,7 @@
 }
 
 /* Table + math look shared with the CM6 widgets (editor/tables.js, editor/math.js). */
-.markdown-body tbody tr:nth-child(even) td { background: var(--accent-tint); }
+.markdown-body tbody tr:nth-child(even) td { background: var(--raised); }
 .markdown-body .math-error {
   color: var(--danger);
   font-family: var(--font-mono);

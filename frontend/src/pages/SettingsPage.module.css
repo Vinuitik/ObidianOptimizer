@@ -168,3 +168,6 @@
   .page { padding: var(--sp-5) var(--sp-4); }
   .numInput { max-width: none; }
 }
+
+.systemLinks { display: flex; flex-direction: column; gap: var(--sp-3); }
+.systemLinks a { color: var(--text); }

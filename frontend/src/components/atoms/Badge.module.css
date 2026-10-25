@@ -4,7 +4,7 @@
   gap: var(--sp-1);
   padding: 2px var(--sp-2);
   border-radius: var(--r-pill);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: var(--fs-12);
   font-weight: 500;
   line-height: 1.4;

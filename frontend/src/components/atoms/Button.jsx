@@ -2,7 +2,7 @@ import Icon from './Icon';
 import Spinner from './Spinner';
 import styles from './Button.module.css';
 
-// variant: primary | secondary | ghost | danger  ('default' = legacy alias of secondary)
+// variant: primary | secondary | ghost | danger  (anything else maps to secondary)
 // size: sm | md.  loading: shows a spinner, disables the button.  icon: Icon name (leading).
 export default function Button({
   onClick,
@@ -16,7 +16,7 @@ export default function Button({
   disabled = false,
   ...rest
 }) {
-  const v = variant === 'default' ? 'secondary' : variant;
+  const v = ['primary', 'secondary', 'ghost', 'danger'].includes(variant) ? variant : 'secondary';
   return (
     <button
       type={type}

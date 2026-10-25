@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import {
   fetchChronoStatus, runChronoNow,
@@ -122,6 +123,23 @@ function Group({ title, description, children }) {
       <Card.Header title={title} subtitle={description} />
       <div className={styles.fields}>{children}</div>
     </Card>
+  );
+}
+
+function SystemGroup({ isAuthenticated }) {
+  const failuresCount = useStore(s => s.failuresCount);
+  const loadFailuresCount = useStore(s => s.loadFailuresCount);
+  useEffect(() => { if (isAuthenticated) loadFailuresCount(); }, [isAuthenticated, loadFailuresCount]);
+  return (
+    <Group title="System" description="Diagnostics and installation.">
+      <nav className={styles.systemLinks} aria-label="System">
+        <Link to="/dashboard">Dashboard</Link>
+        <Link to="/failures">
+          Pipeline failures{failuresCount > 0 ? <> <Badge tone="neutral">{failuresCount}</Badge></> : null}
+        </Link>
+        <Link to="/get-app">Get the app</Link>
+      </nav>
+    </Group>
   );
 }
 
@@ -298,6 +316,8 @@ export default function SettingsPage() {
         <DriveSyncPanel loaded={loaded} isAuthenticated={isAuthenticated} />
 
         <BinPanel isAuthenticated={isAuthenticated} />
+
+        <SystemGroup isAuthenticated={isAuthenticated} />
 
         <Group title="Advanced" description="Startup behaviour and background jobs.">
           {renderField(F.startupSyncMode)}

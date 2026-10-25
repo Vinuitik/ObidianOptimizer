@@ -1,5 +1,5 @@
 .select {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: var(--fs-13);
   color: var(--text-2);
   background: var(--raised);

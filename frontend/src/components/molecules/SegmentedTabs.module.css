@@ -26,7 +26,7 @@
 .tab:hover:not(:disabled) { background: var(--raised); color: var(--text); }
 .active, .active:hover:not(:disabled) { background: var(--accent-tint); color: var(--accent-text); }
 .badge {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: var(--fs-12);
   color: var(--text-3);
 }

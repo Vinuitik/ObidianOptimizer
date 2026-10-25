@@ -76,7 +76,41 @@
   font-weight: 600;
   color: var(--accent-text);
   flex-shrink: 0;
+  cursor: pointer;
+  padding: 0;
 }
+
+.menuWrap { position: relative; }
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--sp-2));
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  z-index: 50;
+}
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--control-h);
+  padding: 0 var(--sp-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--fs-14);
+  text-align: left;
+  cursor: pointer;
+}
+.menuItem:hover { background: var(--raised); color: var(--text); }
+.phoneOnly { display: none; }
 
 /* Phone: one slim row (brand + refresh). Page links live in MobileTabBar
    (bottom bar); Sign out moves into its "More" sheet. Sign in stays here so a
@@ -96,8 +130,9 @@
   }
 
   .nav .links,
-  .nav .avatar,
-  .nav .authOut {
+  .nav .menuWrap {
     display: none;
   }
+
+  .nav .phoneOnly { display: inline-flex; }
 }
