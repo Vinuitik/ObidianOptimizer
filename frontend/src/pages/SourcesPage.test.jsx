@@ -4,17 +4,15 @@ import SourcesPage from './SourcesPage';
 
 const state = { isAuthenticated: true };
 vi.mock('../store/useStore', () => ({ default: vi.fn(sel => sel(state)) }));
-vi.mock('../components/organisms/FeedView', () => ({ default: () => <div data-testid="feed" /> }));
-vi.mock('../pwa/CapturePage', () => ({ default: () => <div data-testid="capture" /> }));
+vi.mock('../components/organisms/FeedView', () => ({ default: ({ view }) => <div data-testid="feed">{view}</div> }));
 
 describe('SourcesPage', () => {
-  it('opens on the Feed and switches to Capture', () => {
+  it('has one tab row Feed · Subscriptions, no Capture', () => {
     render(<SourcesPage />);
-    expect(screen.getByTestId('feed')).toBeTruthy();
-    expect(screen.queryByTestId('capture')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: 'Capture' }));
-    expect(screen.getByTestId('capture')).toBeTruthy();
-    expect(screen.queryByTestId('feed')).toBeNull();
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Feed', 'Subscriptions']);
+    expect(screen.getByTestId('feed').textContent).toBe('feed');
+    fireEvent.click(screen.getByRole('tab', { name: 'Subscriptions' }));
+    expect(screen.getByTestId('feed').textContent).toBe('subscriptions');
   });
 
   it('gates when signed out', () => {

@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import FeedView from '../components/organisms/FeedView';
+import SourcesPage from '../pages/SourcesPage';
 import Toast from '../components/atoms/Toast';
 import useStore from '../store/useStore';
 import * as feed from '../api/feed';
@@ -11,18 +11,18 @@ const item = (id) => ({
   id, sourceId: 1, sourceTitle: 'Chan', itemUrl: `https://y/${id}`, title: `Video ${id}`,
   thumbUrl: null, durationS: 65, publishedAt: '2026-10-01T00:00:00Z', status: 'pending',
 });
-const mount = () => render(<><FeedView /><Toast /></>);
+const mount = () => render(<><SourcesPage /><Toast /></>);
 const blog = { id: 3, kind: 'rss', url: 'u', title: 'Blog', autoAccept: null, pendingCount: 0 };
 
 beforeEach(() => {
   vi.resetAllMocks();
   feed.acceptFeedItem.mockResolvedValue({ captureId: 7 });
-  feed.fetchFeedItems.mockResolvedValue([]);
+  feed.fetchFeedItems.mockImplementation(async () => useStore.getState().feedPending);
   feed.fetchFeedSources.mockResolvedValue([blog]);
   feed.deleteFeedSource.mockResolvedValue();
   useStore.setState({
     feedPending: [item(1), item(2)], feedSources: [],
-    feedLastDecision: null, feedLoaded: true, toast: null, learnView: null,
+    feedLastDecision: null, feedLoaded: true, feedError: false, isAuthenticated: true, toast: null, learnView: null,
   });
 });
 afterEach(() => vi.useRealTimers());
@@ -52,18 +52,38 @@ describe('Feed flow (W2)', () => {
     expect(useStore.getState().learnView).toBe('inbox');
   });
 
-  it('shows a skeleton, not "all caught up", before the first fetch resolves', () => {
+  it('shows a skeleton, not "nothing new", before the first fetch resolves', () => {
     useStore.setState({ feedPending: [], feedLoaded: false });
+    feed.fetchFeedItems.mockReturnValue(new Promise(() => {}));
     mount();
-    expect(screen.queryByText(/all caught up/i)).toBeNull();
+    expect(screen.queryByText(/nothing new/i)).toBeNull();
     expect(screen.getByRole('status', { name: 'Loading' })).toBeTruthy();
   });
 
-  it('empty state after load offers Open Inbox', () => {
+  it('a failing fetch resolves to ErrorState with Retry', async () => {
+    useStore.setState({ feedPending: [], feedLoaded: false });
+    feed.fetchFeedItems.mockRejectedValueOnce(new Error('boom'));
+    mount();
+    await screen.findByText(/couldn.t load the feed/i);
+    feed.fetchFeedItems.mockResolvedValue([item(5)]);
+    fireEvent.click(screen.getByText('Retry'));
+    await screen.findByText('Video 5');
+  });
+
+  it('a hanging fetch times out into ErrorState', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useStore.setState({ feedPending: [], feedLoaded: false });
+    feed.fetchFeedItems.mockReturnValue(new Promise(() => {}));
+    mount();
+    await act(async () => { vi.advanceTimersByTime(16000); });
+    expect(screen.getByText(/couldn.t load the feed/i)).toBeTruthy();
+  });
+
+  it('empty state after load offers Manage subscriptions (switches tab)', async () => {
     useStore.setState({ feedPending: [] });
     mount();
-    fireEvent.click(screen.getByText('Open Inbox'));
-    expect(useStore.getState().learnView).toBe('inbox');
+    fireEvent.click(await screen.findByText('Manage subscriptions'));
+    expect(await screen.findByLabelText('Source URL')).toBeTruthy();
   });
 
   it('delete source is optimistic; Undo cancels the DELETE', async () => {

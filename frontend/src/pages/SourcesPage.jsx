@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import useStore from '../store/useStore';
 import FeedView from '../components/organisms/FeedView';
-import CapturePage from '../pwa/CapturePage';
 import SegmentedTabs from '../components/molecules/SegmentedTabs';
 import styles from './SourcesPage.module.css';
 
-// Sources = the ONLY raw-data intake screen: Feed (swipe · bin · subscriptions) and Capture
-// (link · idea/note · file). Everything accepted flows on into the Learn inbox.
-const TABS = [{ id: 'feed', label: 'Feed' }, { id: 'capture', label: 'Capture' }];
+// Sources = Feed (swipe) · Subscriptions, ONE tab row. Manual capture is the global Capture
+// button. Everything accepted flows on into the Learn inbox.
+const TABS = [{ id: 'feed', label: 'Feed' }, { id: 'subscriptions', label: 'Subscriptions' }];
 
 export default function SourcesPage() {
   const isAuthenticated = useStore(s => s.isAuthenticated);
@@ -27,7 +26,7 @@ export default function SourcesPage() {
         <SegmentedTabs tabs={TABS} value={view} onChange={setView} aria-label="Sources sections" />
       </div>
       <div className={styles.viewBody}>
-        {view === 'feed' ? <FeedView /> : <CapturePage />}
+        <FeedView view={view} onView={setView} />
       </div>
     </div>
   );
