@@ -14,7 +14,7 @@ import EmptyState from '../components/molecules/EmptyState';
 import ErrorState from '../components/molecules/ErrorState';
 import PageHeader from '../components/molecules/PageHeader';
 import { listItem } from '../components/motion/presets';
-import { pickNextInterleaved, advanceHistory } from './reviewOrder';
+import { pickNextInterleaved } from './reviewOrder';
 import { loadFlashSession } from '../store/flashSessionPersist';
 import styles from './ReviewPage.module.css';
 
@@ -55,12 +55,8 @@ export default function ReviewPage() {
   const [loadState, setLoadState]   = useState('loading'); // loading | ready | error
   const [flash, setFlash]           = useState(null);      // { title, band } — "Graded Good" row, ~800ms
   const autoOpened = useRef(false);
-  const orderHist = useRef({ lastTrack: null, run: 0 });   // interleave state, see reviewOrder.js
-  const pickNext = (notes, done) => {
-    const n = pickNextInterleaved(notes, done, orderHist.current);
-    if (n) orderHist.current = advanceHistory(orderHist.current, n.track);
-    return n;
-  };
+  // Next note = first of the order recomputed from what is left (see reviewOrder.js).
+  const pickNext = (notes) => pickNextInterleaved(notes);
 
   function load() {
     setLoadState('loading');
