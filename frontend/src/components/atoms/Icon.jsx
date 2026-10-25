@@ -15,6 +15,7 @@ const paths = {
   refresh:  <><path d="M20 11A8 8 0 0 0 6.3 6.3L4 8.6" /><path d="M4 4v4.6h4.6" /><path d="M4 13a8 8 0 0 0 13.7 4.7L20 15.4" /><path d="M20 20v-4.6h-4.6" /></>,
   user:     <><circle cx="12" cy="8" r="3.5" /><path d="M5.5 19a6.5 6.5 0 0 1 13 0" /></>,
   x:        <path d="M6 6l12 12M18 6L6 18" />,
+  trash:    <><path d="M4 7h16" /><path d="M9 7V4.5h6V7" /><path d="M6.5 7l1 13h9l1-13" /></>,
   alert:    <><path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17.5v.01" /></>,
   inbox:    <><path d="M4 13l2-7h12l2 7v5H4z" /><path d="M4 13h5l1 2h4l1-2h5" /></>,
   track:    <><circle cx="5.5" cy="18.5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="18.5" cy="5.5" r="2" /><path d="M7 17l3.5-3.5M13.5 10.5L17 7" /></>,

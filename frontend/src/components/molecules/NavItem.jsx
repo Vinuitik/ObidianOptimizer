@@ -50,7 +50,7 @@ export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDrag
             title="Move to bin"
             aria-label="Move to bin"
           >
-            <Icon name="x" size={13} />
+            <Icon name="trash" size={13} />
           </button>
         )}
       </div>
