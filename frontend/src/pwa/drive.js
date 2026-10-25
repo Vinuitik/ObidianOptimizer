@@ -10,6 +10,7 @@
 // The page CSP must allow them in connect-src, and Google must allow the browser origin
 // on the token refresh grant — both verified in the P1 proof (fallback: server-proxied
 // refresh). See the arch plan §5 / §11.
+import { vaultPathFits, sha1Hex } from './vaultPath';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
@@ -108,7 +109,9 @@ export async function driveDownload(token, fileId) {
 // traversal needed, unlike driveFindFirstFile's predicate-scan use case.
 export async function driveFindByVaultPath(token, relativePath) {
   const escaped = relativePath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-  const q = `appProperties has { key='vault_path' and value='${escaped}' } and trashed=false`;
+  const q = vaultPathFits(relativePath)
+    ? `appProperties has { key='vault_path' and value='${escaped}' } and trashed=false`
+    : `appProperties has { key='vault_path_sha1' and value='${await sha1Hex(relativePath)}' } and trashed=false`;
   const hits = await driveList(token, q, { fields: 'files(id,name,appProperties)' });
   return hits[0] || null;
 }

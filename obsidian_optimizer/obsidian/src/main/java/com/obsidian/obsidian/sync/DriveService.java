@@ -229,7 +229,7 @@ public class DriveService {
         String folderId = ensureFolderPath(vaultId, relativePath);
 
         Map<String, String> props = new HashMap<>();
-        props.put("vault_path",   relativePath);
+        VaultPathProps.write(props, relativePath);
         props.put("content_hash", contentHash);
         props.put("device_id",    deviceId);
         props.put("uploaded_at",  String.valueOf(System.currentTimeMillis()));
@@ -308,7 +308,8 @@ public class DriveService {
                   || reason.contains("storageQuotaExceeded")
                   || reason.contains("appNotAuthorizedToFile")
                   || reason.contains("domainPolicy")
-                  || reason.contains("sharingRateLimitExceeded"));
+                  || reason.contains("sharingRateLimitExceeded")
+                  || reason.contains("propertyLengthLimitExceeded"));   // never succeeds
         }
         return false;
     }
@@ -371,10 +372,11 @@ public class DriveService {
                     listRecursive(vaultId, f.getId(), acc);
                 } else if (f.getName().endsWith(".enc")) {
                     Map<String, String> props = f.getAppProperties();
-                    if (props != null && props.containsKey("vault_path")) {
+                    String vaultPath = VaultPathProps.read(props);
+                    if (vaultPath != null) {
                         acc.add(new DriveFileInfo(
                             f.getId(),
-                            props.get("vault_path"),
+                            vaultPath,
                             props.getOrDefault("content_hash", ""),
                             props.getOrDefault("device_id", ""),
                             parseLong(props.getOrDefault("uploaded_at", "0")),
