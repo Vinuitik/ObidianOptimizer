@@ -98,7 +98,8 @@
   box-sizing: border-box;
 }
 
-.row:hover .addBtn {
+.row:hover .addBtn,
+.addBtn:focus-visible {
   opacity: 1;
 }
 
@@ -126,7 +127,8 @@
   box-sizing: border-box;
 }
 
-.row:hover .deleteBtn {
+.row:hover .deleteBtn,
+.deleteBtn:focus-visible {
   opacity: 1;
 }
 

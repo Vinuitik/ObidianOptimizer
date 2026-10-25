@@ -228,7 +228,7 @@ export default function FolderTree({ onOpenNote } = {}) {
           </Button>
         )}
         {vaultRoot && (
-          <Button variant="secondary" icon="folder" className={styles.newRootBtn} onClick={() => { setRootName(''); setRootCreating(true); }}>
+          <Button variant="ghost" icon="folder" className={styles.newRootBtn} onClick={() => { setRootName(''); setRootCreating(true); }}>
             New folder
           </Button>
         )}

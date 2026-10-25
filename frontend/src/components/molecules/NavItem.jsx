@@ -38,8 +38,9 @@ export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDrag
             className={styles.addBtn}
             onClick={e => { e.stopPropagation(); onAdd(); }}
             title="New note in this folder"
+            aria-label="New note in this folder"
           >
-            +
+            <Icon name="plus" size={13} />
           </button>
         )}
         {onDelete && (
@@ -47,8 +48,9 @@ export default function NavItem({ name, isFolder, isOpen, isActive, isAI, isDrag
             className={styles.deleteBtn}
             onClick={e => { e.stopPropagation(); onDelete(); }}
             title="Move to bin"
+            aria-label="Move to bin"
           >
-            🗑
+            <Icon name="x" size={13} />
           </button>
         )}
       </div>

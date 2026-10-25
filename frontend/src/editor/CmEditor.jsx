@@ -4,6 +4,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
+import Icon from '../components/atoms/Icon';
 import useStore, { setEditorFlush } from '../store/useStore';
 import { splitFrontmatter } from '../utils/frontmatter';
 import EditorErrorBoundary from '../components/organisms/EditorErrorBoundary';
@@ -174,7 +175,7 @@ export default function CmEditor() {
   if (!currentNotePath) {
     return (
       <div className={styles.empty}>
-        <span className={styles.emptyIcon}>📄</span>
+        <span className={styles.emptyIcon}><Icon name="file" size={32} /></span>
         <span className={styles.emptyText}>Select a note to get started</span>
       </div>
     );
