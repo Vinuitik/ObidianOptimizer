@@ -14,7 +14,7 @@ import EmptyState from '../components/molecules/EmptyState';
 import ErrorState from '../components/molecules/ErrorState';
 import PageHeader from '../components/molecules/PageHeader';
 import { listItem } from '../components/motion/presets';
-import { pickNextInterleaved } from './reviewOrder';
+import { pickNextPlanned } from './reviewOrder';
 import { loadFlashSession } from '../store/flashSessionPersist';
 import styles from './ReviewPage.module.css';
 
@@ -55,8 +55,13 @@ export default function ReviewPage() {
   const [loadState, setLoadState]   = useState('loading'); // loading | ready | error
   const [flash, setFlash]           = useState(null);      // { title, band } — "Graded Good" row, ~800ms
   const autoOpened = useRef(false);
-  // Next note = first of the order recomputed from what is left (see reviewOrder.js).
-  const pickNext = (notes) => pickNextInterleaved(notes);
+  // Next note = head of the stored plan (rebuilt at start / after a flashcard) (see reviewOrder.js).
+  const orderPlan = useRef(null);   // stored queue plan, see pickNextPlanned
+  const pickNext = (notes) => {
+    const { note, plan } = pickNextPlanned(notes, orderPlan.current);
+    orderPlan.current = plan;
+    return note;
+  };
 
   function load() {
     setLoadState('loading');

@@ -266,13 +266,14 @@ Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAcc
 
 ## Flow — review order (reads first, flashcard closes each group)
 Files: reviewOrder.js, ReviewPage.jsx
-Auto-open + `handleClose` → `ReviewPage.pickNext(notes)` → `reviewOrder.pickNextInterleaved(notes)` = `orderQueue(notes)[0]`. `orderQueue` splits the REMAINING reads (n) into f groups (f = remaining flashcards) as evenly as possible, larger groups first, each followed by one flashcard; recomputed stateless on every call (no history ref).
+Auto-open + `handleClose` → `ReviewPage.pickNext(notes)` → `reviewOrder.pickNextPlanned(notes, orderPlan ref)` → head of stored plan; plan rebuilt via `orderQueue` only at start, right after a flashcard completes, when notes appear, or >1 planned item vanished. `orderQueue` splits the REMAINING reads (n) into f groups (f = remaining flashcards) as evenly as possible, larger groups first, each followed by one flashcard; consumed between rebuilds, so reads do not reshuffle groups.
 - 11N/3F → NNNN F NNNN F NNN F; 2N/4F → N F N F F F; f=0 → all N; n=0 → all F. Always starts with a read (if any) and ends on a flashcard. Within a track: DFS (`comparePaths`). To change: `reviewOrder.orderQueue()`.
-- Pattern is recomputed from what is left, so group sizes shift as items complete. Left-hand list keeps server order.
+- After each flashcard the rest is re-split (11N/3F → 4,4,3; after first F: 7/2 → 4,3). Left-hand list keeps server order.
 
 | Touchable | Where |
 |---|---|
-| Group/interleave rule | `reviewOrder.orderQueue()` |
+| Group rule | `reviewOrder.orderQueue()` |
+| When plan rebuilds | `reviewOrder.pickNextPlanned()` |
 | Within-track order | `reviewOrder.comparePaths()` |
 | Call sites | `ReviewPage.pickNext`, auto-open effect, `handleClose` |
 

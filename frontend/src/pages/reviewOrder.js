@@ -72,7 +72,26 @@ export function orderQueue(reviewNotes) {
   return out;
 }
 
-// The auto-picked next note = first of the freshly recomputed order (null if empty).
+// Stateful wrapper: consume a stored plan, rebuild only at session start, right after a
+// flashcard completes, when new notes appear, or when more than the just-finished head
+// vanished. Plan = ordered note objects whose head is the currently picked note, so a
+// read completing does NOT reshuffle the groups (11N/3F stays NNNN F NNNN F NNN F).
+// Returns { note, plan } — caller keeps `plan` (e.g. in a ref) and passes it back.
+export function pickNextPlanned(reviewNotes, plan) {
+  if (!reviewNotes.length) return { note: null, plan: [] };
+  const paths = new Set(reviewNotes.map(n => n.fullPath));
+  const live = (plan ?? []).filter(n => paths.has(n.fullPath));
+  const head = plan?.[0];
+  const headDone = head && !paths.has(head.fullPath);
+  const rebuild = !plan || !plan.length
+    || (headDone && head.track === 'flashcard')
+    || live.length !== reviewNotes.length       // a note appeared
+    || plan.length - live.length > 1;           // more than the finished head vanished
+  const next = rebuild ? orderQueue(reviewNotes) : live;
+  return { note: next[0], plan: next };
+}
+
+// The auto-picked note from scratch = first of the freshly built order (null if empty).
 export function pickNextInterleaved(reviewNotes) {
   return orderQueue(reviewNotes)[0] ?? null;
 }

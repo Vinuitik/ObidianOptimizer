@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { orderQueue, pickNextInterleaved } from './reviewOrder';
+import { orderQueue, pickNextInterleaved, pickNextPlanned } from './reviewOrder';
 
 const mk = (n, f) => [
   ...Array.from({ length: f }, (_, i) => ({ fullPath: `f${String(i).padStart(2, '0')}.md`, track: 'flashcard' })),
@@ -46,4 +46,26 @@ describe('pickNextInterleaved', () => {
   it('first item is a read note when reads exist', () => expect(pickNextInterleaved(mk(5, 2)).track).toBe('read'));
   it('flashcard only when no reads', () => expect(pickNextInterleaved(mk(0, 2)).track).toBe('flashcard'));
   it('null when empty', () => expect(pickNextInterleaved([])).toBeNull());
+});
+
+describe('pickNextPlanned walk', () => {
+  const walk = (notes) => {
+    let left = [...notes], plan = null, out = '';
+    while (left.length) {
+      const r = pickNextPlanned(left, plan);
+      plan = r.plan;
+      out += r.note.track === 'flashcard' ? 'F' : 'N';
+      left = left.filter(x => x !== r.note);
+    }
+    return out;
+  };
+  it('11N/3F completing one by one', () => expect(walk(mk(11, 3))).toBe('NNNNFNNNNFNNNF'));
+  it('2N/4F', () => expect(walk(mk(2, 4))).toBe('NFNFFF'));
+  it('rebuilds when a planned non-head item vanishes', () => {
+    const notes = mk(6, 2);
+    const { plan } = pickNextPlanned(notes, null);
+    const left = notes.filter(n => n.fullPath !== 'n05.md' && n.fullPath !== plan[0].fullPath);
+    const r = pickNextPlanned(left, plan);
+    expect(r.plan.map(x => (x.track === 'flashcard' ? 'F' : 'N')).join('')).toBe('NNFNNF');
+  });
 });
