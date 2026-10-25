@@ -111,7 +111,17 @@ Called concurrently by `ImageProcessingWorker` — concurrency is what makes sha
 
 ## POST /complete
 
-Request: `{"prompt": str, "system"?: str, "model"?: str}` → Response: `{"text": str, "provider": str}`
+Request: `{"prompt": str, "system"?: str, "model"?: str, "priority"?: "high|medium|low", "tier"?: "fast"}` → Response: `{"text": str, "provider": str}`
+
+`tier:"fast"` (answer judge): `main.complete()` → `Router.complete_text(tier="fast")` →
+`_run("text-fast")` → chain = `FAST_ORDER` (`LLM_FAST_ORDER=provider:model,...`, default
+`groq:openai/gpt-oss-20b,gemini:gemini-3.5-flash-lite`), each with its own small model
+and `LLM_FAST_MAX_TOKENS` (400). Same Provider objects/leases/cooldowns as the text
+chain, so `priority` is honoured. Never falls back to the big text chain: exhausted → 503.
+Verified live 2026-10-25: groq gpt-oss-20b 0.2-0.5s (reasoning_effort=low), gemini-3.5-flash-lite 0.6-0.9s;
+default chain for the same prompt: 8.6s (claude-cli). Dead for this key: groq `llama-3.1-8b-instant`
+(404), gemini `gemini-2.5-flash-lite` (404 "no longer available").
+To change: `llm_router._fast_order()` / env `LLM_FAST_ORDER`.
 
 Routed through the TEXT chain — free providers first. The `model` field only
 applies if the `claude-cli` provider is reached (headless `claude -p`, bills the
@@ -124,6 +134,7 @@ generation agent (`embedder/flashcards/generate.py`).
 ---
 
 ## Technology Notes
+- **Fast tier**: model IDs rot (both originally planned defaults 404 on this key). Re-verify with a real call when changing `LLM_FAST_ORDER`. A provider listed there but unconfigured/benched is skipped; if all are, `/complete` 503s and the embedder judge degrades to PARTIAL. groq min_interval 2s means back-to-back judges can wait ~2s for the lease (observed 1.7s). gpt-oss models get `reasoning_effort: low` (in `_openai_chat`) or reasoning eats the token budget.
 
 - **Not in Docker by design** — needs the host `claude` CLI auth context; also lets
   one process own all outbound LLM rate limiting regardless of how many containers call it.
@@ -185,3 +196,5 @@ generation agent (`embedder/flashcards/generate.py`).
 | CLI timeout | `.env → CLI_TIMEOUT_S` (default 180s) |
 | Add a provider | `llm_router._build_providers()` + priority chain |
 | Register a vault / compose override | `main.py register_vault()`, `render_vaults_override()`, `_run_compose()`; tests `tests/test_vaults.py` |
+| Fast-tier provider order / models | `.env → LLM_FAST_ORDER` (`provider:model,...`), `llm_router._fast_order()` |
+| Fast-tier max tokens | `.env → LLM_FAST_MAX_TOKENS` (default 400) |

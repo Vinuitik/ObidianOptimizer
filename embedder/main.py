@@ -75,6 +75,7 @@ class JudgeRequest(BaseModel):
     answer: str
     reference_answers: list[str]
     key_points: list[str] | None = None
+    llm: bool = True   # false = cosine only (mid band -> PARTIAL): the fast first pass
 
 
 class PlacementGroupRequest(BaseModel):
@@ -386,7 +387,7 @@ def judge_answer(req: JudgeRequest):
     """Open-answer verification: banded cosine, LLM judge for the middle band."""
     from flashcards.judge import judge_open_answer
 
-    return judge_open_answer(req.question, req.answer, req.reference_answers, req.key_points)
+    return judge_open_answer(req.question, req.answer, req.reference_answers, req.key_points, req.llm)
 
 
 @app.post("/ingest")

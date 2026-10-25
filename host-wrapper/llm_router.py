@@ -179,6 +179,23 @@ TEXT_PRIORITY = _priority("LLM_TEXT_PRIORITY",
                           "groq,github,mistral,deepseek,gemini,claude-cli")
 
 
+def _fast_order():
+    """LLM_FAST_ORDER=provider:model,... — small low-latency models for the 'fast'
+    tier (answer judge). Defaults verified live 2026-10-25 (groq 8b-instant and
+    gemini-2.5-flash-lite are gone for this key)."""
+    raw = _env("LLM_FAST_ORDER") or "groq:openai/gpt-oss-20b,gemini:gemini-3.5-flash-lite"
+    out = []
+    for part in raw.split(","):
+        name, _, model = part.strip().partition(":")
+        if name:
+            out.append((name, model or None))
+    return out
+
+
+FAST_ORDER = _fast_order()
+FAST_MAX_TOKENS = int(os.environ.get("LLM_FAST_MAX_TOKENS", "400"))
+
+
 class Router:
     def __init__(self):
         self.providers = _build_providers()
@@ -193,6 +210,10 @@ class Router:
     # ── leasing ──────────────────────────────────────────────────────────
 
     def _chain(self, capability):
+        if capability == "text-fast":
+            return [self.providers[n] for n, _ in FAST_ORDER
+                    if n in self.providers and self.providers[n].configured
+                    and self.providers[n].supports("text")]
         order = VISION_PRIORITY if capability == "vision" else TEXT_PRIORITY
         return [self.providers[n] for n in order
                 if n in self.providers
@@ -269,8 +290,15 @@ class Router:
 
     # ── public API ───────────────────────────────────────────────────────
 
-    def complete_text(self, prompt, system=None, cli_model=None, priority=DEFAULT_PRIORITY):
-        """Returns (text, provider_name). Raises RouterError when exhausted."""
+    def complete_text(self, prompt, system=None, cli_model=None, priority=DEFAULT_PRIORITY,
+                      tier=None):
+        """Returns (text, provider_name). Raises RouterError when exhausted.
+        tier="fast": only FAST_ORDER providers, with their small models."""
+        if tier == "fast":
+            models = dict(FAST_ORDER)
+            return self._run("text-fast", lambda p: self._call_text(
+                p, prompt, system, cli_model, model=models.get(p.name),
+                max_tokens=FAST_MAX_TOKENS), priority=priority)
         return self._run("text", lambda p: self._call_text(p, prompt, system, cli_model),
                          priority=priority)
 
@@ -321,15 +349,15 @@ class Router:
 
     # ── per-kind calls ───────────────────────────────────────────────────
 
-    def _call_text(self, p, prompt, system, cli_model):
+    def _call_text(self, p, prompt, system, cli_model, model=None, max_tokens=None):
         if p.kind == "cli":
-            return _claude_cli(prompt, system, cli_model or p.text_model)
+            return _claude_cli(prompt, system, cli_model or model or p.text_model)
         if p.kind == "anthropic":
             return _anthropic_messages(p, [{"role": "user", "content": prompt}],
-                                       system=system, max_tokens=TEXT_MAX_TOKENS)
+                                       system=system, max_tokens=max_tokens or TEXT_MAX_TOKENS)
         messages = ([{"role": "system", "content": system}] if system else []) + \
                    [{"role": "user", "content": prompt}]
-        return _openai_chat(p, p.text_model, messages, TEXT_MAX_TOKENS)
+        return _openai_chat(p, model or p.text_model, messages, max_tokens or TEXT_MAX_TOKENS)
 
     def _call_vision(self, p, prompt, b64, media_type):
         return self._vision_request(p, prompt, [(b64, media_type)], VISION_MAX_TOKENS)
@@ -394,7 +422,9 @@ def _openai_chat(p, model, messages, max_tokens):
         p.url,
         headers={"Authorization": f"Bearer {p.key}",
                  "Content-Type": "application/json"},
-        json={"model": model, "messages": messages, "max_tokens": max_tokens},
+        json={"model": model, "messages": messages, "max_tokens": max_tokens,
+              # gpt-oss are reasoning models: cap thinking so the answer fits the budget
+              **({"reasoning_effort": "low"} if "gpt-oss" in (model or "") else {})},
         timeout=REQUEST_TIMEOUT_S,
     )
     if resp.status_code == 429:

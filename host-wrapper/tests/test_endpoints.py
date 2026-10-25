@@ -133,7 +133,7 @@ def test_process_images_all_missing_skips_router(client, vault_image, monkeypatc
 def test_complete_routes_through_text_chain(client, monkeypatch):
     captured = {}
 
-    def fake_text(prompt, system=None, cli_model=None, priority=None):
+    def fake_text(prompt, system=None, cli_model=None, priority=None, tier=None):
         captured.update(prompt=prompt, system=system, cli_model=cli_model)
         return "answer", "groq"
 
@@ -144,6 +144,17 @@ def test_complete_routes_through_text_chain(client, monkeypatch):
     assert res.get_json() == {"text": "answer", "provider": "groq"}
     assert captured == {"prompt": "make cards", "system": "you are terse",
                         "cli_model": "sonnet"}
+
+
+def test_complete_forwards_tier_and_priority(client, monkeypatch):
+    seen = {}
+
+    def fake_text(prompt, system=None, cli_model=None, priority=None, tier=None):
+        seen.update(priority=priority, tier=tier)
+        return "x", "groq"
+    monkeypatch.setattr(main.router, "complete_text", fake_text)
+    client.post("/complete", json={"prompt": "p", "tier": "fast", "priority": "high"})
+    assert seen == {"priority": "high", "tier": "fast"}
 
 
 def test_complete_422_on_missing_prompt(client):

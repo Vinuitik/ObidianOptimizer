@@ -54,6 +54,8 @@ public class AssignmentRepository {
               current_cycle INT NOT NULL DEFAULT 1,
               PRIMARY KEY (scope, type)
             )""");
+        jdbc.execute("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS provisional BOOLEAN NOT NULL DEFAULT false");
+        jdbc.execute("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS feedback TEXT");
         jdbc.execute("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
         jdbc.execute("ALTER TABLE assignments ALTER COLUMN vault_id DROP DEFAULT");
         jdbc.execute("ALTER TABLE scope_state ADD COLUMN IF NOT EXISTS vault_id BIGINT NOT NULL DEFAULT 1 REFERENCES vaults(id)");
@@ -160,12 +162,22 @@ public class AssignmentRepository {
         return n != null && n > 0;
     }
 
-    public void insertAttempt(UUID cardId, UUID assignmentId, String answer,
-                              String verdict, boolean judgeUsed, int pointsEarned) {
+    public UUID insertAttempt(UUID cardId, UUID assignmentId, String answer,
+                              String verdict, boolean judgeUsed, int pointsEarned,
+                              String feedback, boolean provisional) {
+        return jdbc.queryForObject("""
+            INSERT INTO attempts(card_id, assignment_id, user_answer, verdict, judge_used, points_earned,
+                                 feedback, provisional)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+            """, UUID.class, cardId, assignmentId, answer, verdict, judgeUsed, pointsEarned, feedback, provisional);
+    }
+
+    /** Background LLM refinement landed for a provisional attempt. */
+    public void refineAttempt(UUID attemptId, String verdict, boolean judgeUsed, int pointsEarned, String feedback) {
         jdbc.update("""
-            INSERT INTO attempts(card_id, assignment_id, user_answer, verdict, judge_used, points_earned)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """, cardId, assignmentId, answer, verdict, judgeUsed, pointsEarned);
+            UPDATE attempts SET verdict = ?, judge_used = ?, points_earned = ?, feedback = ?, provisional = false
+            WHERE id = ?
+            """, verdict, judgeUsed, pointsEarned, feedback, attemptId);
     }
 
     /** Per-note score over this assignment: earned/possible grouped by source note. */

@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.*;
 
 /**
  * Deterministic session layer: per-note tiered-knapsack assignments over bag
@@ -50,6 +51,23 @@ public class AssignmentService {
 
     @Value("${embedder.url:http://localhost:8000}")
     private String embedderUrl;
+
+    /** Total budget (ms) for an open answer before we answer with the provisional cosine verdict. */
+    @Value("${judge.wait-ms:1000}")
+    long judgeWaitMs = 1000;
+    /** complete() waits at most this long for the assignment's pending refinements. */
+    @Value("${judge.complete-wait-ms:8000}")
+    long judgeCompleteWaitMs = 8000;
+
+    /** Bounded: at most 4 concurrent LLM judges, 64 queued; overflow degrades to the cosine verdict. */
+    private final ExecutorService judgePool = new ThreadPoolExecutor(4, 4, 30, TimeUnit.SECONDS,
+        new LinkedBlockingQueue<>(64), r -> {
+            Thread t = new Thread(r, "judge-refine");
+            t.setDaemon(true);
+            return t;
+        });
+    /** assignment id → refinement stages still in flight. In-memory: lost on restart. */
+    final ConcurrentMap<UUID, List<CompletableFuture<Void>>> pendingRefinements = new ConcurrentHashMap<>();
 
     private final AssignmentRepository repo;
     private final ReviewService reviewService;
@@ -92,6 +110,7 @@ public class AssignmentService {
         if (picked.isEmpty()) {
             throw new IllegalArgumentException("could not fill assignment for scope: " + scope);
         }
+        picked = orderCards(picked);
         int actual = picked.stream().mapToInt(c -> ((Number) c.get("difficulty")).intValue()).sum();
         UUID[] ids = picked.stream().map(c -> (UUID) c.get("id")).toArray(UUID[]::new);
         UUID id = repo.insertAssignment(vaultId, scope, requestedCap, actual, ids, variants.toString());
@@ -107,6 +126,37 @@ public class AssignmentService {
             id, scope, notes.size(), picked.size(), actual);
         return Map.of("id", id, "scope", scope, "targetPoints", requestedCap,
             "actualPoints", actual, "cards", picked, "variants", variants);
+    }
+
+    static boolean isHard(Map<String, Object> c) {
+        return "open".equals(c.get("type")) || ((Number) c.get("difficulty")).intValue() >= 3;
+    }
+
+    /**
+     * Session order: alternate hard / easy (hard = difficulty >= 3 or open), starting hard,
+     * open cards in the earliest hard slots so their background judges start early.
+     * When one pool runs dry the rest is appended by ascending difficulty.
+     */
+    static List<Map<String, Object>> orderCards(List<Map<String, Object>> cards) {
+        java.util.Comparator<Map<String, Object>> byDiff =
+            java.util.Comparator.comparingInt(c -> ((Number) c.get("difficulty")).intValue());
+        List<Map<String, Object>> hard = new ArrayList<>(cards.stream().filter(AssignmentService::isHard).toList());
+        List<Map<String, Object>> easy = new ArrayList<>(cards.stream().filter(c -> !isHard(c)).toList());
+        // open first (stable), then ascending difficulty within each group
+        hard.sort(java.util.Comparator.<Map<String, Object>, Boolean>comparing(c -> !"open".equals(c.get("type")))
+            .thenComparing(byDiff));
+        easy.sort(byDiff);
+        List<Map<String, Object>> out = new ArrayList<>(cards.size());
+        int h = 0, e = 0;
+        while (h < hard.size() && e < easy.size()) {
+            out.add(hard.get(h++));
+            out.add(easy.get(e++));
+        }
+        List<Map<String, Object>> rest = new ArrayList<>(hard.subList(h, hard.size()));
+        rest.addAll(easy.subList(e, easy.size()));
+        rest.sort(byDiff);
+        out.addAll(rest);
+        return out;
     }
 
     /**
@@ -185,9 +235,12 @@ public class AssignmentService {
                 "maxPoints", difficulty, "feedback", null);
         }
 
+        long startNanos = System.nanoTime();
         String verdict;
         boolean judgeUsed = false;
         String feedback = null;
+        String referenceAnswer = null;
+        UUID provisionalId = null;
         try {
             JsonNode payload = mapper.readTree(card.get("payload").toString());
             switch ((String) card.get("type")) {
@@ -195,11 +248,51 @@ public class AssignmentService {
                     .equals(answer == null ? "" : answer.trim()) ? "CORRECT" : "WRONG";
                 case "exercise" -> verdict = verifyExercise(vaultId, assignmentId, cardId, payload, answer);
                 case "open" -> {
-                    JsonNode judged = postJson("/flashcards/judge", judgeRequest(payload, answer));
+                    JsonNode refs = payload.path("reference_answers");
+                    referenceAnswer = refs.isArray() && refs.size() > 0 ? refs.get(0).asText() : null;
+                    // Pass 1: cosine only (~0.3s). Clear band = final.
+                    JsonNode judged = postJson("/flashcards/judge", judgeRequest(payload, answer, false));
                     if (judged == null) throw new IllegalStateException("judge unavailable");
                     verdict = judged.get("verdict").asText();
-                    judgeUsed = judged.path("judge_used").asBoolean();
-                    feedback = judged.path("feedback").isNull() ? null : judged.path("feedback").asText();
+                    feedback = textOrNull(judged.path("feedback"));
+                    boolean midBand = "PARTIAL".equals(verdict) && !judged.path("judge_used").asBoolean();
+                    if (midBand) {
+                        // Pass 2: full LLM judge in the background; wait for what's left of the budget.
+                        CompletableFuture<JsonNode> full = startFullJudge(payload, answer);
+                        long remainingMs = Math.max(0,
+                            judgeWaitMs - (System.nanoTime() - startNanos) / 1_000_000);
+                        JsonNode refined = null;
+                        boolean late = false;
+                        if (full == null) {
+                            // pool saturated — stay on the cosine verdict, finalise
+                        } else {
+                            try {
+                                refined = full.get(remainingMs, TimeUnit.MILLISECONDS);
+                            } catch (TimeoutException te) {
+                                late = true;
+                            } catch (ExecutionException ee) {
+                                log.warn("[Assignment] full judge failed: {}", ee.getCause().getMessage());
+                            }
+                        }
+                        if (refined != null) {
+                            verdict = refined.get("verdict").asText();
+                            judgeUsed = refined.path("judge_used").asBoolean();
+                            feedback = textOrNull(refined.path("feedback"));
+                        } else if (late) {
+                            int provisionalPoints = pointsFor(verdict, difficulty);
+                            provisionalId = repo.insertAttempt(cardId, assignmentId, answer, verdict,
+                                false, provisionalPoints, null, true);
+                            registerRefinement(assignmentId, provisionalId, difficulty, full);
+                            Map<String, Object> out = new java.util.LinkedHashMap<>();
+                            out.put("verdict", verdict);
+                            out.put("provisional", true);
+                            out.put("referenceAnswer", referenceAnswer);
+                            out.put("pointsEarned", provisionalPoints);
+                            out.put("maxPoints", difficulty);
+                            out.put("feedback", null);
+                            return out;
+                        }
+                    }
                 }
                 default -> throw new IllegalStateException("unknown type");
             }
@@ -207,14 +300,64 @@ public class AssignmentService {
             throw new IllegalStateException("verification failed: " + e.getMessage(), e);
         }
 
-        int points = switch (verdict) {
+        int points = pointsFor(verdict, difficulty);
+        repo.insertAttempt(cardId, assignmentId, answer, verdict, judgeUsed, points, feedback, false);
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("verdict", verdict);
+        out.put("provisional", false);
+        if ("open".equals(card.get("type"))) out.put("referenceAnswer", referenceAnswer);
+        out.put("pointsEarned", points);
+        out.put("maxPoints", difficulty);
+        out.put("feedback", feedback);
+        return out;
+    }
+
+    static int pointsFor(String verdict, int difficulty) {
+        return switch (verdict) {
             case "CORRECT" -> difficulty;
             case "PARTIAL" -> Math.max(1, difficulty / 2);
             default -> 0;
         };
-        repo.insertAttempt(cardId, assignmentId, answer, verdict, judgeUsed, points);
-        return mapOfNullable("verdict", verdict, "pointsEarned", points,
-            "maxPoints", difficulty, "feedback", feedback);
+    }
+
+    private static String textOrNull(JsonNode n) {
+        return n == null || n.isMissingNode() || n.isNull() ? null : n.asText();
+    }
+
+    /** Fire the full (LLM) judge on the bounded pool; null if the pool is saturated. */
+    private CompletableFuture<JsonNode> startFullJudge(JsonNode payload, String answer) {
+        try {
+            return CompletableFuture.supplyAsync(
+                () -> postJson("/flashcards/judge", judgeRequest(payload, answer, true)), judgePool);
+        } catch (RejectedExecutionException e) {
+            log.warn("[Assignment] judge pool saturated — keeping cosine verdict");
+            return null;
+        }
+    }
+
+    /** When the late judge lands, UPDATE the provisional attempt; track the stage for complete(). */
+    private void registerRefinement(UUID assignmentId, UUID attemptId, int difficulty,
+                                    CompletableFuture<JsonNode> full) {
+        CompletableFuture<Void> stage = full.handle((refined, err) -> {
+            try {
+                if (err == null && refined != null && refined.hasNonNull("verdict")) {
+                    String v = refined.get("verdict").asText();
+                    repo.refineAttempt(attemptId, v, refined.path("judge_used").asBoolean(),
+                        pointsFor(v, difficulty), textOrNull(refined.path("feedback")));
+                }  // else: attempt stays provisional PARTIAL
+            } catch (Exception e) {
+                log.warn("[Assignment] refine update failed for attempt {}: {}", attemptId, e.getMessage());
+            }
+            return (Void) null;
+        });
+        pendingRefinements.computeIfAbsent(assignmentId, k -> new CopyOnWriteArrayList<>()).add(stage);
+        stage.whenComplete((v, t) -> {
+            List<CompletableFuture<Void>> l = pendingRefinements.get(assignmentId);
+            if (l != null) {
+                l.remove(stage);
+                if (l.isEmpty()) pendingRefinements.remove(assignmentId, l);
+            }
+        });
     }
 
     private String verifyExercise(long vaultId, UUID assignmentId, UUID cardId, JsonNode payload, String answer)
@@ -242,6 +385,7 @@ public class AssignmentService {
     public Map<String, Object> complete(long vaultId, UUID assignmentId) {
         Map<String, Object> assignment = repo.findAssignment(vaultId, assignmentId);
         if (assignment == null) throw new IllegalArgumentException("unknown assignment");
+        awaitPendingRefinements(assignmentId);
         List<Map<String, Object>> scores = repo.perNoteScores(assignmentId);
         List<Map<String, Object>> graded = new ArrayList<>();
         for (Map<String, Object> row : scores) {
@@ -255,14 +399,32 @@ public class AssignmentService {
         return Map.of("assignmentId", assignmentId, "notes", graded);
     }
 
+    /** Wait (bounded) for this assignment's background judges so FSRS sees refined verdicts. */
+    private void awaitPendingRefinements(UUID assignmentId) {
+        List<CompletableFuture<Void>> pending = pendingRefinements.get(assignmentId);
+        if (pending == null || pending.isEmpty()) return;
+        try {
+            CompletableFuture.allOf(pending.toArray(new CompletableFuture[0]))
+                .get(judgeCompleteWaitMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            log.info("[Assignment] {} complete(): refinements still pending after {}ms — grading with provisional",
+                assignmentId, judgeCompleteWaitMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            // stages never complete exceptionally (handle()), nothing to do
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private ObjectNode judgeRequest(JsonNode payload, String answer) {
+    private ObjectNode judgeRequest(JsonNode payload, String answer, boolean llm) {
         ObjectNode req = mapper.createObjectNode();
         req.put("question", payload.path("question").asText());
         req.put("answer", answer == null ? "" : answer);
         req.set("reference_answers", payload.path("reference_answers"));
         req.set("key_points", payload.path("key_points"));
+        req.put("llm", llm);
         return req;
     }
 
