@@ -249,6 +249,7 @@ const initialDataState = () => ({
   feedPending: [],          // pending items, newest first; [0] is the card on screen
   feedSources: [],
   feedLastDecision: null,   // { item, kind: 'accept'|'bin' } — undo covers ONLY this one
+  feedError: false,         // last fetchFeed failed/timed out → FeedView shows ErrorState + Retry
   feedLoaded: false,        // true once the first fetchFeed resolved — gates empty states + Learn's default tab
   learnView: null,          // 'feed' | 'inbox' | null — Learn's active tab; set by LearnPage / toast "View"
 
@@ -267,6 +268,8 @@ const initialDataState = () => ({
 
 let toastSeq = 0;
 const DELETE_UNDO_MS = 7000;
+
+const FEED_FETCH_TIMEOUT_MS = 15000;
 
 const useStore = create((set, get) => ({
   ...initialDataState(),
@@ -1132,14 +1135,17 @@ const useStore = create((set, get) => ({
   // so the swipe stack + Undo work with the laptop off (feed/FLOWS_feed.md §4/P2) — online
   // behavior is unchanged, they just delegate straight through to the api/feed.js calls below.
   // The Bin tab list itself stays direct/online-only (not exported for offline).
+  // Always resolves: success → feedError false; failure/timeout (FEED_FETCH_TIMEOUT_MS) → feedError true.
   fetchFeed: async () => {
+    set({ feedError: false });
+    let timer;
     try {
-      const feedPending = await fetchFeedOffline();
-      set({ feedPending, feedLoaded: true });
+      const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('feed timeout')), FEED_FETCH_TIMEOUT_MS); });
+      const feedPending = await Promise.race([fetchFeedOffline(), timeout]);
+      set({ feedPending, feedLoaded: true, feedError: false });
     } catch (e) {
-      set({ feedLoaded: true });
-      if (!(e instanceof ApiError && e.status === 401)) get().setFeedNotice("Couldn't load the feed.");
-    }
+      set({ feedLoaded: true, feedError: !(e instanceof ApiError && e.status === 401) });
+    } finally { clearTimeout(timer); }
   },
 
   decideFeed: async (kind) => {

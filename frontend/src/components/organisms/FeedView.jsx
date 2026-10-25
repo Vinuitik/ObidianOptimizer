@@ -3,9 +3,8 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import useStore from '../../store/useStore';
 import Button from '../atoms/Button';
 import Skeleton from '../atoms/Skeleton';
-import SegmentedTabs from '../molecules/SegmentedTabs';
+import ErrorState from '../molecules/ErrorState';
 import EmptyState from '../molecules/EmptyState';
-import ListRow from '../molecules/ListRow';
 import { swipe, fadeRiseReduced } from '../motion/presets';
 import FeedSources from './FeedSources';
 import styles from './FeedView.module.css';
@@ -66,22 +65,25 @@ function FeedCard({ item, onDecide }) {
             variant="ghost" size="sm"
             onPointerDown={e => e.stopPropagation()}
             onClick={e => { e.stopPropagation(); subscribeToChannel(item.itemUrl); }}
-          >🔔 Subscribe to this channel</Button>
+          >Subscribe to this channel</Button>
         )}
       </div>
     </div>
   );
 }
 
-function Stack() {
+function Stack({ onManage }) {
   const pending = useStore(s => s.feedPending);
   const loaded = useStore(s => s.feedLoaded);
   const decide = useStore(s => s.decideFeed);
   const undo = useStore(s => s.undoFeed);
   const last = useStore(s => s.feedLastDecision);
-  const setLearnView = useStore(s => s.setLearnView);
+  const error = useStore(s => s.feedError);
+  const fetchFeed = useStore(s => s.fetchFeed);
   const reduced = useReducedMotion();
   const item = pending[0];
+  useEffect(() => { fetchFeed(); }, [fetchFeed]);
+
   // Exit direction = the decision that just removed the card (right = accept, left = bin).
   const dir = last?.kind === 'bin' ? -1 : 1;
 
@@ -96,7 +98,10 @@ function Stack() {
     return () => window.removeEventListener('keydown', onKey);
   }, [decide]);
 
-  // Never claim "all caught up" before the first fetch resolved.
+  // Loading always resolves: fetchFeed sets feedLoaded (and feedError on failure/timeout).
+  if (!item && error) {
+    return <ErrorState message="Couldn't load the feed" onRetry={fetchFeed} />;
+  }
   if (!item && !loaded) {
     return <div className={styles.stage}><Skeleton height={260} className={styles.cardSkeleton} /></div>;
   }
@@ -104,9 +109,9 @@ function Stack() {
     return (
       <EmptyState
         icon="check"
-        title="You're all caught up"
-        description="New videos and posts from your sources land here. Add them in the Subscriptions tab."
-        action={{ label: 'Open Inbox', onClick: () => setLearnView('inbox') }}
+        title="Nothing new"
+        description="New videos and posts from your subscriptions land here."
+        action={{ label: 'Manage subscriptions', onClick: onManage }}
       />
     );
   }
@@ -126,7 +131,7 @@ function Stack() {
         </AnimatePresence>
       </div>
       <div className={styles.actions}>
-        <Button variant="danger" onClick={() => decide('bin')} aria-label="Bin">← Bin</Button>
+        <Button variant="secondary" onClick={() => decide('bin')} aria-label="Bin">← Bin</Button>
         <span className={styles.center}>
           <span className={styles.count}>{pending.length} left</span>
           {last && <Button variant="ghost" size="sm" onClick={undo}>Undo</Button>}
@@ -137,22 +142,14 @@ function Stack() {
   );
 }
 
-const TABS = [
-  { id: 'stack', label: 'Swipe' },
-  { id: 'sources', label: 'Subscriptions' },
-];
-
-export default function FeedView() {
-  const [tab, setTab] = useState('stack');
-
+// Tab row lives in SourcesPage (Feed · Subscriptions) — FeedView renders only the body.
+// view: 'feed' | 'subscriptions'.
+export default function FeedView({ view = 'feed', onView = () => {} }) {
   return (
     <div className={styles.wrap}>
-      <div className={styles.tabs}>
-        <SegmentedTabs tabs={TABS} value={tab} onChange={setTab} aria-label="Feed sections" />
-      </div>
       <div className={styles.body}>
-        {tab === 'stack' && <Stack />}
-        {tab === 'sources' && <FeedSources onSubscribed={() => setTab('stack')} />}
+        {view === 'feed' && <Stack onManage={() => onView('subscriptions')} />}
+        {view === 'subscriptions' && <FeedSources onSubscribed={() => onView('feed')} />}
       </div>
     </div>
   );

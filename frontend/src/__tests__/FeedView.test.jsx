@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import FeedView from '../components/organisms/FeedView';
+import SourcesPage from '../pages/SourcesPage';
 import Toast from '../components/atoms/Toast';
 import useStore from '../store/useStore';
 import * as feed from '../api/feed';
@@ -31,15 +31,15 @@ beforeEach(() => {
   feed.acceptFeedItem.mockResolvedValue({ captureId: 7 });
   feed.binFeedItem.mockResolvedValue();
   feed.restoreFeedItem.mockResolvedValue();
-  feed.fetchFeedItems.mockResolvedValue([]);
+  feed.fetchFeedItems.mockImplementation(async () => useStore.getState().feedPending);
   feed.fetchFeedSources.mockResolvedValue([]);
   useStore.setState({
     feedPending: [item(1), item(2)], feedSources: [],
-    feedLastDecision: null, feedLoaded: true, toast: null,
+    feedLastDecision: null, feedLoaded: true, feedError: false, isAuthenticated: true, toast: null,
   });
 });
 
-const mount = () => render(<><FeedView /><Toast /></>);
+const mount = () => render(<><SourcesPage /><Toast /></>);
 
 describe('FeedView', () => {
   it('shows the first pending card', () => {
@@ -71,6 +71,7 @@ describe('FeedView', () => {
 
   it('ArrowRight accepts, ArrowLeft bins', async () => {
     mount();
+    await act(async () => {});   // let the mount-time fetch settle
     fireEvent.keyDown(window, { key: 'ArrowRight' });
     await waitFor(() => expect(feed.acceptFeedItem).toHaveBeenCalledWith(1));
     fireEvent.keyDown(window, { key: 'ArrowLeft' });
@@ -80,7 +81,9 @@ describe('FeedView', () => {
   it('has no Bin tab (bin lives in Settings)', () => {
     mount();
     expect(screen.queryByRole('tab', { name: 'Bin' })).toBeNull();
-    expect(screen.getByRole('tab', { name: 'Subscriptions' })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Capture' })).toBeNull();
+    // ONE tab row only: Feed · Subscriptions
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Feed', 'Subscriptions']);
   });
 
   it('keys are ignored while typing in an input', () => {
@@ -120,7 +123,7 @@ describe('FeedView', () => {
   it('shows the empty state', () => {
     useStore.setState({ feedPending: [] });
     mount();
-    expect(screen.getByText(/all caught up/i)).toBeTruthy();
+    expect(screen.getByText(/nothing new/i)).toBeTruthy();
   });
 
   it('shows "Subscribe to this channel" only for YouTube items, and subscribes on click', async () => {
@@ -129,16 +132,16 @@ describe('FeedView', () => {
       feedPending: [item(1, { itemUrl: 'https://www.youtube.com/watch?v=abc' }), item(2)],
     });
     mount();
-    expect(screen.getByText('🔔 Subscribe to this channel')).toBeTruthy();
+    expect(screen.getByText('Subscribe to this channel')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('🔔 Subscribe to this channel'));
+    fireEvent.click(screen.getByText('Subscribe to this channel'));
     await waitFor(() => expect(feed.addFeedSource).toHaveBeenCalledWith('https://www.youtube.com/watch?v=abc'));
     await screen.findByText('Subscribed to this channel.');
   });
 
   it('does not show "Subscribe to this channel" for a non-YouTube item', () => {
     mount();   // item(1) itemUrl is https://y/1
-    expect(screen.queryByText('🔔 Subscribe to this channel')).toBeNull();
+    expect(screen.queryByText('Subscribe to this channel')).toBeNull();
   });
 
 });

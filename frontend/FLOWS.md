@@ -90,7 +90,7 @@ Add it to the **claude.ai** website as a custom connector with **No authenticati
 |---|---|
 | `/` | `<Navigate to="/review">` — Review is the default (web + PWA start_url `/`; PwaApp also redirects `/` and `*` to `/review`) |
 | `/notes` | `MainPage` — 3-panel note editor |
-| `/sources` | `SourcesPage` — Feed + Capture (only raw-data intake) |
+| `/sources` | `SourcesPage` — Feed · Subscriptions |
 | `/learn` | `LearnPage` — split view: ResourcePanel (pdf/video) + NotePanel |
 | `/review` | `ReviewPage` — due list + FlashcardSession (tests) or SlideshowReview (self-rate), per `flashcardsEnabled` |
 | `/dashboard` | `DashboardPage` — live processing stats, polls `/api/stats` every 3s |
@@ -162,8 +162,8 @@ Files: LearnPage.jsx, TodayPlan.jsx, WeekPlan.jsx, TrackEditor.jsx, TracksPlan.m
 ## Sources — the only raw-data intake (`/sources`)
 Files: SourcesPage.jsx, FeedView.jsx, FeedSources.jsx, CapturePage.jsx (pwa/), offlineApi.js, outbox.js, api/capture.js, api/feed.js
 - Product flow: Sources → (auto ingest) Inbox/Learn → Tracks group existing notes → Review. No capture/feed carries a track id any more.
-- `SourcesPage` (auth-gated) SegmentedTabs Feed | Capture (local `useState('feed')`). Same page on web (`App.jsx`) and PWA (`pwa/MobileApp.jsx`, bottom tab "Sources" replaces "Capture").
-- Feed tab → `FeedView` tabs Swipe · Bin · Subscriptions. Subscribe: `FeedSources` → store `resolveFeedSource`/`addFeedSource` → `POST /feed/sources {url}` (preview first). To change: `FeedSources.jsx`, `api/feed.js`.
+- `SourcesPage` (auth-gated) SegmentedTabs Feed | Subscriptions (local `useState('feed')`; Capture tab removed — global Capture button). Same page on web (`App.jsx`) and PWA (`pwa/MobileApp.jsx`, bottom tab "Sources" replaces "Capture").
+- `FeedView` (no tabs of its own) shows Swipe or Subscriptions per `view` prop. Subscribe: `FeedSources` → store `resolveFeedSource`/`addFeedSource` → `POST /feed/sources {url}` (preview first). To change: `FeedSources.jsx`, `api/feed.js`.
 - Capture tab → `pwa/CapturePage` modes Link · Note (idea/text) · File. Link/Note → `offlineApi.captureUrl(url)` / `captureText(text,title)` → `POST /api/capture` (offline/401 → `outbox.enqueueCapture*`, replay body has no track fields; old queued `trackOpts` ignored). File → `api/capture.captureFile(file)` (online only). To change: `CapturePage.jsx`, `offlineApi.js`.
 - Global quick idea/URL/file capture stays in NavBar `QuickCapture` (web). `/capture` PWA route kept as share-target landing (SW 303 → `/capture?shared=`).
 - Tests: `pages/SourcesPage.test.jsx`, `App.routes.test.jsx`, `__tests__/Feed*.test.jsx`, `pwa/shell.test.jsx`.
@@ -174,7 +174,7 @@ Files: SourcesPage.jsx, FeedView.jsx, FeedSources.jsx, CapturePage.jsx (pwa/), o
 | Default route `/` | `App.jsx` `<Route path="/">` Navigate; PWA `MobileApp.jsx` |
 | Nav entries/order | `components/organisms/useNavItems.js` `NAV_ITEMS`; PWA `pwa/BottomNav.jsx` `TABS` |
 | Sources tabs | `pages/SourcesPage.jsx` `TABS` |
-| Feed sub-tabs | `FeedView.jsx` `TABS` |
+| Feed load timeout / error flag | `store/useStore.js` `FEED_FETCH_TIMEOUT_MS`, `fetchFeed`, `feedError` |
 | Capture modes | `pwa/CapturePage.jsx` `MODES` |
 | Capture POST bodies | `offlineApi.captureUrl/captureText`, `outbox.flush`, `api/capture.js` |
 
