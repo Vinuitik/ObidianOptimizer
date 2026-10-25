@@ -185,7 +185,7 @@ Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String>
 ## DELETE /notes — Soft Delete
 
 `NotesController.deleteNote(DeleteNoteRequest{path})`  
-→ `FileRepository.softDeleteNote()` → move to `<active vault root>/_trash/` → `NoteIndexRepository.delete()` → `NoteLinkRepository.deleteSource()`
+→ `FileRepository.softDeleteNote()` → move to `<active vault root>/_trash/` → `BinRepository.record(kind=note, trash_path, original_path)` (see `bin/FLOWS.md`; restore = `FileRepository.restoreFromTrash()`) → `NoteIndexRepository.delete()` → `NoteLinkRepository.deleteSource()`
 
 ## DELETE /folders — Recursive Soft Delete
 
@@ -197,12 +197,13 @@ Hunk DTO: `FileRepository.PatchHunk(int startLine, int deleteCount, List<String>
    `syncQueueRepo.tombstone` — same bookkeeping as `softDeleteNote`, done BEFORE the move.
 3. `folder.renameTo(_trash/<name>)` as a unit (collision-suffixed) — subfolders + non-note
    files ride along. Frontend refetches the parent so the folder vanishes from the tree.
+4. ONE `bin_entries` row (kind=folder) is written for the whole folder; restore moves it back as a unit and re-indexes every note inside (`bin/FLOWS.md`).
 
 ### softDeleteFile (non-note siblings)
 `FileRepository.softDeleteFile(path)` — same `_trash/` move, but **no** note-index /
 link / sync bookkeeping (the target was never indexed). Used by the Inbox to trash a
 Capture source snapshot (`_inbox/_sources/*.md`) on acknowledge. Idempotent: a missing
-file is a no-op (acknowledge can be retried). Collision-suffixes on name clash.
+file is a no-op (acknowledge can be retried). Collision-suffixes on name clash. Writes a `bin_entries` row (kind=file).
 
 ---
 

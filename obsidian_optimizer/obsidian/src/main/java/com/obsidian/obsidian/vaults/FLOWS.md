@@ -1,6 +1,6 @@
 # Vaults — FLOWS
 
-Files: VaultDeletionController.java, VaultDeletionRepository.java, VaultDeletionWorker.java, VaultBackup.java, VaultDeletionIT.java (test), VaultRepository.java, ActiveVault.java, VaultInternalRoutingIT.java (test), ../internalapi/InternalAgentController.java, ../common/IngestClient.java, embedder/vault_paths.py, VaultController.java, VaultException.java, VaultSwitchedEvent.java, VaultKeys.java, VaultHeaderFilter.java, VaultMigrationIT.java + VaultScopingIT.java + VaultSwitchIT.java + VaultHeaderFilterTest.java (tests); settings: ../settings/SettingsRepository.java; sync: ../sync/SyncWorker.java; plan: architecture_plans/VAULTS_PLAN.md
+Files: VaultRepository.java, ActiveVault.java, VaultInternalRoutingIT.java (test), ../internalapi/InternalAgentController.java, ../common/IngestClient.java, embedder/vault_paths.py, VaultController.java, VaultException.java, VaultSwitchedEvent.java, VaultKeys.java, VaultHeaderFilter.java, VaultMigrationIT.java + VaultScopingIT.java + VaultSwitchIT.java + VaultHeaderFilterTest.java (tests); settings: ../settings/SettingsRepository.java; sync: ../sync/SyncWorker.java; plan: architecture_plans/VAULTS_PLAN.md
 
 Status: M1 (registry + `vault_id` column backfill) + M2 (keys + ON CONFLICT + BM25 include vault_id) + M3 (Java scoping: every vault-scoped query filters on `vault_id`, paths come from `ActiveVault`, `X-Vault-Id` filter) + M4 (`vault_settings`, symmetric per-vault Drive sync, per-vault chrono date, switching + rescan, registry REST) + M5 (Python scoping: embedder requests/callbacks carry the vault) + M6 (registration `POST /vaults` + wrapper-generated mounts + nginx per-vault media). Everything marked [NOT IMPLEMENTED] is a later milestone.
 
@@ -64,17 +64,10 @@ Media: nginx `/vault-media/<id>/…` -> `/vaults-res/<id>/…`, `/workspace/<id>
 Every compose invocation must include the override when it exists (`start.sh`, `stop.sh`, `clear.sh`, `overnight.sh`, `redeploy.sh`, `refresh-embedder.sh`, `pg-backup.sh`, `win_scripts/start.ps1|clear.ps1`) - otherwise a plain `up` recreates containers WITHOUT the extra vaults' mounts.
 Tests: `VaultSwitchIT` (register_*), `VaultWrapperClientTest`, `host-wrapper/tests/test_vaults.py`.
 
-## Deletion (M7b)
-Settings ▸ Vaults ▸ Delete (typed-name confirm, `VaultsPanel`) → `deleteVault(id)` → `POST /vaults/{id}/delete` (`VaultDeletionController.delete`) → `VaultDeletionRepository.enqueue()` (txn, row lock) → 404 unknown / 409 active, primary, or last remaining (peers with a non-FAILED job don't count) / 409 `VaultBackup.blockedReason()` (vault has no Drive or no encryption passphrase — checked HERE, at enqueue, so nothing is queued that could never be backed up) → upsert `vault_deletion_jobs` QUEUED (FAILED is requeued; QUEUED/RUNNING/DONE untouched) → **202** `{status}`.
-`VaultDeletionWorker.tick()` (@Scheduled, `vaults.deletion.poll-ms`=5000, `vaults.deletion.enabled`) → `PollingQueueWorker<Long>` over `claimPending()` (QUEUED+RUNNING, so a crash mid-job resumes) → `process(id)`: `markRunning` → `VaultBackup.backup(id)` once (`backup_done` flag persisted) → `VaultDeletionRepository.purge(id)` → `markDone`; any exception → `markFailed` (error text kept; nothing further runs).
-`purge`: re-check not active/primary → tables = `information_schema` base tables with a `vault_id` column → `DELETE ... WHERE vault_id=?` per table, each its own statement; FK-blocked tables retried after the others (no progress = error) → `DELETE FROM vaults` (registration). Files on disk, `vaults.registry.json`, compose mounts are NOT touched.
-While QUEUED/RUNNING: `VaultRepository.activate()` refuses the vault (409); `GET /vaults` rows carry `deletion_status` (QUEUED|RUNNING|FAILED|DONE|null); the panel polls every 3s while any is pending.
-The `VaultBackup` bean IS `sync.DbBackupService` (B1): `backup(id)` = `blockedReason()` → throw if Drive/encryption missing, else `doBackup()` (per-vault encrypted COPY snapshot → Drive `_db/`; Drive-only, no local fallback). The nightly cron uses `backupNow()` instead, which skips with a warning. To change the backup: `DbBackupService.backup()` / `blockedReason()`.
-Tests: `VaultDeletionIT` (409 rules incl. refused without Drive/encryption, backup-before-purge, other vaults intact, backup failure purges nothing, resume skips backup), `VaultsPanel.test.jsx`.
+## Deletion [REMOVED 2026-10-25]
+Vault deletion (queue/worker/purge/backup port, `POST /vaults/{id}/delete`) was removed from the product; archive/unregister stays. Users delete vault folders on disk themselves. `vault_deletion_jobs` is no longer created (an old table, if present, is inert).
 
 ## Not yet
-- Automatic/time-based vault GC: deliberately NEVER; deletion only on user request (see Deletion M7b).
-- Per-vault backup wiring [NOT IMPLEMENTED]: `VaultBackup` port has only the fail-closed default; wire `sync.DbBackupService` at merge.
 - M8 code DONE: every `initSchema` runs `ALTER COLUMN vault_id DROP DEFAULT` right after its ADD COLUMN (Java) / in `generate.ensure_schema` + `failures.ensure_schema` (Python); all main INSERTs set vault_id explicitly (`pipeline_failures` stays nullable). A forgotten vault_id now fails loudly (NOT NULL violation).
 - M8 MANUAL E2E [NOT DONE]: (1) deploy (merge --no-ff + restart; confirm `DROP DEFAULT` ran, no boot errors); (2) register a test vault (Settings > Vaults, accept downtime); (3) switch to it, create note/card/track, confirm it appears only there; (4) switch back to vault 1, compare per-table counts vs `backups/pre-vaults-*.dump` and confirm Drive folder untouched; (5) archive/restore the test vault.
 
@@ -98,7 +91,6 @@ Details: `frontend/src/vault/FLOWS.md`. Client sends `X-Vault-Id` on every `/api
 - Rabbit payloads without `vaultId` (queued before the M3 deploy) are treated as vault 1.
 - Seed hardcodes id 1 and container_path `/vault` (must match the compose mount). If `/vault` is changed, the UNIQUE(container_path) seed insert for id 1 is skipped when a row already exists, silently keeping the old value.
 - Only one `active` row is allowed (partial unique index); the seed is `ON CONFLICT DO NOTHING`, so an install that already has some other active vault keeps it.
-- Deletion queue (M7b): `vault_deletion_jobs` is the durable state; single backend node, single worker thread, no row lock on claim (a second node would double-process; the steps are idempotent but the backup would run twice). The backup is Drive-only and fail-closed: `DbBackupService.backup()` THROWS when Drive/encryption is missing or the upload fails, so the job FAILS at the backup step and nothing is purged (`enqueue` also refuses up-front with 409). A vault whose Drive/passphrase is later removed while QUEUED fails at the worker. `VaultDeletionIT` mocks `DbBackupService` (a `@MockBean VaultBackup` would knock out the real bean that `SyncWorker` needs). The purge is per-table autocommit, NOT one transaction: a crash leaves a half-purged vault (still registered, still RUNNING) until the next tick finishes it, so the UI can briefly show a vault with partial data. In-flight queue work (embedder callbacks, Rabbit messages) for the vault can re-insert rows after its table was purged; the final registration delete would then fail on the FK and the job FAILS (re-POST to retry). Tables lacking `vault_id` that FK a vault-scoped table also block the purge (FAILED with the table list). The vault's mount stays in `vaults.registry.json`/compose override (the wrapper has no unregister), and Drive folders and client IDB/caches are untouched. The nightly whole-DB backup is a separate, whole-database safety net. No automatic GC exists or is allowed.
 
 ## Change Index
 | Thing | Where |
@@ -134,10 +126,3 @@ Details: `frontend/src/vault/FLOWS.md`. Client sends `X-Vault-Id` on every `/api
 | Per-vault media URLs | `frontend/nginx.conf.template` (`/vault-media/<id>/`, `/workspace/<id>/`) |
 | Client vault scoping (header, 409, IDB/cache names, media URLs) | `frontend/src/vault/activeVault.js` |
 | M6 tests | `VaultSwitchIT`, `VaultWrapperClientTest`, `host-wrapper/tests/test_vaults.py` |
-| Delete a vault (enqueue rules) | `VaultDeletionController.delete()`, `VaultDeletionRepository.enqueue()` |
-| Deletion job table DDL | `VaultRepository.initSchema()` (`vault_deletion_jobs`) |
-| Deletion worker / poll interval / off switch | `VaultDeletionWorker`; `vaults.deletion.poll-ms`, `vaults.deletion.enabled` |
-| Purge algorithm | `VaultDeletionRepository.purge()` |
-| Per-vault backup hook / enqueue-time Drive+encryption gate | `VaultBackup` (port), `sync.DbBackupService.backup()` / `blockedReason()`; gate in `VaultDeletionRepository.enqueue()` |
-| Delete UI | `frontend/src/pages/VaultsPanel.jsx`, `frontend/src/api/vaults.js deleteVault` |
-| M7b tests | `VaultDeletionIT`, `VaultsPanel.test.jsx` |

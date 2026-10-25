@@ -5,6 +5,7 @@ Subsystem docs live next to the code they describe.
 | Domain | FLOWS.md | Key classes |
 |---|---|---|
 | **notes** | [notes/FLOWS.md](notes/FLOWS.md) | NotesController, FileRepository, NoteIndexRepository, NoteLinkRepository, FrontmatterParser |
+| **bin** | [bin/FLOWS.md](bin/FLOWS.md) | BinController, BinService, BinRepository |
 | **settings** | [settings/FLOWS.md](settings/FLOWS.md) | SettingsController, SettingsRepository |
 | **chrono** | [chrono/FLOWS.md](chrono/FLOWS.md) | ChronoService, ChronoController, FileMoverService, BankruptcyService, SpreadService, FrontmatterRewriter |
 | **media** | [media/FLOWS.md](media/FLOWS.md) | MediaController |

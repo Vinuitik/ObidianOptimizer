@@ -24,11 +24,11 @@ track item can optionally hand its note off into the FSRS pool (`TrackReviewHand
 ```
 POST   /api/tracks {title, type}              → TrackRepository.create() (source='manual')
 PATCH  /api/tracks/{id} {title?, type?, status?, deadline?, priority?, includeInProgress?, clearDeadline?}
-DELETE /api/tracks/{id}                        → ON DELETE CASCADE takes items + schedule with it
+DELETE /api/tracks/{id}                        → SOFT: tracks.deleted_at + live items get the same deleted_at (schedule rows kept); restore via Bin (bin/FLOWS.md)
 
 POST   /api/tracks/{id}/items {title, notePath?}   → appended at next free position (MAX(position)+1)
 PATCH  /api/tracks/items/{itemId} {title?, position?}   → title edit and/or reorder in one call
-DELETE /api/tracks/items/{itemId}
+DELETE /api/tracks/items/{itemId}               → SOFT: track_items.deleted_at (Bin kind track_item)
 POST   /api/tracks/items/{itemId}/complete {addToReview}
     → TrackRepository.completeItem() (status='pending'→'done', idempotent — no-op if already done)
     → if addToReview && item has note_path: TrackReviewHandoff.seedDueToday(notePath)
@@ -310,3 +310,7 @@ Left (unused, harmless): `TrackRepository.getOrCreatePassive()/getOrCreateGroup(
 | MCP track creation (internal) | `InternalAgentController.createTrack()`; `publish.create_track()`; `mcp_tools/write.py create_track` |
 | Discover HTTP client (shared with `feed/`) | `TrackAgentClient.discover()` / `Candidate` |
 | Vault scoping (M3) | `TrackRepository` methods take `long vaultId` first; item routes vault-check via `TrackRepository.getItem(vaultId, id)` (items inherit their vault through `tracks`); `TodayPlanService`/`TrackProgressService`/`TrackController` use `activeVault.id()` |
+
+
+## Bin / soft delete
+Every read in `TrackRepository` filters `deleted_at IS NULL` on `tracks` and `track_items` (get, listAll, listActive, getOrCreatePassive, getItem, listItems, nextPendingItems, countPendingItems, completionsByDay, listProgressRows). To change: `TrackRepository.delete()/restoreTrack()/restoreItem()/purge*`. Bin flows: `bin/FLOWS.md`.
