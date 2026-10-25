@@ -1,5 +1,6 @@
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import SettingsPage from './SettingsPage';
 import { parseField } from './useAutosaveSettings';
 import useStore from '../store/useStore';
@@ -35,7 +36,7 @@ afterEach(() => { vi.clearAllMocks(); useStore.setState({ isAuthenticated: false
 
 describe('SettingsPage autosave', () => {
   it('saves a number field on blur and shows Saved', async () => {
-    render(<SettingsPage />);
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>);
     const input = await screen.findByLabelText(/Max reviews per day/);
     fireEvent.change(input, { target: { value: '40' } });
     expect(applySettings).not.toHaveBeenCalled();
@@ -45,14 +46,14 @@ describe('SettingsPage autosave', () => {
   });
 
   it('saves a select immediately on change with the typed value', async () => {
-    render(<SettingsPage />);
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>);
     const sel = await screen.findByLabelText(/Tracks tab/);
     fireEvent.change(sel, { target: { value: 'false' } });
     await waitFor(() => expect(applySettings).toHaveBeenCalledWith({ tracksEnabled: false }));
   });
 
   it('does not call the API when blurred without a change', async () => {
-    render(<SettingsPage />);
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>);
     const input = await screen.findByLabelText(/Max reviews per day/);
     fireEvent.blur(input);
     await act(async () => {});
@@ -60,7 +61,7 @@ describe('SettingsPage autosave', () => {
   });
 
   it('shows an inline error and does not save an invalid number', async () => {
-    render(<SettingsPage />);
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>);
     const input = await screen.findByLabelText(/Notes loaded per review/);
     fireEvent.change(input, { target: { value: '9999' } });
     fireEvent.blur(input);
@@ -70,16 +71,16 @@ describe('SettingsPage autosave', () => {
 
   it('surfaces a failed save inline', async () => {
     applySettings.mockRejectedValueOnce(new Error('400'));
-    render(<SettingsPage />);
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>);
     const input = await screen.findByLabelText(/Max reviews per day/);
     fireEvent.change(input, { target: { value: '10' } });
     fireEvent.blur(input);
     expect(await screen.findByText(/Couldn’t save/)).toBeInTheDocument();
   });
 
-  it('groups settings under Vault, Learning, Feed, Sync, Advanced', async () => {
-    render(<SettingsPage />);
-    for (const t of ['Vault', 'Learning', 'Feed', 'Sync', 'Advanced']) {
+  it('groups settings under Vault, Learning, Feed, Sync, System, Advanced', async () => {
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>);
+    for (const t of ['Vault', 'Learning', 'Feed', 'Sync', 'System', 'Advanced']) {
       expect(await screen.findByRole('heading', { name: t })).toBeInTheDocument();
     }
   });
