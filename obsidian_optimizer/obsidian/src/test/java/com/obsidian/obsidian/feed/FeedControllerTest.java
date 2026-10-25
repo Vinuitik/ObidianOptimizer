@@ -34,7 +34,7 @@ class FeedControllerTest {
     }
 
     static Source src(long id, String kind, String url) {
-        return new Source(id, kind, url, null, "T", null, "active", Instant.now(), Instant.now(), 0);
+        return new Source(id, kind, url, null, "T", null, "active", Instant.now(), Instant.now(), 0, null, null);
     }
 
     @BeforeEach
@@ -186,5 +186,42 @@ class FeedControllerTest {
         assertThat(resp.getBody()).isEqualTo(existing);
         verifyNoInteractions(client);
         verifyNoInteractions(pollWorker);
+    }
+
+    // ── patchSource: targetTrackId ───────────────────────────────────────────
+
+    @Test
+    void patchSource_setsTargetTrack() {
+        when(sourceRepo.get(1L, 5L)).thenReturn(src(5, "rss", "u"));
+        when(sourceRepo.trackExists(1L, 7L)).thenReturn(true);
+        var body = new java.util.HashMap<String, Object>();
+        body.put("targetTrackId", 7);
+        controller.patchSource(5L, body);
+        verify(sourceRepo).setTargetTrack(1L, 5L, 7L);
+    }
+
+    @Test
+    void patchSource_nullClearsTargetTrack() {
+        when(sourceRepo.get(1L, 5L)).thenReturn(src(5, "rss", "u"));
+        var body = new java.util.HashMap<String, Object>();
+        body.put("targetTrackId", null);
+        controller.patchSource(5L, body);
+        verify(sourceRepo).setTargetTrack(1L, 5L, null);
+    }
+
+    @Test
+    void patchSource_unknownTrack404_noWrite() {
+        when(sourceRepo.get(1L, 5L)).thenReturn(src(5, "rss", "u"));
+        when(sourceRepo.trackExists(1L, 99L)).thenReturn(false);
+        var resp = controller.patchSource(5L, java.util.Map.of("targetTrackId", 99));
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        verify(sourceRepo, never()).setTargetTrack(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    void patchSource_absentTargetTrackLeavesItAlone() {
+        when(sourceRepo.get(1L, 5L)).thenReturn(src(5, "rss", "u"));
+        controller.patchSource(5L, java.util.Map.of("status", "paused"));
+        verify(sourceRepo, never()).setTargetTrack(anyLong(), anyLong(), any());
     }
 }
