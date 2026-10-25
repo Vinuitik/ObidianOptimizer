@@ -108,11 +108,10 @@ Technology Notes: autosave is store-level and in-memory; a hard crash/`beforeunl
 
 ## NavBar
 
-Fixed top bar, 56px height on desktop.  
-Auth state from `isAuthenticated` → "Sign in" / "Sign out".  
-`NavLink` from react-router-dom — `.linkActive` applied on active route.
+Desktop top bar: Review · Sources · Learn · Notes (`useNavItems` items with `primary`), then VaultSwitcher, QuickCapture, avatar menu (Settings, Refresh, Sign out). Signed out → "Sign in" button.
+Dashboard / Failures / Get App are NOT in the bar: links live in Settings → System (`SettingsPage.SystemGroup`); failures count shows only there. To change nav items: `useNavItems.NAV_ITEMS`; avatar menu: `NavBar.jsx`.
 
-Mobile (≤768px): CSS-only two-row wrap — brand + auth on row 1 (auth always on-screen), links on row 2, horizontally scrollable, ≥44px touch targets. See `NavBar.module.css` `@media` block.
+Phone (≤768px): brand + RefreshButton row; avatar menu hidden; `MobileTabBar` "More" sheet lists non-primary items (Settings) + Sign in/out.
 
 `QuickCapture` (molecule, authed only) sits left of RefreshButton - see next section.
 

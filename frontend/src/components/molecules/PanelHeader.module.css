@@ -10,7 +10,7 @@
 }
 
 .title {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.14em;

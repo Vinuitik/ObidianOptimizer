@@ -55,7 +55,7 @@ To add a new setting:
 
 ---
 
-## PipelineFailuresPage — `/failures` (top-level nav)
+## PipelineFailuresPage — `/failures` (linked from Settings → System)
 
 Files: PipelineFailuresPage.jsx, ../api/capture.js, ../api/pipelineFailures.js
 
@@ -66,8 +66,8 @@ Two independently-loaded sections (each Skeleton → list | EmptyState | `ErrorS
   `QUEUE_UNIFICATION_PLAN.md`). "Show details" expands the payload JSON; "Mark resolved" → `resolvePipelineFailure(id)`.
   **Resolve all older than 7 days** → `resolveOlder()` loops the per-row resolve (`WEEK_MS`); partial failures stay listed + toast.
 
-Nav badge: `store.failuresCount` (open pipeline failures + failed captures) ← `store.loadFailuresCount()`, called on NavBar mount
-(authenticated) and after every retry/dismiss/resolve. Shown on the Failures link in `NavBar.jsx` only (desktop; phone tab bar has none).
+Count: `store.failuresCount` (open pipeline failures + failed captures) ← `store.loadFailuresCount()`, called on Settings System section mount
+(authenticated) and after every retry/dismiss/resolve. Shown (neutral badge) on the Pipeline failures link in `SettingsPage.SystemGroup` only.
 
 WRITE side lives per pipeline: `common/PipelineFailureRepository.record()` (Java) / `embedder/failures.py record_failure()` /
 extension `background.js reportFailure()`. To change summary heuristic: `summarize()`; labels: `humanize()`.

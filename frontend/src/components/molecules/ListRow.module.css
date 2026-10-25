@@ -17,5 +17,5 @@
 .leading { display: inline-flex; flex-shrink: 0; color: var(--text-2); }
 .text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .title { font-size: var(--fs-14); overflow-wrap: anywhere; }
-.meta { font-size: var(--fs-12); color: var(--text-3); font-family: var(--font-mono); }
+.meta { font-size: var(--fs-12); color: var(--text-3); font-family: var(--font-ui); }
 .trailing { display: inline-flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }

@@ -1,6 +1,7 @@
 const paths = {
   folder:   <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z" />,
   file:     <><path d="M6 3.5h7l5 5V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20z" /><path d="M13 3.5V8.5h5" /></>,
+  flag:     <><path d="M6 20.5V4" /><path d="M6 4.5h11l-2 4 2 4H6" /></>,
   chevron:  <path d="M9 6l6 6-6 6" />,
   search:   <><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4 4" /></>,
   plus:     <><path d="M12 5v14" /><path d="M5 12h14" /></>,
