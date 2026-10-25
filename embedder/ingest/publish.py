@@ -7,6 +7,7 @@ consistent. Auth: X-Internal-Token = MCP_API_TOKEN (shared service secret).
 Multi-vault: every callback carries `vaultId` (default 1) and Java routes the write by
 rootFor(vaultId), NOT by whichever vault is active when the (slow) job finishes.
 """
+import hashlib
 import logging
 import os
 import re
@@ -44,15 +45,68 @@ def chapter_for_page(page: int | None, chapters: list[dict]) -> str:
     return ""
 
 
-def inbox_folder(capture_id: str | None = None, chapter_slug: str | None = None) -> str:
+_UNIT_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def sanitize_unit_name(title: str | None) -> str:
+    """Filesystem-safe single folder name from a source title: keeps spaces/case, drops
+    path/reserved chars, collapses whitespace, <=80 chars, no leading/trailing '.'/'_' (so it
+    can't shadow `_sources`). Empty → ''. Mirrored in Java InboxFolderMigration.sanitize()."""
+    s = _UNIT_BAD.sub(" ", title or "")
+    s = re.sub(r"\s+", " ", s).strip()
+    s = s[:80].strip()
+    return s.strip(" ._")
+
+
+def mcp_capture_id(vault_id: int, folder: str) -> str:
+    """Deterministic synthetic capture-id for an MCP `create_note(folder=...)` batch, so all
+    notes in the folder form ONE Learn unit. Mirrored in Java InboxFolderMigration."""
+    h = hashlib.sha1(f"{vault_id}:{folder.strip().lower()}".encode("utf-8")).hexdigest()
+    return "mcp-" + h[:8]
+
+
+def _folder_capture_ids(d) -> set[str]:
+    """capture-id of every .md under dir `d` ('' for notes without one)."""
+    ids = set()
+    for f in d.rglob("*.md"):
+        try:
+            head = f.read_text(encoding="utf-8", errors="ignore")[:4000]
+        except OSError:
+            continue
+        m = re.search(r"^capture-id:\s*(\S+)", head, re.M) if head.startswith("---") else None
+        ids.add(m.group(1) if m else "")
+    return ids
+
+
+def unit_folder_name(title: str | None, capture_id: str, vault_root) -> str:
+    """Readable `_inbox` unit folder name for a source: sanitized title; if that folder already
+    holds notes of a DIFFERENT capture, append ' 2', ' 3'…. Folder already ours (or empty/absent)
+    is reused, so retries/resumes of one capture land in the same folder. No title → capture_id."""
+    from pathlib import Path
+    base = sanitize_unit_name(title)
+    if not base:
+        return capture_id
+    inbox = Path(vault_root) / INBOX_FOLDER
+    n = 1
+    while True:
+        cand = base if n == 1 else f"{base} {n}"
+        d = inbox / cand
+        if not d.is_dir():
+            return cand
+        ids = _folder_capture_ids(d)
+        if not ids or ids == {capture_id}:
+            return cand
+        n += 1
+
+
+def inbox_folder(unit: str | None = None, chapter_slug: str | None = None) -> str:
     """Vault-relative staging folder for a standalone note. Each source gets its OWN
-    subfolder under `_inbox` (keyed by the capture id) so the Learn queue presents it as a
-    collapsible folder and "file the whole folder" is one clean move (rename the uuid dir to
-    a real title on the way out). PDF chapters nest one level deeper. No capture id → the flat
-    `_inbox` (older callers / defensive)."""
+    subfolder under `_inbox` named after the source title (`unit`, see unit_folder_name;
+    capture-id lives in frontmatter, not the path) so the Learn queue presents it as a
+    collapsible folder. PDF chapters nest one level deeper. No unit → the flat `_inbox`."""
     parts = [INBOX_FOLDER]
-    if capture_id:
-        parts.append(capture_id)
+    if unit:
+        parts.append(unit)
         seg = _slug_seg(chapter_slug or "")
         if seg:
             parts.append(seg)

@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
 @Service
 public class TrackUnitService {
 
-    /** {@code .../_inbox/<captureId>/<note>.md} or {@code .../_inbox/<captureId>/<chapterSlug>/<note>.md}. */
+    /** {@code .../_inbox/<folderName>/<note>.md} or {@code .../_inbox/<folderName>/<chapterSlug>/<note>.md}. */
     private static final Pattern INBOX_PATH = Pattern.compile("/_inbox/([^/]+)(?:/([^/]+))?/[^/]+$");
 
     private final TrackRepository trackRepo;
@@ -141,23 +141,26 @@ public class TrackUnitService {
 
     private List<Group> inboxGroups(long vid) {
         Map<String, int[]> agg = new LinkedHashMap<>();           // key -> {count, minSeq}
-        Map<String, String[]> ids = new HashMap<>();              // key -> {captureId, chapter}
+        Map<String, String[]> ids = new HashMap<>();              // key -> {captureId, chapter, folderName}
         for (InboxNoteRow r : noteIndex.listInboxCaptureNotes(vid)) {
             Matcher m = INBOX_PATH.matcher(r.path().replace('\\', '/'));
-            if (!m.find() || !m.group(1).equals(r.captureId())) continue;
+            // The unit is keyed by frontmatter capture-id; the 1st path segment is just a readable
+            // folder name (source title / MCP folder), no longer the capture id itself.
+            if (!m.find()) continue;
             String chapter = m.group(2);
             String key = groupKey(r.captureId(), chapter);
             int[] a = agg.computeIfAbsent(key, k -> new int[]{0, Integer.MAX_VALUE});
             a[0]++;
             if (r.captureSeq() != null) a[1] = Math.min(a[1], r.captureSeq());
-            ids.putIfAbsent(key, new String[]{r.captureId(), chapter});
+            ids.putIfAbsent(key, new String[]{r.captureId(), chapter, m.group(1)});
         }
         Map<String, CaptureRepository.Capture> caps = new HashMap<>();
         List<Group> out = new ArrayList<>();
         for (var e : agg.entrySet()) {
             String[] id = ids.get(e.getKey());
             CaptureRepository.Capture c = caps.computeIfAbsent(id[0], captureRepo::get);
-            String title = titleOf(c == null ? null : c.title(), id[1]);
+            // No Capture row (MCP folder batches carry only a synthetic capture-id) → the folder name.
+            String title = titleOf(c == null || c.title() == null ? id[2] : c.title(), id[1]);
             out.add(new Group(e.getKey(), id[0], id[1], title == null ? e.getKey() : title,
                 e.getValue()[0], c == null ? Long.MAX_VALUE : c.createdAt(), e.getValue()[1]));
         }

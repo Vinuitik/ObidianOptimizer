@@ -125,7 +125,7 @@ exactly one source, so the source is the pre-rewrite note itself.
 _store_media → outline → write_note() per plan (frontmatter + sr fields + #review)
 → publish.validate_note → chapter_title = chapter_for_page(min page, source.chapters)
 → publish.stamp_inbox(source, suggested=find_home, source_title, chapter_title)
-→ publish.create_note in publish.inbox_folder(capture_id, chapter_title)
+→ publish.create_note in publish.inbox_folder(unit, chapter_title)  (unit = publish.unit_folder_name(title, capture_id, vault.root): sanitized source title, " 2"/" 3" on collision with another capture; capture-id stays in frontmatter only)
     (_inbox/<captureId>/[chapter]/ — see "Per-source staging folders" below)
 one bad note never sinks its siblings; all-fail raises. Same shape in
 _synthesize_and_publish_v2 (bucket key = n.unit.locator_span pages instead of plan segment_ids).
@@ -507,7 +507,7 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | Source-footer sub-page bbox (v2) | `synthesize._span_to_segs()` attaches `loc.bbox` for SINGLE-page spans (`bbox_start/end` pts) → `_source_section()` emits `bbox: <page> x0 y0 x1 y1`. Multi-page/v1 → omitted. Read by frontend `inboxParse.parseSourceRegion.bboxes` |
 | v2 note title (reuse chapter names) | `pipeline_v2._title_for()` = `_structural_title()` (in-unit HEADING → enclosing TOC chapter name, `ir.toc` leaf ≤ unit start page) → injected `title_fn` (LLM names the unit from its content) → `<source> (n)`. `_dedup_titles()` appends "(part k)" when a chapter splits into ≥2 Units. Set BEFORE drafting in `run()` |
 | v2 title_fn (A/V + unstructured) | `title_fn` wired in `jobs._run_pipeline_v2` → `synthesize.write_unit_title(raw_text, source)` (one LLM call, `TITLE_PROMPT`/`TITLE_SYSTEM`). Called ONLY when there's no HEADING/TOC name — chiefly A/V transcripts (videos rarely ship yt-dlp chapters). A 503 (providers cooling) propagates so the job DEFERs; other errors fall back to `<source> (n)` |
-| **Per-source `_inbox` staging folder** | `publish.inbox_folder(capture_id, chapter_slug)`; called from both `jobs._synthesize_and_publish[_v2]` |
+| **Per-source `_inbox` staging folder** | `publish.inbox_folder(unit, chapter_slug)`, `publish.unit_folder_name()`, `publish.mcp_capture_id()`; called from both `jobs._synthesize_and_publish[_v2]` |
 | **Track tagging (Phase 1b)** | [REMOVED in I1] `jobs.submit(track_id=)`, `jobs._link_track_item()`, `publish.add_track_item()` deleted; `publish.create_track()` / `get_track_items()` stay (MCP create_track, minicourse). See `.../tracks/FLOWS.md` I1 |
 | **PDF chapter boundaries (real, no LLM)** | `extract_pdf._toc_chapters()` (`PyMuPDF doc.get_toc()`) → `source.chapters`; bucketed per note via `publish.chapter_for_page()` |
 | **Chapter/source-title inbox frontmatter** | `publish.stamp_inbox(content, source, suggested, source_title, chapter)` — `ingest-source-title` / `ingest-chapter` keys; stripped on file (`InboxController.stripInboxFrontmatter`) |
@@ -521,3 +521,6 @@ its module. Tests: `tests/test_pipeline_v2.py`.
 | Debug reports per vault | `AgentReport(…, reports_dir=vault.reports_dir())` (flashcards, minicourse, ingest-outline via `synthesize.outline(bundle, reports_dir=)`). `AGENT_FIXES_DIR` fix-log (`escalation.FIXES_DIR`) and `_renditions` (now `<reports_dir>/_renditions`) |
 | Multi-vault tests | `embedder/tests/test_multivault.py` (two tmp vaults); Java `VaultInternalRoutingIT` (callback after a switch) |
 
+
+## Readable inbox folders (2026-10)
+- Unit folder = sanitized source title (ingest_resource `title` overrides); create_note(folder=) stamps `capture-id: mcp-<sha1(vault:folder)[:8]>` so the folder is one Learn unit. To change: publish.unit_folder_name / publish.mcp_capture_id / write._stage_note_as_is.

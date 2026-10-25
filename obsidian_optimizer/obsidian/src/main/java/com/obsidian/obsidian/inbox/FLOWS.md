@@ -120,3 +120,6 @@ that SQL and embedder `publish.INBOX_FOLDER`.
 ## Units (consumer: tracks/)
 `tracks/TrackUnitService` reads staged inbox notes via `NoteIndexRepository.listInboxCaptureNotes()` (notes.capture_id + path under `_inbox/`) and groups them as `<captureId>[/<chapterSlug>]` to schedule Learn units on Today. See tracks/FLOWS.md "Units". InboxController itself is unchanged.
 To change: group-key derivation → `TrackUnitService.INBOX_PATH` (must match `InboxItem.inboxFolder`).
+
+## Inbox folder migration (one-time)
+POST /api/internal/inbox/migrate-folders?dryRun=false (X-Internal-Token) → InboxFolderMigration.run(): renames `_inbox/<captureId>/` to ingest-source-title via FileRepository.moveNote per note; stamps synthetic mcp- capture-id on capture-less notes in named folders; loose root notes untouched; idempotent. Sanitize/hash mirror publish.py (keep in sync).

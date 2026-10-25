@@ -612,7 +612,8 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
     # collapsible folder. Generate a group id if the job didn't carry one (e.g. direct MCP).
     capture_id = job.get("capture_id") or uuid.uuid4().hex[:12]
     job["capture_id"] = capture_id
-    inbox_dir = publish.inbox_folder(capture_id)
+    unit = publish.unit_folder_name(job.get("title") or source_title, capture_id, vault.root)
+    inbox_dir = publish.inbox_folder(unit)
     publish.ensure_folder(inbox_dir, vault.id)
     ensured_dirs = {inbox_dir}
     chapters = bundle["source"].get("chapters") or []
@@ -631,7 +632,7 @@ def _synthesize_and_publish_v2(job: dict, bundle: dict):
             pages = n.unit.locator_span.get("pages") or [] \
                 if n.unit.locator_span.get("kind") == "page" else []
             chapter_title = publish.chapter_for_page(min(pages), chapters) if pages else ""
-            note_dir = publish.inbox_folder(capture_id, chapter_title) if chapter_title else inbox_dir
+            note_dir = publish.inbox_folder(unit, chapter_title) if chapter_title else inbox_dir
             if note_dir not in ensured_dirs:
                 publish.ensure_folder(note_dir, vault.id)
                 ensured_dirs.add(note_dir)
@@ -692,7 +693,8 @@ def _synthesize_and_publish(job: dict, bundle: dict):
     # Every standalone source gets its OWN _inbox subfolder (collapsible in the Learn queue).
     capture_id = job.get("capture_id") or uuid.uuid4().hex[:12]
     job["capture_id"] = capture_id
-    inbox_dir = publish.inbox_folder(capture_id)
+    unit = publish.unit_folder_name(job.get("title") or source_title, capture_id, vault.root)
+    inbox_dir = publish.inbox_folder(unit)
     publish.ensure_folder(inbox_dir, vault.id)
     ensured_dirs = {inbox_dir}
     chapters = bundle["source"].get("chapters") or []
@@ -716,7 +718,7 @@ def _synthesize_and_publish(job: dict, bundle: dict):
             pages = [by_id[i]["loc"].get("page") for i in plan["segment_ids"] if i in by_id]
             pages = [p for p in pages if p is not None]
             chapter_title = publish.chapter_for_page(min(pages), chapters) if pages else ""
-            note_dir = publish.inbox_folder(capture_id, chapter_title) if chapter_title else inbox_dir
+            note_dir = publish.inbox_folder(unit, chapter_title) if chapter_title else inbox_dir
             if note_dir not in ensured_dirs:
                 publish.ensure_folder(note_dir, vault.id)
                 ensured_dirs.add(note_dir)

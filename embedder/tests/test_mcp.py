@@ -365,6 +365,8 @@ def test_create_note_grouped_folder_still_gets_suggested_folder(monkeypatch):
     res = mcp_server.create_note("a short thought", folder="Some Group")
     assert res["status"] == "DONE"
     assert "SUGGESTED=Study" in written["content"]
+    from ingest import publish as _p
+    assert f"capture-id: {_p.mcp_capture_id(1, 'Some Group')}" in written["content"]
 
 
 # ── mini-course MCP tools — call the same minicourse_jobs seam as the HTTP routes ──
