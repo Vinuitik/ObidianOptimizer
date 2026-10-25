@@ -258,9 +258,9 @@ export default function SplitLayout() {
                   <IconButton
                     icon="x"
                     variant="danger"
-                    aria-label="Move to trash"
+                    aria-label="Move to bin"
                     onClick={() => {
-                      if (window.confirm(`Move "${title}" to trash?`)) deleteNote(currentNotePath);
+                      if (window.confirm(`Move "${title}" to bin?`)) deleteNote(currentNotePath);
                     }}
                   />
                 )}

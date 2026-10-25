@@ -27,10 +27,8 @@ import {
   fetchFeedSources as apiFetchFeedSources, addFeedSource as apiAddFeedSource,
   patchFeedSource as apiPatchFeedSource, deleteFeedSource as apiDeleteFeedSource,
   pollFeedSource as apiPollFeedSource, resolveFeedSource as apiResolveFeedSource,
-  // items/sources go through the offline-aware wrappers below (fetchFeed/decideFeed/
-  // restoreFeedItem) — see pwa/offlineApi.js. Bin tab list stays direct/online-only
-  // (not exported for offline — feed/FLOWS_feed.md §4/P2).
-  fetchFeedItems as apiFetchFeedBinned,
+  // items go through the offline-aware wrappers below (fetchFeed/decideFeed/
+  // restoreFeedItem) — see pwa/offlineApi.js. The bin lives in Settings (api/bin.js).
 } from '../api/feed';
 // Offline-aware drop-ins: identical to the api/notes versions when online (they
 // just delegate), but fall back to the downloaded IndexedDB subset when offline.
@@ -249,7 +247,6 @@ const initialDataState = () => ({
 
   // Feed (tracks/FLOWS_feed.md) — in-memory only; optimistic state is lost on refresh.
   feedPending: [],          // pending items, newest first; [0] is the card on screen
-  feedBinned: [],           // Bin tab
   feedSources: [],
   feedLastDecision: null,   // { item, kind: 'accept'|'bin' } — undo covers ONLY this one
   feedLoaded: false,        // true once the first fetchFeed resolved — gates empty states + Learn's default tab
@@ -1145,14 +1142,6 @@ const useStore = create((set, get) => ({
     }
   },
 
-  fetchFeedBin: async () => {
-    try {
-      set({ feedBinned: await apiFetchFeedBinned('binned') });
-    } catch {
-      get().setFeedNotice("Couldn't load the bin.");
-    }
-  },
-
   decideFeed: async (kind) => {
     const item = get().feedPending[0];
     if (!item) return;
@@ -1173,11 +1162,10 @@ const useStore = create((set, get) => ({
     }
   },
 
-  // Shared by Undo and Bin ▸ Restore. `from` = where the item currently lives optimistically.
+  // Used by Undo.
   restoreFeedItem: async (item) => {
     set(s => ({
       feedPending: [item, ...s.feedPending.filter(i => i.id !== item.id)],
-      feedBinned: s.feedBinned.filter(i => i.id !== item.id),
     }));
     try {
       await restoreFeedOffline(item);
@@ -1186,7 +1174,6 @@ const useStore = create((set, get) => ({
       if (e instanceof ApiError && e.status === 409) {
         get().setFeedNotice('Already ingesting — discard it in Inbox.');
       } else {
-        set(s => item.status === 'binned' ? { feedBinned: [item, ...s.feedBinned] } : {});
         get().setFeedNotice("Couldn't restore — try again.");
       }
     }
@@ -1197,18 +1184,6 @@ const useStore = create((set, get) => ({
     if (!last) return;
     set({ feedLastDecision: null });
     await get().restoreFeedItem({ ...last.item, status: last.kind === 'bin' ? 'binned' : 'accepted' });
-  },
-
-  // Bin tab "Ingest anyway" (= accept).
-  ingestFeedItem: async (item) => {
-    set(s => ({ feedBinned: s.feedBinned.filter(i => i.id !== item.id) }));
-    try {
-      await acceptFeedOffline(item.id);
-      get().setFeedNotice('Sent to Inbox', 'view');
-    } catch {
-      set(s => ({ feedBinned: [item, ...s.feedBinned] }));
-      get().setFeedNotice("Couldn't ingest — try again.");
-    }
   },
 
   fetchFeedSources: async () => {
@@ -1256,17 +1231,15 @@ const useStore = create((set, get) => ({
   // DELETE is held DELETE_UNDO_MS so Undo can cancel it. Closing the tab inside that window
   // keeps the source (nothing was sent yet).
   deleteFeedSource: (id) => {
-    const snap = { src: get().feedSources.find(x => x.id === id), pending: get().feedPending, binned: get().feedBinned };
+    const snap = { src: get().feedSources.find(x => x.id === id), pending: get().feedPending };
     if (!snap.src) return;
     set(s => ({
       feedSources: s.feedSources.filter(x => x.id !== id),
       feedPending: s.feedPending.filter(i => i.sourceId !== id),
-      feedBinned: s.feedBinned.filter(i => i.sourceId !== id),
     }));
     const restore = () => set(s => ({
       feedSources: [snap.src, ...s.feedSources.filter(x => x.id !== id)],
       feedPending: snap.pending.length ? snap.pending : s.feedPending,
-      feedBinned: snap.binned.length ? snap.binned : s.feedBinned,
     }));
     const timer = setTimeout(async () => {
       try { await apiDeleteFeedSource(id); }

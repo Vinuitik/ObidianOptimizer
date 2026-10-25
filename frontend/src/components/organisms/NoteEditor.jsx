@@ -19,7 +19,7 @@ export default function NoteEditor() {
   const [content, setContent] = useState(currentNoteRaw);
 
   const handleDelete = async () => {
-    if (!window.confirm(`Move "${title}" to trash?`)) return;
+    if (!window.confirm(`Move "${title}" to bin?`)) return;
     await deleteNote(currentNotePath);
   };
 
@@ -40,7 +40,7 @@ export default function NoteEditor() {
         <Button onClick={() => saveNote(title, content)}>Save</Button>
         <Button variant="ghost" onClick={cancelEdit}>Cancel</Button>
         <span className={styles.spacer} />
-        <Button variant="danger" onClick={handleDelete}>Move to trash</Button>
+        <Button variant="danger" onClick={handleDelete}>Move to bin</Button>
       </div>
     </div>
   );

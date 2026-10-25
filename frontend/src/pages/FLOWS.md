@@ -235,7 +235,7 @@ Settings ▸ Feed → `feedAutoAccept` select (`SettingsPage.jsx` `F.feedAutoAcc
 ---
 
 ## Settings ▸ Vaults
-`SettingsPage` renders `VaultsPanel.jsx` first (list, register via host-fs `FolderPicker` + downtime confirm, switch, rename, archive/restore) — details in [../vault/FLOWS.md](../vault/FLOWS.md). `DriveSyncPanel` is the ACTIVE vault's sync and names it.
+`SettingsPage` renders `VaultsPanel.jsx` first (list, register via host-fs `FolderPicker` + downtime confirm, switch, rename, archive/restore; no delete) — details in [../vault/FLOWS.md](../vault/FLOWS.md). `DriveSyncPanel` is the ACTIVE vault's sync and names it.
 
 ## Change Index
 | Vaults settings section | `VaultsPanel.jsx`, `SettingsPage.jsx` (mount point + `DriveSyncPanel` description) |
@@ -275,3 +275,9 @@ Auto-open + `handleClose` → `ReviewPage.pickNext(notes, donePath)` → `review
 | Interleave rule | `reviewOrder.nextTrack()` |
 | Within-track order | `reviewOrder.pickNextInOrder()` / `comparePaths()` |
 | Call sites | `ReviewPage.pickNext`, auto-open effect, `handleClose` |
+
+## Settings ▸ Bin
+`SettingsPage` renders `BinPanel.jsx` after Sync: `fetchBin()` → segments (Notes·Folders·Files·Feed·Tracks[+track_item]·Subscriptions·Other[unknown]; 0-item segments hidden, counts shown) → row Restore → `restoreBinItem()` (404/409/410 → `RESTORE_ERRORS` messages) · Delete forever → confirm → `deleteBinItem()` · Empty bin → confirm → `emptyBin()`. Backend 30-day purge. Sources has no Bin tab; swipe-left still bins.
+To change: segment grouping `BinPanel.SEGMENTS` · error copy `BinPanel.RESTORE_ERRORS` · client `api/bin.js`.
+
+| Bin settings section | `BinPanel.jsx`, `api/bin.js`, mount in `SettingsPage.jsx` |

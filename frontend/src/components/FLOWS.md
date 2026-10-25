@@ -190,12 +190,12 @@ the full flow (SW update signal, `registerSW.js`, desktop shell). Mounted in
 `organisms/NavBar.jsx` and `pwa/MobileLayout.jsx`.
 
 ## FeedView / FeedSources (organisms)
-`FeedView` SegmentedTabs Swipe | Bin | Sources. `Stack`: `AnimatePresence` + `motion/presets.swipe` — exit flies out in the decision direction (`feedLastDecision.kind`), next card scales in. `FeedCard` pointer events → dx → transform on the inner div; release past `SWIPE_PX` (80) → accept/bin. Keys ←/→ (ignored in INPUT/TEXTAREA/SELECT). Undo button in the action bar (`undoFeed`); toasts: accept "Sent to Inbox · View", bin "Binned. · Undo".
+`FeedView` SegmentedTabs Swipe | Subscriptions (no Bin tab — see Settings ▸ Bin). `Stack`: `AnimatePresence` + `motion/presets.swipe` — exit flies out in the decision direction (`feedLastDecision.kind`), next card scales in. `FeedCard` pointer events → dx → transform on the inner div; release past `SWIPE_PX` (80) → accept/bin. Keys ←/→ (ignored in INPUT/TEXTAREA/SELECT). Undo button in the action bar (`undoFeed`); toasts: accept "Sent to Inbox · View", bin "Binned. · Undo".
 Loading: `!item && !feedLoaded` → Skeleton card (never "all caught up" before the first fetch); empty → `EmptyState` + "Open Inbox".
 `FeedSources` subscribe = URL → **Preview** (`resolveFeedSource`, nothing persisted; Card with human kind label + 3 items) → **Subscribe** (`addFeedSource`) → `onSubscribed()` → FeedView switches to Swipe. Delete → store `deleteFeedSource` (optimistic, Undo toast). Kind labels: `FeedSources.kindLabel`.
 `LearnPage` no longer mounts FeedView (L2 Sources page will); store `learnView` is only set by the Feed toast "View"/"Open Inbox" and is currently unused by LearnPage.
 To change threshold: `FeedView.jsx SWIPE_PX`. Auto-accept tri-state: `FeedSources.jsx toVal/fromVal`.
-Offline: `decideFeed`/`restoreFeedItem`/`ingestFeedItem` route through `pwa/offlineApi.js`; Bin tab / Sources stay online-only.
+Offline: `decideFeed`/`restoreFeedItem` route through `pwa/offlineApi.js`; Sources stay online-only.
 `FeedCard` "Subscribe to this channel" (youtube.com/youtu.be items) → `subscribeToChannel(url)` → `addFeedSource` (direct, no preview).
 ## InboxReview (organism)
 `load({preferGroup})` after file/discard: next note in the same group, else the first note of the next group (no dead stop). Enter = Save & file (Save & acknowledge for in-place): window listener, skipped while typing / on focused non-row buttons / picker open; Ctrl/Cmd+Enter works inside the editor. Preview strips a leading `# Title` equal to the note title (`stripLeadingTitle`, display only). Queue row: folder chip shrinks first (`.rowTag`), title `min-width: 12ch`. `loading` starts true (Skeleton, not the empty message). `SourceSplicePanel` text sources default to Read, RSVP secondary.

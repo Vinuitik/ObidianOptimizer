@@ -11,6 +11,9 @@ vi.mock('../api/notes', () => ({
   fetchHostChildren: vi.fn(),
   fetchVaultHostPath: vi.fn().mockResolvedValue({ path: '/home/me/vault' }),
 }));
+vi.mock('../api/bin', () => ({
+  fetchBin: vi.fn().mockResolvedValue({}), restoreBinItem: vi.fn(), deleteBinItem: vi.fn(), emptyBin: vi.fn(),
+}));
 vi.mock('../api/sync', () => ({
   fetchSyncStatus: vi.fn().mockResolvedValue({ connected: false }),
   fetchOAuthUrl: vi.fn(), disconnectDrive: vi.fn(),
