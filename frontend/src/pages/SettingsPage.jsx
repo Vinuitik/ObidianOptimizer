@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import useStore from '../store/useStore';
 import {
@@ -14,7 +14,6 @@ import Button from '../components/atoms/Button';
 import Badge from '../components/atoms/Badge';
 import Input from '../components/atoms/Input';
 import Select from '../components/atoms/Select';
-import Card from '../components/molecules/Card';
 import Field from '../components/molecules/Field';
 import PageHeader from '../components/molecules/PageHeader';
 import useAutosaveSettings from './useAutosaveSettings';
@@ -117,12 +116,56 @@ function CopyButton({ text, label = 'Copy' }) {
   return <Button size="sm" variant="ghost" onClick={copy} disabled={!text}>{label}</Button>;
 }
 
+// Section index (desktop sticky nav). Ids are the anchor targets; VaultsPanel/BinPanel use 'vaults'/'bin'.
+const SECTIONS = [
+  { id: 'vaults', label: 'Vaults' }, { id: 'vault', label: 'Vault' },
+  { id: 'learning', label: 'Learning' }, { id: 'feed', label: 'Feed' },
+  { id: 'sync', label: 'Sync' }, { id: 'bin', label: 'Bin' },
+  { id: 'system', label: 'System' }, { id: 'advanced', label: 'Advanced' },
+];
+
 function Group({ title, description, children }) {
+  const id = title.toLowerCase();
   return (
-    <Card as="section" className={styles.group} aria-label={title}>
-      <Card.Header title={title} subtitle={description} />
+    <section id={id} className={styles.section} aria-label={title}>
+      <h2 className={styles.sectionTitle}>{title}</h2>
+      {description && <p className={styles.sectionDesc}>{description}</p>}
       <div className={styles.fields}>{children}</div>
-    </Card>
+    </section>
+  );
+}
+
+// Sticky left index with current-section highlight. Scroll container = .page (overflow-y:auto).
+function SectionIndex({ rootRef }) {
+  const [current, setCurrent] = useState(SECTIONS[0].id);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof IntersectionObserver === 'undefined') return undefined;
+    const seen = new Map();
+    const io = new IntersectionObserver(entries => {
+      entries.forEach(e => seen.set(e.target.id, e.isIntersecting));
+      const first = SECTIONS.find(s => seen.get(s.id));
+      if (first) setCurrent(first.id);
+    }, { root, rootMargin: '0px 0px -65% 0px' });
+    SECTIONS.forEach(s => { const el = root.querySelector(`#${s.id}`); if (el) io.observe(el); });
+    return () => io.disconnect();
+  }, [rootRef]);
+
+  function go(e, id) {
+    e.preventDefault();
+    setCurrent(id);
+    document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }
+  return (
+    <nav className={styles.index} aria-label="Settings sections">
+      {SECTIONS.map(s => (
+        <a
+          key={s.id} href={`#${s.id}`} onClick={e => go(e, s.id)}
+          className={`${styles.indexLink} ${current === s.id ? styles.indexCurrent : ''}`}
+          aria-current={current === s.id ? 'true' : undefined}
+        >{s.label}</a>
+      ))}
+    </nav>
   );
 }
 
@@ -158,6 +201,7 @@ export default function SettingsPage() {
   const [chronoResult,  setChronoResult]  = useState(null);
   const [chronoError,   setChronoError]   = useState(null);
 
+  const pageRef = useRef(null);
   const [picker, setPicker]         = useState(null);
   const [vaultRoot, setVaultRoot]   = useState(null);
   const [hostPath, setHostPath]     = useState(null);
@@ -251,7 +295,7 @@ export default function SettingsPage() {
         <div key={field.key} className={styles.fieldRow}>
           <Field label={label} hint={field.hint} error={err}>
             <Input
-              id={id} className={styles.mono} value={value} placeholder={field.placeholder ?? ''} disabled={!loaded}
+              id={id} className={`${styles.mono} ${styles.monoPh}`} value={value} placeholder={field.placeholder ?? ''} disabled={!loaded}
               onChange={e => setDraft(field.key, e.target.value)}
               onBlur={() => commit(field)}
               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
@@ -273,9 +317,11 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} ref={pageRef}>
       <PageHeader title="Settings" subtitle="Changes save automatically." />
 
+      <div className={styles.layout}>
+      <SectionIndex rootRef={pageRef} />
       <div className={styles.groups}>
         <VaultsPanel isAuthenticated={isAuthenticated} />
 
@@ -350,6 +396,7 @@ export default function SettingsPage() {
             {chronoError && <p className={styles.error} role="alert">{chronoError}</p>}
           </div>
         </Group>
+      </div>
       </div>
 
       {picker && <FolderPicker {...picker} />}
