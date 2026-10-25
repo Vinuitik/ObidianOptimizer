@@ -23,7 +23,7 @@ To change startup data-fetch order: `MainPage useEffect`
 
 Files: SettingsPage.jsx, useAutosaveSettings.js, SettingsPage.module.css
 
-Groups (Card each): Vault · Learning · Feed · Sync (`DriveSyncPanel`) · Advanced. Fields are
+Sections (heading + thin divider, no cards; ids = anchors): Vaults · Vault · Learning · Feed · Sync (`DriveSyncPanel`) · Bin · System · Advanced. Desktop (>768px): sticky `SectionIndex` on the left (IntersectionObserver highlight; hidden on mobile via CSS). Add a section → `SECTIONS` + `Group` id (lowercase title). Buttons: one primary per section; Bin Delete forever/Empty bin = danger. Fields are
 the `F` map at the top of `SettingsPage.jsx`; render via `renderField(F.x)` inside a `Group`.
 
 Edit a simple field → `useAutosaveSettings.setDraft()` → select: `commit()` at once; text/number: `commit()` on blur/Enter

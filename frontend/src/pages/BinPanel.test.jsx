@@ -50,6 +50,14 @@ describe('BinPanel', () => {
     await waitFor(() => expect(fetchBin).toHaveBeenCalledTimes(2));
   });
 
+  it('uses danger buttons for destructive actions, secondary for Restore', async () => {
+    render(<BinPanel isAuthenticated />);
+    await screen.findByText('Alpha note');
+    expect(screen.getByText('Delete forever').className).toMatch(/danger/);
+    expect(screen.getByText('Empty bin').className).toMatch(/danger/);
+    expect(screen.getByText('Restore').className).toMatch(/secondary/);
+  });
+
   it('shows a human message per restore error', async () => {
     render(<BinPanel isAuthenticated />);
     await screen.findByText('Alpha note');

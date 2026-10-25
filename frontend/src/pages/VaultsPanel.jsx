@@ -8,7 +8,6 @@ import FolderPicker from '../components/organisms/FolderPicker';
 import Button from '../components/atoms/Button';
 import Badge from '../components/atoms/Badge';
 import Input from '../components/atoms/Input';
-import Card from '../components/molecules/Card';
 import Field from '../components/molecules/Field';
 import styles from './SettingsPage.module.css';
 
@@ -66,11 +65,11 @@ export default function VaultsPanel({ isAuthenticated, waitOpts }) {
   }
 
   return (
-    <Card as="section" className={styles.group} aria-label="Vaults">
-      <Card.Header
-        title="Vaults"
-        subtitle={active ? `Active: ${active.name}. Each vault has its own notes, cards and Drive sync.` : 'Separate note collections.'}
-      />
+    <section id="vaults" className={styles.section} aria-label="Vaults">
+      <h2 className={styles.sectionTitle}>Vaults</h2>
+      <p className={styles.sectionDesc}>
+        {active ? `Active: ${active.name}. Each vault has its own notes, cards and Drive sync.` : 'Separate note collections.'}
+      </p>
       <div className={styles.fields}>
         {(vaults || []).map(v => (
           <div key={v.id} className={styles.fieldRow} data-testid={`vault-${v.id}`}>
@@ -93,7 +92,7 @@ export default function VaultsPanel({ isAuthenticated, waitOpts }) {
             <span className={styles.note}>{v.host_path || v.container_path}</span>
             <div className={styles.inline}>
               {!v.active && !v.archived_at && (
-                <Button size="sm" disabled={!isAuthenticated || busy} onClick={() => run('switch', () => switchVault(v.id))}>Switch to</Button>
+                <Button size="sm" variant="secondary" disabled={!isAuthenticated || busy} onClick={() => run('switch', () => switchVault(v.id))}>Switch to</Button>
               )}
               {editing?.id === v.id ? (
                 <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
@@ -122,8 +121,8 @@ export default function VaultsPanel({ isAuthenticated, waitOpts }) {
             value={hostPath} onChange={e => setHostPath(e.target.value)}
           />
           <div className={styles.pathActions}>
-            <Button size="sm" disabled={!isAuthenticated} onClick={() => setPicker(true)}>Browse…</Button>
-            <Button size="sm" variant="primary" disabled={!isAuthenticated || !hostPath.trim() || Boolean(busy)} onClick={() => setConfirming(true)}>Add vault</Button>
+            <Button size="sm" variant="secondary" disabled={!isAuthenticated} onClick={() => setPicker(true)}>Browse…</Button>
+            <Button size="sm" variant={confirming ? 'secondary' : 'primary'} disabled={!isAuthenticated || !hostPath.trim() || Boolean(busy)} onClick={() => setConfirming(true)}>Add vault</Button>
           </div>
           {confirming && (
             <div role="alertdialog" aria-label="Confirm add vault" className={styles.note}>
@@ -149,6 +148,6 @@ export default function VaultsPanel({ isAuthenticated, waitOpts }) {
           onClose={() => setPicker(false)}
         />
       )}
-    </Card>
+    </section>
   );
 }

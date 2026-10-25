@@ -84,6 +84,14 @@ describe('SettingsPage autosave', () => {
       expect(await screen.findByRole('heading', { name: t })).toBeInTheDocument();
     }
   });
+
+  it('renders a section index with an anchor per section', async () => {
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>);
+    const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
+    for (const t of ['Vaults', 'Vault', 'Learning', 'Feed', 'Sync', 'Bin', 'System', 'Advanced']) {
+      expect(nav.querySelector(`a[href="#${t.toLowerCase()}"]`)).not.toBeNull();
+    }
+  });
 });
 
 describe('parseField', () => {

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchBin, restoreBinItem, deleteBinItem, emptyBin } from '../api/bin';
 import Button from '../components/atoms/Button';
-import Card from '../components/molecules/Card';
 import SegmentedTabs from '../components/molecules/SegmentedTabs';
 import styles from './SettingsPage.module.css';
 
@@ -73,8 +72,9 @@ export default function BinPanel({ isAuthenticated }) {
   };
 
   return (
-    <Card as="section" className={styles.group} aria-label="Bin">
-      <Card.Header title="Bin" subtitle="Deleted items wait here. Items are deleted forever after 30 days." />
+    <section id="bin" className={styles.section} aria-label="Bin">
+      <h2 className={styles.sectionTitle}>Bin</h2>
+      <p className={styles.sectionDesc}>Deleted items wait here. Items are deleted forever after 30 days.</p>
       <div className={styles.fields}>
         {loadErr && <div className={styles.fieldRow}><p className={styles.error} role="alert">Couldn’t load the bin.</p></div>}
         {bin && !current && !loadErr && <div className={styles.fieldRow}><p className={styles.note}>Bin is empty.</p></div>}
@@ -95,18 +95,18 @@ export default function BinPanel({ isAuthenticated }) {
                 {item.originalPath && <span className={styles.note} title={item.originalPath}>{item.originalPath}</span>}
                 <div className={styles.inline}>
                   <span className={styles.note}>Deleted {ago(item.deletedAt)}</span>
-                  <Button size="sm" disabled={busy} onClick={() => restore(item)}>Restore</Button>
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => forever(item)}>Delete forever</Button>
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => restore(item)}>Restore</Button>
+                  <Button size="sm" variant="danger" disabled={busy} onClick={() => forever(item)}>Delete forever</Button>
                 </div>
               </div>
             ))}
             <div className={styles.fieldRow}>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={empty}>Empty bin</Button>
+              <Button size="sm" variant="danger" disabled={busy} onClick={empty}>Empty bin</Button>
             </div>
           </>
         )}
         {error && <div className={styles.fieldRow}><p className={styles.error} role="alert">{error}</p></div>}
       </div>
-    </Card>
+    </section>
   );
 }
