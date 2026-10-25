@@ -72,6 +72,7 @@
 .resultCorrectAnswer { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--success); }
 .resultExplanation { font-size: var(--fs-13); color: var(--text); line-height: var(--lh-reading); }
 .resultFeedback { font-size: var(--fs-12); color: var(--text-2); font-style: italic; }
+.provisional { font-size: var(--fs-12); color: var(--text-3, var(--text-2)); opacity: 0.8; }
 
 .resultFooter {
   display: flex;

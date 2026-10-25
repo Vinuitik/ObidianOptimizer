@@ -386,9 +386,16 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
                     cardDeferred. Only the VERDICT (was the student's specific answer judged
                     right — genuinely unknown for 'open' until the LLM judge runs) and the
                     points below stay gated on it. */}
-                {!flaggedResult && v?.verdict !== 'CORRECT' && correctAnswerOf(c, variants) != null && (
-                  <p className={styles.resultCorrectAnswer}>
-                    Correct answer: {String(correctAnswerOf(c, variants))}
+                {!flaggedResult && (c.type === 'open' || v?.verdict !== 'CORRECT')
+                  && (c.type === 'open' ? (v?.referenceAnswer ?? correctAnswerOf(c, variants)) : correctAnswerOf(c, variants)) != null && (
+                  <p className={styles.resultCorrectAnswer} data-testid={`reference-${c.id}`}>
+                    Correct answer:{' '}
+                    {String(c.type === 'open' ? (v?.referenceAnswer ?? correctAnswerOf(c, variants)) : correctAnswerOf(c, variants))}
+                  </p>
+                )}
+                {!flaggedResult && !cardDeferred && v?.provisional && (
+                  <p className={styles.provisional} data-testid={`provisional-${c.id}`}>
+                    Provisional · refining in background
                   </p>
                 )}
                 {!flaggedResult && c.payload.explanation && (

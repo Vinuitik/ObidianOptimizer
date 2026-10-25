@@ -77,3 +77,39 @@ describe('MCQ option needs a clean tap', () => {
     expect(screen.getByTestId('answered-badge')).toBeInTheDocument();
   });
 });
+
+describe('result display for open cards', () => {
+  async function runTo(results, cardIds = ['c1', 'c2']) {
+    const api = await import('../../pwa/offlineApi');
+    api.buildAssignmentOffline.mockResolvedValueOnce({
+      id: 'a2', variants: {},
+      cards: cardIds.map(id => ({ id, type: 'open', difficulty: 2,
+        payload: { question: `Q-${id}`, reference_answers: ['local ref'] } })),
+    });
+    api.submitAttemptOffline.mockImplementation(async (_a, cid) => results[cid]);
+    api.completeAssignmentOffline.mockResolvedValue({ notes: [] });
+    render(<FlashcardSession notePath="/v/O.md" onClose={() => {}} onReviewNote={() => {}} />);
+    await screen.findByTestId('flashcard-session');
+    for (let i = 0; i < cardIds.length; i++) {
+      await act(async () => { fireEvent.click(screen.getByTestId('next-btn')); });
+    }
+    await screen.findByTestId('flashcard-result');
+  }
+
+  it('provisional: reference + quiet mark; non-provisional: feedback, no mark', async () => {
+    await runTo({ c1: { verdict: 'PARTIAL', provisional: true, referenceAnswer: 'srv ref', pointsEarned: 1, maxPoints: 2, feedback: null },
+                  c2: { verdict: 'CORRECT', provisional: false, referenceAnswer: 'r2', pointsEarned: 2, maxPoints: 2, feedback: 'nice' } });
+    expect(screen.getByTestId('reference-c1')).toHaveTextContent('srv ref');
+    expect(screen.getByTestId('provisional-c1')).toHaveTextContent('Provisional');
+    expect(screen.queryByTestId('provisional-c2')).toBeNull();
+    expect(screen.getByTestId('reference-c2')).toHaveTextContent('r2');
+    expect(screen.getByText('nice')).toBeInTheDocument();
+  });
+
+  it('results render in received card order', async () => {
+    const w = { verdict: 'WRONG', provisional: false, referenceAnswer: 'x', pointsEarned: 0, maxPoints: 2 };
+    await runTo({ c9: w, c3: w, c5: w }, ['c9', 'c3', 'c5']);
+    const ids = screen.getAllByTestId(/^result-card-/).map(e => e.dataset.testid);
+    expect(ids).toEqual(['result-card-c9', 'result-card-c3', 'result-card-c5']);
+  });
+});
