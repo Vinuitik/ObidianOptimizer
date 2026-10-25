@@ -6,6 +6,7 @@ import useOffline from '../pwa/useOffline';
 import FlashcardSession from '../components/organisms/FlashcardSession';
 import MarkdownView from '../components/molecules/MarkdownView';
 import Button from '../components/atoms/Button';
+import Icon from '../components/atoms/Icon';
 import Badge from '../components/atoms/Badge';
 import Skeleton from '../components/atoms/Skeleton';
 import ListRow from '../components/molecules/ListRow';
@@ -187,7 +188,7 @@ export default function ReviewPage() {
             <AnimatePresence initial={false}>
               {flash && (
                 <motion.li key="__flash" className={styles.row} {...itemMotion} data-testid="graded-flash">
-                  <ListRow leading="✓" title={flash.title} trailing={<Badge tone="success">Graded {flash.band}</Badge>} />
+                  <ListRow leading={<Icon name="check" size={16} />} title={flash.title} trailing={<Badge tone="success">Graded {flash.band}</Badge>} />
                 </motion.li>
               )}
               {reviewNotes.map(note => (
@@ -196,11 +197,11 @@ export default function ReviewPage() {
                     title={note.shortName}
                     active={activeNote?.fullPath === note.fullPath || inlineNote?.fullPath === note.fullPath}
                     onClick={() => startSession(note)}
-                    trailing={
-                      <Badge tone={note.track === 'flashcard' ? 'accent' : 'neutral'}>
-                        {note.track === 'flashcard' ? 'cards' : 'read'}
-                      </Badge>
-                    }
+                    trailing={note.track === 'flashcard' ? null : (
+                      <span className={styles.readIcon} role="img" aria-label="read" title="Read">
+                        <Icon name="file" size={14} />
+                      </span>
+                    )}
                   />
                 </motion.li>
               ))}

@@ -7,6 +7,7 @@ import {
   flagCardOffline as flagCard,
 } from '../../pwa/offlineApi';
 import Button from '../atoms/Button';
+import Icon from '../atoms/Icon';
 import Badge from '../atoms/Badge';
 import Skeleton from '../atoms/Skeleton';
 import Textarea from '../atoms/Textarea';
@@ -237,7 +238,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
         <div className={styles.progress}>
           <span className={styles.progressText}>
             {idx + 1} / {cards.length}
-            {isAnswered && <span data-testid="answered-badge" title="Answered">{' '}✓</span>}
+            {isAnswered && <span data-testid="answered-badge" title="Answered">{' '}<Icon name="check" size={12} /></span>}
           </span>
           <div className={styles.progressBar}>
             <div className={styles.progressFill}
@@ -247,7 +248,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
 
         <Card className={styles.card} data-testid="flashcard-card">
           <span className={styles.cardType}>
-            <Badge tone="accent">{TYPE_LABELS[card.type]} · {card.difficulty} pt{card.difficulty > 1 ? 's' : ''}</Badge>
+            <Badge tone="neutral">{TYPE_LABELS[card.type]} · {card.difficulty} pt{card.difficulty > 1 ? 's' : ''}</Badge>
           </span>
           <p className={styles.question}>{questionOf(card, variants)}</p>
 
@@ -368,7 +369,7 @@ export default function FlashcardSession({ notePath, onReviewNote, onClose }) {
             <div key={c.id} className={`${styles.resultCard} ${cls}`}
                  data-testid={`result-card-${c.id}`}>
               <span className={styles.resultMark}>
-                {cardDeferred ? '◐' : flaggedResult ? '🚩'
+                {cardDeferred ? '◐' : flaggedResult ? <Icon name="flag" size={16} />
                   : v?.verdict === 'CORRECT' ? '✓' : v?.verdict === 'PARTIAL' ? '◐' : '✗'}
               </span>
               <div className={styles.resultCardBody}>
@@ -441,12 +442,12 @@ function FlagControl({ flagged, onFlag }) {
 
   if (flagged) {
     return <p className={styles.flagDone} data-testid="flag-done">
-      🚩 Flagged — excluded from grading, replacement generating now.
+      <Icon name="flag" size={12} /> Flagged — excluded from grading, replacement generating now.
     </p>;
   }
   if (!open) {
-    return <Button variant="ghost" size="sm" className={styles.flagLink} data-testid="flag-btn"
-                   onClick={() => setOpen(true)}>🚩 Flag this card</Button>;
+    return <Button variant="ghost" size="sm" icon="flag" className={styles.flagLink} data-testid="flag-btn"
+                   onClick={() => setOpen(true)}>Flag this card</Button>;
   }
   return (
     <div className={styles.flagBox} data-testid="flag-box">

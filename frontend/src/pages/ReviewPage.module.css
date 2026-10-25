@@ -73,3 +73,5 @@
 
 /* Full-page states (auth gate, error, all caught up) */
 .gate { display: flex; align-items: center; justify-content: center; height: 100%; padding: var(--sp-5); }
+
+.readIcon { display: inline-flex; color: var(--text-3); }
