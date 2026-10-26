@@ -5,7 +5,7 @@ name: obsopt
 
 services:
   postgres:
-    image: paradedb/paradedb:latest
+    image: paradedb/paradedb:0.24.0-pg18   # pinned: a PG major bump breaks existing data volumes
     restart: unless-stopped
     environment:
       POSTGRES_DB: obsidian
@@ -170,7 +170,7 @@ services:
       - backend
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.6.1
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
     restart: unless-stopped
     depends_on:

@@ -50,7 +50,8 @@ async function install(input, log = () => {}) {
   const manifest = await fetchManifest();
   const gpu = await docker.detectNvidia();
   await writeComposeFiles(manifest, gpu);
-  fs.mkdirSync(input.vaultPath, { recursive: true });
+  // Bind-mount sources must exist or Docker creates them root-owned.
+  for (const sub of ['', '_reports', '_workspace', 'resources']) fs.mkdirSync(path.join(input.vaultPath, sub), { recursive: true });
   fs.writeFileSync(f('.env'), envgen.buildEnv(input, claim, { version: manifest.version }), { mode: 0o600 });
   writeState({ name: claim.name, hostname: claim.hostname, installSecret: claim.installSecret, version: manifest.version, gpu });
   return { hostname: claim.hostname, gpu };
