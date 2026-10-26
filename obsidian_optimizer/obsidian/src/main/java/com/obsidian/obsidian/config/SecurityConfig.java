@@ -14,6 +14,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -34,9 +35,10 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+            .addFilterBefore(new LoginRateLimitFilter(new LoginAttemptService()), UsernamePasswordAuthenticationFilter.class)
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/login", "/logout").permitAll()
+                .requestMatchers("/login", "/logout", "/health").permitAll()
                 // service-to-service agent API — token-guarded inside the
                 // controller (X-Internal-Token = MCP_API_TOKEN, fail closed)
                 .requestMatchers("/api/internal/**").permitAll()
