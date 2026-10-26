@@ -1,0 +1,22 @@
+name = "obsidian-registry"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+workers_dev = false
+
+# Custom domain route (zone obsidianoptimizer.uk must be on this Cloudflare account)
+routes = [
+  { pattern = "registry.obsidianoptimizer.uk", custom_domain = true }
+]
+
+[[kv_namespaces]]
+binding = "REGISTRY"
+# Replace with the id printed by: npx wrangler kv namespace create REGISTRY
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+BASE_DOMAIN = "obsidianoptimizer.uk"
+TUNNEL_ORIGIN = "http://frontend:8081"
+CLAIMS_PER_IP_PER_DAY = "5"
+
+# Secrets (NOT here; set with `npx wrangler secret put <NAME>`):
+#   CF_API_TOKEN, CF_ACCOUNT_ID, CF_ZONE_ID
