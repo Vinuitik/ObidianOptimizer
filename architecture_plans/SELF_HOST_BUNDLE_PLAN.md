@@ -24,7 +24,7 @@ phone / browser ─► <name>.obsidianoptimizer.uk ─► CF edge (Access gate) 
 ## Decisions (defaults taken 2026-10-26 — user may override)
 - D1 Compose under the hood (Docker Desktop required), native bundle later.
 - D2 PWA served per-user from `<name>.obsidianoptimizer.uk` (same-origin, no CORS).
-- D3 Unsigned builds for now (SmartScreen/Gatekeeper click-through). Targets: Windows NSIS + Linux AppImage; mac later.
+- D3 Unsigned builds for now (SmartScreen/Gatekeeper click-through). Targets: macOS dmg (ad-hoc signed, arm64+x64 — first real user is on Mac), Windows NSIS, Linux AppImage; built by launcher-release.yml on native runners. Mac launcher self-update is manual (unsigned); image updates work.
 - D4 Cloudflare Access email-OTP gate on every user subdomain; `/mcp` path bypasses Access (token-auth only).
 - D5 Images public on GHCR (`ghcr.io/vinuitik/obsidian-optimizer-*`) — repo is already public.
 - D6 LLM keys stay in the launcher-generated `.env` for v1 (no per-user DB settings rewrite).
