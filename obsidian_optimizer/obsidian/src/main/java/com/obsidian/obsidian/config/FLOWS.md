@@ -1,6 +1,6 @@
 # Config Domain Flows
 
-Files: SecurityConfig.java, WebConfig.java, ObsidianApplication.java, ServletInitializer.java
+Files: SecurityConfig.java, LoginRateLimitFilter.java, LoginAttemptService.java, HealthController.java, WebConfig.java, ObsidianApplication.java, ServletInitializer.java
 
 ---
 
@@ -23,7 +23,7 @@ restarts/redeploys** — that in-memory session loss was the cause of the consta
 with the PWA's persisted offline flag (`obsOpt_authOk`) → "sign in once." To change validity/key:
 those two props. Rotating the key logs everyone out.
 
-Only `/login` and `/logout` are public — **everything else requires session auth**
+Public: `/login`, `/logout`, `/health` (nginx exposes it as `/api/health`; returns `{"status":"ok"}`, used by the desktop launcher), plus `/api/internal/**` (token-guarded in-controller). **Everything else requires session auth**
 (`GET /settings` was public until the security-hardening pass; it leaked the vault path).  
 To add/remove protected endpoints: `SecurityConfig.filterChain()` `authorizeHttpRequests`
 
@@ -85,3 +85,19 @@ To change port: `application.properties server.port`
 | Server port | `application.properties server.port` |
 | Postgres connection | `application.properties` (overridden by `SPRING_DATASOURCE_*` env vars) |
 | Enable scheduling | `ObsidianApplication` `@EnableScheduling` annotation |
+| Lockout threshold/duration (5 fails → 15 min, 429) | `LoginAttemptService.MAX_FAILURES`, `LOCK_MS` |
+| Lockout client-IP source (CF-Connecting-IP else remote addr) | `LoginRateLimitFilter.clientIp()` |
+| Public health endpoint | `HealthController.health()`, `SecurityConfig` permitAll `/health` |
+
+---
+
+## Login brute-force lockout
+
+`POST /login` → `LoginRateLimitFilter` (before `UsernamePasswordAuthenticationFilter`; wired in `SecurityConfig.filterChain()`) → `LoginAttemptService.retryAfterSeconds(ip)` > 0 → **429 + Retry-After** → else chain → 401 → `recordFailure()` (5th locks 15 min) / 200 → `recordSuccess()`.
+Filter is `new`-ed in SecurityConfig (not a bean) so `@WebMvcTest` slices need no wiring.
+
+## Technology Notes (lockout)
+- In-memory, single-node: counters reset on backend restart; not shared across replicas.
+- Behind the bundled nginx locally (no CF header) all LAN clients share nginx's container IP, so 5 failures from anyone lock everyone for 15 min (via the tunnel, CF-Connecting-IP gives real IPs). nginx also has `limit_req` 5/min on `/api/login`.
+- `CF-Connecting-IP` is trusted blindly: safe only because the backend is reachable solely via nginx/cloudflared.
+- Expired locks pruned only when >10k entries; unlocked failure counters persist until success or lock.
