@@ -1,0 +1,8 @@
+.env
+.env.*
+*.log
+*.deb
+target/
+.idea/
+.vscode/
+src/test/

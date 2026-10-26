@@ -1,6 +1,11 @@
 # CUDA 13 + cuDNN base — matches host driver 580.x which exposes CUDA 13.0.
 # onnxruntime-gpu >=1.21 requires libcudart.so.13; CUDA 12 images don't ship it.
-FROM nvidia/cuda:13.0.0-cudnn-runtime-ubuntu22.04
+# Variant build-args (default = owner's GPU build, unchanged):
+#   GPU variant (default): --build-arg BASE_IMAGE=nvidia/cuda:13.0.0-cudnn-runtime-ubuntu22.04 --build-arg GPU=1
+#   CPU variant (user bundle, multi-arch): --build-arg BASE_IMAGE=ubuntu:22.04 --build-arg GPU=0
+ARG BASE_IMAGE=nvidia/cuda:13.0.0-cudnn-runtime-ubuntu22.04
+FROM ${BASE_IMAGE}
+ARG GPU=1
 
 ENV DEBIAN_FRONTEND=noninteractive
 # --no-install-recommends keeps this to the packages we actually use. Without it,
@@ -16,10 +21,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN python3.11 -m pip install --no-cache-dir -r requirements.txt
+# GPU=0: drop the CUDA-only wheels (onnxruntime-gpu, nvidia-cublas-cu12); faster-whisper
+# already pulls CPU onnxruntime, which is then what the embedder runs on.
+RUN if [ "$GPU" = "1" ]; then cp requirements.txt /tmp/req.txt; \
+    else grep -viE '^(onnxruntime-gpu|nvidia-cublas-cu12)' requirements.txt > /tmp/req.txt; fi \
+    && python3.11 -m pip install --no-cache-dir -r /tmp/req.txt
 # faster-whisper drags in CPU onnxruntime, whose files clobber onnxruntime-gpu's
 # in the shared namespace — reinstall the GPU wheel last so CUDA EP survives.
-RUN python3.11 -m pip install --no-cache-dir --force-reinstall --no-deps "onnxruntime-gpu>=1.19.0"
+RUN if [ "$GPU" = "1" ]; then python3.11 -m pip install --no-cache-dir --force-reinstall --no-deps "onnxruntime-gpu>=1.19.0"; fi
 
 # CUDA-12 cuBLAS (from the nvidia-cublas-cu12 wheel) lands in site-packages, not a
 # standard linker dir — prepend it so ctranslate2 (a CUDA-12 build) finds libcublas.so.12.

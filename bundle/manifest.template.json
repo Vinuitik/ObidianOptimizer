@@ -1,0 +1,13 @@
+{
+  "version": "@VERSION@",
+  "compose": "compose.yml",
+  "composeGpu": "compose.gpu.yml",
+  "images": [
+    "ghcr.io/vinuitik/obsidian-optimizer-backend:@VERSION@",
+    "ghcr.io/vinuitik/obsidian-optimizer-frontend:@VERSION@",
+    "ghcr.io/vinuitik/obsidian-optimizer-embedder:@VERSION@",
+    "ghcr.io/vinuitik/obsidian-optimizer-embedder:@VERSION@-gpu",
+    "ghcr.io/vinuitik/obsidian-optimizer-llm:@VERSION@"
+  ],
+  "minLauncher": "1.0.0"
+}

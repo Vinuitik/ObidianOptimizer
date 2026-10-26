@@ -1,0 +1,15 @@
+# NVIDIA overlay — launcher adds it (-f compose.yml -f compose.gpu.yml) when it detects an
+# NVIDIA GPU + container toolkit. Swaps the embedder to the CUDA image variant (tag suffix
+# -gpu, amd64 only) and reserves the GPU.
+services:
+  embedder:
+    image: ghcr.io/vinuitik/obsidian-optimizer-embedder:${OO_VERSION}-gpu
+    environment:
+      - EMBED_DEVICE=${EMBED_DEVICE_GPU:-auto}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
