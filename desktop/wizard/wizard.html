@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Set up Obsidian Optimizer</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+<link rel="stylesheet" href="style.css"></head>
+<body><main>
+<h1>Set up Obsidian Optimizer</h1>
+<p class="sub">Your own private instance, running on this computer.</p>
+<p class="note" id="macnote" hidden>macOS: this build is not notarized. The first time, right-click the app and choose Open. Updating the launcher app itself is manual on macOS (re-download it); updates to the app's images still work from the tray.</p>
+<form id="f">
+  <label>Your address name <input id="name" autocomplete="off" placeholder="alice" required>
+    <span class="note" id="host">yourname.obsidianoptimizer.uk</span></label>
+  <div class="err" id="e-name"></div>
+  <label>Email (the only address allowed to sign in remotely) <input id="email" type="email" required></label>
+  <div class="err" id="e-email"></div>
+  <label>App password (min 12 characters) <input id="password" type="password" minlength="12" required></label>
+  <div class="err" id="e-password"></div>
+  <label>Vault folder
+    <div class="row"><input id="vaultPath" required><button type="button" class="sec" id="pick">Browse</button></div></label>
+  <div class="err" id="e-vaultPath"></div>
+  <fieldset><legend>Optional free AI keys (can be added later by editing .env)</legend>
+    <label>Groq key (<a data-link="https://console.groq.com/keys">get one</a>) <input id="GROQ_API_KEY" autocomplete="off"></label>
+    <label>Gemini key (<a data-link="https://aistudio.google.com/apikey">get one</a>) <input id="GEMINI_API_KEY" autocomplete="off"></label>
+    <label>Mistral key (<a data-link="https://console.mistral.ai/api-keys">get one</a>) <input id="MISTRAL_API_KEY" autocomplete="off"></label>
+  </fieldset>
+  <button id="go" type="submit">Create my instance</button>
+  <div class="err" id="e-form"></div>
+</form>
+<pre id="log" hidden></pre>
+<script src="wizard.js"></script>
+</main></body></html>

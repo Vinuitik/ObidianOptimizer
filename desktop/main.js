@@ -9,12 +9,26 @@
 //   (no Learn item processed today  ->  localStorage 'obsOpt_learnDoneDate' != today)
 //   OR (a review is still due  ->  GET /api/review?limit=1 returns a note).
 // Evaluated IN the loaded page so it shares that page's session cookie + origin.
-const { app, BrowserWindow, dialog, shell, Notification } = require('electron');
+//
+// LAUNCHER (self-host bundle): this shell also runs the user's local docker stack. Boot flow
+// is in boot() below; logic lives in lib/ (see FLOWS.md).
+const { app, BrowserWindow, dialog, shell, Notification, Tray, Menu, ipcMain, nativeImage } = require('electron');
+const path = require('path');
 const quotes = require('./quotes.json');
+const launcher = require('./lib/launcher');
+const docker = require('./lib/docker');
+const { defaultVault } = require('./lib/paths');
+const C = require('./lib/config');
 
-const APP_URL = process.env.OBSOPT_URL || 'https://obsidianoptimizer.uk';
+// Dev escape hatch: OBSOPT_URL skips the launcher and loads that site (old thin-shell behaviour).
+const APP_URL_OVERRIDE = process.env.OBSOPT_URL || null;
 let win;
+let tray;
 let allowClose = false;
+let busy = false;           // an up/stop/update is in flight
+
+const say = (m) => { if (win && !win.isDestroyed()) win.webContents.send('oo:status', m); };
+const showPage = async (f, msg) => { await win.loadFile(path.join(__dirname, 'wizard', f)); if (msg) say(msg); };
 
 function createWindow() {
   win = new BrowserWindow({
@@ -23,12 +37,10 @@ function createWindow() {
     backgroundColor: '#0f1115',
     title: 'Obsidian Optimizer',
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.js') },
   });
 
-  win.loadURL(APP_URL);
-  // ?pwa=1 forces the narrow app shell (ResponsiveApp) — the "akin to the phone app" view.
-  // Drop it (or set OBSOPT_URL) if you'd rather the full desktop site.
+  if (APP_URL_OVERRIDE) win.loadURL(APP_URL_OVERRIDE); else boot();
 
   // External links (http/https to other origins) open in the system browser, not in-shell.
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
@@ -108,6 +120,103 @@ async function onMinimize() {
   }).show();
 }
 
-app.whenReady().then(createWindow);
+// ── Launcher ────────────────────────────────────────────────────────────────
+// boot: not installed -> wizard; docker missing -> install help; else up -d -> wait healthy -> load UI.
+async function boot() {
+  if (!launcher.isInstalled()) return showPage('wizard.html');
+  return startStack();
+}
+
+async function ensureDocker() {
+  const d = await docker.detectDocker();
+  if (d.state === 'ok') return true;
+  const why = { 'no-docker': 'Docker is not installed.', 'no-compose': 'Docker Compose v2 is missing (update Docker Desktop).', 'no-daemon': 'Docker is installed but not running.' }[d.state];
+  await showPage('status.html', { title: 'Docker needed', msg: why, docker: true });
+  return false;
+}
+
+async function startStack() {
+  if (busy) return;
+  busy = true;
+  try {
+    await showPage('status.html', { title: 'Starting...', msg: 'Checking Docker', docker: false });
+    if (!(await ensureDocker())) return;
+    say({ msg: 'Starting your stack (first start downloads images, this can take several minutes)' });
+    await launcher.up({ onLine: (l) => say({ line: l }) });
+    say({ msg: 'Waiting for the app to become healthy' });
+    if (await launcher.waitUntilHealthy()) await win.loadURL(launcher.localUrl());
+    else say({ title: 'Not healthy yet', msg: 'The app did not answer in time. Use the tray menu: Offline, then Online to retry.' });
+  } catch (e) {
+    say({ title: 'Start failed', msg: String(e.message || e) });
+  } finally { busy = false; refreshTray(); }
+}
+
+async function goOffline() {
+  if (busy) return; busy = true;
+  try { await showPage('status.html', { title: 'Stopping...', msg: '' }); await launcher.stop({ onLine: (l) => say({ line: l }) }); say({ title: 'Offline', msg: 'Your instance is stopped. Tray: Online to start it.' }); }
+  catch (e) { say({ title: 'Stop failed', msg: String(e.message || e) }); }
+  finally { busy = false; refreshTray(); }
+}
+
+async function runUpdateFlow() {
+  if (busy || !launcher.isInstalled()) return; busy = true;
+  try {
+    await showPage('status.html', { title: 'Updating...', msg: 'Backing up, then pulling the new version' });
+    if (!(await ensureDocker())) return;
+    const r = await launcher.update((l) => say({ line: l }));
+    const text = {
+      'up-to-date': 'You are on the latest version.',
+      'launcher-too-old': 'A newer launcher is required for this release - download the latest launcher app.',
+      updated: `Updated ${r.from} -> ${r.to}.`,
+      'rolled-back': `Update to ${r.to} failed (${r.error}). Rolled back to ${r.from}; a database backup is in the data folder.`,
+      'rollback-failed': `Update failed AND rollback is unhealthy (${r.error}). Backups are in the data folder.`,
+      'backup-failed': `Backup failed, update aborted (${r.error}). Is the stack online?`,
+    }[r.status];
+    say({ title: r.status === 'updated' || r.status === 'up-to-date' ? 'Done' : 'Update problem', msg: text });
+    if (r.status === 'updated' || r.status === 'rolled-back') await win.loadURL(launcher.localUrl());
+  } catch (e) { say({ title: 'Update failed', msg: String(e.message || e) }); }
+  finally { busy = false; refreshTray(); }
+}
+
+let online = false;
+async function refreshTray() {
+  if (!tray) return;
+  online = launcher.isInstalled() ? await launcher.isOnline().catch(() => false) : false;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: online ? 'Status: Online' : 'Status: Offline', enabled: false },
+    { label: online ? 'Go Offline (stop)' : 'Go Online (start)', enabled: !busy && launcher.isInstalled(), click: () => (online ? goOffline() : startStack()) },
+    { label: 'Open app', enabled: launcher.isInstalled(), click: () => { if (win) { win.show(); win.focus(); } else createWindow(); if (online && win) win.loadURL(launcher.localUrl()); } },
+    { label: 'Check for updates', enabled: !busy && launcher.isInstalled(), click: runUpdateFlow },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { allowClose = true; app.quit(); } },   // containers keep running; use Go Offline first to stop
+  ]));
+}
+
+ipcMain.handle('oo:defaults', () => ({ vaultPath: defaultVault(), platform: process.platform }));
+ipcMain.handle('oo:pick-folder', async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
+  return r.canceled ? null : r.filePaths[0];
+});
+ipcMain.handle('oo:open-external', (_e, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
+ipcMain.handle('oo:recheck', () => startStack());
+ipcMain.handle('oo:install', async (_e, input) => {
+  try {
+    if (!(await ensureDockerForWizard())) return { ok: false, error: 'Docker is not ready - install/start Docker Desktop first.' };
+    await launcher.install(input, (m) => say(m));
+    startStack();
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e.message || e), fields: e.fields }; }
+});
+async function ensureDockerForWizard() { return (await docker.detectDocker()).state === 'ok'; }
+
+app.whenReady().then(() => {
+  createWindow();
+  try {
+    tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: 22, height: 22 }));
+    tray.setToolTip('Obsidian Optimizer');
+    refreshTray();
+    setInterval(() => { if (!busy) refreshTray(); }, 30000);
+  } catch (e) { console.error('[tray] unavailable', e); }
+});
 app.on('window-all-closed', () => app.quit());
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
