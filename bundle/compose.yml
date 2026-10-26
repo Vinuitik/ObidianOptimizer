@@ -1,0 +1,182 @@
+# User bundle — image-only (no build:). Run by the launcher as:
+#   docker compose -p obsopt -f compose.yml [-f compose.gpu.yml] --env-file .env up -d
+# Mirrors the owner's root docker-compose.yml env vars; see bundle/FLOWS.md.
+name: obsopt
+
+services:
+  postgres:
+    image: paradedb/paradedb:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: obsidian
+      POSTGRES_USER: obsidian
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    # no host port: reachable only over the compose network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U obsidian"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Containerized host-wrapper (LLM/vision router). claude-cli provider is OFF.
+  llm:
+    image: ghcr.io/vinuitik/obsidian-optimizer-llm:${OO_VERSION:?set OO_VERSION in .env}
+    restart: unless-stopped
+    environment:
+      - PORT=5001
+      - VAULT_HOST_PATH=/vault
+      # pinned (not interpolated): claude-cli must never be re-enabled in the user bundle
+      - LLM_TEXT_PRIORITY=groq,github,mistral,deepseek,gemini,anthropic
+      - LLM_VISION_PRIORITY=gemini,github,mistral,anthropic
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GITHUB_MODELS_TOKEN=${GITHUB_MODELS_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ${HOST_VAULT_PATH:?set HOST_VAULT_PATH in .env}:/vault:ro
+
+  embedder:
+    image: ghcr.io/vinuitik/obsidian-optimizer-embedder:${OO_VERSION}
+    restart: unless-stopped
+    volumes:
+      - embedder_models:/models
+      - ${HOST_VAULT_PATH}:/vault:ro
+      # Writable sub-binds (launcher must pre-create these dirs so Docker doesn't
+      # create them root-owned): agent reports, yt-dlp downloads, permanent media store.
+      - ${HOST_VAULT_PATH}/_reports:/reports
+      - ${HOST_VAULT_PATH}/_workspace:/workspace
+      - ${HOST_VAULT_PATH}/resources:/resources
+    environment:
+      - EMBED_MODEL=${EMBED_MODEL:-onnx-community/embeddinggemma-300m-ONNX}
+      - MODEL_CACHE=/models
+      - EMBED_ONNX_FILE=${EMBED_ONNX_FILE:-onnx/model_quantized.onnx}
+      - EMBED_GPU_MEM_LIMIT_MB=${EMBED_GPU_MEM_LIMIT_MB:-1800}
+      - EMBED_BATCH_SIZE=${EMBED_BATCH_SIZE:-8}
+      - EMBED_DEVICE=${EMBED_DEVICE:-cpu}
+      - DATABASE_URL=postgresql://obsidian:${POSTGRES_PASSWORD}@postgres:5432/obsidian
+      - VAULT_DIR=/vault
+      - AGENT_REPORTS_DIR=/reports
+      - MCP_API_TOKEN=${MCP_API_TOKEN:?set MCP_API_TOKEN in .env}
+      - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}
+      - WRAPPER_URL=http://llm:5001
+      - SYNTH_MODEL=${SYNTH_MODEL:-haiku}
+      - INGEST_V2=${INGEST_V2:-off}
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - DOWNLOAD_DIR=/workspace
+      - RESOURCE_DIR=/resources
+      - AGENT_ESCALATION_ENABLED=${AGENT_ESCALATION_ENABLED:-0}
+      - BACKEND_URL=http://backend:8084
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llm:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "${OO_EMBEDDER_CPUS:-2}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 600s   # first start downloads ~669MB of model weights
+
+  backend:
+    image: ghcr.io/vinuitik/obsidian-optimizer-backend:${OO_VERSION}
+    restart: unless-stopped
+    environment:
+      - VAULT_PATH=/vault
+      - HOST_VAULT_PATH=${HOST_VAULT_PATH}
+      - IMAGE_PATH=/vault/resources/images
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/obsidian
+      - SPRING_DATASOURCE_USERNAME=obsidian
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
+      - APP_AUTH_USERNAME=${APP_AUTH_USERNAME:-admin}
+      - APP_AUTH_PASSWORD=${APP_AUTH_PASSWORD:?set APP_AUTH_PASSWORD in .env}
+      - APP_AUTH_REMEMBER_KEY=${APP_AUTH_REMEMBER_KEY:?set APP_AUTH_REMEMBER_KEY in .env}
+      - CARDS_ENABLED=${CARDS_ENABLED:-true}
+      - CARDS_BATCH_LIMIT=${CARDS_BATCH_LIMIT:-5}
+      - EMBEDDING_ENABLED=${EMBEDDING_ENABLED:-true}
+      - EMBEDDING_BATCH_LIMIT=${EMBEDDING_BATCH_LIMIT:-4}
+      - EMBEDDING_SCAN_DELAY_MS=${EMBEDDING_SCAN_DELAY_MS:-3600000}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=guest
+      - RABBITMQ_PASSWORD=guest
+      - RABBITMQ_LISTENERS_AUTO_START=true
+      - IMAGES_ENABLED=${IMAGES_ENABLED:-true}
+      - CHRONO_ENABLED=${CHRONO_ENABLED:-true}
+      - INGEST_ENABLED=${INGEST_ENABLED:-true}
+      - EMBEDDER_URL=http://embedder:8000
+      - WRAPPER_URL=http://llm:5001
+      - IMAGE_WORKER_PARALLELISM=${IMAGE_WORKER_PARALLELISM:-2}
+      - IMAGE_BATCH_SIZE=${IMAGE_BATCH_SIZE:-2}
+      - SYNC_PASSPHRASE=${SYNC_PASSPHRASE:-}
+      - GOOGLE_DRIVE_FOLDER_ID=placeholder
+      - GOOGLE_SERVICE_ACCOUNT_JSON=placeholder
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-}
+      - SYNC_UPLOAD_CRON=${SYNC_UPLOAD_CRON:-0 0 */6 * * *}
+      - SYNC_JANITOR_CRON=${SYNC_JANITOR_CRON:-0 0 4 * * SUN}
+      - SYNC_UPLOAD_CONCURRENCY=${SYNC_UPLOAD_CONCURRENCY:-3}
+      - SYNC_UPLOAD_MAX_RETRIES=${SYNC_UPLOAD_MAX_RETRIES:-5}
+      - SYNC_UPLOAD_RETRY_DELAY_MS=${SYNC_UPLOAD_RETRY_DELAY_MS:-60000}
+      - SYNC_DBBACKUP_CRON=${SYNC_DBBACKUP_CRON:-0 0 3 * * *}
+      - SYNC_DBBACKUP_KEEP=${SYNC_DBBACKUP_KEEP:-3}
+      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=35 -XX:+UseG1GC -XX:+UseStringDeduplication -XX:G1PeriodicGCInterval=300000 -XX:+G1PeriodicGCInvokesConcurrent
+    volumes:
+      - ${HOST_VAULT_PATH}:/vault
+    depends_on:
+      postgres:
+        condition: service_healthy
+      embedder:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      llm:
+        condition: service_started
+
+  frontend:
+    image: ghcr.io/vinuitik/obsidian-optimizer-frontend:${OO_VERSION}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OO_LOCAL_PORT:-8090}:8081"   # desktop window loads this locally
+    environment:
+      - MCP_API_TOKEN=${MCP_API_TOKEN}
+      - AGENT_WS_TOKEN=${AGENT_WS_TOKEN:-}
+      - NGINX_ENVSUBST_FILTER=(MCP_API_TOKEN|AGENT_WS_TOKEN)
+    volumes:
+      - ${HOST_VAULT_PATH}/resources:/vault-resources:ro
+      - ${HOST_VAULT_PATH}/_workspace:/workspace:ro
+    depends_on:
+      - backend
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    restart: unless-stopped
+    depends_on:
+      - frontend
+
+volumes:
+  postgres_data:
+  embedder_models:
+  rabbitmq_data:
