@@ -24,5 +24,11 @@
     "type": "module"
   },
   "permissions": ["activeTab", "storage", "tabs", "contextMenus", "scripting"],
-  "host_permissions": ["http://localhost/*", "https://*/*"]
+  "host_permissions": [
+    "https://*.obsidianoptimizer.uk/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://drive.usercontent.google.com/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"]
 }

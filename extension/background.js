@@ -17,19 +17,30 @@
 //   POST /capture {url}               → embedder /ingest (extract → synthesize → inbox)
 //   POST /workspace/upload (multipart) store a dropped local file in _workspace/
 //   POST /pipeline-failures            report a client-side capture dead-end (see below)
-import { getConfig, setConfig, getCreds, api } from './config.js';
+import { getConfig, setConfig, getCreds, api, isConfigured, isAccessRedirect, baseOfApi, LEGACY_DEFAULT_API } from './config.js';
 
 // ── HTTP helper ────────────────────────────────────────────────────────────────
 // Self-healing auth: the backend session is in-memory and dies on server restart, so a
 // call can 401 even though the user "is" logged in. When that happens and we have
 // remembered credentials, silently re-login once and retry — the capture just works
 // instead of dumping the user back to the sign-in form.
+//
+// Two synthetic states (header X-OO-State) instead of a generic failure:
+//   setup  — no server configured yet (fresh install that skipped onboarding)
+//   access — the site is behind Cloudflare Access and the browser has no CF_Authorization
+//            cookie: fetch followed the redirect to <team>.cloudflareaccess.com. The user
+//            fixes it by opening their site once in a tab (email OTP); the cookie is then
+//            sent automatically on later extension fetches (credentials:'include' + host perm).
+const synthetic = (state, status) => new Response('', { status, headers: { 'X-OO-State': state } });
 async function obsidian(path, opts = {}) {
-  const { obsidianApi } = await getConfig();
+  const cfg = await getConfig();
+  if (!isConfigured(cfg)) return synthetic('setup', 400);
+  const { obsidianApi } = cfg;
   const doFetch = () => fetch(`${obsidianApi}${path}`, { credentials: 'include', ...opts });
   let res;
   try { res = await doFetch(); }
-  catch { return Response.error(); }   // truly unreachable (offline/DNS/refused) — no HTTP
+  catch { return Response.error(); }
+  if (isAccessRedirect(res)) return synthetic('access', 403);   // truly unreachable (offline/DNS/refused) — no HTTP
   // response at all. Response.error() is the spec's own "network error" sentinel (status 0,
   // type 'error', empty body) — every existing caller's res.ok/res.status/res.text() check
   // still works on it, instead of this throwing and leaving the popup awaiting forever
@@ -38,6 +49,7 @@ async function obsidian(path, opts = {}) {
     if (await reloginFromStored(obsidianApi)) {
       try { res = await doFetch(); }
       catch { return Response.error(); }
+      if (isAccessRedirect(res)) return synthetic('access', 403);
     }
   }
   return res;
@@ -51,6 +63,9 @@ async function obsidian(path, opts = {}) {
 // unreachable backend. This also derives the SHORT message the popup shows — never the
 // raw body (a Cloudflare 1033 page is several KB of HTML; see extension/FLOWS.md).
 async function classifyFailure(res) {
+  const state = res.headers?.get?.('x-oo-state');
+  if (state === 'access') return { networkDown: true, accessRequired: true, message: await accessMessage() };
+  if (state === 'setup') return { networkDown: true, needsSetup: true, message: 'Set up your server first (open the extension settings).' };
   if (res.type === 'error' || res.status === 0) {
     return { networkDown: true, message: 'Server unreachable — check your connection and try again.' };
   }
@@ -86,9 +101,9 @@ async function reportFailure(stage, inputPayload, errorMessage) {
 // real (non-network-down) rejection, and return the friendly message instead of the raw
 // body. inputPayload is what gets stored in the ledger for debugging/replay.
 async function handleFailure(res, stage, inputPayload) {
-  const { networkDown, message } = await classifyFailure(res);
+  const { networkDown, message, accessRequired, needsSetup } = await classifyFailure(res);
   if (!networkDown) await reportFailure(stage, inputPayload, message);
-  return { ok: false, status: res.status, error: message };
+  return { ok: false, status: res.status, error: message, ...(accessRequired && { accessRequired }), ...(needsSetup && { needsSetup }) };
 }
 
 async function reloginFromStored(obsidianApi) {
@@ -136,8 +151,22 @@ function sanitizeName(raw) {
 }
 
 // ── Auth + config ────────────────────────────────────────────────────────────
+async function siteHost() {
+  const { obsidianApi } = await getConfig();
+  try { return new URL(baseOfApi(obsidianApi)).host; } catch { return ''; }
+}
+async function accessMessage() { return `Open ${await siteHost()} once to sign in.`; }
+
+// Maps a synthetic state to the popup-facing fields (see obsidian()).
+async function stateOf(res) {
+  const s = res.headers?.get?.('x-oo-state');
+  if (s === 'access') return { accessRequired: true, host: await siteHost(), error: await accessMessage() };
+  if (s === 'setup') return { needsSetup: true };
+  return {};
+}
+
 async function checkAuth() {
-  try { return { ok: (await obsidian('/me')).ok }; }
+  try { const res = await obsidian('/me'); return { ok: res.ok, ...(await stateOf(res)) }; }
   catch (e) { return { ok: false, error: String(e) }; }
 }
 
@@ -147,7 +176,7 @@ async function login({ username, password }) {
       method: 'POST',
       body: new URLSearchParams({ username, password }),
     });
-    return { ok: res.ok, status: res.status };
+    return { ok: res.ok, status: res.status, ...(await stateOf(res)) };
   } catch (e) { return { ok: false, error: String(e) }; }
 }
 
@@ -481,7 +510,7 @@ let agentWs = null, agentWsTimer = null;
 
 async function connectAgentWs() {
   const { obsidianApi, agentWsToken } = await getConfig();
-  if (!agentWsToken) return;   // disabled until a token is set
+  if (!agentWsToken || !obsidianApi) return;   // disabled until a token + server are set
   const base = (obsidianApi || '').replace(/\/api\/?$/, '').replace(/^http/, 'ws');
   try {
     const ws = new WebSocket(`${base}/agent-ws?token=${encodeURIComponent(agentWsToken)}`);
@@ -545,8 +574,14 @@ api.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // ── Install: create menus + open the onboarding tab once ────────────────────────
-api.runtime.onInstalled.addListener((details) => {
+api.runtime.onInstalled.addListener(async (details) => {
   installMenus();
+  // Migration: pre-M5 installs had NO stored server and silently used the owner's built-in
+  // default. Pin it explicitly so they keep working and are not forced through onboarding.
+  if (details.reason === 'update') {
+    const cfg = await getConfig();
+    if (!isConfigured(cfg)) await setConfig({ obsidianApi: LEGACY_DEFAULT_API });
+  }
   if (details.reason === 'install') {
     api.tabs.create({ url: api.runtime.getURL('onboarding.html') });
   }
