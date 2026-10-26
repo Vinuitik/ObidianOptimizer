@@ -20,6 +20,7 @@ import useAutosaveSettings from './useAutosaveSettings';
 import useVaults from '../vault/useVaults';
 import VaultsPanel from './VaultsPanel';
 import BinPanel from './BinPanel';
+import ImportPanel from './ImportPanel';
 import styles from './SettingsPage.module.css';
 
 const baseName = p => (p || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || p;
@@ -120,7 +121,7 @@ function CopyButton({ text, label = 'Copy' }) {
 const SECTIONS = [
   { id: 'vaults', label: 'Vaults' }, { id: 'vault', label: 'Vault' },
   { id: 'learning', label: 'Learning' }, { id: 'feed', label: 'Feed' },
-  { id: 'sync', label: 'Sync' }, { id: 'bin', label: 'Bin' },
+  { id: 'sync', label: 'Sync' }, { id: 'import', label: 'Import' }, { id: 'bin', label: 'Bin' },
   { id: 'system', label: 'System' }, { id: 'advanced', label: 'Advanced' },
 ];
 
@@ -360,6 +361,8 @@ export default function SettingsPage() {
         </Group>
 
         <DriveSyncPanel loaded={loaded} isAuthenticated={isAuthenticated} />
+
+        <ImportPanel />
 
         <BinPanel isAuthenticated={isAuthenticated} />
 
