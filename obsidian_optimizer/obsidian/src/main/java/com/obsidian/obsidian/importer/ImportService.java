@@ -2,6 +2,7 @@ package com.obsidian.obsidian.importer;
 
 import com.obsidian.obsidian.capture.CaptureController;
 import com.obsidian.obsidian.notes.FileRepository;
+import com.obsidian.obsidian.sync.SyncService;
 import com.obsidian.obsidian.vaults.ActiveVault;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,15 +34,18 @@ public class ImportService {
     private final ActiveVault activeVault;
     private final FileRepository repository;
     private final CaptureController capture;
+    private final SyncService sync;
     private final ZipImporter.Limits limits;
 
     public ImportService(ActiveVault activeVault, FileRepository repository, CaptureController capture,
+                         SyncService sync,
                          @Value("${import.max-zip-mb:500}") long maxZipMb,
                          @Value("${import.max-entries:20000}") int maxEntries,
                          @Value("${import.max-uncompressed-mb:2048}") long maxUncompressedMb) {
         this.activeVault = activeVault;
         this.repository = repository;
         this.capture = capture;
+        this.sync = sync;
         this.limits = new ZipImporter.Limits(maxZipMb << 20, maxEntries, maxUncompressedMb << 20);
     }
 
@@ -97,7 +101,13 @@ public class ImportService {
                 default -> skipped.add(new Skipped(name, "unsupported file type (use .zip, .md, .txt, .pdf or .docx)"));
             }
         }
-        if (notes > 0) repository.triggerDeltaSync();
+        if (notes > 0) {
+            repository.triggerDeltaSync();
+            // Drive sync_queue is only filled at boot (SyncService.onReady); files written straight
+            // to disk would otherwise wait for the next restart before uploading.
+            long vaultId = activeVault.id();
+            java.util.concurrent.CompletableFuture.runAsync(() -> sync.initialScan(vaultId));
+        }
         log.info("[import] notes={} attachments={} queued={} skipped={}", notes, attachments, queued, skipped.size());
         return new Summary(notes, attachments, queued, folders, skipped);
     }

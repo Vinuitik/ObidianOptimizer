@@ -13,6 +13,7 @@ Settings ▸ Import → `importNotes(files)` → `POST /api/import` (nginx `loca
 4. Plain: copied verbatim (folders + attachments kept)
 5. Written to `<vault>/_inbox/Imported/<source>-<yyyy-MM-dd>[ (n)]/` (never vault root); failure mid-write deletes the folder
 → `FileRepository.triggerDeltaSync()` once → notes indexed like any externally-added file.
+  → `SyncService.initialScan(vaultId)` async → new files marked PENDING in sync_queue so Drive uploads them without a restart.
 To change target folder: `ImportService.importFiles()` (`importsRoot`). To change junk rules: `ImportPaths.junkReason()`.
 
 ## Loose files
