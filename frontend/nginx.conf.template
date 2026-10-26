@@ -37,6 +37,19 @@ server {
         proxy_set_header   X-Forwarded-Proto https;
     }
 
+    # Notes import (importer/FLOWS.md): big zips, long unzip+index. Keep in sync with IMPORT_MAX_ZIP_MB.
+    location = /api/import {
+        limit_req zone=api burst=5 nodelay;
+        proxy_pass            http://backend:8084/import;
+        proxy_set_header      Host $host;
+        proxy_set_header      X-Real-IP $remote_addr;
+        proxy_set_header      X-Forwarded-Proto https;
+        proxy_request_buffering off;
+        proxy_read_timeout    900s;
+        proxy_send_timeout    900s;
+        client_max_body_size  512m;
+    }
+
     location /api/ {
         limit_req zone=api burst=60 nodelay;
         proxy_pass         http://backend:8084/;

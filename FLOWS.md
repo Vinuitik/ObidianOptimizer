@@ -44,6 +44,7 @@ Naming: `FLOWS.md` = a folder's main flows; `FLOWS_<topic>.md` = a focused sub-f
 | [Feed FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/feed/FLOWS.md) | Flows | Passive Feed backend: sources/feed_items, poll worker, accept/bin/restore (P1a/P2/P3, implemented) |
 | [Passive Feed plan](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/feed/FLOWS_feed.md) | Flows (plan) | Subscriptions → swipe Feed → Learn; P0–P3 shipped (offline swipe, subscribe-any-URL, text posts via capture queue) |
 | [PWA backend FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/pwa/FLOWS.md) | Flows | Drive-mediated offline: encrypted `_offline/` export, `_mailbox/` consume |
+| [Import FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/importer/FLOWS.md) | Flows | Settings ▸ Import: Notion/Obsidian zip + loose files → `_inbox/Imported/`, zip-slip + size limits |
 | [Notes FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/notes/FLOWS.md) | Flows | Note index, startup disk sync, file CRUD |
 | [Settings FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/settings/FLOWS.md) | Flows | `app_settings` EAV table, settings API |
 | [Config FLOWS](obsidian_optimizer/obsidian/src/main/java/com/obsidian/obsidian/config/FLOWS.md) | Flows | Spring Security auth, remember-me, app config |
