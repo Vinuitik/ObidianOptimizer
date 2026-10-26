@@ -44,7 +44,8 @@ async function install(input, log = () => {}) {
   if (Object.keys(errors).length) { const e = new Error('Invalid input'); e.fields = errors; throw e; }
   fs.mkdirSync(dir(), { recursive: true });
   log('Claiming your address...');
-  const claim = await registry.claim(input.name, input.email);
+  // Persist name+installSecret right after the claim so a failed install can resume via /v1/rotate.
+  const claim = await registry.claimOrResume(input, readState(), async (s) => writeState(s));
   log('Fetching latest release...');
   const manifest = await fetchManifest();
   const gpu = await docker.detectNvidia();

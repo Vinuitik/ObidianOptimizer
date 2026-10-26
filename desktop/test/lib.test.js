@@ -12,7 +12,35 @@ test('extendedPath adds mac docker dirs only on darwin, no duplicates', () => {
   assert.ok(p.includes('/usr/local/bin'));
   assert.equal(p.filter((x) => x === '/opt/homebrew/bin').length, 1);
 });
-const { claim } = require('../lib/registry');
+const { claim, rotate, claimOrResume } = require('../lib/registry');
+
+test('claimOrResume: fresh claim persists state before returning', async () => {
+  const saved = [];
+  const fetchImpl = async () => ({ status: 201, json: async () => clm });
+  const r = await claimOrResume(good, null, async (s) => saved.push(s), { fetchImpl });
+  assert.deepEqual(r, clm);
+  assert.deepEqual(saved, [{ name: 'alice', hostname: clm.hostname, installSecret: 's' }]);
+});
+
+test('claimOrResume: resume via rotate skips claim, reuses installSecret', async () => {
+  const urls = [];
+  const fetchImpl = async (u, o) => { urls.push(u); assert.deepEqual(JSON.parse(o.body), { name: 'alice', installSecret: 's' }); return { status: 200, json: async () => ({ tunnelToken: 'fresh' }) }; };
+  const state = { name: 'alice', hostname: clm.hostname, installSecret: 's' };
+  const saved = [];
+  const r = await claimOrResume({ ...good, name: 'ignored' }, state, async (s) => saved.push(s), { fetchImpl });
+  assert.equal(r.tunnelToken, 'fresh');
+  assert.equal(r.name, 'alice');
+  assert.equal(urls.length, 1);
+  assert.match(urls[0], /\/v1\/rotate$/);
+  assert.deepEqual(saved, []);
+});
+
+test('rotate 403 -> owned by another install', async () => {
+  const fetchImpl = async () => ({ status: 403, json: async () => ({}) });
+  await assert.rejects(rotate('alice', 'bad', { fetchImpl }), /owned by another install/);
+  await assert.rejects(claimOrResume(good, { name: 'alice', installSecret: 'bad' }, async () => {}, { fetchImpl }), /owned by another install/);
+  await assert.rejects(rotate('a', 's', { fetchImpl: async () => ({ status: 500 }) }), /HTTP 500/);
+});
 const C = require('../lib/config');
 
 const good = { name: 'alice', email: 'a@b.co', password: 'twelve-chars-ok', vaultPath: '/home/a/vault' };
