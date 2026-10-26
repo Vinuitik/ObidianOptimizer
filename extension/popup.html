@@ -15,6 +15,11 @@
   <!-- Capture --------------------------------------------------------------- -->
   <section class="panel active" data-panel="capture">
     <!-- Signed-out card: shown instead of the capture controls -->
+    <div id="notice-card" class="card" hidden>
+      <p id="notice-text" class="card-title"></p>
+      <button id="notice-btn" class="btn" type="button">Open</button>
+    </div>
+
     <form id="signin-card" class="card" hidden>
       <h2 class="card-title">Sign in to start capturing</h2>
       <label class="lbl" for="si-user">Username</label>
@@ -93,8 +98,8 @@
 
     <details class="disc">
       <summary>Advanced</summary>
-      <label class="lbl" for="cfg-obsidian">API base</label>
-      <input id="cfg-obsidian" class="in" type="text" placeholder="https://obsidianoptimizer.uk/api" />
+      <label class="lbl" for="cfg-obsidian">Server (your site name, or a full URL)</label>
+      <input id="cfg-obsidian" class="in" type="text" placeholder="alice  or  https://my.server.example" autocomplete="off" />
       <label class="lbl" for="cfg-agent-token">Agent WS token (optional, enables the escalation agent)</label>
       <input id="cfg-agent-token" class="in" type="password" placeholder="AGENT_WS_TOKEN" autocomplete="off" />
       <button id="cfg-save" class="btn ghost" type="button">Save settings</button>

@@ -47,7 +47,7 @@ export const originPattern = (base) => { const u = new URL(base); return `${u.pr
 export function isStaticallyCovered(base) {
   const u = new URL(base);
   if (u.protocol === 'http:') return LOCAL_HOSTS.includes(u.hostname);
-  return u.hostname.endsWith(`.${USER_DOMAIN}`);
+  return u.hostname === USER_DOMAIN || u.hostname.endsWith(`.${USER_DOMAIN}`);
 }
 // CF Access (email OTP) answers an unauthenticated request with a redirect to
 // <team>.cloudflareaccess.com. fetch follows it, so the tell is the FINAL url's host.

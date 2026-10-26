@@ -30,6 +30,7 @@ test('api/base helpers', () => {
 test('static coverage', () => {
   assert.ok(isStaticallyCovered('https://alice.obsidianoptimizer.uk'));
   assert.ok(isStaticallyCovered('http://localhost:8082'));
+  assert.ok(isStaticallyCovered('https://obsidianoptimizer.uk'));
   assert.ok(!isStaticallyCovered('https://my.server.net'));
   assert.ok(!isStaticallyCovered('https://obsidianoptimizer.uk.evil.com'));
 });

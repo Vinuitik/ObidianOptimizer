@@ -1,5 +1,5 @@
 # Browser Extension — FLOWS
-Files: manifest.json, manifest.firefox.overlay.json, background.js, popup.html, popup.css, popup.js, config.js, onboarding.html, onboarding.js, ../linux_scripts/build-firefox-extension.sh
+Files: manifest.json, manifest.firefox.overlay.json, background.js, popup.html, popup.css, popup.js, config.js, config.test.mjs, onboarding.html, onboarding.js, ../linux_scripts/build-firefox-extension.sh
 
 > One job: **capture anything worth reviewing into the Learn queue** without opening
 > the app. Paste text/markdown/a URL, drop a file, or right-click a selection/link/page.
@@ -15,6 +15,33 @@ Files: manifest.json, manifest.firefox.overlay.json, background.js, popup.html, 
 
 On first install a welcome tab (`onboarding.html`) opens explaining how to pin the
 icon + sign in inline (`onboarding.js` → existing `login` message). The popup also shows a sign-in card itself when signed out.
+
+## Server setting (self-host; M5)
+One published extension serves every self-hosted user; there is **no built-in server**.
+- Onboarding step 2 / Settings → Advanced "Server" → `onboarding.js` / `popup.js #cfg-save` →
+  `config.resolveServerInput()` → bare name ("alice") → `resolveName()` →
+  `GET https://registry.obsidianoptimizer.uk/v1/resolve?name=alice` → `{hostname}` →
+  base `https://alice.obsidianoptimizer.uk`; anything with `.`/`:`/`/` → `normalizeServerUrl()`
+  (owner / dev / localhost; http only for loopback) → `saveServer(base)` → `ensureHostAccess()`
+  (runtime `permissions.request` unless statically covered) → `storage.local.obsidianApi = base + '/api'`.
+  To change X: resolve rules `config.resolveName()`; URL rules `config.normalizeServerUrl()`; registry host `config.REGISTRY`.
+- Unconfigured: `background.obsidian()` returns a synthetic `X-OO-State: setup` response →
+  `checkAuth` → popup `#notice-card` "Set up your server" → opens `onboarding.html`.
+- **Migration**: `background onInstalled(reason='update')` pins `LEGACY_DEFAULT_API`
+  (`https://obsidianoptimizer.uk/api`) if nothing is stored (old installs used it implicitly), so
+  existing installs keep working without onboarding. To change: `config.LEGACY_DEFAULT_API`.
+- Every fetch derives from the stored value (`background.obsidian()`, `popup` logout, Learn link
+  `learnUrl()`, agent WS `connectAgentWs()`); no other hardcoded server URLs remain
+  (only `drive.usercontent.google.com` for Drive capture and the registry).
+
+## Cloudflare Access (email OTP) on user subdomains
+`background.obsidian()` always sends `credentials:'include'`; with the host permission the
+browser attaches the `CF_Authorization` cookie. If absent/expired, CF 302s to
+`<team>.cloudflareaccess.com` → fetch follows → `config.isAccessRedirect(res)` (final URL host)
+→ synthetic `X-OO-State: access` → `checkAuth`/`login`/`handleFailure` return
+`{accessRequired, host}` → popup `#notice-card` "Open <host> once to sign in" (button opens the
+site; user does the email OTP; cookie then flows to extension fetches). `/mcp` is bypassed by
+Access server-side and is not used by the extension. To change: `background.stateOf()`, `accessMessage()`, `popup.applyAuth()`.
 
 ## Cross-browser (Chromium + Firefox) — single source of truth
 There is exactly **one** manifest you hand-edit for shared fields: `manifest.json`
@@ -199,14 +226,29 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
   build script + `browser_specific_settings`) both supported. Earlier docs said
   "Chromium only" — that is no longer true.
 - **Self-signed cert blocks the extension.** A background `fetch` to the local `:8443`
-  self-signed cert fails (no UI to accept it). Default `obsidianApi` is the Cloudflare
-  tunnel domain (real cert). For same-machine dev, point it at the Vite proxy
+  self-signed cert fails (no UI to accept it). Use the HTTPS site (real cert; e.g. the user's tunnel subdomain). For same-machine dev, point it at the Vite proxy
   `http://localhost:8082` in ⚙ Settings.
 - **Session cookie, not a token.** Auth relies on the Spring session cookie surviving in
   the extension's fetch context for the `obsidianApi` origin. The tunnel (HTTPS) is the
   reliable path. CSRF is disabled server-side (`SecurityConfig`).
-- **`host_permissions` are broad** (`http://localhost/*`, `https://*/*`) so the
-  configurable endpoint works. Tighten to your exact hosts before sharing.
+- **Permissions are narrow** (M5). Static `host_permissions`: `https://*.obsidianoptimizer.uk/*`
+  (users + registry; also the apex), `http://localhost/*`, `http://127.0.0.1/*`,
+  `https://drive.usercontent.google.com/*` (Drive-link capture). `optional_host_permissions`
+  `https://*/*` + `http://*/*` exist only so (a) a custom server URL can be requested per-origin
+  at save time and (b) the escalation agent (needs `executeScript`/`fetch` on arbitrary open tabs
+  with no user gesture) can ask for all-sites access when an agent token is saved. Page capture
+  itself uses `activeTab` (granted by toolbar click / context menu), so it needs no broad host.
+  Firefox: host permissions are user-revocable; a revoked one surfaces as an unreachable server.
+- **Access cookie behaviour.** The CF_Authorization cookie is set on the user's own subdomain
+  when they pass the OTP in a normal tab; extension fetches reuse it only because the origin is
+  in host permissions AND `credentials:'include'`. Expiry is the Access app's session duration
+  (owner-configured); on expiry the popup shows "Open <host> once". Firefox with Total Cookie
+  Protection / Chrome with third-party-cookie blocking: extension-origin requests to a host the
+  extension has permission for are treated as first-party-ish, but this is unverified on a live
+  Access app [UNVERIFIED].
+- **Stored server is trusted.** Anything saved is used verbatim for credentials-bearing fetches
+  and the stored password; custom URLs require an explicit permission prompt, http is refused
+  except loopback.
 - **Media is fetched twice for video-platform/media URLs** (once by ingest to
   transcribe, once kept as a watchable file). Accepted for a personal tool; it's the
   cost of "notes AND a copy to watch."
@@ -241,7 +283,11 @@ session lapsed. **Enter** in either field submits (`doLogin`; there's no `<form>
 | Context-menu items | `background.MENU` + `installMenus()` |
 | Onboarding copy | `onboarding.html` |
 | Icons / branding | `icons/` + `manifest.json` `icons` / `action.default_icon` (shared, both browsers) |
-| Permissions / hosts | `manifest.json` `permissions` + `host_permissions` (shared, both browsers) |
+| Permissions / hosts | `manifest.json` `permissions` + `host_permissions` + `optional_host_permissions` (shared, both browsers) |
+| Server setting (name/URL, registry, permission) | `config.resolveServerInput()` / `resolveName()` / `normalizeServerUrl()` / `saveServer()`; UI `onboarding.js`, `popup.js #cfg-save` |
+| Pre-M5 install migration | `background` `onInstalled` + `config.LEGACY_DEFAULT_API` |
+| Access-redirect / setup notices | `config.isAccessRedirect()`, `background.obsidian()` / `stateOf()`, `popup.applyAuth()` `#notice-card` |
+| Unit tests (URL logic) | `config.test.mjs` — `node --test extension/config.test.mjs` |
 | Look & feel | `popup.css` (tokens mirrored from `frontend/src/styles/tokens.css`) |
 | Subscribe button (Chrome + Firefox share this popup) | `popup.js #sub-preview-btn` → `background.resolveSource()` (preview) → `#sub-confirm` → `background.subscribeSource()` → `POST /feed/sources {url}` |
 

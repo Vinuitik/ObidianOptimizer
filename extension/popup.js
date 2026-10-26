@@ -1,6 +1,6 @@
 // Popup controller. UI only — every network call is delegated to background.js
 // via runtime.sendMessage so it runs with the extension's host permissions.
-import { getConfig, getCreds, setCreds, clearCreds, api } from './config.js';
+import { getConfig, getCreds, setCreds, clearCreds, api, isConfigured, baseOfApi, resolveServerInput, saveServer } from './config.js';
 
 const send = (type, payload) => api.runtime.sendMessage({ type, payload });
 const $ = (id) => document.getElementById(id);
@@ -17,7 +17,7 @@ const isOffline = (res) => res && !res.ok && (res.status === 0 || /unreachable/i
 // Learn page lives at the site root next to the API base (…/api → …/learn).
 async function learnUrl() {
   const { obsidianApi } = await getConfig();
-  return `${obsidianApi.replace(/\/api\/?$/, '')}/learn`;
+  return `${baseOfApi(obsidianApi)}/learn`;
 }
 
 // ── Auth gate: signed out → sign-in card instead of capture controls ─────────────
@@ -25,9 +25,19 @@ let signedIn = true;
 async function applyAuth() {
   const res = await send('checkAuth');
   signedIn = !!res?.ok;
-  $('signin-card').hidden = signedIn;
+  // Setup / Cloudflare-Access states replace both the sign-in card and the capture UI.
+  const notice = res?.needsSetup ? { text: 'Set up your server to start capturing.', btn: 'Set up', open: api.runtime.getURL('onboarding.html') }
+    : res?.accessRequired ? { text: `Open ${res.host} once to sign in.`, btn: `Open ${res.host}`, open: `https://${res.host}/` }
+    : null;
+  $('notice-card').hidden = !notice;
+  if (notice) {
+    $('notice-text').textContent = notice.text;
+    $('notice-btn').textContent = notice.btn;
+    $('notice-btn').onclick = () => api.tabs.create({ url: notice.open });
+  }
+  $('signin-card').hidden = signedIn || !!notice;
   $('capture-main').hidden = !signedIn;
-  if (!signedIn) {
+  if (!signedIn && !notice) {
     const { authUser } = await getCreds();
     if (authUser && !$('si-user').value) $('si-user').value = authUser;
   }
@@ -164,7 +174,7 @@ $('sub-confirm').addEventListener('click', async () => {
     $('sub-url').value = '';
     pendingSubscribeUrl = null;
     $('sub-preview').hidden = true;
-  } else if (res?.status === 401) {
+  } else if (res?.status === 401 || res?.accessRequired || res?.needsSetup) {
     applyAuth();
   } else if (isOffline(res)) {
     setStatus($('sub-status'), 'You appear to be offline. Check your connection and try again.', 'err');
@@ -248,7 +258,7 @@ function handleResult(res) {
 // ── Settings ────────────────────────────────────────────────────────────────────
 async function loadSettings() {
   const cfg = await getConfig();
-  $('cfg-obsidian').value = cfg.obsidianApi;
+  $('cfg-obsidian').value = isConfigured(cfg) ? baseOfApi(cfg.obsidianApi) : '';
   $('cfg-agent-token').value = cfg.agentWsToken || '';
   // Prefill remembered credentials so the user never re-types (password managers don't
   // fire reliably in an extension popup — this is the reliable substitute).
@@ -260,11 +270,23 @@ async function loadSettings() {
 }
 
 $('cfg-save').addEventListener('click', async () => {
-  await send('setConfig', {
-    obsidianApi: $('cfg-obsidian').value.trim(),
-    agentWsToken: $('cfg-agent-token').value.trim(),
-  });
-  setStatus($('cfg-status'), 'Settings saved.', 'ok');
+  // Server: a name ("alice") or a full URL. Permission prompts need this click's gesture,
+  // so request BEFORE any other await-heavy work.
+  const srv = await resolveServerInput($('cfg-obsidian').value);
+  if (!srv.ok) return setStatus($('cfg-status'), srv.error, 'err');
+  const token = $('cfg-agent-token').value.trim();
+  if (token) {
+    // The escalation agent injects scripts into / fetches from arbitrary open tabs, which the
+    // narrow manifest does not grant. Ask for broad access only when the user enables it.
+    const granted = await api.permissions.request({ origins: ['https://*/*', 'http://*/*'] }).catch(() => false);
+    if (!granted) return setStatus($('cfg-status'), 'The agent needs access to all sites. Clear the token or allow it.', 'err');
+  }
+  const saved = await saveServer(srv.base);
+  if (!saved.ok) return setStatus($('cfg-status'), saved.error, 'err');
+  await send('setConfig', { agentWsToken: token });
+  $('cfg-obsidian').value = srv.base;
+  setStatus($('cfg-status'), `Saved. Server: ${new URL(srv.base).host}`, 'ok');
+  applyAuth();
 });
 
 // One login routine for both the capture-panel card and the settings form.
@@ -308,6 +330,7 @@ $('signout-btn').addEventListener('click', async () => {
   let ok = false;
   try {
     const { obsidianApi } = await getConfig();
+    if (!obsidianApi) throw new Error('no server');
     ok = (await fetch(`${obsidianApi}/logout`, { method: 'POST', credentials: 'include' })).ok;
   } catch { /* offline */ }
   await applyAuth();
