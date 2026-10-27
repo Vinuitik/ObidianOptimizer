@@ -1,0 +1,47 @@
+# Override for memory experiments. Simulates a constrained Mac Docker VM via mem_limit.
+services:
+  cloudflared:
+    profiles: ["disabled"]
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 300m
+    pull_policy: never
+  rabbitmq:
+    deploy:
+      resources:
+        limits:
+          memory: 300m
+    pull_policy: never
+  llm:
+    deploy:
+      resources:
+        limits:
+          memory: 200m
+    pull_policy: never
+  embedder:
+    deploy:
+      resources:
+        limits:
+          memory: 2200m
+    pull_policy: never
+  backend:
+    deploy:
+      resources:
+        limits:
+          memory: 1200m
+    pull_policy: never
+  frontend:
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+    pull_policy: never
+    ports: !override
+      - "127.0.0.1:8091:8081"
+
+volumes:
+  embedder_models:
+    external: true
+    name: obsopt-exp-models

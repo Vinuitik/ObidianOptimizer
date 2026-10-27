@@ -1,0 +1,5 @@
+vault/
+fixtures/
+sampler.pid
+*.tmp
+sampler.pid
